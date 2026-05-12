@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,640
+- behavior tests: 2,641
 - docs/inventory meta-tests: 32
 - `pytest`: 1324 (1292 behavior + 32 meta)
-- `vitest`: 1101
+- `vitest`: 1102
 - `playwright`: 247
-- total: 2,672
+- total: 2,673
 
 This document is organized in two parts:
 
@@ -1556,7 +1556,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `updates user options from the terminal config command` | Verifies that terminal-native `config set/get/list` updates and reports user options, including prompt username and run comparison defaults, through the same preference path as the options modal. |
 | `requires explicit set before updating user options from the terminal config command` | Verifies that `config <option> <value>` is rejected and only `config set <option> <value>` applies terminal-native option changes. |
 | `keeps config command output pinned to the tail when the tab is already following` | Verifies that terminal-native `config set` output preserves tail-follow state after async preference application. |
-| `renders the terminal tour, records it once, and loads sample chips without running` | Verifies that the `tour` built-in prints visible chapters, records the opened version once per session, and loads sample commands into the prompt without running them. |
+| `renders the guided terminal tour, records it once, and opens sample chips in a new tab` | Verifies that the `tour` built-in types visible chapters, pauses between them, records the opened version once per session, and opens sample commands in a new tab without running them. |
 | `omits the interactive tools chapter from the terminal tour on mobile` | Verifies that the terminal tour hides the Interactive Tools chapter on mobile layouts even when Interactive PTY is enabled. |
 | `serves runtime autocomplete context for theme and config values` | Verifies that theme slugs, config keys, and config values are generated into the shared autocomplete context instead of duplicated static lists. |
 | `serves workflow names and variable flags in runtime autocomplete context` | Verifies that saved workflow names and workflow input flags are exposed through runtime autocomplete. |
@@ -1689,7 +1689,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `clears the session token only after confirming the destructive action` | Verifies that the active session token is only removed after the destructive clear action is explicitly confirmed. |
 | `persists options changes through cookies and syncs quick-toggle state` | Verifies that option changes update cookies, quick-toggle UI, and the persisted `/session/preferences` snapshot together. |
 | `renders backend-driven FAQ items with HTML answers and dynamic sections` | Verifies that renders backend-driven FAQ items with HTML answers and dynamic sections. |
-| `renders the FAQ visual tour re-entry link and opens the tour modal` | Verifies that the FAQ renders the desktop visual tour re-entry link and passes focus restoration to the tour modal. |
+| `renders the FAQ visual tour re-entry link and opens the tour modal` | Verifies that the FAQ renders the desktop visual tour re-entry link, opens the tour modal, and closes FAQ so tour actions return to the terminal. |
 | `suppresses the FAQ visual tour re-entry link when the tour is disabled` | Verifies that the FAQ hides the visual tour re-entry link when `tour_enabled` is false. |
 | `opens command catalog details from the command registry browser` | Verifies that the Command Registry opens command details without loading the prompt directly. |
 | `opens autocomplete after loading a command catalog example chip` | Verifies that command catalog example chips load the prompt and trigger the normal composer autocomplete flow. |
@@ -2467,10 +2467,11 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | --- | --- |
 | `opens the desktop visual tour, records the version, and binds the focus trap` | Verifies that the desktop tour modal opens, records the current tour version, and binds the shared focus trap. |
 | `navigates chapters with the shared pressable controls` | Verifies that the tour modal Prev and Next controls move between chapters through the pressable contract. |
-| `loads sample chips into the composer without running them` | Verifies that visual tour sample chips load their command into the composer without submitting it. |
+| `runs the visual tour Try this actions and closes the carousel` | Verifies that visual tour Try this actions close the carousel, load command-focused prompt text, and open real app surfaces for UI-focused chapters. |
 | `closes through the shared dismissible dispatcher and backdrop` | Verifies that the tour modal closes through closeTopmostDismissible and backdrop dismissal. |
 | `stays unavailable when the tour is disabled, empty, or on mobile` | Verifies that the desktop visual tour is suppressed when the feature is disabled, no chapters are visible, or mobile mode is active. |
 | `renders each configured illustration key with a themed mini card fallback` | Verifies that every configured tour illustration key renders a non-empty themed mini card and unknown keys fall back safely. |
+| `renders the running command exit row like terminal success output` | Verifies that the Running Commands tour illustration uses the same bracketed green success exit row as terminal output. |
 
 #### `ui_confirm.test.js`
 

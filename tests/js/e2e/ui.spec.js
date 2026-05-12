@@ -263,10 +263,14 @@ test.describe('FAQ modal', () => {
     await tourButton.click()
     await expect(page.locator('#tour-overlay')).toHaveClass(/open/)
     await expect(page.locator('#tour-chapter-title')).toContainText('Running commands')
+    await expect(page.locator('#faq-overlay')).not.toHaveClass(/open/)
     await page.keyboard.press('Escape')
     await expect(page.locator('#tour-overlay')).not.toHaveClass(/open/)
+    await expect(page.locator('#faq-overlay')).not.toHaveClass(/open/)
+    await expect(page.locator('#cmd')).toBeFocused()
+
+    await page.locator('.rail-nav [data-action="faq"]').click()
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
-    await expect(tourButton).toBeFocused()
 
     // The allowed-commands section is inside a collapsed accordion — expand it first
     await page.locator('.faq-q').filter({ hasText: 'What commands are allowed?' }).click()

@@ -18,6 +18,16 @@
   let _currentIndex = 0;
   let _returnFocusEl = null;
 
+  const TOUR_MODAL_ACTIONS = {
+    autocomplete: { label: 'nmap -sV -', command: 'nmap -sV -' },
+    history: { label: 'Open History', opener: () => global.toggleHistoryPanelSurface?.(true) },
+    workflows: { label: 'Open Workflows', opener: () => global.openWorkflows?.() },
+    projects: { label: 'Open Projects', opener: () => global.openProjectWorkspace?.() },
+    session_files: { label: 'Open Files', opener: () => global.openWorkspace?.() },
+    session_tokens: { label: 'Open Options', opener: () => global.openOptions?.() },
+    closer: { label: 'Open FAQ', opener: () => global.openFaq?.() },
+  };
+
   function _isMobileViewport() {
     return typeof global.useMobileTerminalViewportMode === 'function'
       && global.useMobileTerminalViewportMode();
@@ -68,7 +78,7 @@
       card.append(
         _createMiniLine('$ dig darklab.sh A', 'is-command'),
         _createMiniLine('darklab.sh. 300 IN A 203.0.113.10', 'is-output'),
-        _createMiniLine('exit 0 · 2 lines · 0.2s', 'is-muted'),
+        _createMiniLine('[exit 0 · 2 lines · 0.2s]', 'is-exit-ok'),
       );
       return card;
     }
@@ -85,24 +95,137 @@
     }
 
     if (normalized === 'history_rows') {
-      ['nmap darklab.sh', 'curl -I https://darklab.sh', 'dig darklab.sh A'].forEach((cmd, index) => {
+      [
+        { command: 'dig darklab.sh A', star: '★', starred: true, time: '4:53:03 AM', elapsed: '0.0s' },
+        { command: 'mtr --interactive 192.168.1.254', star: '☆', starred: false, time: '4:40:17 AM', elapsed: '13s' },
+      ].forEach((run) => {
         const row = document.createElement('div');
-        row.className = 'tour-mini-row';
-        row.append(_createMiniLine(cmd, 'is-command'), _createMiniPill(index === 0 ? 'starred' : 'restore'));
+        row.className = `tour-history-entry${run.starred ? ' is-starred' : ''}`;
+
+        const header = document.createElement('div');
+        header.className = 'tour-history-header';
+        const star = document.createElement('span');
+        star.className = `tour-history-star${run.starred ? ' is-starred' : ''}`;
+        star.textContent = run.star;
+        const command = document.createElement('span');
+        command.className = 'tour-history-command';
+        command.textContent = run.command;
+        header.append(star, command);
+
+        const meta = document.createElement('div');
+        meta.className = 'tour-history-meta';
+        const kind = document.createElement('span');
+        kind.className = 'tour-history-kind';
+        kind.textContent = 'RUN';
+        const time = document.createElement('span');
+        time.textContent = run.time;
+        const elapsed = document.createElement('span');
+        elapsed.textContent = run.elapsed;
+        const exit = document.createElement('span');
+        exit.className = 'tour-history-exit';
+        exit.textContent = 'exit 0';
+        meta.append(kind, time, elapsed, exit);
+
+        const actions = document.createElement('div');
+        actions.className = 'tour-history-actions';
+        ['copy command', 'restore', 'delete', 'more ▾'].forEach((label) => {
+          const action = document.createElement('span');
+          action.className = 'tour-history-action';
+          action.textContent = label;
+          actions.appendChild(action);
+        });
+
+        row.append(header, meta, actions);
         card.appendChild(row);
       });
       return card;
     }
 
     if (normalized === 'compare_runs') {
+      const runGrid = document.createElement('div');
+      runGrid.className = 'tour-compare-run-grid';
+      [
+        { label: 'RUN A', command: 'dig darklab.sh A', meta: '5/12/2026 · exit 0 · 21 lines' },
+        { label: 'RUN B', command: 'dig darklab.sh A', meta: '5/12/2026 · exit 0 · 22 lines' },
+      ].forEach((run) => {
+        const runCard = document.createElement('div');
+        runCard.className = 'tour-compare-run-card';
+        const label = document.createElement('span');
+        label.className = 'tour-compare-label';
+        label.textContent = run.label;
+        const command = document.createElement('span');
+        command.className = 'tour-compare-command';
+        command.textContent = run.command;
+        const meta = document.createElement('span');
+        meta.className = 'tour-compare-meta';
+        meta.textContent = run.meta;
+        runCard.append(label, command, meta);
+        runGrid.appendChild(runCard);
+      });
+
+      const metrics = document.createElement('div');
+      metrics.className = 'tour-compare-metrics';
+      [
+        ['LINES', '+1'],
+        ['FINDINGS', '2 added'],
+      ].forEach(([labelText, valueText]) => {
+        const metric = document.createElement('div');
+        metric.className = 'tour-compare-metric';
+        const label = document.createElement('span');
+        label.className = 'tour-compare-label';
+        label.textContent = labelText;
+        const value = document.createElement('span');
+        value.className = 'tour-compare-metric-value';
+        value.textContent = valueText;
+        metric.append(label, value);
+        metrics.appendChild(metric);
+      });
+
       const split = document.createElement('div');
-      split.className = 'tour-mini-split';
-      const left = document.createElement('div');
-      left.append(_createMiniLine('80/tcp open http'), _createMiniLine('443/tcp open https'));
-      const right = document.createElement('div');
-      right.append(_createMiniLine('443/tcp open https'), _createMiniLine('8443/tcp open https', 'is-added'));
-      split.append(left, right);
-      card.append(split, _createMiniLine('2 changed · findings matched out of order', 'is-muted'));
+      split.className = 'tour-compare-split';
+      [
+        { title: 'RUN A', rows: [['A', ';; Got answer:'], ['A', ';; ->>HEADER<<- id: 8849', 'is-replace'], ['A', ';; QUESTION SECTION:']] },
+        { title: 'RUN B', rows: [['B', ';; Got answer:'], ['B', ';; ->>HEADER<<- id: 1299', 'is-replace'], ['+', '; EDE: 3 (Stale Answer)', 'is-added']] },
+      ].forEach((pane) => {
+        const paneEl = document.createElement('div');
+        paneEl.className = 'tour-compare-pane';
+        const title = document.createElement('div');
+        title.className = 'tour-compare-pane-title';
+        title.textContent = pane.title;
+        paneEl.appendChild(title);
+        pane.rows.forEach(([markText, text, tone]) => {
+          const row = document.createElement('div');
+          row.className = `tour-compare-row${tone ? ` ${tone}` : ''}`;
+          const mark = document.createElement('span');
+          mark.className = 'tour-compare-mark';
+          mark.textContent = markText;
+          const code = document.createElement('code');
+          code.textContent = text;
+          row.append(mark, code);
+          paneEl.appendChild(row);
+        });
+        split.appendChild(paneEl);
+      });
+
+      const findings = document.createElement('div');
+      findings.className = 'tour-compare-findings';
+      const findingsTitle = document.createElement('div');
+      findingsTitle.className = 'tour-compare-findings-title';
+      findingsTitle.textContent = '▾ Added findings (2)';
+      findings.appendChild(findingsTitle);
+      ['darklab.sh.    0    IN    A    104.21.4.35', 'darklab.sh.    0    IN    A    172.67.131.156'].forEach(text => {
+        const row = document.createElement('div');
+        row.className = 'tour-compare-finding-row';
+        const mark = document.createElement('span');
+        mark.className = 'tour-compare-mark is-added';
+        mark.textContent = '+';
+        const content = document.createElement('span');
+        content.textContent = text;
+        row.append(mark, content);
+        findings.appendChild(row);
+      });
+
+      card.append(runGrid, metrics, split, findings);
       return card;
     }
 
@@ -176,6 +299,25 @@
     if (input && typeof input.dispatchEvent === 'function') {
       setTimeout(() => input.dispatchEvent(new Event('input')), 0);
     }
+  }
+
+  function _tourActionForChapter(chapter) {
+    const id = String(chapter && chapter.id || '');
+    const action = TOUR_MODAL_ACTIONS[id];
+    if (action) return action;
+    const sample = String(chapter && chapter.sample || '').trim();
+    if (!sample) return null;
+    return { label: sample, command: sample };
+  }
+
+  function _activateTourAction(action) {
+    if (!action) return;
+    closeTourModal({ skipRefocus: true });
+    if (action.command) {
+      _loadSampleCommand(action.command);
+      return;
+    }
+    if (typeof action.opener === 'function') action.opener();
   }
 
   function _bindPressable(el, onActivate) {
@@ -292,8 +434,8 @@
     visual.appendChild(_renderTourIllustration(chapter.illustration));
 
     sampleHost.innerHTML = '';
-    const sample = String(chapter.sample || '').trim();
-    if (sample) {
+    const action = _tourActionForChapter(chapter);
+    if (action) {
       const label = document.createElement('span');
       label.className = 'tour-sample-label';
       label.textContent = 'Try this';
@@ -301,9 +443,9 @@
       chip.className = 'tour-sample-chip welcome-command-loadable';
       chip.tabIndex = 0;
       chip.setAttribute('role', 'button');
-      chip.setAttribute('aria-label', `Load command: ${sample}`);
-      chip.textContent = sample;
-      _bindPressable(chip, () => _loadSampleCommand(sample));
+      chip.setAttribute('aria-label', action.command ? `Load command: ${action.label}` : action.label);
+      chip.textContent = action.label;
+      _bindPressable(chip, () => _activateTourAction(action));
       sampleHost.append(label, chip);
     }
 
@@ -368,11 +510,15 @@
     return true;
   }
 
-  function closeTourModal() {
+  function closeTourModal(options = {}) {
     if (!_overlay) return;
     _overlay.classList.remove('open');
     _overlay.classList.add('u-hidden');
     _overlay.setAttribute('aria-hidden', 'true');
+    if (options && options.skipRefocus) {
+      _returnFocusEl = null;
+      return;
+    }
     if (_returnFocusEl && _returnFocusEl.isConnected && typeof _returnFocusEl.focus === 'function') {
       try {
         _returnFocusEl.focus({ preventScroll: true });

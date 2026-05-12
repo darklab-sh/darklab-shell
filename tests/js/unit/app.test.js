@@ -998,7 +998,18 @@ describe('app helpers', () => {
     expect(scrollTop).toBe(500)
   })
 
-  it('renders the terminal tour, records it once, and loads sample chips without running', async () => {
+  async function advanceTerminalTour(output, pendingTour, chapterCount) {
+    const promptCount = output.querySelectorAll('.builtin-tour-prompt').length
+    for (let index = 0; index < chapterCount; index += 1) {
+      await vi.waitFor(() => {
+        expect(output.querySelectorAll('.builtin-tour-prompt')).toHaveLength(promptCount + index + 1)
+      })
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    }
+    await pendingTour
+  }
+
+  it('renders the guided terminal tour, records it once, and opens sample chips in a new tab', async () => {
     const output = document.createElement('div')
     const tourConfig = {
       workspace_enabled: true,
@@ -1042,6 +1053,8 @@ describe('app helpers', () => {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
     const submitVisibleComposerCommand = vi.fn()
+    const createTab = vi.fn(() => 'tab-tour-sample')
+    const activateTab = vi.fn()
     const {
       handleTourCommand,
       getTourSeenVersionPreference,
@@ -1050,19 +1063,24 @@ describe('app helpers', () => {
       apiFetch,
       getOutput: () => output,
       submitVisibleComposerCommand,
+      createTab,
+      activateTab,
       appConfig: tourConfig,
     })
 
-    await handleTourCommand('tour', 'tab-1')
-    await handleTourCommand('tour', 'tab-1')
+    await advanceTerminalTour(output, handleTourCommand('tour', 'tab-1'), 2)
+    await advanceTerminalTour(output, handleTourCommand('tour', 'tab-1'), 2)
 
     expect(output.textContent).toContain('Running commands')
     expect(output.textContent).toContain('Capture the output.')
     expect(output.textContent).toContain('Interactive tools')
+    expect(output.textContent).toContain('Press any key to continue, or press q to quit the tour.')
     const chips = output.querySelectorAll('.faq-chip[data-faq-command]')
     expect(chips).toHaveLength(4)
     chips[0].dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(document.getElementById('cmd').value).toBe('dig darklab.sh A ')
+    expect(createTab).toHaveBeenCalled()
+    expect(activateTab).toHaveBeenCalledWith('tab-tour-sample')
+    expect(document.getElementById('cmd').value).toBe('dig darklab.sh A')
     expect(submitVisibleComposerCommand).not.toHaveBeenCalled()
     expect(getTourSeenVersionPreference()).toBe(3)
     expect(apiFetch.mock.calls.filter(([url]) => url === '/session/tour-seen')).toHaveLength(1)
@@ -1100,7 +1118,7 @@ describe('app helpers', () => {
       appConfig: tourConfig,
     })
     try {
-      await handleTourCommand('tour', 'tab-1')
+      await advanceTerminalTour(output, handleTourCommand('tour', 'tab-1'), 1)
       expect(output.textContent).toContain('Running commands')
       expect(output.textContent).not.toContain('Interactive tools')
     } finally {
@@ -4824,7 +4842,7 @@ describe('app helpers', () => {
 
   it('renders the FAQ visual tour re-entry link and opens the tour modal', async () => {
     const openTourModal = vi.fn(() => true)
-    await loadAppFns({
+    const { openFaq } = await loadAppFns({
       openTourModal,
       mobileViewport: { height: 700, offsetTop: 0 },
       mobileTouch: false,
@@ -4863,14 +4881,17 @@ describe('app helpers', () => {
     })
     await new Promise((resolve) => setImmediate(resolve))
 
+    const faqOverlay = document.getElementById('faq-overlay')
+    openFaq()
+    expect(faqOverlay.classList.contains('open')).toBe(true)
     const button = document.querySelector('.faq-tour-open')
     expect(button).not.toBeNull()
     button.click()
 
     expect(openTourModal).toHaveBeenCalledWith({
       source: 'faq',
-      returnFocus: button,
     })
+    expect(faqOverlay.classList.contains('open')).toBe(false)
   })
 
   it('suppresses the FAQ visual tour re-entry link when the tour is disabled', async () => {

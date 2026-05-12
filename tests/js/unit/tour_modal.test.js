@@ -6,6 +6,7 @@ function loadTourModal({
   config = null,
   recordTourOpened = vi.fn(() => Promise.resolve(true)),
   setComposerValue = vi.fn(),
+  actions = {},
 } = {}) {
   document.body.innerHTML = '<input id="cmd" />'
   window.APP_CONFIG = config || {
@@ -34,6 +35,9 @@ function loadTourModal({
   window.refocusComposerAfterAction = refocusComposerAfterAction
   window.setComposerValue = setComposerValue
   window.cmdInput = document.getElementById('cmd')
+  Object.entries(actions).forEach(([key, value]) => {
+    window[key] = value
+  })
 
   return {
     ...fromDomScripts(
@@ -62,6 +66,7 @@ function loadTourModal({
     recordTourOpened,
     refocusComposerAfterAction,
     setComposerValue,
+    actions,
   }
 }
 
@@ -90,7 +95,7 @@ describe('tour modal renderer', () => {
     expect(document.getElementById('tour-chapter-title')?.textContent).toBe('Running commands')
   })
 
-  it('loads sample chips into the composer without running them', () => {
+  it('runs the visual tour Try this actions and closes the carousel', () => {
     const setComposerValue = vi.fn()
     const { openTourModal } = loadTourModal({ setComposerValue })
     openTourModal()
@@ -108,6 +113,59 @@ describe('tour modal renderer', () => {
       { dispatch: false },
     )
     expect(window.refocusComposerAfterAction).toHaveBeenCalled()
+    expect(document.getElementById('tour-overlay')?.classList.contains('open')).toBe(false)
+
+    const openHistory = vi.fn()
+    const openWorkflows = vi.fn()
+    const openProjects = vi.fn()
+    const openFiles = vi.fn()
+    const openOptions = vi.fn()
+    const openFaq = vi.fn()
+    const modalConfig = {
+      tour_enabled: true,
+      tour_version: 1,
+      tour_chapters: [
+        { id: 'autocomplete', title: 'Autocomplete', sample: 'nmap -sV darklab.sh', illustration: 'tab_complete' },
+        { id: 'history', title: 'History', sample: 'history', illustration: 'history_rows' },
+        { id: 'workflows', title: 'Guided Workflows', sample: 'workflow list', illustration: 'workflow_steps' },
+        { id: 'projects', title: 'Projects', sample: 'project help', illustration: 'project_summary' },
+        { id: 'session_files', title: 'Files', sample: 'file list', illustration: 'files_panel' },
+        { id: 'session_tokens', title: 'Tokens', sample: 'session-token', illustration: 'session_token' },
+        { id: 'closer', title: 'Next', sample: 'help', illustration: 'next_steps' },
+      ],
+    }
+    const secondComposer = vi.fn()
+    const { openTourModal: openSecondTour } = loadTourModal({
+      config: modalConfig,
+      setComposerValue: secondComposer,
+      actions: {
+        toggleHistoryPanelSurface: openHistory,
+        openWorkflows,
+        openProjectWorkspace: openProjects,
+        openWorkspace: openFiles,
+        openOptions,
+        openFaq,
+      },
+    })
+    openSecondTour({ chapterId: 'autocomplete' })
+    expect(document.querySelector('.tour-sample-chip')?.textContent).toBe('nmap -sV -')
+    document.querySelector('.tour-sample-chip')?.dispatchEvent(new window.Event('click', { bubbles: true }))
+    expect(secondComposer).toHaveBeenCalledWith('nmap -sV -', 'nmap -sV -'.length, 'nmap -sV -'.length, { dispatch: false })
+    expect(document.getElementById('tour-overlay')?.classList.contains('open')).toBe(false)
+
+    ;[
+      ['history', openHistory, [true]],
+      ['workflows', openWorkflows, []],
+      ['projects', openProjects, []],
+      ['session_files', openFiles, []],
+      ['session_tokens', openOptions, []],
+      ['closer', openFaq, []],
+    ].forEach(([chapterId, spy, args]) => {
+      openSecondTour({ chapterId })
+      document.querySelector('.tour-sample-chip')?.dispatchEvent(new window.Event('click', { bubbles: true }))
+      expect(spy).toHaveBeenLastCalledWith(...args)
+      expect(document.getElementById('tour-overlay')?.classList.contains('open')).toBe(false)
+    })
   })
 
   it('closes through the shared dismissible dispatcher and backdrop', () => {
@@ -151,6 +209,22 @@ describe('tour modal renderer', () => {
       expect(node.classList.contains(`tour-visual-${key}`)).toBe(true)
       expect(node.textContent.trim().length).toBeGreaterThan(0)
     })
+    const historyNode = _renderTourIllustration('history_rows')
+    expect(historyNode.querySelectorAll('.tour-history-entry')).toHaveLength(2)
+    expect(historyNode.querySelector('.tour-history-kind')?.textContent).toBe('RUN')
+    expect(historyNode.querySelector('.tour-history-exit')?.textContent).toBe('exit 0')
+    const compareNode = _renderTourIllustration('compare_runs')
+    expect(compareNode.querySelectorAll('.tour-compare-run-card')).toHaveLength(2)
+    expect(compareNode.querySelectorAll('.tour-compare-pane')).toHaveLength(2)
+    expect(compareNode.querySelector('.tour-compare-findings-title')?.textContent).toContain('Added findings')
     expect(_renderTourIllustration('unknown').classList.contains('tour-visual-terminal_stream')).toBe(true)
+  })
+
+  it('renders the running command exit row like terminal success output', () => {
+    const { _renderTourIllustration } = loadTourModal()
+    const node = _renderTourIllustration('terminal_stream')
+    const exitLine = node.querySelector('.tour-mini-line.is-exit-ok')
+
+    expect(exitLine?.textContent).toBe('[exit 0 · 2 lines · 0.2s]')
   })
 })

@@ -33,6 +33,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [Interactive PTY Mode](#interactive-pty-mode)
 - [Wordlists](#wordlists)
 - [Welcome Animation](#welcome-animation)
+- [Onboarding Tour](#onboarding-tour)
 - [Custom FAQ](#custom-faq)
 - [Theme Selector](#theme-selector)
 - [Options Modal](#options-modal)
@@ -827,6 +828,7 @@ wget -q -O /dev/null --server-response https://example.com
 - Banner text is loaded from `app/conf/ascii.txt`; status labels come from `welcome_status_labels` in `config.yaml`; sampled commands and their sample output come from `app/conf/welcome.yaml`; rotating footer hints come from `app/conf/app_hints.txt`.
 - On touch-sized screens the flow uses `app/conf/ascii_mobile.txt` and `app/conf/app_hints_mobile.txt` instead of the wide desktop banner/hints, keeping status and hint timing but skipping sampled commands entirely.
 - Sampled welcome commands are clickable and load into the prompt without running; the `TRY THIS FIRST` badge is clickable with the same behavior as the featured command text.
+- When the onboarding tour has visible chapters, the welcome flow adds a tour entry line. Desktop users can type `tour` or open the visual tour; mobile users get the CLI-only `tour` entry point.
 - App hints rotate until interrupted unless `welcome_hint_rotations` is set to `1`.
 - If the user runs a command before the welcome sequence completes, the animation stops immediately and clears the partial output in that same tab only.
 - An optional message of the day (`motd`) in `config.yaml` is displayed below the welcome sequence and supports `**bold**`, `` `inline code` ``, `[link](url)`, and newlines.
@@ -858,6 +860,24 @@ wget -q -O /dev/null --server-response https://example.com
 - `app/conf/app_hints.txt` / `app_hints_mobile.txt` — rotating footer hint lines.
 
 **Related files:** `app/blueprints/content.py` (welcome/banner/hint endpoints), `app/static/js/shell_chrome.js` + `app/static/js/mobile_chrome.js` (sequence rendering), `app/conf/welcome.yaml`, `app/conf/ascii.txt`, `app/conf/ascii_mobile.txt`, `app/conf/app_hints.txt`, `app/conf/app_hints_mobile.txt`.
+
+---
+
+## Onboarding Tour
+
+**Purpose:** an optional guided introduction that helps new users learn the main shell, history, comparison, workflow, project, files, PTY, options, and FAQ flows without leaving the app.
+
+**Behavior:**
+
+- The welcome flow can point users at the tour, and users can start it again with the `tour` built-in command or the visual tour link in FAQ.
+- The terminal `tour` command types each chapter into the transcript, pauses after each chapter, and lets the user press any key to continue or `q` to stop.
+- Terminal tour `Try this` chips open the sample command in a new tab so the tour tab stays readable while the user experiments.
+- The desktop visual tour uses a carousel with app-shaped previews. `Try this` actions close the carousel and open the matching app surface when one exists, such as History, Workflows, Projects, Files, Options, or FAQ.
+- Feature-gated chapters are hidden when their feature is unavailable. Interactive Tools stays hidden on mobile because interactive PTY sessions are desktop-only.
+
+**Configuration:** `app/conf/tour.yaml` stores chapter text, sample commands, and visual illustration keys. See [CONFIGURATION.md](CONFIGURATION.md#tour-configuration) for the file format.
+
+**Related files:** `app/conf/tour.yaml`, `app/static/js/app.js` (`tour` built-in), `app/static/js/tour_modal.js` (visual carousel), `app/static/css/welcome.css` (tour visuals), `app/blueprints/content.py` (tour content loader).
 
 ---
 

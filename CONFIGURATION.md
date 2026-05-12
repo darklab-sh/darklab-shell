@@ -171,7 +171,7 @@ Each chapter supports:
 - `id` - stable chapter identifier used by both renderers
 - `title` - short display title
 - `summary` - end-user copy for the chapter
-- `sample` - optional command-chip value
+- `sample` - optional command-chip value for the terminal `tour` command; terminal samples open in a new tab, while the visual tour may replace this with an app action such as opening History, Workflows, Projects, Files, Options, or FAQ
 - `illustration` - optional key for the visual tour renderer
 - `requires` - optional exact config key such as `workspace_enabled` or `interactive_pty_enabled`; chapters are hidden when that feature is disabled
 
