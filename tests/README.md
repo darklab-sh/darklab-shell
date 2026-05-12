@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,638
+- behavior tests: 2,640
 - docs/inventory meta-tests: 32
 - `pytest`: 1324 (1292 behavior + 32 meta)
-- `vitest`: 1099
+- `vitest`: 1101
 - `playwright`: 247
-- total: 2,670
+- total: 2,672
 
 This document is organized in two parts:
 
@@ -1689,6 +1689,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `clears the session token only after confirming the destructive action` | Verifies that the active session token is only removed after the destructive clear action is explicitly confirmed. |
 | `persists options changes through cookies and syncs quick-toggle state` | Verifies that option changes update cookies, quick-toggle UI, and the persisted `/session/preferences` snapshot together. |
 | `renders backend-driven FAQ items with HTML answers and dynamic sections` | Verifies that renders backend-driven FAQ items with HTML answers and dynamic sections. |
+| `renders the FAQ visual tour re-entry link and opens the tour modal` | Verifies that the FAQ renders the desktop visual tour re-entry link and passes focus restoration to the tour modal. |
+| `suppresses the FAQ visual tour re-entry link when the tour is disabled` | Verifies that the FAQ hides the visual tour re-entry link when `tour_enabled` is false. |
 | `opens command catalog details from the command registry browser` | Verifies that the Command Registry opens command details without loading the prompt directly. |
 | `opens autocomplete after loading a command catalog example chip` | Verifies that command catalog example chips load the prompt and trigger the normal composer autocomplete flow. |
 | `loads custom FAQ chips into the prompt with the same command-chip behavior` | Verifies that loads custom FAQ chips into the prompt with the same command-chip behavior. |

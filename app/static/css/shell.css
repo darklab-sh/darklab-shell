@@ -2090,6 +2090,32 @@ body.mobile-terminal-mode .output-follow-btn {
   font-size: 12px;
 }
 
+.faq-tour-entry {
+  border: 1px solid color-mix(in srgb, var(--green) 18%, var(--theme-panel-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--green) 4%, transparent);
+  padding: 14px;
+}
+
+.faq-tour-entry-title {
+  margin-bottom: 8px;
+  color: var(--green);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.faq-tour-entry-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .command-registry-subtitle {
   margin-top: 3px;
   color: var(--muted);

@@ -65,24 +65,6 @@ function loadTourModal({
   }
 }
 
-afterEach(() => {
-  ;[
-    'APP_CONFIG',
-    'useMobileTerminalViewportMode',
-    '_recordTourOpenedOnceThisSession',
-    'refocusComposerAfterAction',
-    'setComposerValue',
-    'cmdInput',
-    'openTourModal',
-    'closeTourModal',
-    '_renderTourIllustration',
-    '_visibleTourModalChapters',
-  ].forEach((name) => {
-    delete window[name]
-  })
-  document.body.innerHTML = ''
-})
-
 describe('tour modal renderer', () => {
   it('opens the desktop visual tour, records the version, and binds the focus trap', () => {
     const { openTourModal, recordTourOpened } = loadTourModal()
@@ -130,10 +112,14 @@ describe('tour modal renderer', () => {
 
   it('closes through the shared dismissible dispatcher and backdrop', () => {
     const { openTourModal, closeTopmostDismissible } = loadTourModal()
-    openTourModal()
+    const returnFocus = document.createElement('button')
+    returnFocus.focus = vi.fn()
+    document.body.appendChild(returnFocus)
+    openTourModal({ returnFocus })
 
     expect(closeTopmostDismissible()).toBe(true)
     expect(document.getElementById('tour-overlay')?.classList.contains('open')).toBe(false)
+    expect(returnFocus.focus).toHaveBeenCalledWith({ preventScroll: true })
 
     openTourModal()
     const overlay = document.getElementById('tour-overlay')

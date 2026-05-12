@@ -258,6 +258,15 @@ test.describe('FAQ modal', () => {
     await expect(
       page.locator('.faq-a a[href*="gitlab.com/darklab.sh/darklab_shell"]').first(),
     ).toBeVisible()
+    const tourButton = page.locator('.faq-tour-open')
+    await expect(tourButton).toBeVisible()
+    await tourButton.click()
+    await expect(page.locator('#tour-overlay')).toHaveClass(/open/)
+    await expect(page.locator('#tour-chapter-title')).toContainText('Running commands')
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#tour-overlay')).not.toHaveClass(/open/)
+    await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
+    await expect(tourButton).toBeFocused()
 
     // The allowed-commands section is inside a collapsed accordion — expand it first
     await page.locator('.faq-q').filter({ hasText: 'What commands are allowed?' }).click()

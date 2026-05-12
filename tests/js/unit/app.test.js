@@ -4822,6 +4822,97 @@ describe('app helpers', () => {
     expect(document.querySelectorAll('#faq-allowed-text .allowed-chip')).toHaveLength(0)
   })
 
+  it('renders the FAQ visual tour re-entry link and opens the tour modal', async () => {
+    const openTourModal = vi.fn(() => true)
+    await loadAppFns({
+      openTourModal,
+      mobileViewport: { height: 700, offsetTop: 0 },
+      mobileTouch: false,
+      appConfig: {
+        tour_enabled: true,
+        tour_version: 1,
+        tour_chapters: [{ id: 'running_commands', title: 'Running commands' }],
+      },
+      apiFetch: vi.fn((url) => {
+        if (url === '/config') {
+          return Promise.resolve({
+            json: () =>
+              Promise.resolve({
+                app_name: 'darklab_shell',
+                prompt_username: 'anon',
+                prompt_domain: 'darklab.sh',
+                version: '9.9',
+                default_theme: 'darklab_obsidian.yaml',
+                motd: '',
+                tour_enabled: true,
+                tour_version: 1,
+                tour_chapters: [{ id: 'running_commands', title: 'Running commands' }],
+              }),
+          })
+        }
+        if (url === '/allowed-commands') {
+          return Promise.resolve({ json: () => Promise.resolve({ commands: [], groups: [] }) })
+        }
+        if (url === '/faq') {
+          return Promise.resolve({
+            json: () => Promise.resolve({ items: [{ question: 'What is this?', answer: 'plain' }] }),
+          })
+        }
+        return Promise.resolve({ json: () => Promise.resolve({}) })
+      }),
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const button = document.querySelector('.faq-tour-open')
+    expect(button).not.toBeNull()
+    button.click()
+
+    expect(openTourModal).toHaveBeenCalledWith({
+      source: 'faq',
+      returnFocus: button,
+    })
+  })
+
+  it('suppresses the FAQ visual tour re-entry link when the tour is disabled', async () => {
+    await loadAppFns({
+      mobileViewport: { height: 700, offsetTop: 0 },
+      mobileTouch: false,
+      appConfig: {
+        tour_enabled: false,
+        tour_chapters: [{ id: 'running_commands', title: 'Running commands' }],
+      },
+      apiFetch: vi.fn((url) => {
+        if (url === '/config') {
+          return Promise.resolve({
+            json: () =>
+              Promise.resolve({
+                app_name: 'darklab_shell',
+                prompt_username: 'anon',
+                prompt_domain: 'darklab.sh',
+                version: '9.9',
+                default_theme: 'darklab_obsidian.yaml',
+                motd: '',
+                tour_enabled: false,
+                tour_chapters: [{ id: 'running_commands', title: 'Running commands' }],
+              }),
+          })
+        }
+        if (url === '/allowed-commands') {
+          return Promise.resolve({ json: () => Promise.resolve({ commands: [], groups: [] }) })
+        }
+        if (url === '/faq') {
+          return Promise.resolve({
+            json: () => Promise.resolve({ items: [{ question: 'What is this?', answer: 'plain' }] }),
+          })
+        }
+        return Promise.resolve({ json: () => Promise.resolve({}) })
+      }),
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(document.querySelector('.faq-tour-open')).toBeNull()
+  })
+
   it('opens command catalog details from the command registry browser', async () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/config') {

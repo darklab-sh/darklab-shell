@@ -16,6 +16,7 @@
 
   let _overlay = null;
   let _currentIndex = 0;
+  let _returnFocusEl = null;
 
   function _isMobileViewport() {
     return typeof global.useMobileTerminalViewportMode === 'function'
@@ -352,6 +353,9 @@
     const requestedId = String(options.chapterId || '');
     const requestedIndex = chapters.findIndex(chapter => String(chapter.id || '') === requestedId);
     _currentIndex = requestedIndex >= 0 ? requestedIndex : 0;
+    _returnFocusEl = options.returnFocus && typeof options.returnFocus.focus === 'function'
+      ? options.returnFocus
+      : null;
     _renderTourChapter();
     overlay.classList.remove('u-hidden');
     overlay.classList.add('open');
@@ -369,6 +373,16 @@
     _overlay.classList.remove('open');
     _overlay.classList.add('u-hidden');
     _overlay.setAttribute('aria-hidden', 'true');
+    if (_returnFocusEl && _returnFocusEl.isConnected && typeof _returnFocusEl.focus === 'function') {
+      try {
+        _returnFocusEl.focus({ preventScroll: true });
+      } catch (_) {
+        _returnFocusEl.focus();
+      }
+      _returnFocusEl = null;
+      return;
+    }
+    _returnFocusEl = null;
     if (typeof global.refocusComposerAfterAction === 'function') {
       global.refocusComposerAfterAction({ preventScroll: true });
     }

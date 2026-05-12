@@ -3755,6 +3755,51 @@ function wireFaqCommandChips(root = faqBody) {
   });
 }
 
+function shouldShowVisualTourFaqLink() {
+  if (!(APP_CONFIG && APP_CONFIG.tour_enabled === true)) return false;
+  if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) return false;
+  const chapters = Array.isArray(APP_CONFIG.tour_chapters) ? APP_CONFIG.tour_chapters : [];
+  return chapters.some(chapter => chapter && typeof chapter === 'object');
+}
+
+function appendVisualTourFaqLink() {
+  if (!faqBody || !shouldShowVisualTourFaqLink()) return null;
+  const item = document.createElement('div');
+  item.className = 'faq-tour-entry';
+
+  const title = document.createElement('div');
+  title.className = 'faq-tour-entry-title';
+  title.textContent = 'Tour the app';
+
+  const body = document.createElement('div');
+  body.className = 'faq-tour-entry-body';
+  const copy = document.createElement('span');
+  copy.textContent = 'Open a quick visual walkthrough of the shell, history, projects, workflows, and other core features.';
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'btn btn-secondary btn-compact faq-tour-open';
+  button.textContent = 'Open visual tour';
+  button.setAttribute('aria-label', 'Open the visual tour');
+  const activate = () => {
+    if (typeof openTourModal === 'function') {
+      openTourModal({ source: 'faq', returnFocus: button });
+    }
+  };
+  if (typeof bindPressable === 'function') {
+    bindPressable(button, {
+      refocusComposer: false,
+      clearPressStyle: true,
+      onActivate: activate,
+    });
+  } else {
+    button.addEventListener('click', activate);
+  }
+  body.append(copy, button);
+  item.append(title, body);
+  faqBody.prepend(item);
+  return item;
+}
+
 function renderAllowedCommandsFaq(data) {
   const el = document.getElementById('faq-allowed-text');
   if (!el || !data) return;
@@ -3829,6 +3874,7 @@ function renderFaqItems(items) {
 
   if (faqHandles[0]) faqHandles[0].open();
 
+  appendVisualTourFaqLink();
   renderAllowedCommandsFaq(allowedCommandsFaqData);
   renderFaqLimits(APP_CONFIG);
   wireFaqCommandChips(faqBody);
