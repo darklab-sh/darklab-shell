@@ -46,7 +46,7 @@ import workspace as workspace_module
 import wordlists
 from commands import (
     split_chained_commands, load_all_faq, load_all_workflows, load_faq,
-    load_welcome, load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
+    load_welcome, load_tour, load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
     load_mobile_welcome_hints, autocomplete_context_from_commands_registry,
     load_autocomplete_context_from_commands_registry, load_command_policy, load_container_smoke_test_commands,
     load_container_smoke_test_interactive_commands, load_allow_grouping_flags, load_commands_registry, load_workflows,
@@ -3523,6 +3523,195 @@ class TestWelcomeLoading:
             with mock.patch("commands.WELCOME_FILE", base_path):
                 result = load_welcome()
         assert [item["cmd"] for item in result] == ["ping", "curl"]
+
+
+# ── load_tour ────────────────────────────────────────────────────────────────
+
+class TestTourLoading:
+    def _write(self, tmp_path, content):
+        path = tmp_path / "tour.yaml"
+        path.write_text(textwrap.dedent(content))
+        return path
+
+    def test_missing_file_returns_empty_tour(self):
+        with mock.patch("commands.TOUR_FILE", "/nonexistent/tour.yaml"):
+            result = load_tour()
+        assert result == {"version": 0, "chapters": []}
+
+    def test_valid_chapters_load_with_version(self, tmp_path):
+        path = self._write(
+            tmp_path,
+            """
+            version: 2
+            chapters:
+              - id: intro
+                title: Intro
+                summary: Welcome to the shell.
+                sample: help
+                illustration: terminal_stream
+            """,
+        )
+
+        with mock.patch("commands.TOUR_FILE", str(path)):
+            result = load_tour({"tour_enabled": True})
+
+        assert result == {
+            "version": 2,
+            "chapters": [
+                {
+                    "id": "intro",
+                    "title": "Intro",
+                    "summary": "Welcome to the shell.",
+                    "sample": "help",
+                    "illustration": "terminal_stream",
+                }
+            ],
+        }
+
+    def test_tour_disabled_returns_no_visible_chapters(self, tmp_path):
+        path = self._write(
+            tmp_path,
+            """
+            version: 1
+            chapters:
+              - id: intro
+                title: Intro
+                summary: Welcome.
+            """,
+        )
+
+        with mock.patch("commands.TOUR_FILE", str(path)):
+            result = load_tour({"tour_enabled": False})
+
+        assert result == {"version": 1, "chapters": []}
+
+    def test_missing_or_invalid_version_raises(self, tmp_path):
+        missing = self._write(
+            tmp_path,
+            """
+            chapters:
+              - id: intro
+                title: Intro
+                summary: Welcome.
+            """,
+        )
+        with mock.patch("commands.TOUR_FILE", str(missing)):
+            with pytest.raises(ValueError, match="version"):
+                load_tour()
+
+        invalid = self._write(
+            tmp_path,
+            """
+            version: "1"
+            chapters: []
+            """,
+        )
+        with mock.patch("commands.TOUR_FILE", str(invalid)):
+            with pytest.raises(ValueError, match="version"):
+                load_tour()
+
+    def test_unknown_requires_key_raises(self, tmp_path):
+        path = self._write(
+            tmp_path,
+            """
+            version: 1
+            chapters:
+              - id: broken
+                title: Broken
+                summary: Unknown feature key.
+                requires: future_feature_enabled
+            """,
+        )
+
+        with mock.patch("commands.TOUR_FILE", str(path)):
+            with pytest.raises(ValueError, match="unknown requires key"):
+                load_tour()
+
+    def test_feature_gated_chapters_follow_config_flags(self, tmp_path):
+        path = self._write(
+            tmp_path,
+            """
+            version: 1
+            chapters:
+              - id: always
+                title: Always
+                summary: Always visible.
+              - id: files
+                title: Files
+                summary: Workspace files.
+                requires: workspace_enabled
+              - id: pty
+                title: PTY
+                summary: Interactive terminal tools.
+                requires: interactive_pty_enabled
+            """,
+        )
+
+        with mock.patch("commands.TOUR_FILE", str(path)):
+            disabled = load_tour({
+                "tour_enabled": True,
+                "workspace_enabled": False,
+                "interactive_pty_enabled": False,
+            })
+            enabled = load_tour({
+                "tour_enabled": True,
+                "workspace_enabled": True,
+                "interactive_pty_enabled": True,
+            })
+
+        assert [item["id"] for item in disabled["chapters"]] == ["always"]
+        assert [item["id"] for item in enabled["chapters"]] == ["always", "files", "pty"]
+
+    def test_mobile_tour_omits_interactive_pty_chapter(self, tmp_path):
+        path = self._write(
+            tmp_path,
+            """
+            version: 1
+            chapters:
+              - id: always
+                title: Always
+                summary: Always visible.
+              - id: interactive_pty
+                title: Interactive PTY
+                summary: Desktop-only interactive terminal tools.
+                requires: interactive_pty_enabled
+            """,
+        )
+
+        with mock.patch("commands.TOUR_FILE", str(path)):
+            desktop = load_tour({"tour_enabled": True, "interactive_pty_enabled": True})
+            mobile = load_tour({"tour_enabled": True, "interactive_pty_enabled": True}, mobile=True)
+
+        assert [item["id"] for item in desktop["chapters"]] == ["always", "interactive_pty"]
+        assert [item["id"] for item in mobile["chapters"]] == ["always"]
+
+    def test_loader_rereads_changed_tour_file(self, tmp_path):
+        path = self._write(
+            tmp_path,
+            """
+            version: 1
+            chapters:
+              - id: first
+                title: First
+                summary: First version.
+            """,
+        )
+
+        with mock.patch("commands.TOUR_FILE", str(path)):
+            assert load_tour()["chapters"][0]["id"] == "first"
+            path.write_text(textwrap.dedent(
+                """
+                version: 2
+                chapters:
+                  - id: second
+                    title: Second
+                    summary: Second version.
+                """
+            ))
+            result = load_tour()
+
+        assert result["version"] == 2
+        assert result["chapters"][0]["id"] == "second"
 
 
 # ── load_ascii_art / load_ascii_mobile_art / load_welcome_hints ──────────────

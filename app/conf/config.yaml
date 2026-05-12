@@ -440,3 +440,8 @@
 # Higher values allow that many total hint states, counting the first hint.
 # Server default if unset: 0
 # welcome_hint_rotations: 0
+
+# Enable the app tour entry points. When disabled, the welcome tour prompt,
+# visual tour links, and `tour` built-in command are hidden.
+# Server default if unset: true
+# tour_enabled: true

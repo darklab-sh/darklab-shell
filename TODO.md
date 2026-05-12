@@ -82,6 +82,104 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Consider active-tab compare, snapshot/permalink compare, package-artifact compare, and export/share comparison once the run-vs-run model has more production use.
   - Add focused large/noisy output regressions if real scanner output exposes performance or alignment gaps beyond the current backend, Vitest, and Playwright coverage.
 
+- **Onboarding tour**
+  - **Constraints (apply to every phase below)**
+    - The tour is opt-in only. It never auto-opens on first visit; the welcome animation surfaces a tour entry line and users choose whether to open the CLI or visual renderer.
+    - CLI tour and Desktop Modal Carousel only. Mobile shows the CLI tour; no mobile modal/sheet variant in v1.
+    - Single chapter source in `app/conf/tour.yaml`; both renderers consume the same chapters so copy edits land in one place.
+    - No raster screenshots. The visual renderer uses small symbolic panels rather than pixel-faithful screenshots; prefer runtime-rendered mini cards using existing app classes/primitives where practical, and use inline SVG only for simple theme-token-aware illustrations.
+  - **Chapters (9 + closer)**
+    - Running commands with live output.
+    - Autocomplete & hints.
+    - History.
+    - Run Comparison.
+    - Guided Workflows.
+    - Organize an Investigation (Projects).
+    - Use Session Files (Workspaces).
+    - Interactive Tools (PTY).
+    - Keep Your Workspace Across Sessions (session token).
+    - Closer: "Where to go from here" — pointers to `help`, `commands info <tool>`, FAQ, and themes.
+    - Feature-gated chapters declare a `requires` field naming the matching `<feature>_enabled` key from `config.yaml` (for example `requires: workspace_enabled`, `requires: interactive_pty_enabled`). The loader hides any chapter whose requirement resolves to false. Interactive Tools is always omitted from the mobile CLI tour in v1 because PTY startup is desktop-only.
+  - **Entry-point copy**
+    - Desktop welcome CTA, placed after the sampled commands: "Tour the app — type `tour` or open the visual tour."
+    - Mobile welcome CTA: "Tour the app — type `tour`" only.
+    - Re-entry for the CLI tour: the `tour` built-in command, always available when `tour_enabled` is true.
+    - Re-entry for the visual tour: a link from the FAQ modal.
+  - **Persistence model**
+    - New token-bound `pref_tour_seen_version` on `/session/preferences`. Opening either tour renderer records the current `tour.yaml` version against the session, so the welcome animation can demote the CTA for already-seen tour versions and re-emphasize it when the tour version changes. Partial reads count as seen — version bumps are an enticement to re-enter the tour, not a completion gate.
+    - No "do not show again" checkbox is needed in v1 because no tour opens automatically. Re-entry remains available through `tour` and FAQ even after the CTA is demoted.
+  - **Operator configuration discipline**
+    - The `tour_enabled` kill-switch lives in `config.yaml` alongside other `<feature>_enabled` keys; `tour.yaml` stays content-only.
+    - `tour.yaml` reloads with the rest of `app/conf/` on file change.
+    - Operators can edit chapter titles, summaries, and sample commands; chapter `id` values stay stable for deep-link parity between renderers.
+    - Per-chapter `requires` values must reference exact `<feature>_enabled` keys from `config.yaml` so chapter visibility tracks the same feature switches that gate the rest of the app.
+    - `tour.yaml` includes a required integer `version`; incrementing it lets the welcome CTA regain emphasis for users who already opened an older tour.
+    - Bump `version` only when chapters are added or existing chapters are substantively overhauled. Typo fixes, copy tweaks, and reorder-only edits should not bump it, because every bump re-emphasizes the CTA for every user.
+  - **Phase 1 — Foundation: kill-switch, schema, chapter content**
+    - **Steps**
+      - Add `tour_enabled` to `config.yaml` (default true). When false, the welcome CTA line, the `tour` built-in command, and the visual modal entry points are all suppressed.
+      - Hide the `tour` built-in from autocomplete/help/catalog surfaces when `tour_enabled` is false so disabled tour entry points do not appear as dead suggestions.
+      - Land the `app/conf/tour.yaml` schema (top-level integer `version`; per-chapter `id`, `title`, `summary`, optional `sample`, optional `requires`, optional `illustration`).
+      - Author the nine feature chapters plus the closer chapter.
+      - Implement the chapter loader with `requires`-based filtering against current config and the same filter applied to both renderers so the CLI and modal always see the same chapter set.
+      - Wire `tour.yaml` into the existing `app/conf/` live-reload path.
+    - **Validation**
+      - Backend tests for `tour.yaml` loading, schema validation, missing/invalid `version`, unknown `requires` keys, and feature-gate filtering against representative `config.yaml` states.
+      - CONFIGURATION.md gains `tour.yaml` coverage and the `tour_enabled` entry.
+  - **Phase 2 — Persistence plumbing**
+    - **Steps**
+      - Add token-bound `pref_tour_seen_version` to `/session/preferences` (integer; default unset).
+      - Include the current `tour.yaml` version and the session's `pref_tour_seen_version` in the existing config/preference payload consumed by the welcome animation; do not add a dedicated tour-only read endpoint unless the existing payload shape makes that impractical.
+      - Define a single "record open" call that both renderers invoke on open, before any chapter renders, so partial reads count.
+    - **Validation**
+      - Backend tests covering `/session/preferences` round-trip for `pref_tour_seen_version`, including unset, equal-to-current, and stale values.
+      - Session-token migration tests confirming `pref_tour_seen_version` follows the active token like the other token-bound prefs.
+  - **Phase 3 — CLI tour renderer (`tour` built-in command)**
+    - **Steps**
+      - Register `tour` as a built-in command; suppress registration when `tour_enabled` is false.
+      - Render each chapter as ANSI-styled per-chapter output (title, summary, optional sample).
+      - Reuse the welcome animation's `TRY THIS FIRST` command-chip mechanism so the sample command loads into the prompt without running.
+      - If terminal output cannot reuse the welcome DOM chip directly, introduce a small shared command-chip renderer used by both the welcome animation and CLI tour.
+      - Call the Phase 2 "record open" hook the first time `tour` runs in the session.
+      - Apply the Phase 1 feature filter, plus the mobile-specific PTY omission rule for the Interactive Tools chapter.
+    - **Validation**
+      - Vitest coverage for chapter rendering, feature-gated chapter omission, and the sample-loads-without-running behavior.
+      - Playwright e2e: `tour` from a fresh session renders all chapters in order, the clickable sample loads into the prompt without running, and `pref_tour_seen_version` is updated.
+  - **Phase 4 — Welcome animation CTA entry point**
+    - **Steps**
+      - Render the CTA line after the sampled commands, using the desktop/mobile copy in **Entry-point copy** above.
+      - Suppress the CTA when `tour_enabled` is false or when there are no visible chapters after feature filtering.
+      - Demote (do not hide) the CTA when `pref_tour_seen_version` equals the current `tour.yaml` version; restore emphasis when the version differs.
+      - Before Phase 5 lands, the desktop CTA renders only the CLI entry text; the visual-tour affordance is added with the modal wiring in Phase 5. On mobile, the CTA only mentions `tour`.
+    - **Validation**
+      - Vitest coverage for CTA rendering, copy variants, suppression when disabled, and demotion/re-emphasis based on version comparison.
+      - Playwright welcome-flow coverage: fresh session shows emphasized CTA; second visit after opening the tour shows demoted CTA; bumping `version` re-emphasizes.
+  - **Phase 5 — Desktop modal carousel (visual renderer)**
+    - **Steps**
+      - Add a dedicated renderer module built on `ui_dismissible` / `ui_focus_trap` / `ui_pressable`, with Prev/Next chrome and chapter navigation.
+      - Render each chapter's illustration as a runtime mini card using existing app classes/primitives when the chapter benefits from "looks like the real thing"; fall back to inline SVG bound to `currentColor` and theme variables for conceptual illustrations.
+      - Add the desktop CTA's "open the visual tour" affordance and wire it to the modal.
+      - Open from the desktop CTA and from the FAQ link in Phase 6.
+      - Call the Phase 2 "record open" hook the first time the modal opens in the session.
+      - Apply the Phase 1 feature filter so the modal and CLI never disagree about visible chapters.
+    - **Validation**
+      - Vitest mount coverage per illustration (real-DOM cards) and per SVG (snapshot).
+      - Theme-audit walk over the modal in every built-in theme to catch token leaks.
+      - Playwright happy-path: open from CTA, navigate Prev/Next through every chapter, close via backdrop/Escape/explicit close, confirm focus trap and `pref_tour_seen_version` update.
+  - **Phase 6 — FAQ re-entry link**
+    - **Steps**
+      - Add a link inside the FAQ modal that opens the Phase 5 visual tour.
+      - Suppress the link when `tour_enabled` is false.
+    - **Validation**
+      - Vitest coverage for the link's presence/absence based on `tour_enabled` and for the open handoff.
+      - Playwright e2e: FAQ → tour → close → FAQ still focused as expected.
+  - **Phase 7 — Release prep: docs and test-count surfaces**
+    - **Steps**
+      - FEATURES.md gains a dedicated Tour section; the Welcome Animation section gets a cross-reference for the new CTA line.
+      - CHANGELOG entry covering the tour, `tour_enabled`, and `pref_tour_seen_version`.
+      - ARCHITECTURE pointer if a dedicated renderer module landed in Phase 5.
+      - Refresh `tests/README.md` and the other documented test-count surfaces to match the new Vitest, backend, and Playwright additions.
+
 ## Research
 
 No research items are currently tracked.

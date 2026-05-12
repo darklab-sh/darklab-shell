@@ -1,0 +1,143 @@
+# Onboarding tour content for darklab_shell.
+#
+# Two renderers consume this file:
+#   - the `tour` built-in command, which prints each chapter as styled
+#     terminal output with a clickable sample command
+#   - the Desktop Modal Carousel, which renders the same chapters with
+#     inline SVG illustrations and Prev/Next chrome
+# Mobile only ships the CLI renderer; the visual tour is desktop-only.
+#
+# Operators may edit chapter `title`, `summary`, and `sample` values to
+# match instance branding or local conventions. Chapter `id` values are
+# stable identifiers used for cross-renderer parity; do not rename them
+# without a migration.
+#
+# Reloaded with the rest of app/conf/ on file change.
+
+# Required top-level field:
+#
+# version: integer schema/content version. Bump it when chapters are added
+#          or existing chapters are substantively overhauled so the welcome
+#          CTA can re-emphasize for users who already opened an older tour.
+#          Do not bump for typo fixes, copy tweaks, or reorder-only edits.
+#
+# The tour kill-switch lives in config.yaml as `tour_enabled` alongside
+# other <feature>_enabled keys; this file stays content-only.
+
+version: 1
+
+chapters:
+  - id: running_commands
+    title: "Running commands"
+    summary: |
+      Type a command at the prompt and press Enter. Output streams as the
+      command runs, with the prompt, exit status, and elapsed time kept in
+      the transcript so results stay readable later. Long-running commands
+      can be killed from the tab controls, and finished output can be
+      copied, saved, shared, searched, or restored from history.
+    sample: "dig darklab.sh A"
+    # The visual renderer resolves illustration keys to a small symbolic
+    # panel; the CLI renderer ignores this field.
+    illustration: terminal_stream
+
+  - id: autocomplete
+    title: "Autocomplete and hints"
+    summary: |
+      Press Tab to complete commands, subcommands, flags, session files,
+      wordlists, and known values. Suggestions come from the command
+      registry and only show what this instance is configured to allow.
+      Arrow keys move through suggestions; Enter or Tab accepts the
+      highlighted item.
+    sample: "nmap -sV darklab.sh"
+    illustration: tab_complete
+
+  - id: history
+    title: "History"
+    summary: |
+      Every saved run can be found again from History. Use history to search
+      commands and stored output, star commands you use often, restore a
+      previous transcript into a tab, copy a run permalink, or remove old
+      rows when a session gets noisy. Session tokens carry history across
+      browsers and devices.
+    sample: "history"
+    illustration: history_rows
+
+  - id: run_comparison
+    title: "Run Comparison"
+    summary: |
+      Compare two saved runs when you need to see what changed between
+      checks. The comparison view keeps each transcript in its original
+      order, folds unchanged context, jumps between changed regions, and
+      compares findings and run artifacts without depending on output order.
+      Start from History, Run Details, or a linked run inside Projects.
+    sample: "commands info nmap"
+    illustration: compare_runs
+
+  - id: workflows
+    title: "Guided Workflows"
+    summary: |
+      Workflows are curated command playbooks for common jobs such as DNS
+      checks, TLS review, HTTP triage, passive recon, directory discovery,
+      API checks, and network path analysis. Fill in any inputs once, then
+      load a single step or run the whole sequence in the active tab.
+    sample: "workflow list"
+    illustration: workflow_steps
+
+  - id: projects
+    title: "Organize an Investigation"
+    summary: |
+      Projects group related work without copying the underlying history.
+      An active project can collect linked runs, discovered targets,
+      findings, run artifacts, labels, notes, comparisons, and evidence
+      packages so an investigation has a home beyond scattered terminal
+      output.
+    sample: "project help"
+    illustration: project_summary
+
+  # Feature-gated chapters use `requires` to reference exact
+  # <feature>_enabled keys from config.yaml. When the referenced feature is
+  # disabled, the loader hides the chapter in both renderers.
+  - id: session_files
+    title: "Use Session Files"
+    summary: |
+      Session Files give the shell a per-session workspace for small inputs
+      and outputs such as target lists, generated reports, response
+      captures, and resume state. Create, edit, label, preview, move, and
+      download files from the Files panel or with terminal commands like
+      file, ls, cat, mv, and rm.
+    sample: "file list"
+    requires: workspace_enabled
+    illustration: files_panel
+
+  - id: interactive_pty
+    title: "Interactive Tools"
+    summary: |
+      Some tools need a real interactive terminal instead of plain
+      line-by-line output. When Interactive PTY is enabled, approved commands
+      such as nc, telnet, mtr, ffuf, and masscan can run with
+      --interactive. Completed sessions save a transcript back into normal
+      history.
+    sample: "mtr --interactive darklab.sh"
+    requires: interactive_pty_enabled
+    illustration: pty_terminal
+
+  - id: session_tokens
+    title: "Keep Your Workspace Across Sessions"
+    summary: |
+      A session token lets your history, starred commands, variables,
+      workflows, project context, Files, and saved options follow you to
+      another browser or device. Generate a token when you want continuity;
+      clear it when you want to return to a browser-local anonymous session.
+    sample: "session-token"
+    illustration: session_token
+
+  - id: closer
+    title: "Where to go from here"
+    summary: |
+      Use help for the short built-in guide, commands to browse what this
+      instance allows, commands info <tool> for examples and flags, FAQ for
+      operator notes, and theme or Options to tune how the shell looks and
+      behaves. The best next step is usually to run one small command and
+      follow the history from there.
+    sample: "help"
+    illustration: next_steps

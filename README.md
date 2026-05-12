@@ -154,7 +154,7 @@ For system design, contributor workflow, and detailed test references, use the s
 
 ## Configuration
 
-Runtime settings live in `app/conf/config.yaml`, with optional untracked overrides in `app/conf/config.local.yaml`. The other operator-owned files under `app/conf/` customize commands, FAQ entries, welcome content, app hints, workflows, wordlists, and themes.
+Runtime settings live in `app/conf/config.yaml`, with optional untracked overrides in `app/conf/config.local.yaml`. The other operator-owned files under `app/conf/` customize commands, FAQ entries, welcome content, app hints, onboarding tour chapters, workflows, wordlists, and themes.
 
 Use [CONFIGURATION.md](CONFIGURATION.md) for the full operator reference, including:
 
@@ -426,6 +426,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── theme_dark.yaml.example # Generated dark-theme reference template — regenerate with scripts/generate_theme_examples.py
 │   │   ├── theme_light.yaml.example # Generated light-theme reference template — regenerate with scripts/generate_theme_examples.py
 │   │   ├── themes/                 # Built-in theme definitions (one YAML per theme — apricot_sand, charcoal_amber, darklab_obsidian, etc.)
+│   │   ├── tour.yaml               # Versioned onboarding tour chapters shared by the tour command and visual tour
 │   │   ├── welcome.yaml            # Welcome command samples with optional group/featured metadata (optional)
 │   │   ├── wordlists.yaml          # Curated SecLists catalog categories used by the wordlist command and autocomplete
 │   │   └── workflows.yaml          # Guided workflows panel definitions (multi-step diagnostic command sequences)

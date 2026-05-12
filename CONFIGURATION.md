@@ -54,6 +54,7 @@ Most operator-owned files under `app/conf/` and `app/conf/themes/` support sibli
 | `conf/app_hints.txt` | On next page load |
 | `conf/app_hints_mobile.txt` | On next page load |
 | `conf/welcome.yaml` | On next page load |
+| `conf/tour.yaml` | Immediately for tour renderers |
 | `conf/commands.yaml` | On next page load for autocomplete; immediately for command policy, catalog, diagnostics, and smoke-corpus helpers |
 | `conf/config.yaml` | After `docker compose restart` |
 
@@ -132,6 +133,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `welcome_status_labels` | `["CONFIG","RUNNER","HISTORY","LIMITS","AUTOCOMPLETE"]` | Labels shown in the fake startup-status block during the welcome animation. Best with 4-6 short labels |
 | `welcome_hint_interval_ms` | `4200` | Delay between footer-hint rotations while the welcome tab remains idle |
 | `welcome_hint_rotations` | `0` | Maximum number of hint states shown while the welcome tab remains idle. `0` keeps rotating until interrupted; `1` keeps only the first hint visible |
+| `tour_enabled` | `true` | Enables the app tour entry points. When disabled, the welcome tour prompt, visual tour links, and `tour` built-in command are hidden |
 | `log_level` | `INFO` | Log verbosity. Options: `ERROR`, `WARN`, `INFO`, `DEBUG` |
 | `log_format` | `text` | Log output format. Options: `text` for human-readable logs or `gelf` for GELF 1.1 JSON |
 
@@ -145,6 +147,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `app/conf/commands.yaml` | Command registry for catalog grouping, autocomplete, allow/deny policy, runtime adaptations, workspace flags, and smoke-test examples |
 | `app/conf/faq.yaml` | Operator FAQ entries appended to the built-in FAQ |
 | `app/conf/welcome.yaml` | Welcome command samples and featured sample metadata |
+| `app/conf/tour.yaml` | Versioned onboarding tour chapters shared by the `tour` command and visual tour |
 | `app/conf/ascii.txt` | Desktop welcome banner art |
 | `app/conf/ascii_mobile.txt` | Mobile welcome banner art |
 | `app/conf/app_hints.txt` | Desktop rotating welcome hints |
@@ -156,6 +159,23 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `app/conf/theme_light.yaml.example` | Generated light-theme reference template |
 
 Theme authoring details live in [THEME.md](THEME.md). Command integration details live in [docs/external-command-integrations.md](docs/external-command-integrations.md).
+
+---
+
+## Onboarding Tour
+
+`app/conf/tour.yaml` stores the shared content for the app tour. Each file has a positive integer `version` and a `chapters` list. Bump `version` when the tour meaningfully changes so the welcome prompt can point returning users at the refreshed tour.
+
+Each chapter supports:
+
+- `id` - stable chapter identifier used by both renderers
+- `title` - short display title
+- `summary` - end-user copy for the chapter
+- `sample` - optional command-chip value
+- `illustration` - optional key for the visual tour renderer
+- `requires` - optional exact config key such as `workspace_enabled` or `interactive_pty_enabled`; chapters are hidden when that feature is disabled
+
+The `tour_enabled` setting in `config.yaml` is the kill-switch for tour entry points. Keep `tour.yaml` focused on chapter content.
 
 ---
 

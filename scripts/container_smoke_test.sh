@@ -14,7 +14,8 @@
 #
 # If a command's output has intentionally changed (e.g. a tool updated its
 # help text), re-capture the baseline with scripts/capture_container_smoke_test_outputs.sh
-# against a known-good running container, then re-run this script to confirm.
+# against a known-good running container, to capture the command results in /tmp/ as a
+# reference. Then manually update the expectations file with the new valid output and re-run.
 #
 # Usage:
 #   scripts/container_smoke_test.sh

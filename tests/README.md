@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,608
+- behavior tests: 2,616
 - docs/inventory meta-tests: 32
-- `pytest`: 1310 (1278 behavior + 32 meta)
+- `pytest`: 1318 (1286 behavior + 32 meta)
 - `vitest`: 1083
 - `playwright`: 247
-- total: 2,640
+- total: 2,648
 
 This document is organized in two parts:
 
@@ -552,6 +552,14 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWelcomeLoading.test_out_trailing_whitespace_stripped_but_leading_preserved` | Checks that out trailing whitespace stripped but leading preserved. |
 | `TestWelcomeLoading.test_non_list_yaml_returns_empty` | Checks that non list YAML returns empty. |
 | `TestWelcomeLoading.test_local_overlay_appends_entries` | Checks that local overlay appends entries. |
+| `TestTourLoading.test_missing_file_returns_empty_tour` | Verifies that a missing tour file returns an empty disabled tour. |
+| `TestTourLoading.test_valid_chapters_load_with_version` | Verifies that valid tour chapters load with the configured schema version. |
+| `TestTourLoading.test_tour_disabled_returns_no_visible_chapters` | Verifies that `tour_enabled: false` hides all tour chapters. |
+| `TestTourLoading.test_missing_or_invalid_version_raises` | Verifies that missing or invalid tour versions fail schema validation. |
+| `TestTourLoading.test_unknown_requires_key_raises` | Verifies that unknown tour feature gates fail schema validation. |
+| `TestTourLoading.test_feature_gated_chapters_follow_config_flags` | Verifies that tour chapters respect representative feature flags. |
+| `TestTourLoading.test_mobile_tour_omits_interactive_pty_chapter` | Verifies that the mobile tour omits the desktop-only Interactive PTY chapter. |
+| `TestTourLoading.test_loader_rereads_changed_tour_file` | Verifies that the tour loader re-reads changed chapter content. |
 | `TestWelcomeAssetLoading.test_missing_ascii_file_returns_empty_string` | Checks that missing ascii file returns empty string. |
 | `TestWelcomeAssetLoading.test_ascii_art_trims_only_trailing_whitespace` | Checks that ascii art trims only trailing whitespace. |
 | `TestWelcomeAssetLoading.test_missing_mobile_ascii_file_returns_empty_string` | Checks that missing mobile ascii file returns empty string. |

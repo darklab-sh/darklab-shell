@@ -36,6 +36,7 @@ BUILTIN_AUTOCOMPLETE_FILE = os.path.join(_HERE, "builtin_autocomplete.yaml")
 FAQ_FILE              = os.path.join(_CONF, "faq.yaml")
 WORKFLOWS_FILE        = os.path.join(_CONF, "workflows.yaml")
 WELCOME_FILE          = os.path.join(_CONF, "welcome.yaml")
+TOUR_FILE             = os.path.join(_CONF, "tour.yaml")
 ASCII_FILE            = os.path.join(_CONF, "ascii.txt")
 ASCII_MOBILE_FILE     = os.path.join(_CONF, "ascii_mobile.txt")
 APP_HINTS_FILE        = os.path.join(_CONF, "app_hints.txt")
@@ -2013,6 +2014,122 @@ def load_welcome():
         for item in data
         if isinstance(item, dict) and item.get("cmd")
     ]
+
+
+_TOUR_ALLOWED_REQUIRES = {"workspace_enabled", "interactive_pty_enabled"}
+_TOUR_REQUIRED_STRING_FIELDS = ("id", "title", "summary")
+_TOUR_OPTIONAL_STRING_FIELDS = ("sample", "illustration")
+
+
+def _tour_config(cfg=None):
+    return app_config.CFG if cfg is None else cfg
+
+
+def _tour_error(message):
+    return ValueError(f"Invalid tour.yaml: {message}")
+
+
+def _read_tour_payload(path):
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        loaded = yaml.safe_load(f) or {}
+    if not isinstance(loaded, dict):
+        raise _tour_error("top-level value must be a mapping")
+    return loaded
+
+
+def _tour_requires_values(raw, index):
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        values = [raw]
+    elif isinstance(raw, list):
+        values = raw
+    else:
+        raise _tour_error(f"chapter {index} requires must be a string or list of strings")
+    normalized = []
+    for value in values:
+        if not isinstance(value, str) or not value.strip():
+            raise _tour_error(f"chapter {index} requires must contain non-empty strings")
+        key = value.strip()
+        if key not in _TOUR_ALLOWED_REQUIRES:
+            raise _tour_error(f"chapter {index} has unknown requires key {key!r}")
+        normalized.append(key)
+    return normalized
+
+
+def _normalize_tour_chapter(raw, index):
+    if not isinstance(raw, dict):
+        raise _tour_error(f"chapter {index} must be a mapping")
+    chapter = {}
+    for field_name in _TOUR_REQUIRED_STRING_FIELDS:
+        value = raw.get(field_name)
+        if not isinstance(value, str) or not value.strip():
+            raise _tour_error(f"chapter {index} missing required {field_name!r}")
+        chapter[field_name] = value.strip()
+    for field_name in _TOUR_OPTIONAL_STRING_FIELDS:
+        value = raw.get(field_name)
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            raise _tour_error(f"chapter {index} {field_name!r} must be a string")
+        stripped = value.strip()
+        if stripped:
+            chapter[field_name] = stripped
+    requires = _tour_requires_values(raw.get("requires"), index)
+    if len(requires) == 1:
+        chapter["requires"] = requires[0]
+    elif len(requires) > 1:
+        chapter["requires"] = requires
+    return chapter
+
+
+def _tour_chapter_requires(chapter):
+    requires = chapter.get("requires")
+    if not requires:
+        return []
+    if isinstance(requires, str):
+        return [requires]
+    return [str(value) for value in requires]
+
+
+def _tour_chapter_enabled(chapter, cfg=None, mobile=False):
+    if mobile and chapter.get("id") == "interactive_pty":
+        return False
+    active_cfg = _tour_config(cfg)
+    return all(bool(active_cfg.get(key, False)) for key in _tour_chapter_requires(chapter))
+
+
+def load_tour(cfg=None, *, mobile=False):
+    """Read tour.yaml and return the visible onboarding tour chapters.
+
+    Missing tour.yaml returns an empty disabled tour. Invalid files raise a
+    ValueError so docs/tests catch stale or malformed chapter content.
+    """
+    payload = _read_tour_payload(TOUR_FILE)
+    if payload is None:
+        return {"version": 0, "chapters": []}
+    version = payload.get("version")
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise _tour_error("version must be a positive integer")
+    raw_chapters = payload.get("chapters")
+    if not isinstance(raw_chapters, list):
+        raise _tour_error("chapters must be a list")
+    chapters = [
+        _normalize_tour_chapter(item, index)
+        for index, item in enumerate(raw_chapters, start=1)
+    ]
+    active_cfg = _tour_config(cfg)
+    if not bool(active_cfg.get("tour_enabled", True)):
+        return {"version": version, "chapters": []}
+    return {
+        "version": version,
+        "chapters": [
+            chapter for chapter in chapters
+            if _tour_chapter_enabled(chapter, active_cfg, mobile=mobile)
+        ],
+    }
 
 
 def load_ascii_art():

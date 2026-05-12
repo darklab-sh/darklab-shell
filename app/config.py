@@ -148,6 +148,7 @@ def load_config(conf_dir=None):
         "welcome_status_labels":      ["CONFIG", "RUNNER", "HISTORY", "LIMITS", "AUTOCOMPLETE"],
         "welcome_hint_interval_ms":   4200,
         "welcome_hint_rotations":     0,
+        "tour_enabled":               True,
     }
     if conf_dir is not None:
         conf_path = Path(conf_dir)
