@@ -228,6 +228,7 @@ describe('app helpers', () => {
       'pref_prompt_username',
       'pref_compare_view_mode',
       'pref_compare_context',
+      'pref_tour_seen_version',
     ].forEach((name) => {
       document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
     })
@@ -293,6 +294,7 @@ describe('app helpers', () => {
         pref_hud_clock: 'local',
         pref_compare_view_mode: 'unified',
         pref_compare_context: '10',
+        pref_tour_seen_version: 2,
       },
     })
 
@@ -327,6 +329,7 @@ describe('app helpers', () => {
               pref_hud_clock: 'local',
               pref_compare_view_mode: 'changes_only',
               pref_compare_context: 'all',
+              pref_tour_seen_version: 3,
             },
           }),
         })
@@ -909,6 +912,7 @@ describe('app helpers', () => {
           pref_prompt_username: '',
           pref_compare_view_mode: 'auto',
           pref_compare_context: '3',
+          pref_tour_seen_version: '',
         },
       })
 
@@ -4505,6 +4509,16 @@ describe('app helpers', () => {
       if (url === '/session/preferences' && opts.method === 'POST') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
       }
+      if (url === '/session/tour-seen') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            tour_version: 4,
+            preferences: { pref_tour_seen_version: 4 },
+          }),
+        })
+      }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
     const {
@@ -4514,6 +4528,8 @@ describe('app helpers', () => {
       getHudClockPreference,
       getCompareViewModePreference,
       getCompareContextPreference,
+      getTourSeenVersionPreference,
+      recordTourOpened,
     } = await loadAppFns({
       apiFetch,
       themeRegistry: {
@@ -4601,6 +4617,9 @@ describe('app helpers', () => {
     expect(getHudClockPreference()).toBe('local')
     expect(getCompareViewModePreference()).toBe('side_by_side')
     expect(getCompareContextPreference()).toBe('10')
+    await recordTourOpened()
+    expect(getTourSeenVersionPreference()).toBe(4)
+    expect(document.cookie).toContain('pref_tour_seen_version=4')
     const postCalls = apiFetch.mock.calls.filter(([url, opts]) => url === '/session/preferences' && opts?.method === 'POST')
     expect(postCalls.length).toBeGreaterThan(0)
     const lastPayload = JSON.parse(postCalls.at(-1)[1].body)

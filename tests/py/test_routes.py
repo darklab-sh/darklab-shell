@@ -2222,7 +2222,8 @@ class TestConfigRoute:
                     "welcome_post_cmd_ms", "welcome_inter_block_ms",
                     "welcome_first_prompt_idle_ms", "welcome_post_status_pause_ms",
                     "welcome_sample_count", "welcome_status_labels",
-                    "welcome_hint_interval_ms", "welcome_hint_rotations"):
+                    "welcome_hint_interval_ms", "welcome_hint_rotations",
+                    "tour_enabled", "tour_version", "tour_chapter_count"):
             assert key in data, f"missing key: {key}"
 
     def test_all_new_keys_are_ints(self):
@@ -2233,8 +2234,9 @@ class TestConfigRoute:
                     "welcome_post_cmd_ms", "welcome_inter_block_ms",
                     "welcome_first_prompt_idle_ms", "welcome_post_status_pause_ms",
                     "welcome_sample_count", "welcome_hint_interval_ms",
-                    "welcome_hint_rotations"):
+                    "welcome_hint_rotations", "tour_version", "tour_chapter_count"):
             assert isinstance(data[key], int), f"{key} should be int, got {type(data[key])}"
+        assert isinstance(data["tour_enabled"], bool)
         assert isinstance(data["welcome_status_labels"], list)
         assert all(isinstance(item, str) for item in data["welcome_status_labels"])
 
@@ -2275,6 +2277,21 @@ class TestConfigRoute:
             data = json.loads(client.get("/config").data)
         for key, val in overrides.items():
             assert data[key] == val, f"{key}: expected {val}, got {data[key]}"
+
+    def test_tour_metadata_reflects_cfg_and_visible_chapters(self):
+        client = get_client()
+        tour_payload = {
+            "version": 7,
+            "chapters": [{"id": "one"}, {"id": "two"}],
+        }
+        with mock.patch.dict("config.CFG", {"tour_enabled": True}):
+            with mock.patch("blueprints.content.load_tour", return_value=tour_payload) as load:
+                data = json.loads(client.get("/config").data)
+
+        load.assert_called_once()
+        assert data["tour_enabled"] is True
+        assert data["tour_version"] == 7
+        assert data["tour_chapter_count"] == 2
 
     def test_command_timeout_defaults_to_one_hour(self):
         # Default config keeps long-running commands bounded to an hour
@@ -3467,6 +3484,112 @@ class TestWorkflowsRoute:
         assert data["items"][0]["title"] == "Saved DNS"
         assert data["items"][0]["source"] == "user"
         assert data["items"][1]["source"] == "builtin"
+
+
+# ── /session/preferences ─────────────────────────────────────────────────────
+
+class TestSessionPreferencesRoute:
+    def test_tour_seen_version_round_trips_unset_current_and_stale_values(self):
+        client = get_client()
+        session = "tour-pref-" + uuid.uuid4().hex[:8]
+        try:
+            empty = json.loads(client.get(
+                "/session/preferences",
+                headers={"X-Session-ID": session},
+            ).data)
+            assert empty["preferences"] == {}
+
+            current_resp = client.post(
+                "/session/preferences",
+                headers={"X-Session-ID": session},
+                json={"preferences": {"pref_tour_seen_version": 3}},
+            )
+            assert current_resp.status_code == 200
+            current = json.loads(current_resp.data)
+            assert current["preferences"]["pref_tour_seen_version"] == 3
+
+            stale_resp = client.post(
+                "/session/preferences",
+                headers={"X-Session-ID": session},
+                json={"preferences": {"pref_tour_seen_version": 1}},
+            )
+            assert stale_resp.status_code == 200
+            stale = json.loads(stale_resp.data)
+            assert stale["preferences"]["pref_tour_seen_version"] == 1
+
+            loaded = json.loads(client.get(
+                "/session/preferences",
+                headers={"X-Session-ID": session},
+            ).data)
+            assert loaded["preferences"]["pref_tour_seen_version"] == 1
+        finally:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("DELETE FROM session_preferences WHERE session_id = ?", (session,))
+                conn.commit()
+
+    def test_tour_seen_route_records_current_tour_version_without_losing_preferences(self):
+        client = get_client()
+        session = "tour-seen-" + uuid.uuid4().hex[:8]
+        try:
+            client.post(
+                "/session/preferences",
+                headers={"X-Session-ID": session},
+                json={"preferences": {"pref_compare_context": "10"}},
+            )
+            with mock.patch(
+                "blueprints.session.load_tour",
+                return_value={"version": 4, "chapters": [{"id": "intro"}]},
+            ):
+                resp = client.post("/session/tour-seen", headers={"X-Session-ID": session})
+            assert resp.status_code == 200
+            data = json.loads(resp.data)
+            assert data["tour_version"] == 4
+            assert data["preferences"]["pref_tour_seen_version"] == 4
+            assert data["preferences"]["pref_compare_context"] == "10"
+        finally:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("DELETE FROM session_preferences WHERE session_id = ?", (session,))
+                conn.commit()
+
+    def test_tour_seen_version_migrates_with_session_token(self):
+        client = get_client()
+        from_session = "anon-tour-" + uuid.uuid4().hex[:8]
+        token = "tok_" + uuid.uuid4().hex
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    "INSERT INTO session_tokens (token, created) VALUES (?, datetime('now'))",
+                    (token,),
+                )
+                conn.execute(
+                    "INSERT INTO session_preferences (session_id, preferences, updated) "
+                    "VALUES (?, ?, datetime('now'))",
+                    (from_session, json.dumps({"pref_tour_seen_version": 5})),
+                )
+                conn.commit()
+
+            resp = client.post(
+                "/session/migrate",
+                headers={"X-Session-ID": from_session},
+                json={"from_session_id": from_session, "to_session_id": token},
+            )
+            assert resp.status_code == 200
+            data = json.loads(resp.data)
+            assert data["migrated_preferences"] == 1
+
+            prefs = json.loads(client.get(
+                "/session/preferences",
+                headers={"X-Session-ID": token},
+            ).data)
+            assert prefs["preferences"]["pref_tour_seen_version"] == 5
+        finally:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    "DELETE FROM session_preferences WHERE session_id IN (?, ?)",
+                    (from_session, token),
+                )
+                conn.execute("DELETE FROM session_tokens WHERE token = ?", (token,))
+                conn.commit()
 
 
 # ── /shortcuts ────────────────────────────────────────────────────────────────

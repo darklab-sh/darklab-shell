@@ -15,6 +15,7 @@
     'pref_prompt_username',
     'pref_compare_view_mode',
     'pref_compare_context',
+    'pref_tour_seen_version',
   ]);
   const WELCOME_INTRO_MODES = Object.freeze(['animated', 'disable_animation', 'remove']);
   const SHARE_REDACTION_DEFAULT_MODES = Object.freeze(['unset', 'redacted', 'raw']);
@@ -64,6 +65,12 @@
     return /^[A-Za-z0-9._-]{1,32}$/.test(username) ? username : '';
   }
 
+  function coerceTourSeenVersion(value) {
+    if (value === null || typeof value === 'undefined' || value === '') return '';
+    const parsed = Number.parseInt(String(value).trim(), 10);
+    return Number.isFinite(parsed) && parsed >= 1 ? parsed : '';
+  }
+
   function defaultSessionPreferences(defaultTheme = 'darklab_obsidian.yaml') {
     return {
       pref_theme_name: defaultTheme || 'darklab_obsidian.yaml',
@@ -78,6 +85,7 @@
       pref_prompt_username: '',
       pref_compare_view_mode: 'auto',
       pref_compare_context: '3',
+      pref_tour_seen_version: '',
     };
   }
 
@@ -100,6 +108,7 @@
     prefs.pref_prompt_username = normalizePromptUsername(source.pref_prompt_username);
     prefs.pref_compare_view_mode = coerceCompareViewMode(source.pref_compare_view_mode);
     prefs.pref_compare_context = coerceCompareContextMode(source.pref_compare_context);
+    prefs.pref_tour_seen_version = coerceTourSeenVersion(source.pref_tour_seen_version);
     return prefs;
   }
 
@@ -123,6 +132,7 @@
     coerceCompareViewMode,
     coerceCompareContextMode,
     normalizePromptUsername,
+    coerceTourSeenVersion,
     defaultSessionPreferences,
     normalizeSessionPreferences,
     sessionPreferenceCacheKey,

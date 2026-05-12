@@ -21,6 +21,9 @@ describe('frontend config bootstrap', () => {
       welcome_status_labels: ['CONFIG', 'RUNNER', 'HISTORY', 'LIMITS', 'AUTOCOMPLETE'],
       welcome_hint_interval_ms: 4200,
       welcome_hint_rotations: 0,
+      tour_enabled: true,
+      tour_version: 1,
+      tour_chapter_count: 8,
       share_redaction_enabled: true,
       share_redaction_rules: [{ label: 'bearer token' }],
     }
@@ -46,6 +49,9 @@ describe('frontend config bootstrap', () => {
       welcome_status_labels: expect.any(Array),
       welcome_hint_interval_ms: expect.any(Number),
       welcome_hint_rotations: expect.any(Number),
+      tour_enabled: expect.any(Boolean),
+      tour_version: expect.any(Number),
+      tour_chapter_count: expect.any(Number),
       share_redaction_enabled: expect.any(Boolean),
       share_redaction_rules: expect.any(Array),
     })

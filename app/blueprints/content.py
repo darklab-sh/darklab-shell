@@ -19,6 +19,7 @@ from commands import (
     load_autocomplete_context_from_commands_registry,
     load_commands_registry,
     load_mobile_welcome_hints,
+    load_tour,
     load_welcome,
     load_welcome_hints,
 )
@@ -107,6 +108,7 @@ def _prompt_label(workspace_enabled: bool) -> str:
 def _frontend_config_payload():
     """Return the browser-facing config payload derived from server config."""
     cfg = _config.CFG
+    tour = load_tour(cfg)
     return {
         "version":               _config.APP_VERSION,
         "app_name":              cfg["app_name"],
@@ -137,6 +139,9 @@ def _frontend_config_payload():
         "welcome_status_labels":  cfg["welcome_status_labels"],
         "welcome_hint_interval_ms": cfg["welcome_hint_interval_ms"],
         "welcome_hint_rotations": cfg["welcome_hint_rotations"],
+        "tour_enabled":           bool(cfg.get("tour_enabled", True)),
+        "tour_version":           int(tour.get("version") or 0),
+        "tour_chapter_count":      len(tour.get("chapters") or []),
         "diag_enabled": ip_is_in_cidrs(
             get_client_ip(),
             cfg.get("diagnostics_allowed_cidrs") or [],

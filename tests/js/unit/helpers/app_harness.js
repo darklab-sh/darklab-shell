@@ -644,6 +644,8 @@ export async function loadAppFns({
     getPromptUsernamePreference,
     getCompareViewModePreference,
     getCompareContextPreference,
+    getTourSeenVersionPreference,
+    recordTourOpened,
     applyRunNotifyPreference,
     applyProjectAutoLinkExternalRunsPreference,
     applyHudClockPreference,

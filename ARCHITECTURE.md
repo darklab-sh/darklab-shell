@@ -260,6 +260,7 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | `POST` | `/session/migrate` | Migrates runs, snapshots, starred commands, preferences, command variables, user workflows, project workspace records, recent domains, and non-conflicting workspace paths between session IDs. |
 | `GET` | `/session/preferences` | Returns the current session's normalized saved Options snapshot. |
 | `POST` | `/session/preferences` | Persists the current session's normalized saved Options snapshot. |
+| `POST` | `/session/tour-seen` | Records that the current session opened the current onboarding tour version. |
 | `GET` | `/session/variables` | Returns current session command-variable names and values for autocomplete and runtime refresh. |
 | `GET` | `/session/workflows` | Returns current-session user-created workflows. |
 | `POST` | `/session/workflows` | Creates a current-session user workflow. |
@@ -474,7 +475,7 @@ Each tab is an object: `{ id, label, command, runId, runStart, exitCode, rawLine
 
 Tab activation is intentionally stateful rather than stateless rendering. `activateTab()` preserves the leaving tab's draft, restores the arriving tab's draft without reopening autocomplete, and resets transient input-mode state such as history-navigation and autocomplete selection. During full session restore, draft-flush side effects are suppressed until the saved tab set has been rebuilt so non-active drafts cannot be overwritten by the final active-tab selection.
 
-Session-scoped user preferences are normalized by `app/static/js/app_preferences_core.js`, cached in cookies/local storage as a browser fallback, and persisted through `/session/preferences` so session tokens carry the user's shell state across browsers. The persisted set includes theme, timestamps, line numbers, welcome intro, share-redaction default, external-run project capture, run notifications, HUD clock, prompt username, active project, and run comparison preferences. Run comparison stores `pref_compare_view_mode` (`auto`, `side_by_side`, `unified`, `changes_only`, `findings_only`) plus `pref_compare_context` (`3`, `10`, `all`), defaulting to responsive `auto` view mode and `±3` equal-line context.
+Session-scoped user preferences are normalized by `app/static/js/app_preferences_core.js`, cached in cookies/local storage as a browser fallback, and persisted through `/session/preferences` so session tokens carry the user's shell state across browsers. The persisted set includes theme, timestamps, line numbers, welcome intro, share-redaction default, external-run project capture, run notifications, HUD clock, prompt username, active project, onboarding tour version, and run comparison preferences. Run comparison stores `pref_compare_view_mode` (`auto`, `side_by_side`, `unified`, `changes_only`, `findings_only`) plus `pref_compare_context` (`3`, `10`, `all`), defaulting to responsive `auto` view mode and `±3` equal-line context.
 
 ### Welcome Bootstrap Flow
 
@@ -1230,12 +1231,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,616
+- behavior tests: 2,620
 - docs/inventory meta-tests: 32
-- `pytest`: 1318 (1286 behavior + 32 meta)
+- `pytest`: 1322 (1290 behavior + 32 meta)
 - `vitest`: 1083
 - `playwright`: 247
-- total: 2,648
+- total: 2,652
 
 ### Testing Architecture
 

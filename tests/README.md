@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,616
+- behavior tests: 2,620
 - docs/inventory meta-tests: 32
-- `pytest`: 1318 (1286 behavior + 32 meta)
+- `pytest`: 1322 (1290 behavior + 32 meta)
 - `vitest`: 1083
 - `playwright`: 247
-- total: 2,648
+- total: 2,652
 
 This document is organized in two parts:
 
@@ -980,6 +980,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestConfigRoute.test_prompt_identity_reflects_cfg` | Checks that prompt username and domain reflect CFG. |
 | `TestConfigRoute.test_project_readme_is_constant` | Checks that project readme is constant. |
 | `TestConfigRoute.test_welcome_timing_reflects_cfg` | Checks that welcome timing reflects CFG. |
+| `TestConfigRoute.test_tour_metadata_reflects_cfg_and_visible_chapters` | Verifies that `/config` exposes tour availability, version, and chapter count from the tour configuration. |
 | `TestConfigRoute.test_command_timeout_defaults_to_one_hour` | Checks that command timeout defaults to one hour. |
 | `TestConfigRoute.test_diag_enabled_false_when_cidrs_empty` | Checks that diagnostics enabled false when cidrs empty. |
 | `TestConfigRoute.test_diag_enabled_false_when_client_ip_not_in_cidrs` | Checks that diagnostics enabled false when client IP not in cidrs. |
@@ -1071,6 +1072,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestWorkflowsRoute.test_payload_includes_input_driven_workflows` | Verifies that `/workflows` includes workflows with declared inputs so the client can render prefilled, user-editable workflow forms. |
 | `TestWorkflowsRoute.test_workspace_required_workflows_follow_files_feature_flag` | Verifies that workspace-required workflows are omitted from `/workflows` when Files are disabled and returned when Files are enabled. |
 | `TestWorkflowsRoute.test_user_workflows_are_returned_before_builtins` | Verifies that current-session user-created workflows are returned before built-in workflows. |
+| `TestSessionPreferencesRoute.test_tour_seen_version_round_trips_unset_current_and_stale_values` | Verifies that session preferences preserve unset, current, and stale tour-seen versions as normalized integers. |
+| `TestSessionPreferencesRoute.test_tour_seen_route_records_current_tour_version_without_losing_preferences` | Verifies that recording an opened tour stores the current tour version without discarding existing session preferences. |
+| `TestSessionPreferencesRoute.test_tour_seen_version_migrates_with_session_token` | Verifies that tour-seen preferences migrate with the rest of a session token's saved Options state. |
 | `TestShortcutsRoute.test_returns_200` | Checks `/shortcuts` returns 200. |
 | `TestShortcutsRoute.test_payload_shape` | Verifies `sections[].title`, `sections[].items[]`, and `note` schema. |
 | `TestShortcutsRoute.test_sections_cover_terminal_tabs_and_ui` | Confirms the three canonical section titles (`Terminal`, `Tabs`, `UI`) are present in order. |

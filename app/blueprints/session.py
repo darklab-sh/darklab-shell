@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, request
 
 from database import db_connect
+from commands import load_tour
 from helpers import get_client_ip, get_log_session_id, get_session_id, is_valid_anonymous_session_id
 from project_workspace import migrate_project_workspace_session
 from session_variables import list_session_variables
@@ -41,6 +42,7 @@ _SESSION_PREFERENCE_KEYS = {
     "pref_prompt_username",
     "pref_compare_view_mode",
     "pref_compare_context",
+    "pref_tour_seen_version",
 }
 
 _PROMPT_USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
@@ -67,6 +69,15 @@ def _normalize_session_preferences(raw):
     for key, value in raw.items():
         if key not in _SESSION_PREFERENCE_KEYS:
             continue
+        if key == "pref_tour_seen_version":
+            try:
+                tour_seen_version = int(value)
+            except (TypeError, ValueError):
+                continue
+            if tour_seen_version < 1:
+                continue
+            prefs[key] = tour_seen_version
+            continue
         if not isinstance(value, str):
             value = str(value or "")
         value = value.strip()
@@ -88,6 +99,35 @@ def _normalize_session_preferences(raw):
                 continue
         prefs[key] = value
     return prefs
+
+
+def _load_session_preferences(conn, session_id):
+    row = conn.execute(
+        "SELECT preferences FROM session_preferences WHERE session_id = ?",
+        (session_id,),
+    ).fetchone()
+    if not row:
+        return {}
+    try:
+        return _normalize_session_preferences(json.loads(row["preferences"] or "{}"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def _save_session_preferences(conn, session_id, preferences, updated):
+    conn.execute(
+        "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (?, ?, ?) "
+        "ON CONFLICT(session_id) DO UPDATE SET preferences = excluded.preferences, updated = excluded.updated",
+        (session_id, json.dumps(preferences, sort_keys=True), updated),
+    )
+
+
+def _current_tour_version():
+    tour = load_tour()
+    try:
+        return int(tour.get("version") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _normalize_recent_domain(value):
@@ -544,11 +584,7 @@ def session_preferences_save():
     updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     session_id = get_session_id()
     with db_connect() as conn:
-        conn.execute(
-            "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (?, ?, ?) "
-            "ON CONFLICT(session_id) DO UPDATE SET preferences = excluded.preferences, updated = excluded.updated",
-            (session_id, json.dumps(prefs, sort_keys=True), updated),
-        )
+        _save_session_preferences(conn, session_id, prefs, updated)
         conn.commit()
     log.info("SESSION_PREFERENCES_SAVED", extra={
         "ip": get_client_ip(),
@@ -557,6 +593,33 @@ def session_preferences_save():
         "key_count": len(prefs),
     })
     return jsonify({"ok": True, "preferences": prefs, "updated": updated})
+
+
+@session_bp.route("/session/tour-seen", methods=["POST"])
+def session_tour_seen():
+    """Record that the current session opened the current tour version."""
+    tour_version = _current_tour_version()
+    if tour_version < 1:
+        return jsonify({"error": "tour is not available"}), 404
+    updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    session_id = get_session_id()
+    with db_connect() as conn:
+        prefs = _load_session_preferences(conn, session_id)
+        prefs["pref_tour_seen_version"] = tour_version
+        _save_session_preferences(conn, session_id, prefs, updated)
+        conn.commit()
+    log.info("SESSION_TOUR_SEEN", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "session_kind": _session_kind(session_id),
+        "tour_version": tour_version,
+    })
+    return jsonify({
+        "ok": True,
+        "tour_version": tour_version,
+        "preferences": prefs,
+        "updated": updated,
+    })
 
 
 @session_bp.route("/session/variables")

@@ -553,6 +553,7 @@ function _buildCurrentSessionPreferenceSnapshot() {
     pref_prompt_username: getPromptUsernamePreference(),
     pref_compare_view_mode: getCompareViewModePreference(),
     pref_compare_context: getCompareContextPreference(),
+    pref_tour_seen_version: getTourSeenVersionPreference(),
   };
   const activeProject = typeof globalThis.getActiveProjectContext === 'function'
     ? globalThis.getActiveProjectContext()
@@ -662,6 +663,32 @@ function getCompareViewModePreference() {
 
 function getCompareContextPreference() {
   return PreferenceCore.coerceCompareContextMode(getPreference('pref_compare_context'));
+}
+
+function getTourSeenVersionPreference() {
+  return PreferenceCore.coerceTourSeenVersion(getPreference('pref_tour_seen_version'));
+}
+
+async function recordTourOpened() {
+  const resp = await apiFetch('/session/tour-seen', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  if (resp && resp.ok === false) {
+    let detail = '';
+    try {
+      const data = await resp.json();
+      detail = data && data.error ? `: ${data.error}` : '';
+    } catch (_) {}
+    throw new Error(`failed to record tour open${detail}`);
+  }
+  const data = await resp.json();
+  const prefs = _normalizeSessionPreferences(data && data.preferences);
+  _sessionPreferenceOverrides = prefs;
+  _writePreferenceSnapshotToStorage(prefs, { writeThemeToLocalStorage: false });
+  _cacheSessionPreferences(prefs);
+  return data;
 }
 
 function _promptUsernameInputValid(value) {
