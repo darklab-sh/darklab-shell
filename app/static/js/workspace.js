@@ -775,6 +775,15 @@ function showWorkspaceEditor(path = '', text = '', { readOnlyPath = false, label
   }
   if (workspaceTextInput) workspaceTextInput.value = text;
   setTimeout(() => {
+    const active = document.activeElement;
+    const activeIsEditable = active instanceof HTMLInputElement
+      || active instanceof HTMLTextAreaElement
+      || active instanceof HTMLSelectElement
+      || active?.isContentEditable;
+    const editorHost = (typeof workspaceEditorOverlay !== 'undefined' && workspaceEditorOverlay)
+      ? workspaceEditorOverlay
+      : workspaceEditor;
+    if (activeIsEditable && editorHost?.contains(active)) return;
     if (workspacePathInput && !path) workspacePathInput.focus();
     else if (workspaceTextInput) workspaceTextInput.focus();
   }, 0);

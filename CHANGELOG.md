@@ -79,6 +79,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Modal focus no longer steals typed input on slower browsers** — delayed initial-focus helpers in Files, Workflows, and Projects now leave focus alone once a field inside the opened surface is already active, preventing typed text from landing in the wrong input during fast interactions and CI runs. The History star reload e2e also waits for DOM readiness with a larger budget so normal startup hydration does not exhaust the test timeout.
 - **Project finding text now strips ANSI formatting before storage** — scanner output with colored findings, such as Nuclei template results, is normalized before it is persisted as a project finding title/raw line.
 - **Project target discovery no longer announces duplicate rediscoveries** — re-running a command that only touches already known or dismissed targets increments target tracking without emitting a fresh "discovered targets" notice.
 - **Project labels and notes controls stay hidden when no project exists** — the Projects modal empty state no longer leaks the detached Labels/Notes inputs before a project is created.

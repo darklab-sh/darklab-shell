@@ -4517,7 +4517,15 @@ function openWorkflowEditor(workflow = null) {
   refs.overlay.classList.remove('u-hidden');
   refs.overlay.classList.add('open');
   refs.overlay.setAttribute('aria-hidden', 'false');
-  setTimeout(() => refs.titleInput?.focus(), 0);
+  setTimeout(() => {
+    const active = document.activeElement;
+    const activeIsEditable = active instanceof HTMLInputElement
+      || active instanceof HTMLTextAreaElement
+      || active instanceof HTMLSelectElement
+      || active?.isContentEditable;
+    if (activeIsEditable && refs.overlay.contains(active)) return;
+    refs.titleInput?.focus();
+  }, 0);
 }
 
 function closeWorkflowEditor() {

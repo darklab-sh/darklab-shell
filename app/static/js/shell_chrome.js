@@ -1454,6 +1454,16 @@
   function _focusProjectNestedSheet(overlay, preferred = null) {
     const target = _projectSheetFocusTarget(overlay, preferred);
     window.setTimeout(() => {
+      const active = document.activeElement;
+      const activeIsEditable = active instanceof HTMLInputElement
+        || active instanceof HTMLTextAreaElement
+        || active instanceof HTMLSelectElement
+        || active?.isContentEditable;
+      if (activeIsEditable && overlay?.contains(active)) {
+        _syncProjectWorkspaceNestedSuppression();
+        _syncProjectMobileFocusedField();
+        return;
+      }
       if (target && target.isConnected && typeof target.focus === 'function') {
         try { target.focus({ preventScroll: true }); } catch (_) { target.focus(); }
       }

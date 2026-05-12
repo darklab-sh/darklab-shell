@@ -96,7 +96,56 @@ No known issues are currently tracked.
 
 ## Technical Debt
 
-No technical debt items are currently tracked.
+- **Restructure large app modules by feature responsibility**
+  - Several app-side JS, CSS, and Python files are now large enough that focused follow-up work is harder than it needs to be. Split these gradually when touching the relevant area instead of doing one broad mechanical rewrite.
+  - **Strong split candidates**
+    - `app/static/js/shell_chrome.js` — split desktop rail/HUD chrome, Projects mobile/detail helpers, Run Details/history actions, and shared shell navigation glue.
+    - `app/static/css/shell.css` — split terminal output, modals, Projects, package wizard, Command Registry, FAQ/shortcuts, and workflows.
+    - `app/static/js/app.js` — split preferences, themes, CLI built-ins, tour CLI, autocomplete runtime context, FAQ/Command Registry, and workflows.
+    - `app/project_workspace.py` — split project CRUD, targets/discovery, findings, artifacts, evidence package/export rendering, labels/notes, and compare/link helpers.
+    - `app/static/js/history.js` — split History drawer, Run Details modal, compare launcher, compare renderer, compare controls, and share/delete actions.
+    - `app/commands.py` — split registry loading/schema normalization, autocomplete derivation, command validation, workspace flag rewriting, restriction checks, and runtime environment handling.
+    - `app/static/js/status_monitor.js` — split data polling/state, modal/sheet rendering, visual cards, active-run rows, attach/kill actions, and mobile behavior.
+    - `app/static/js/runner.js` — split SSE streaming, run lifecycle/state, stalled-run recovery, PTY handoff/finalization, output persistence, and composer submit glue.
+    - `app/builtin_commands.py` — split command families such as help/status/history/config/theme/tour/project/workspace/workflow commands.
+    - `app/static/css/components.css` — keep true primitives together, but move compare/project/history-specific rules into feature stylesheets.
+  - **Worth considering during related work**
+    - `app/static/css/shell-chrome.css` — split shell chrome from Status Monitor styling.
+    - `app/static/js/controller.js` — split mobile menu wiring, options/session-token controls, global shortcuts, autocomplete input handling, and bootstrap wiring.
+    - `app/blueprints/run.py` — split run routes from persistence/finalization helpers, PTY persistence shaping, workspace artifact capture, and SSE streaming helpers.
+    - `app/static/js/workspace.js` — split browser/list rendering, viewer rendering/search, editor/actions, drag/drop/move, and autocomplete cache helpers.
+    - `app/blueprints/history.py` — split history list/stats routes, run details payload helpers, compare routes, and share/permalink routes.
+    - `app/static/js/mobile_chrome.js` — split mobile menu, mobile History sheet, mobile status/peek behavior, and mobile shell state sync.
+    - `app/static/js/tabs.js` — split tab state/rendering, drag/reorder, restore/session hydration, and close/kill prompts.
+    - `app/static/js/autocomplete.js` — split menu rendering/navigation from suggestion resolution/application.
+    - `app/static/css/mobile.css` — split mobile composer/shell layout from sheet-specific and orientation-specific rules.
+    - `app/pty_service.py` — split terminal capture/snapshot code from process lifecycle, Redis broker state, controls, and stream helpers.
+    - `app/static/js/pty.js` — split xterm asset/init handling, PTY stream lifecycle, modal controls, snapshots/reattach, and input batching.
+  - **Probably fine for now**
+    - `app/static/js/search.js`, `app/workspace.py`, and `app/static/js/welcome.js` are large, but each still reads as one coherent feature module. Split them only when related work makes the boundary obvious.
+
+- **Adopt a hybrid feature-folder structure for app code**
+  - Prefer a gradual hybrid layout that keeps Flask route files familiar while moving bulky service, UI, and CSS code into clearer core/shared/feature folders.
+  - **Python target shape**
+    - Keep `app.py`, `config.py`, `extensions.py`, and existing route modules under `app/blueprints/`.
+    - Add `app/core/` for cross-cutting helpers such as database, logging, redaction, and generic utilities.
+    - Add `app/services/` with feature subfolders for commands, runs, history, projects, workspace, PTY, and workflows.
+    - Start by extracting service modules behind stable route files rather than moving blueprints first.
+  - **JavaScript target shape**
+    - Add `app/static/js/core/` for global state, DOM refs, config, and low-level utilities.
+    - Add `app/static/js/ui/` for shared UI primitives such as confirm dialogs, disclosure, dismissible overlays, focus traps, pressable rows, outside-click handling, app-native selects, and sheet helpers.
+    - Add `app/static/js/features/` for autocomplete, history, projects, run comparison, runner, PTY, workspace, workflows, Status Monitor, tour, and welcome code.
+    - Move JS gradually because the current browser bundle depends on globals and script-tag load order.
+  - **CSS target shape**
+    - Add `app/static/css/core/` for base styles, fonts, and theme bootstrap.
+    - Add `app/static/css/primitives/` for buttons, forms, tabs, dropdowns, sheets, rows, and other reusable UI contracts.
+    - Add `app/static/css/features/` for shell, shell chrome, history, projects, run comparison, workspace, PTY, workflows, Status Monitor, welcome, and mobile feature styles.
+    - Split CSS only after related selectors are stable, since CSS moves are the easiest place to introduce subtle visual drift.
+  - **Suggested starting order**
+    - Move project workspace service logic into `app/services/projects/`.
+    - Move Run Comparison browser code out of `history.js` into `app/static/js/features/run-comparison/`.
+    - Move Projects, Run Comparison, and Workflows sections out of `shell.css` into feature CSS files.
+    - Move CLI, tour, and workflow chunks out of `app.js` into feature modules.
 
 ---
 

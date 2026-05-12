@@ -369,6 +369,7 @@ test.describe('history drawer', () => {
   })
 
   test('starred commands are remembered across page reload', async ({ page }) => {
+    test.setTimeout(60_000)
     await runCommand(page, CMD_A)
 
     // Star the run from the history panel
@@ -384,7 +385,7 @@ test.describe('history drawer', () => {
 
     // Reload without clearing localStorage — session_id is preserved, so starred
     // commands are still in the server DB for this session.
-    await page.reload()
+    await page.reload({ waitUntil: 'domcontentloaded' })
     await page.locator('#cmd').waitFor()
     await starredResponse
     // The reload re-fires the welcome boot path; wait for it to settle before
