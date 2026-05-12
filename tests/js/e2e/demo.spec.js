@@ -19,11 +19,19 @@ import { test, expect } from '@playwright/test'
 import { ensurePromptReady } from './helpers.js'
 import { buildVisualHistoryPayload } from './visual_history_fixture.js'
 import { assertVisualFlowGuardrails } from './visual_guardrails.js'
+import {
+  INTERACTIVE_CAPTURE_CMD,
+  WORKSPACE_CAPTURE_CMD,
+  activeHistoryRunId,
+  createCaptureProjectFixture,
+  installCommonCaptureMocks,
+  openCaptureRunComparison,
+} from './ui_capture_shared.js'
 import { CAPTURE_SESSION_TOKEN } from '../../../config/playwright.visual.contracts.js'
 
 // Keystroke delay — intentionally closer to a real person than a script.
 const TYPE_DELAY_MS = 62
-const WORKSPACE_DEMO_CMD = 'curl -L -o response.html https://noc.darklab.sh'
+const WORKSPACE_DEMO_CMD = WORKSPACE_CAPTURE_CMD
 const LONG_DEMO_CMD = 'ping -i 0.5 -c 300 darklab.sh'
 const FFUF_TARGET_URL = 'https://tor-stats.darklab.sh/FUZZ'
 const FFUF_WORDLIST =
@@ -333,6 +341,63 @@ async function openFilesPanelWithResponseFile(page) {
   await page.waitForTimeout(1_000)
 }
 
+async function openProjectsPanelForDemo(page, runId) {
+  await createCaptureProjectFixture(page, {
+    name: 'Demo Investigation',
+    runIds: [runId],
+    target: 'noc.darklab.sh',
+    note: 'Group related runs, notes, targets, and evidence packages in one place.',
+  })
+  await page.locator('.rail-nav [data-action="projects"]').hover()
+  await page.waitForTimeout(650)
+  await page.locator('.rail-nav [data-action="projects"]').click()
+  await page.locator('#project-workspace-overlay').waitFor({ state: 'visible', timeout: 10_000 })
+  await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
+  await expect(page.locator('#project-workspace-body')).not.toContainText('Loading projects...')
+  await page.waitForTimeout(900)
+  await page.locator('[data-project-tab="details"]').click()
+  await expect(page.locator('#project-explorer-body')).toContainText('noc.darklab.sh')
+  await page.waitForTimeout(3_200)
+  await page.locator('.project-workspace-close').hover()
+  await page.waitForTimeout(600)
+  await page.locator('.project-workspace-close').click()
+  await page.locator('#project-workspace-overlay').waitFor({ state: 'hidden', timeout: 10_000 })
+  await page.waitForTimeout(1_000)
+}
+
+async function openRunComparisonForDemo(page) {
+  await openCaptureRunComparison(page)
+  await page.locator('#history-compare-overlay').waitFor({ state: 'visible', timeout: 10_000 })
+  await expect(page.locator('#history-compare-overlay')).toHaveClass(/\bopen\b/)
+  await expect(page.locator('.history-compare-split')).toContainText('443/tcp open https')
+  await page.waitForTimeout(4_400)
+  await page.locator('.history-compare-close').hover()
+  await page.waitForTimeout(600)
+  await page.locator('.history-compare-close').click()
+  await page.locator('#history-compare-overlay').waitFor({ state: 'hidden', timeout: 10_000 })
+  await page.waitForTimeout(1_000)
+}
+
+async function runInteractiveDemoCommand(page) {
+  await page.locator('#new-tab-btn').click()
+  await ensurePromptReady(page, { timeout: 10_000 })
+  await page.waitForTimeout(800)
+  await typeSlowly(page, INTERACTIVE_CAPTURE_CMD)
+  await page.waitForTimeout(600)
+  await submitCommand(page)
+  await expect(page.locator('#pty-overlay')).toHaveClass(/\bopen\b/)
+  await expect(page.locator('#pty-modal-screen')).toContainText('capture hop darklab.sh')
+  await page.waitForTimeout(4_200)
+  await page.locator('#pty-modal-kill').hover()
+  await page.waitForTimeout(600)
+  await page.locator('#pty-modal-kill').click()
+  await expect(page.locator('#confirm-host')).toContainText('Kill the running process')
+  await page.waitForTimeout(750)
+  await page.locator('#confirm-host [data-confirm-action-id="confirm"]').click()
+  await page.locator('#pty-overlay').waitFor({ state: 'hidden', timeout: 10_000 })
+  await page.waitForTimeout(1_100)
+}
+
 /**
  * Select a theme by calling applyThemeSelection() directly in the page
  * context, bypassing any DOM click event.
@@ -458,6 +523,7 @@ test('demo', async ({ page }) => {
       // Ignore storage failures in non-standard contexts.
     }
   }, process.env.DEMO_SESSION_TOKEN || CAPTURE_SESSION_TOKEN)
+  await installCommonCaptureMocks(page)
 
   // ── Optional screenshot-frame fallback ────────────────────────────────────
   const FRAMES_DIR = process.env.DEMO_FRAMES_DIR || '/tmp/darklab_shell-demo-frames'
@@ -581,10 +647,20 @@ test('demo', async ({ page }) => {
   await typeSlowly(page, WORKSPACE_DEMO_CMD)
   await page.waitForTimeout(700)
   await waitForFinished(page, WORKSPACE_DEMO_CMD, { timeoutMs: 45_000 })
+  const workspaceRunId = await activeHistoryRunId(page, WORKSPACE_DEMO_CMD)
   await page.waitForTimeout(1_000)
 
   // ── Files panel: captured response file ──────────────────────────────────
   await openFilesPanelWithResponseFile(page)
+
+  // ── Projects panel: active project with a linked run ─────────────────────
+  await openProjectsPanelForDemo(page, workspaceRunId)
+
+  // ── Run comparison: side-by-side output and changed findings ─────────────
+  await openRunComparisonForDemo(page)
+
+  // ── Interactive PTY: live terminal session ───────────────────────────────
+  await runInteractiveDemoCommand(page)
 
   // ── Switch back to tab 1 to show ping still running ───────────────────────
   await page.locator('.tab').first().hover()

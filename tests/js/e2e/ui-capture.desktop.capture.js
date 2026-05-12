@@ -11,10 +11,15 @@ import {
 } from './helpers.js'
 import {
   FAST_RUN_CMD,
+  INTERACTIVE_CAPTURE_CMD,
   LONG_RUN_CMD,
+  WORKSPACE_CAPTURE_CMD,
+  activeHistoryRunId,
   createManifest,
+  createCaptureProjectFixture,
   freshHome,
   installCommonCaptureMocks,
+  openCaptureRunComparison,
   resolveCaptureThemes,
   saveCapture,
   seedOutput,
@@ -27,8 +32,6 @@ const freshCaptureHome = (page, opts = {}) => freshHome(page, {
   ...opts,
   guardrailMode: 'desktop',
 })
-
-const WORKSPACE_CAPTURE_CMD = 'curl -L -o response.html https://noc.darklab.sh'
 
 async function runLongCaptureCommand(page) {
   await page.locator('#cmd').fill(LONG_RUN_CMD)
@@ -47,6 +50,12 @@ async function runFastCaptureCommand(page) {
     FAST_RUN_CMD,
     { timeout: 10_000 },
   )
+}
+
+async function runCaptureCommandAndGetRunId(page, command) {
+  await runCommand(page, command)
+  await waitForHistoryRuns(page, 1)
+  return activeHistoryRunId(page, command)
 }
 
 async function prepareStatusMonitorTelemetryScene(page) {
@@ -106,6 +115,21 @@ async function createAndOpenWorkspaceResponseFile(page) {
   await row.locator('[data-workspace-action="view"]').click()
   await expect(page.locator('#workspace-viewer')).toBeVisible()
   await expect(page.locator('#workspace-viewer-title')).toHaveText('response.html')
+}
+
+async function openProjectsModalWithCaptureProject(page, themeName) {
+  const runId = await runCaptureCommandAndGetRunId(page, 'hostname')
+  await createCaptureProjectFixture(page, {
+    name: `Capture Project ${themeLabel(themeName)}`,
+    runIds: [runId],
+    target: 'capture.darklab.sh',
+  })
+  await page.locator('.rail-nav [data-action="projects"]').click()
+  await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
+  await expect(page.locator('#project-workspace-body')).not.toContainText('Loading projects...')
+  await page.locator('[data-project-tab="details"]').click()
+  await expect(page.locator('#project-explorer-body')).toContainText(`Capture Project ${themeLabel(themeName)}`)
+  await expect(page.locator('#project-explorer-body')).toContainText('capture.darklab.sh')
 }
 
 const scenes = [
@@ -313,6 +337,38 @@ const scenes = [
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
       await openScopedWorkflow(page)
+    },
+  },
+  {
+    slug: 'projects-modal',
+    title: 'Main UI - Projects modal with active project',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await openProjectsModalWithCaptureProject(page, themeName)
+    },
+  },
+  {
+    slug: 'run-comparison-modal',
+    title: 'Main UI - run comparison modal',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await openCaptureRunComparison(page)
+      await expect(page.locator('#history-compare-overlay')).toHaveClass(/\bopen\b/)
+      await expect(page.locator('.history-compare-split')).toContainText('443/tcp open https')
+    },
+  },
+  {
+    slug: 'interactive-pty-run',
+    title: 'Main UI - interactive PTY run',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await page.locator('#cmd').fill(INTERACTIVE_CAPTURE_CMD)
+      await page.keyboard.press('Enter')
+      await expect(page.locator('#pty-overlay')).toHaveClass(/\bopen\b/)
+      await expect(page.locator('#pty-modal-screen')).toContainText('capture hop darklab.sh')
     },
   },
   {

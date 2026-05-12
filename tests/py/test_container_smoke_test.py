@@ -225,6 +225,33 @@ def _cleanup_stale_smoke_compose_projects(*, exclude: str | None = None) -> None
         _cleanup_compose_project_resources(project)
 
 
+def _running_inside_container() -> bool:
+    if Path("/.dockerenv").exists():
+        return True
+    try:
+        cgroup = Path("/proc/1/cgroup").read_text()
+    except OSError:
+        return False
+    return any(marker in cgroup for marker in ("/docker/", "/kubepods/", "/containerd/"))
+
+
+def _default_gateway_from_proc_net_route() -> str | None:
+    try:
+        lines = Path("/proc/net/route").read_text().splitlines()
+    except OSError:
+        return None
+    for line in lines[1:]:
+        fields = line.split()
+        if len(fields) < 3 or fields[1] != "00000000":
+            continue
+        try:
+            gateway = int(fields[2], 16).to_bytes(4, "little")
+        except (ValueError, OverflowError):
+            continue
+        return ".".join(str(part) for part in gateway)
+    return None
+
+
 def _docker_reach_host() -> str:
     """Return the hostname used to reach ports published by Docker containers.
 
@@ -241,6 +268,10 @@ def _docker_reach_host() -> str:
         host = urlparse(docker_host).hostname
         if host:
             return host
+    if docker_host.startswith("unix://") and _running_inside_container():
+        gateway = _default_gateway_from_proc_net_route()
+        if gateway:
+            return gateway
     return "127.0.0.1"
 
 
@@ -254,12 +285,22 @@ def _docker_reach_host() -> str:
     ],
 )
 def test_docker_reach_host(monkeypatch: pytest.MonkeyPatch, docker_host: str | None, expected: str) -> None:
+    monkeypatch.setattr(sys.modules[__name__], "_running_inside_container", lambda: False)
     if docker_host is None:
         monkeypatch.delenv("DOCKER_HOST", raising=False)
     else:
         monkeypatch.setenv("DOCKER_HOST", docker_host)
 
     assert _docker_reach_host() == expected
+
+    if docker_host == "unix:///var/run/docker.sock":
+        monkeypatch.setattr(sys.modules[__name__], "_running_inside_container", lambda: True)
+        monkeypatch.setattr(
+            sys.modules[__name__],
+            "_default_gateway_from_proc_net_route",
+            lambda: "172.18.0.1",
+        )
+        assert _docker_reach_host() == "172.18.0.1"
 
 
 @pytest.mark.parametrize(
@@ -1049,7 +1090,7 @@ def container_smoke_test():
                 _wait_for_health(base_url)
                 print(f"[container-smoke-test] container ready: {base_url}", flush=True)
             except AssertionError as exc:
-                pytest.skip(f"container setup failed — {exc}")
+                pytest.exit(f"container setup failed — {exc}", returncode=1)
             yield base_url
         finally:
             logs = subprocess.run(compose + ["logs", "--no-color"], cwd=ROOT, capture_output=True, text=True)

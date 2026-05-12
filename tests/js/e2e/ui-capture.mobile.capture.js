@@ -8,9 +8,13 @@ import {
 import {
   FAST_RUN_CMD,
   LONG_RUN_CMD,
+  WORKSPACE_CAPTURE_CMD,
+  activeHistoryRunId,
   createManifest,
+  createCaptureProjectFixture,
   freshHome,
   installCommonCaptureMocks,
+  openCaptureRunComparison,
   resolveCaptureThemes,
   saveCapture,
   seedOutput,
@@ -23,8 +27,6 @@ const freshCaptureHome = (page, opts = {}) => freshHome(page, {
   guardrailMode: 'mobile',
 })
 
-const WORKSPACE_CAPTURE_CMD = 'curl -L -o response.html https://noc.darklab.sh'
-
 async function runCommandMobile(page, cmd) {
   await setComposerValueForTest(page, cmd, { mobile: true })
   await page.locator('#mobile-run-btn').click()
@@ -36,6 +38,12 @@ async function runCommandMobile(page, cmd) {
     cmd,
     { timeout: 15_000 },
   )
+}
+
+async function runCommandMobileAndGetRunId(page, cmd) {
+  await runCommandMobile(page, cmd)
+  await waitForHistoryRuns(page, 1)
+  return activeHistoryRunId(page, cmd)
 }
 
 async function runLongCaptureCommandMobile(page) {
@@ -78,6 +86,25 @@ async function createAndOpenWorkspaceResponseFileMobile(page) {
   await row.locator('[data-workspace-action="view"]').click()
   await expect(page.locator('#workspace-viewer')).toBeVisible()
   await expect(page.locator('#workspace-viewer-title')).toHaveText('response.html')
+}
+
+async function openMobileProjectsWithCaptureProject(page, themeName) {
+  const runId = await runCommandMobileAndGetRunId(page, 'hostname')
+  await createCaptureProjectFixture(page, {
+    name: `Mobile Capture ${themeLabel(themeName)}`,
+    runIds: [runId],
+    target: 'mobile.capture.darklab.sh',
+  })
+  await openMenu(page)
+  await page.locator('#mobile-menu-sheet [data-menu-action="projects"]').click()
+  await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
+  await expect(page.locator('#project-mobile-root')).toBeVisible()
+  const row = page.locator('.project-mobile-row').filter({ hasText: `Mobile Capture ${themeLabel(themeName)}` }).first()
+  await expect(row).toBeVisible()
+  await row.click()
+  await expect(page.locator('#project-mobile-detail-view')).toBeVisible()
+  await page.locator('[data-project-mobile-detail-tab="details"]').click()
+  await expect(page.locator('#project-mobile-detail-body')).toContainText('mobile.capture.darklab.sh')
 }
 
 const scenes = [
@@ -185,6 +212,26 @@ const scenes = [
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
       await createAndOpenWorkspaceResponseFileMobile(page)
+    },
+  },
+  {
+    slug: 'projects-modal',
+    title: 'Projects modal with active project',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await openMobileProjectsWithCaptureProject(page, themeName)
+    },
+  },
+  {
+    slug: 'run-comparison-modal',
+    title: 'Run comparison modal',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await openCaptureRunComparison(page)
+      await expect(page.locator('#history-compare-overlay')).toHaveClass(/\bopen\b/)
+      await expect(page.locator('.history-compare-split')).toContainText('443/tcp open https')
     },
   },
   {
@@ -415,10 +462,11 @@ const scenes = [
       const runItem = page
         .locator('#mobile-recents-list .sheet-item')
         .filter({
-          has: page.locator('.sheet-item-action', { hasText: 'permalink' }),
+          has: page.locator('.sheet-item-action-menu-trigger'),
         })
         .first()
-      await runItem.locator('.sheet-item-action', { hasText: 'permalink' }).click()
+      await runItem.locator('.sheet-item-action-menu-trigger').click()
+      await runItem.locator('.sheet-item-action-menu .dropdown-item', { hasText: 'permalink' }).click()
       const copied = await page.evaluate(() => window.__clipboardText || '')
       await page.goto(copied, { waitUntil: 'domcontentloaded' })
       await expect(page.locator('body.permalink-page')).toBeVisible()

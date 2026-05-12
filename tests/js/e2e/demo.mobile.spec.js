@@ -25,6 +25,13 @@ import { ensurePromptReady } from './helpers.js'
 import { buildVisualHistoryPayload } from './visual_history_fixture.js'
 import { assertVisualFlowGuardrails } from './visual_guardrails.js'
 import {
+  WORKSPACE_CAPTURE_CMD,
+  activeHistoryRunId,
+  createCaptureProjectFixture,
+  installCommonCaptureMocks,
+  openCaptureRunComparison,
+} from './ui_capture_shared.js'
+import {
   CAPTURE_SESSION_TOKEN,
   MOBILE_VISUAL_CONTRACT,
 } from '../../../config/playwright.visual.contracts.js'
@@ -39,7 +46,7 @@ const DEMO_TOP_SAFE_AREA_PX = Number(
   process.env.DEMO_MOBILE_TOP_SAFE_AREA_PX || (DEMO_OBS_CAPTURE ? 0 : 16),
 )
 const DEMO_BOTTOM_SAFE_AREA_PX = Number(process.env.DEMO_MOBILE_BOTTOM_SAFE_AREA_PX || 14)
-const WORKSPACE_DEMO_CMD = 'curl -L -o response.html https://noc.darklab.sh'
+const WORKSPACE_DEMO_CMD = WORKSPACE_CAPTURE_CMD
 const LONG_DEMO_CMD = 'ping -i 0.5 -c 300 darklab.sh'
 const FFUF_TARGET_URL = 'https://tor-stats.darklab.sh/FUZZ'
 const FFUF_WORDLIST =
@@ -367,6 +374,47 @@ async function openFilesPanelWithResponseFile(page) {
   await page.waitForTimeout(1_000)
 }
 
+async function openProjectsPanelForDemo(page, runId) {
+  await createCaptureProjectFixture(page, {
+    name: 'Mobile Demo Investigation',
+    runIds: [runId],
+    target: 'noc.darklab.sh',
+    note: 'Mobile projects keep linked runs, targets, notes, and evidence together.',
+  })
+  await openMobileMenuAction(page, 'projects')
+  await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
+  await expect(page.locator('#project-mobile-root')).toBeVisible()
+  const row = page.locator('.project-mobile-row').filter({ hasText: 'Mobile Demo Investigation' }).first()
+  await expect(row).toBeVisible()
+  await page.waitForTimeout(1_100)
+  await row.click()
+  await expect(page.locator('#project-mobile-detail-view')).toBeVisible()
+  await page.locator('[data-project-mobile-detail-tab="details"]').click()
+  await expect(page.locator('#project-mobile-detail-body')).toContainText('noc.darklab.sh')
+  await page.waitForTimeout(3_300)
+  await page.evaluate(() => {
+    if (typeof closeProjectWorkspace === 'function') closeProjectWorkspace({ refocus: false })
+  })
+  await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
+  await page.waitForTimeout(1_000)
+}
+
+async function openRunComparisonForDemo(page) {
+  await openCaptureRunComparison(page)
+  await expect(page.locator('#history-compare-overlay')).toHaveClass(/\bopen\b/)
+  await expect(page.locator('.history-compare-split')).toContainText('443/tcp open https')
+  await page.waitForTimeout(4_200)
+  await page.evaluate(() => {
+    if (typeof closeHistoryCompareOverlay === 'function') {
+      closeHistoryCompareOverlay()
+      return
+    }
+    document.querySelector('.history-compare-close')?.click()
+  })
+  await expect(page.locator('#history-compare-overlay')).not.toHaveClass(/\bopen\b/)
+  await page.waitForTimeout(1_000)
+}
+
 /**
  * Remove the keyboard overlay and restore the full transcript area.
  * Call after the run button is clicked — mimics the keyboard dismissing
@@ -560,6 +608,7 @@ test('demo-mobile', async ({ page }) => {
       // Ignore storage failures in non-standard contexts.
     }
   }, process.env.DEMO_SESSION_TOKEN || CAPTURE_SESSION_TOKEN)
+  await installCommonCaptureMocks(page)
 
   // ── Optional screenshot-frame fallback ────────────────────────────────────
   // The normal OBS wrapper disables this path. It remains useful for quick
@@ -760,11 +809,18 @@ test('demo-mobile', async ({ page }) => {
   await typeSlowly(page, WORKSPACE_DEMO_CMD)
   await page.waitForTimeout(800)
   await waitForFinished(page, WORKSPACE_DEMO_CMD, { timeoutMs: 45_000 })
+  const workspaceRunId = await activeHistoryRunId(page, WORKSPACE_DEMO_CMD)
   await unmountKeyboard(page)
   await page.waitForTimeout(1_500)
 
   // ── Files panel: captured response file ──────────────────────────────────
   await openFilesPanelWithResponseFile(page)
+
+  // ── Projects panel: active project with a linked run ─────────────────────
+  await openProjectsPanelForDemo(page, workspaceRunId)
+
+  // ── Run comparison: mobile comparison sheet ──────────────────────────────
+  await openRunComparisonForDemo(page)
 
   // ── Switch back to tab 1 — show ping still scrolling ──────────────────────
   await page.waitForTimeout(900)
