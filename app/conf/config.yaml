@@ -353,10 +353,11 @@
 # Server default if unset: 75
 # run_broker_owner_stale_seconds: 75
 
-# Enable interactive PTY mode for allowlisted interactive tools such
-# as nc --interactive and mtr --interactive. Multi-worker deployments require Redis so PTY output,
-# input, and resize events can be brokered across workers. Without Redis, this
-# mode is limited to single-worker local/dev deployments.
+# Enable interactive PTY mode for allowlisted interactive tools such as
+# nc --interactive, telnet --interactive, mtr --interactive, ffuf --interactive,
+# and masscan --interactive. Multi-worker deployments require Redis so PTY
+# output, input, and resize events can be brokered across workers. Without
+# Redis, this mode is limited to single-worker local/dev deployments.
 # Server default if unset: false
 # interactive_pty_enabled: false
 

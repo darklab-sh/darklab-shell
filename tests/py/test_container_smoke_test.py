@@ -133,6 +133,15 @@ def _run_streaming(cmd: list[str], *, timeout: int) -> subprocess.CompletedProce
     return subprocess.CompletedProcess(cmd, proc.returncode, stdout, "")
 
 
+def _docker_image_exists(image_tag: str) -> bool:
+    proc = _run(
+        ["docker", "image", "inspect", image_tag],
+        timeout=30,
+        check=False,
+    )
+    return proc.returncode == 0
+
+
 def _docker_names_matching(prefix: str) -> list[str]:
     proc = _run(
         [
@@ -1001,19 +1010,22 @@ def container_smoke_test():
 
         try:
             try:
-                print(f"[container-smoke-test] building image: {image_tag}", flush=True)
-                _run_streaming(
-                    [
-                        "docker",
-                        "build",
-                        "-t",
-                        image_tag,
-                        "-f",
-                        str(dockerfile_path),
-                        str(build_context),
-                    ],
-                    timeout=DEFAULT_BUILD_TIMEOUT,
-                )
+                if _docker_image_exists(image_tag):
+                    print(f"[container-smoke-test] using cached image: {image_tag}", flush=True)
+                else:
+                    print(f"[container-smoke-test] building image: {image_tag}", flush=True)
+                    _run_streaming(
+                        [
+                            "docker",
+                            "build",
+                            "-t",
+                            image_tag,
+                            "-f",
+                            str(dockerfile_path),
+                            str(build_context),
+                        ],
+                        timeout=DEFAULT_BUILD_TIMEOUT,
+                    )
                 print(f"[container-smoke-test] building runtime image: {runtime_image_tag}", flush=True)
                 _run(["docker", "create", "--name", runtime_container_name, image_tag], timeout=30)
                 _run(

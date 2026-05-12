@@ -748,7 +748,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 ## Interactive PTY Mode
 
-**Purpose:** run approved screen-oriented tools inside a real browser terminal when line-oriented streaming would lose important live state.
+**Purpose:** run approved interactive and screen-oriented tools inside a real browser terminal when line-oriented streaming would lose important live state.
 
 **Behavior:**
 

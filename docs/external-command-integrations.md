@@ -33,7 +33,7 @@ Command-specific runtime behavior is declared in `app/conf/commands.yaml` under 
 
 | Tool | App adaptation | Why |
 | ---- | -------------- | --- |
-| `mtr` | Adds `--report-wide` when no report mode flag is present. | Interactive `mtr` expects a real TTY and redraws in place; report mode streams clean text over SSE. |
+| `mtr` | Adds `--report-wide` when no report mode flag is present, unless the run is started through the Interactive PTY trigger. | Plain shell runs need clean line-oriented output for streaming and saved history; `mtr --interactive <host>` uses the PTY path for the live redraw view when the feature is enabled. |
 | `nmap` | Adds `-sT` when no scan mode is explicit. | TCP connect scans work reliably as the unprivileged `scanner` user; raw SYN scans (`-sS`) and explicit `--privileged` mode are blocked. |
 | `nuclei` | Adds `-ud /tmp/nuclei-templates` when no update-directory flag is present, wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>/tools` when Files are enabled, and declares workspace paths for response stores, Markdown/SARIF/JSON/JSONL exports, trace/error logs, resume files, and selected config/secret inputs. | Template storage must be writable under the read-only container filesystem, while useful per-session evidence and logs should be visible in Files without exposing template caches as session artifacts. |
 | `subfinder` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>/tools` when Files are enabled and declares workspace paths for list input, per-domain output directories, resolver lists, config files, and provider config files. | Subfinder otherwise falls back to `$HOME/.config` under `/tmp`, hiding useful session artifacts; provider configs can contain API keys and remain session-owned rather than share/export artifacts. |
@@ -102,6 +102,22 @@ is shown and stored as:
 ```text
 Creating resume file: /tools/katana/resume-abcd.cfg
 ```
+
+---
+
+## Interactive PTY Commands
+
+Interactive PTY support is declared in `app/conf/commands.yaml` with an `interactive` block per command. The currently shipped PTY commands are:
+
+- `nc --interactive <host> <port>`
+- `telnet --interactive [host] [port]`
+- `mtr --interactive <host>`
+- `ffuf --interactive ...`
+- `masscan --interactive ...`
+
+These trigger the dedicated `/pty/runs` path instead of normal `/runs`. The trigger flag is stripped before the process starts, validation re-checks the resulting command, and the command's registry metadata owns terminal size, input policy, max runtime, and saved transcript mode.
+
+Plain non-PTY commands keep their normal adaptations. For example, `mtr darklab.sh` is rewritten to report mode for readable saved output, while `mtr --interactive darklab.sh` opens the live terminal view when Interactive PTY is enabled.
 
 ---
 

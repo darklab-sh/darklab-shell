@@ -61,4 +61,4 @@ Run 'file help' to see file commands and aliases such as ls, cat, and rm.
 [interactive_pty]
 Interactive PTY commands open supported tools in a focused terminal window when plain output is not enough.
 Use an interactive PTY run when you need to type into the tool or watch a screen-style interface.
-Try supported interactive commands such as 'nc --interactive <host> <port>' or 'mtr --interactive <host>' from the prompt.
+Try supported interactive commands such as 'nc --interactive <host> <port>', 'telnet --interactive <host> <port>', 'mtr --interactive <host>', 'ffuf --interactive ...', or 'masscan --interactive ...' from the prompt.

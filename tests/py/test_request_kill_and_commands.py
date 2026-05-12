@@ -870,8 +870,8 @@ class TestBuiltinCommandResolution:
         assert "Probe a target safely." in text
         assert "sentinel-scan example.test" in text
         assert "-i <value>" in text
-        assert "App handling:" not in text
-        assert "Adds `--safe` automatically when needed." not in text
+        assert "App Handling:" in text
+        assert "Adds `--safe` automatically when needed." in text
 
     def test_commands_info_unknown_root_returns_usage_hint(self):
         with mock.patch("commands.load_commands_registry", return_value={"commands": [], "pipe_helpers": []}):

@@ -2930,6 +2930,14 @@ class TestInteractivePtyRegistry:
         assert not is_command_allowed("nc -l 4444")[0]
         assert not is_command_allowed("telnet ip.darklab.sh 80")[0]
         assert not is_command_allowed("telnet --interactive ip.darklab.sh 80")[0]
+        catalog_entry = command_catalog_entry("nc")
+        assert catalog_entry is not None
+        runtime_notes = catalog_entry["runtime_notes"]
+        assert isinstance(runtime_notes, list)
+        assert (
+            "Use `--interactive` to open the interactive terminal view for this command."
+            in runtime_notes
+        )
 
 
 class TestPtyBrokerService:

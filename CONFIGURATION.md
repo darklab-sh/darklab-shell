@@ -63,7 +63,7 @@ Most operator-owned files under `app/conf/` and `app/conf/themes/` support sibli
 
 The values below are the built-in server defaults from `app/config.py`.
 
-Project workspace settings cap session-scoped case folders, links, targets, labels, notes, and package exports. Interactive PTY settings enable a separate guarded terminal path for approved screen-oriented tools; leave `interactive_pty_enabled` off unless the deployment is prepared for the runtime and Redis requirements described below.
+Project workspace settings cap session-scoped case folders, links, targets, labels, notes, and package exports. Interactive PTY settings enable a separate guarded terminal path for approved interactive tools; leave `interactive_pty_enabled` off unless the deployment is prepared for the runtime and Redis requirements described below.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -624,6 +624,8 @@ Make sure `WORKSPACE_ROOT` in Compose points at the same path.
 interactive_pty_enabled: true
 interactive_pty_max_runtime_seconds: 900
 interactive_pty_max_concurrent_per_session: 4
+interactive_pty_input_rate_limit_per_second: 10
+interactive_pty_input_rate_limit_per_minute: 500
 ```
 
 Multi-worker deployments should keep Redis enabled so PTY output, input, resize, and reattach state work across workers.

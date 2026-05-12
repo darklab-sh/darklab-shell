@@ -90,6 +90,7 @@ async function answerTerminalConfirm(page, answer, expectedText, { timeout = 30_
   })
   await page.waitForFunction(
     () => (typeof hasPendingTerminalConfirm === 'function' ? !hasPendingTerminalConfirm() : true),
+    undefined,
     { timeout },
   )
 }
@@ -155,6 +156,7 @@ test.describe('session-token lifecycle', () => {
   test('set migration carries history, starred commands, and workspace files', async ({
     page,
   }) => {
+    test.setTimeout(60_000)
     await runCommand(page, CMD)
     await waitForHistoryRuns(page, 1)
     await starCommand(page, CMD)

@@ -225,7 +225,7 @@ commands:
           description: Show help and usage
           closes: true
         - value: --interactive
-          description: Start the constrained interactive PTY view
+          description: Open the interactive terminal view
         - value: -z
           description: Zero-I/O mode for port scanning
           allow_grouping: true
@@ -274,7 +274,7 @@ commands:
           interactive: true
       flags:
         - value: --interactive
-          description: Start the constrained interactive PTY view
+          description: Open the interactive terminal view
       arguments:
         - placeholder: <host>
           position: 1
@@ -313,7 +313,7 @@ commands:
             - --report
             - --report-wide
             - -r
-          notice: "Note: mtr has been run in --report-wide mode (non-interactive). See FAQ for details."
+          notice: "Note: mtr has been run in --report-wide mode. Use mtr --interactive when Interactive PTY is enabled for the live view."
     autocomplete:
       examples:
         - value: mtr -h
@@ -344,7 +344,7 @@ commands:
         - value: -w
           description: Wide report output
         - value: --interactive
-          description: Start the constrained interactive PTY view
+          description: Open the interactive terminal view
       arguments:
         - placeholder: <host>
           hint_only: true
@@ -2381,7 +2381,7 @@ commands:
             - value: ffuf-results.json
               description: Save machine-readable fuzzing results
         - value: --interactive
-          description: Start the constrained interactive PTY view
+          description: Open the interactive terminal view
       arguments:
         - placeholder: <target-url>
           hint_only: true
@@ -3016,7 +3016,7 @@ commands:
             - value: masscan-results.txt
               description: Save scan results
         - value: --interactive
-          description: Start the constrained interactive PTY view
+          description: Open the interactive terminal view
       arguments:
         - placeholder: <target>
           hint_only: true

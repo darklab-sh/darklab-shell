@@ -354,14 +354,15 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         {
             "question": "Why does mtr look different here?",
             "answer": (
-                "mtr requires a real terminal (TTY) for its live interactive display, which isn't "
-                "available in a web shell. It runs in --report-wide mode instead."
+                "Plain mtr runs are converted to --report-wide mode so the shell can show and save "
+                "readable output. Use mtr --interactive when Interactive PTY is enabled for the live view."
             ),
             "answer_html": (
-                "<code>mtr</code> needs a real terminal (TTY) for its interactive display, which "
-                "isn't available in a web shell. It automatically runs in <code>--report-wide</code> "
-                "mode here, printing 10 probe cycles and a summary table. You can change the cycle "
-                "count with <code>-c</code>, e.g. <code class=\"faq-example\">mtr -c 20 google.com</code>"
+                "Plain <code>mtr</code> runs are converted to <code>--report-wide</code> mode so the "
+                "shell can stream readable rows and save the result to history. Use "
+                "<code class=\"faq-example\">mtr --interactive google.com</code> when Interactive PTY "
+                "is enabled and you want the live hop table. For report mode, you can change the cycle "
+                "count with <code>-c</code>, e.g. <code class=\"faq-example\">mtr -c 20 google.com</code>."
             ),
         },
         {
@@ -1285,6 +1286,16 @@ def _catalog_runtime_notes(runtime_adaptations: object) -> list[str]:
     return _dedupe_preserve_order(notes)
 
 
+def _catalog_interactive_notes(interactive_spec: object) -> list[str]:
+    interactive = interactive_spec if isinstance(interactive_spec, dict) else {}
+    if interactive.get("mode") != "pty":
+        return []
+    trigger = str(interactive.get("trigger_flag") or "").strip()
+    if not trigger:
+        return []
+    return [f"Use `{trigger}` to open the interactive terminal view for this command."]
+
+
 def command_catalog_from_registry(registry: dict | None = None) -> list[dict[str, object]]:
     """Return user-facing command reference data from the external command registry."""
     active_registry = registry or load_commands_registry()
@@ -1320,7 +1331,10 @@ def command_catalog_from_registry(registry: dict | None = None) -> list[dict[str
             "arguments": autocomplete["arguments"],
             "subcommands": autocomplete["subcommands"],
             "workspace_flags": _catalog_workspace_flags(entry.get("workspace_flags")),
-            "runtime_notes": _catalog_runtime_notes(entry.get("runtime_adaptations")),
+            "runtime_notes": _dedupe_preserve_order([
+                *_catalog_runtime_notes(entry.get("runtime_adaptations")),
+                *_catalog_interactive_notes(entry.get("interactive")),
+            ]),
         })
     return catalog
 

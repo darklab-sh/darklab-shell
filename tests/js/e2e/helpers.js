@@ -35,6 +35,7 @@ export async function ensurePromptReady(page, { cancelWelcome = false, timeout =
         (active && welcomeTabId !== activeTab)
       )
     },
+    undefined,
     { timeout },
   )
 
@@ -66,6 +67,7 @@ export async function ensurePromptReady(page, { cancelWelcome = false, timeout =
       const activeTab = typeof activeTabId !== 'undefined' ? activeTabId : null
       return (!active && !bootPending) || (active && welcomeTabId !== activeTab)
     },
+    undefined,
     { timeout },
   )
 
@@ -79,6 +81,7 @@ export async function ensurePromptReady(page, { cancelWelcome = false, timeout =
       const style = window.getComputedStyle(target)
       return style.display !== 'none' && style.visibility !== 'hidden'
     },
+    undefined,
     { timeout },
   )
 
@@ -92,6 +95,7 @@ export async function ensurePromptReady(page, { cancelWelcome = false, timeout =
     () => {
       return typeof acContextRegistry !== 'undefined' && Object.keys(acContextRegistry).length > 0
     },
+    undefined,
     { timeout },
   )
 }
@@ -142,6 +146,7 @@ export async function waitForActiveOutputSettled(page, { timeout = 15_000 } = {}
         typeof _pendingOutputBatches !== 'undefined' ? _pendingOutputBatches.get(tabId) : null
       return !pending || (!pending.scheduled && pending.items.length === 0)
     },
+    undefined,
     { timeout },
   )
 

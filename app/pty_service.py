@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Constrained PTY lifecycle for first-pass interactive runs."""
+"""Constrained PTY lifecycle for interactive runs."""
 
 import fcntl
 import importlib

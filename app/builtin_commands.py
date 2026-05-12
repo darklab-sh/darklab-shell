@@ -817,6 +817,15 @@ def _run_builtin_commands_info(parts: list[str]) -> list[dict[str, str]]:
             if value:
                 lines.append(_output_line(f"  {value}{marker}{suffix}", "builtin-catalog-item"))
 
+    runtime_notes = cast(list[str], entry.get("runtime_notes")) if isinstance(entry.get("runtime_notes"), list) else []
+    if runtime_notes:
+        lines.append(_output_line("", "builtin-spacer"))
+        lines.append(_output_line("App Handling:", "builtin-section"))
+        for note in runtime_notes:
+            text = str(note or "").strip()
+            if text:
+                lines.append(_output_line(f"  {text}", "builtin-catalog-item"))
+
     return lines
 
 
