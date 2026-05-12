@@ -557,6 +557,22 @@ describe('client-side UI command pipe helpers', () => {
     expect(appendCommandEcho).not.toHaveBeenCalled()
   })
 
+  it('routes tour commands to the client-side tour handler', async () => {
+    const handleTourCommand = vi.fn(() => Promise.resolve(true))
+    const appendCommandEcho = vi.fn()
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      handleTourCommand,
+      appendCommandEcho,
+    })
+
+    submitCommand('tour')
+    await vi.waitFor(() =>
+      expect(handleTourCommand).toHaveBeenCalledWith('tour', 'tab-1'),
+    )
+    expect(appendCommandEcho).not.toHaveBeenCalled()
+  })
+
   it('routes exit and quit commands to tab close without persisting a run', () => {
     const closeTab = vi.fn()
     const addToHistory = vi.fn()
@@ -636,6 +652,7 @@ function loadRunnerFns({
   Notification: NotificationOverride = undefined,
   handleThemeCommand: handleThemeCommandOverride = undefined,
   handleConfigCommand: handleConfigCommandOverride = undefined,
+  handleTourCommand: handleTourCommandOverride = undefined,
   handleWorkflowTerminalCommand: handleWorkflowTerminalCommandOverride = undefined,
   closeTab: closeTabOverride = vi.fn(),
   refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride = undefined,
@@ -801,6 +818,7 @@ function loadRunnerFns({
       getRunNotifyPreference: getRunNotifyPreferenceOverride,
       ...(handleThemeCommandOverride ? { handleThemeCommand: handleThemeCommandOverride } : {}),
       ...(handleConfigCommandOverride ? { handleConfigCommand: handleConfigCommandOverride } : {}),
+      ...(handleTourCommandOverride ? { handleTourCommand: handleTourCommandOverride } : {}),
       ...(handleWorkflowTerminalCommandOverride
         ? { handleWorkflowTerminalCommand: handleWorkflowTerminalCommandOverride }
         : {}),

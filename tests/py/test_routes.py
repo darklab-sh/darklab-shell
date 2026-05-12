@@ -2160,6 +2160,7 @@ class TestConfigRoute:
         for key in (
             "app_name", "project_readme", "prompt_username", "prompt_domain", "default_theme",
             "max_tabs", "max_output_lines", "workspace_enabled", "interactive_pty_commands",
+            "tour_chapters",
         ):
             assert key in data
         assert "share_redaction_enabled" in data
@@ -2291,6 +2292,7 @@ class TestConfigRoute:
         load.assert_called_once()
         assert data["tour_enabled"] is True
         assert data["tour_version"] == 7
+        assert data["tour_chapters"] == tour_payload["chapters"]
         assert data["tour_chapter_count"] == 2
 
     def test_command_timeout_defaults_to_one_hour(self):
@@ -4416,7 +4418,8 @@ class TestRunRoute:
     def test_brokered_run_stream_rejects_runs_outside_session(self):
         client = get_client()
         with mock.patch("blueprints.run.active_runs_for_session", return_value=[]), \
-             mock.patch("blueprints.run.stream_run_events") as stream_events:
+             mock.patch("blueprints.run.stream_run_events") as stream_events, \
+             mock.patch("blueprints.run.log.warning") as warn:
             resp = client.get(
                 "/runs/run-other/stream",
                 headers={"X-Session-ID": "session-1", "X-Client-ID": "client-1"},
@@ -4425,6 +4428,12 @@ class TestRunRoute:
         assert resp.status_code == 404
         assert json.loads(resp.data) == {"error": "Run not found"}
         stream_events.assert_not_called()
+        warn.assert_called_once()
+        assert warn.call_args.args[0] == "RUN_BROKER_STREAM_MISS"
+        extra = warn.call_args.kwargs["extra"]
+        assert extra["run_id"] == "run-other"
+        assert extra["active_match"] is False
+        assert extra["db_match"] is False
 
     def test_brokered_run_owner_takeover_route_is_retired(self):
         client = get_client()
@@ -4531,6 +4540,40 @@ class TestRunRoute:
             )
             assert detail["command"] == "theme list"
             assert detail["output"] == ["Available themes:", "Dark themes:"]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.commit()
+            conn.close()
+
+    def test_client_side_run_persists_tour_builtin(self):
+        client = get_client()
+        session = "client-tour-" + uuid.uuid4().hex[:8]
+        try:
+            resp = client.post(
+                "/run/client",
+                headers={"X-Session-ID": session},
+                json={
+                    "command": "tour",
+                    "exit_code": 0,
+                    "lines": [
+                        {"text": "Running commands", "cls": "builtin-section"},
+                        {"text": "dig darklab.sh A", "cls": "builtin-help-row"},
+                    ],
+                },
+            )
+            data = json.loads(resp.data)
+            assert resp.status_code == 200
+            assert data["ok"] is True
+
+            history = json.loads(
+                client.get(
+                    "/history?type=runs&include_total=1",
+                    headers={"X-Session-ID": session},
+                ).data
+            )
+            assert history["runs"][0]["command"] == "tour"
+            assert history["total_count"] == 1
         finally:
             conn = sqlite3.connect(DB_PATH)
             conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))

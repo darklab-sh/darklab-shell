@@ -1502,6 +1502,8 @@ def _feature_enabled(feature, cfg=None):
     if not normalized:
         return True
     active_cfg = app_config.CFG if cfg is None else cfg
+    if normalized == "tour":
+        return bool(active_cfg.get("tour_enabled", True))
     if normalized == "workspace":
         return bool(active_cfg.get("workspace_enabled", False))
     if normalized in {"interactive_pty", "pty"}:

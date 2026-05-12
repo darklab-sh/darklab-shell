@@ -396,6 +396,30 @@ function _applyOutputSignalMetadata(span, rawLine, metadata) {
   }
 }
 
+function _activateOutputCommandChip(command) {
+  const activate = typeof globalThis.activateFaqCommandChip === 'function'
+    ? globalThis.activateFaqCommandChip
+    : null;
+  if (typeof activate === 'function') activate(command);
+}
+
+function _appendOutputCommandChip(content, command, label = '') {
+  const chip = document.createElement('span');
+  chip.className = 'allowed-chip faq-chip chip chip-action';
+  chip.tabIndex = 0;
+  chip.setAttribute('role', 'button');
+  chip.title = 'Load this command into the prompt';
+  chip.dataset.faqCommand = command;
+  chip.textContent = label || command;
+  chip.addEventListener('click', () => _activateOutputCommandChip(command));
+  chip.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    _activateOutputCommandChip(command);
+  });
+  content.appendChild(chip);
+}
+
 function _buildOutputLine(text, cls, tabId, now, runStart, metadata = null) {
   const span = document.createElement('span');
   span.className = 'line' + (cls ? ' ' + cls : '');
@@ -421,6 +445,8 @@ function _buildOutputLine(text, cls, tabId, now, runStart, metadata = null) {
     rawTextForStorage = `${prefix}${text ? ' ' + text : ''}`;
   } else if (cls === 'exit-ok' || cls === 'exit-fail' || cls === 'denied' || cls === 'notice') {
     content.textContent = text;
+  } else if (metadata && typeof metadata.faq_command === 'string' && metadata.faq_command.trim()) {
+    _appendOutputCommandChip(content, metadata.faq_command.trim(), String(text || '').trim());
   } else {
     content.innerHTML = ansi_up.ansi_to_html(text);
   }

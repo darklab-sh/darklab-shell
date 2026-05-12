@@ -775,6 +775,7 @@ class TestBuiltinCommandResolution:
         assert resolve_builtin_command(":(){:|:&};:") == "fork_bomb"
         assert resolve_builtin_command("status") == "status"
         assert resolve_builtin_command("sudo") == "sudo"
+        assert resolve_builtin_command("tour") == "tour"
         assert resolve_builtin_command("tty") == "tty"
         assert resolve_builtin_command("type curl") == "type"
         assert resolve_builtin_command("uname -a") == "uname"
@@ -798,6 +799,10 @@ class TestBuiltinCommandResolution:
             assert resolve_builtin_command("ls") is None
             assert resolve_builtin_command("cat targets.txt") is None
             assert resolve_builtin_command("rm targets.txt") is None
+
+    def test_tour_builtin_command_is_hidden_when_disabled(self):
+        with mock.patch.dict("config.CFG", {"tour_enabled": False}):
+            assert resolve_builtin_command("tour") is None
 
     def test_commands_external_catalog_uses_commands_registry(self):
         registry = {

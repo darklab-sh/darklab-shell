@@ -566,6 +566,14 @@ commands:
           description: "Apply a theme"
           takes_value: true
           insert: "set "
+  - root: tour
+    description: "built-in: print the onboarding tour inside the terminal"
+    feature_required: tour
+    autocomplete:
+      subcommands:
+        - value: help
+          description: "Show tour command usage"
+          closes: true
   - root: tty
     description: "built-in: show the web terminal device path"
     autocomplete:

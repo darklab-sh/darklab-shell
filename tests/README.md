@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,620
+- behavior tests: 2,626
 - docs/inventory meta-tests: 32
-- `pytest`: 1322 (1290 behavior + 32 meta)
-- `vitest`: 1083
+- `pytest`: 1324 (1292 behavior + 32 meta)
+- `vitest`: 1087
 - `playwright`: 247
-- total: 2,652
+- total: 2,658
 
 This document is organized in two parts:
 
@@ -922,6 +922,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestBuiltinCommandResolution.test_documented_builtin_commands_are_backed_by_runtime_dispatch` | Checks that every entry in `_DOCUMENTED_BUILTIN_COMMANDS` has a corresponding runtime dispatch handler. |
 | `TestBuiltinCommandResolution.test_resolves_supported_builtin_commands` | Checks that resolves supported built-in commands. |
 | `TestBuiltinCommandResolution.test_workspace_builtin_commands_are_hidden_when_disabled` | Verifies that file built-ins and aliases stop resolving when Files are disabled. |
+| `TestBuiltinCommandResolution.test_tour_builtin_command_is_hidden_when_disabled` | Verifies that the `tour` built-in stops resolving when the onboarding feature is disabled. |
 | `TestBuiltinCommandResolution.test_commands_external_catalog_uses_commands_registry` | Verifies that `commands --external` renders allowed external roots from `commands.yaml` rather than a duplicated list. |
 | `TestBuiltinCommandResolution.test_commands_info_renders_registry_catalog_entry` | Verifies that `commands info <root>` renders command descriptions, examples, and value-taking flags from the registry catalog without exposing internal app-handling notes. |
 | `TestBuiltinCommandResolution.test_commands_info_unknown_root_returns_usage_hint` | Verifies that `commands info` returns a clear no-entry message for unknown roots. |
@@ -1123,6 +1124,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunRoute.test_shell_operator_returns_403` | Checks that shell operator returns 403. |
 | `TestRunRoute.test_non_json_body_handled` | Checks that non JSON body handled. |
 | `TestRunRoute.test_client_side_run_persists_terminal_native_builtin` | Verifies that browser-owned built-in output is persisted as a server-backed history run. |
+| `TestRunRoute.test_client_side_run_persists_tour_builtin` | Verifies that the terminal tour can persist its client-side transcript as a normal history run. |
 | `TestRunRoute.test_client_side_run_does_not_link_to_active_project` | Verifies browser-owned built-in persistence saves history without linking administrative runs to the active project. |
 | `TestRunRoute.test_client_side_run_rejects_non_client_builtin_root` | Verifies that `/run/client` only accepts allowlisted browser-owned built-in roots. |
 | `TestHistoryRoute.test_get_returns_200` | Checks get returns 200 handling. |
@@ -1554,6 +1556,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `updates user options from the terminal config command` | Verifies that terminal-native `config set/get/list` updates and reports user options, including prompt username and run comparison defaults, through the same preference path as the options modal. |
 | `requires explicit set before updating user options from the terminal config command` | Verifies that `config <option> <value>` is rejected and only `config set <option> <value>` applies terminal-native option changes. |
 | `keeps config command output pinned to the tail when the tab is already following` | Verifies that terminal-native `config set` output preserves tail-follow state after async preference application. |
+| `renders the terminal tour, records it once, and loads sample chips without running` | Verifies that the `tour` built-in prints visible chapters, records the opened version once per session, and loads sample commands into the prompt without running them. |
+| `omits the interactive tools chapter from the terminal tour on mobile` | Verifies that the terminal tour hides the Interactive Tools chapter on mobile layouts even when Interactive PTY is enabled. |
 | `serves runtime autocomplete context for theme and config values` | Verifies that theme slugs, config keys, and config values are generated into the shared autocomplete context instead of duplicated static lists. |
 | `serves workflow names and variable flags in runtime autocomplete context` | Verifies that saved workflow names and workflow input flags are exposed through runtime autocomplete. |
 | `deduplicates workflow subcommands that share runtime insert text` | Verifies that runtime workflow subcommands replace placeholder-decorated static hints when both insert the same command text. |
@@ -1564,6 +1568,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `serves workspace autocomplete values relative to the active workspace folder` | Verifies that workspace autocomplete offers current-folder file and folder names instead of root-relative paths. |
 | `serves directory-aware workspace autocomplete hints while preserving typed prefixes` | Verifies that typed workspace path prefixes such as `darklab/`, `../`, and `../darklab/` resolve against the active tab cwd while preserving the user's typed prefix. |
 | `hides workspace built-ins from runtime autocomplete when Files are disabled` | Verifies that file commands and aliases are removed from runtime autocomplete when the operator disables Files. |
+| `hides the tour built-in from runtime autocomplete when the feature is disabled` | Verifies that the runtime autocomplete context omits `tour` when the onboarding feature is disabled. |
 | `keeps code-owned built-ins out of commands.yaml` | Verifies that app-owned built-ins are not duplicated in the operator-facing command registry. |
 | `groups theme cards into labeled sections in the preview modal` | Verifies that groups theme cards into labeled sections in the preview modal. |
 | `falls back to the current/default theme when localStorage references a missing theme` | Verifies that falls back to the current/default theme when localStorage references a missing theme. |
@@ -2123,6 +2128,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `filters terminal-native config output through chained pipe helpers` | Verifies that terminal-native `config` output supports chained pipe helpers before rendering. |
 | `persists terminal-native built-ins to server-backed history` | Verifies that terminal-native built-ins post their rendered output to `/run/client` so recents and history survive reload. |
 | `routes workflow commands to the client-side workflow handler` | Verifies that `workflow` terminal commands are handled by the client workflow runtime. |
+| `routes tour commands to the client-side tour handler` | Verifies that `tour` terminal commands are handled by the client tour renderer instead of going to the backend run path. |
 | `routes exit and quit commands to tab close without persisting a run` | Verifies that `exit` and `quit` close the active tab directly without adding history entries or posting client-side run artifacts. |
 | `clears stale failed tab and HUD state after a successful client-side built-in` | Verifies that successful client-side built-ins reset stale failed tab indicators, tab exit codes, and HUD state. |
 | `setStatus shows RUNNING only while running and IDLE otherwise` | Verifies that setStatus shows RUNNING only while running and IDLE otherwise. |

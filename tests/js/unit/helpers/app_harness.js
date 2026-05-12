@@ -655,6 +655,7 @@ export async function loadAppFns({
     syncOptionsControls,
     handleThemeCommand,
     handleConfigCommand,
+    handleTourCommand,
     renderWorkflowItems,
     reloadWorkflowCatalog,
     handleWorkflowTerminalCommand,

@@ -127,6 +127,14 @@ function builtInAutocompleteBase() {
         ],
       },
     },
+    tour: {
+      ...emptyBuiltIn('built-in: print the onboarding tour inside the terminal'),
+      feature_required: 'tour',
+      arg_hints: {
+        help: [],
+        __positional__: [hint('help', 'Show tour command usage')],
+      },
+    },
     file: {
       ...emptyBuiltIn('built-in: list, view, create, edit, download, move, or remove session files'),
       feature_required: 'workspace',
@@ -990,6 +998,116 @@ describe('app helpers', () => {
     expect(scrollTop).toBe(500)
   })
 
+  it('renders the terminal tour, records it once, and loads sample chips without running', async () => {
+    const output = document.createElement('div')
+    const tourConfig = {
+      workspace_enabled: true,
+      tour_enabled: true,
+      tour_version: 3,
+      tour_chapters: [
+        {
+          id: 'running_commands',
+          title: 'Running commands',
+          summary: 'Run something useful.\nCapture the output.',
+          sample: 'dig darklab.sh A',
+        },
+        {
+          id: 'interactive_pty',
+          title: 'Interactive tools',
+          summary: 'Open supported interactive tools.',
+          sample: 'mtr --interactive darklab.sh',
+        },
+      ],
+    }
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/config') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(tourConfig) })
+      }
+      if (url === '/session/tour-seen') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            tour_version: 3,
+            preferences: { pref_tour_seen_version: 3 },
+          }),
+        })
+      }
+      if (url === '/session/preferences' && (!opts.method || opts.method === 'GET')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ preferences: {} }) })
+      }
+      if (url === '/session/preferences' && opts.method === 'POST') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const submitVisibleComposerCommand = vi.fn()
+    const {
+      handleTourCommand,
+      getTourSeenVersionPreference,
+      setStatus,
+    } = await loadAppFns({
+      apiFetch,
+      getOutput: () => output,
+      submitVisibleComposerCommand,
+      appConfig: tourConfig,
+    })
+
+    await handleTourCommand('tour', 'tab-1')
+    await handleTourCommand('tour', 'tab-1')
+
+    expect(output.textContent).toContain('Running commands')
+    expect(output.textContent).toContain('Capture the output.')
+    expect(output.textContent).toContain('Interactive tools')
+    const chips = output.querySelectorAll('.faq-chip[data-faq-command]')
+    expect(chips).toHaveLength(4)
+    chips[0].dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(document.getElementById('cmd').value).toBe('dig darklab.sh A ')
+    expect(submitVisibleComposerCommand).not.toHaveBeenCalled()
+    expect(getTourSeenVersionPreference()).toBe(3)
+    expect(apiFetch.mock.calls.filter(([url]) => url === '/session/tour-seen')).toHaveLength(1)
+    expect(setStatus).toHaveBeenLastCalledWith('ok')
+  })
+
+  it('omits the interactive tools chapter from the terminal tour on mobile', async () => {
+    const output = document.createElement('div')
+    const tourConfig = {
+      workspace_enabled: true,
+      tour_enabled: true,
+      tour_version: 1,
+      tour_chapters: [
+        {
+          id: 'running_commands',
+          title: 'Running commands',
+          summary: 'Run something useful.',
+          sample: 'dig darklab.sh A',
+        },
+        {
+          id: 'interactive_pty',
+          title: 'Interactive tools',
+          summary: 'Open supported interactive tools.',
+          sample: 'mtr --interactive darklab.sh',
+        },
+      ],
+    }
+    const { handleTourCommand, restoreViewport } = await loadAppFns({
+      apiFetch: (url) => {
+        if (url === '/config') return Promise.resolve({ ok: true, json: () => Promise.resolve(tourConfig) })
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+      },
+      getOutput: () => output,
+      mobileViewport: { width: 390, height: 844 },
+      appConfig: tourConfig,
+    })
+    try {
+      await handleTourCommand('tour', 'tab-1')
+      expect(output.textContent).toContain('Running commands')
+      expect(output.textContent).not.toContain('Interactive tools')
+    } finally {
+      restoreViewport()
+    }
+  })
+
   it('serves runtime autocomplete context for theme and config values', async () => {
     const { getRuntimeAutocompleteContext } = await loadAppFns({
       themeRegistry: {
@@ -1334,6 +1452,16 @@ describe('app helpers', () => {
     expect(context.man.arg_hints.__positional__.map(item => item.value)).not.toContain('file')
   })
 
+  it('hides the tour built-in from runtime autocomplete when the feature is disabled', async () => {
+    const { getRuntimeAutocompleteContext } = await loadAppFns({
+      appConfig: { workspace_enabled: true, tour_enabled: false },
+    })
+
+    const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
+
+    expect(context.tour).toBeUndefined()
+  })
+
   it('keeps code-owned built-ins out of commands.yaml', () => {
     const commandsYaml = readFileSync(resolve(REPO_ROOT, 'app/conf/commands.yaml'), 'utf8')
     const yamlRoots = new Set(
@@ -1343,7 +1471,7 @@ describe('app helpers', () => {
       'banner', 'cat', 'cd', 'clear', 'commands', 'config', 'date', 'df', 'env', 'exit', 'faq', 'fortune', 'free',
       'file', 'grep', 'groups', 'head', 'help', 'history', 'hostname', 'id', 'ip', 'jobs', 'last', 'limits', 'll', 'ls', 'man',
       'mkdir', 'ps', 'pwd', 'quit', 'retention', 'rm', 'route', 'runs', 'session-token', 'shortcuts', 'sort', 'stats', 'status',
-      'tail', 'theme', 'tty', 'type', 'uname', 'uniq', 'uptime', 'version', 'wc', 'which', 'who', 'whoami',
+      'tail', 'theme', 'tour', 'tty', 'type', 'uname', 'uniq', 'uptime', 'version', 'wc', 'which', 'who', 'whoami',
     ]
 
     expect(runtimeRoots.filter(root => yamlRoots.has(root))).toEqual([])

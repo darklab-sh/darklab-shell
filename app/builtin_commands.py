@@ -256,6 +256,7 @@ _DOCUMENTED_BUILTIN_COMMANDS = [
     {"name": "sort [-r|-n|-u] <file>", "description": "Sort a session file.", "root": "sort"},
     {"name": "tail [-n N] <file>", "description": "Show the last lines of a session file.", "root": "tail"},
     {"name": "theme", "description": "Show or apply the active shell theme from the terminal.", "root": "theme"},
+    {"name": "tour", "description": "Print the onboarding tour inside the terminal.", "root": "tour"},
     {"name": "tty", "description": "Show the web terminal device path.", "root": "tty"},
     {"name": "type <cmd>", "description": "Describe whether a command is built in, installed, or missing.", "root": "type"},
     {"name": "uname [-a]", "description": "Show the shell platform string.", "root": "uname"},
@@ -283,19 +284,31 @@ def _workspace_feature_enabled() -> bool:
     return bool(CFG.get("workspace_enabled", False))
 
 
+def _tour_feature_enabled() -> bool:
+    return bool(CFG.get("tour_enabled", True))
+
+
 def _active_documented_builtin_commands() -> list[dict[str, str]]:
-    if _workspace_feature_enabled():
-        return _DOCUMENTED_BUILTIN_COMMANDS
-    return [
-        entry for entry in _DOCUMENTED_BUILTIN_COMMANDS
-        if str(entry.get("root") or "") not in _WORKSPACE_BUILTIN_ROOTS
-    ]
+    commands = _DOCUMENTED_BUILTIN_COMMANDS
+    if not _workspace_feature_enabled():
+        commands = [
+            entry for entry in commands
+            if str(entry.get("root") or "") not in _WORKSPACE_BUILTIN_ROOTS
+        ]
+    if not _tour_feature_enabled():
+        commands = [
+            entry for entry in commands
+            if str(entry.get("root") or "") != "tour"
+        ]
+    return commands
 
 
 def _active_builtin_command_roots() -> set[str]:
     roots = set(_BUILTIN_COMMANDS)
     if not _workspace_feature_enabled():
         roots -= _WORKSPACE_BUILTIN_ROOTS
+    if not _tour_feature_enabled():
+        roots.discard("tour")
     return roots
 
 
@@ -427,6 +440,7 @@ _BUILTIN_COMMAND_DISPATCH = {
     "sudo":      lambda cmd, sid: _run_builtin_sudo(cmd),
     "su_shell":  lambda cmd, sid: _run_builtin_su(cmd),
     "theme":     lambda cmd, sid: _run_builtin_client_side_command("theme"),
+    "tour":      lambda cmd, sid: _run_builtin_client_side_command("tour"),
     "tty":       lambda cmd, sid: _run_builtin_tty(),
     "type":      lambda cmd, sid: _run_builtin_type(cmd),
     "uname":     lambda cmd, sid: _run_builtin_uname(cmd),

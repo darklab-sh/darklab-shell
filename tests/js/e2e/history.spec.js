@@ -10,6 +10,7 @@ import {
   closeHistory,
   createShareSnapshot,
   clickHistoryRunMenuAction,
+  ensurePromptReady,
 } from './helpers.js'
 
 // Use fake shell commands — they bypass the allowlist and complete instantly.
@@ -386,6 +387,9 @@ test.describe('history drawer', () => {
     await page.reload()
     await page.locator('#cmd').waitFor()
     await starredResponse
+    // The reload re-fires the welcome boot path; wait for it to settle before
+    // touching the rail so slow runners don't race the welcome animation.
+    await ensurePromptReady(page)
 
     // History panel entries should reflect the server-side starred state.
     await openHistoryWithEntries(page)

@@ -19,7 +19,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import cast
+from typing import TypedDict, cast
 
 from flask import Blueprint, Response, jsonify, request
 
@@ -58,6 +58,7 @@ from process import (
 )
 from run_broker import (
     broker_available,
+    broker_mode,
     broker_unavailable_reason,
     get_run_events,
     publish_run_event,
@@ -90,6 +91,13 @@ from pty_service import (
 log = logging.getLogger("shell")
 
 run_bp = Blueprint("run", __name__)
+
+
+class _RunSessionVisibility(TypedDict):
+    allowed: bool
+    active_match: bool
+    db_match: bool
+    active_count: int
 
 
 def _active_run_owner_value(value: object) -> str:
@@ -152,6 +160,7 @@ CLIENT_SIDE_RUN_ROOTS = {
     "sort",
     "tail",
     "theme",
+    "tour",
     "uniq",
     "wc",
 }
@@ -1448,23 +1457,49 @@ def _brokered_real_run_worker(
 
 
 def _run_belongs_to_session(run_id: str, session_id: str) -> bool:
+    return bool(_run_session_visibility(run_id, session_id)["allowed"])
+
+
+def _run_session_visibility(run_id: str, session_id: str) -> _RunSessionVisibility:
     if not run_id or not session_id:
-        return False
+        return {
+            "allowed": False,
+            "active_match": False,
+            "db_match": False,
+            "active_count": 0,
+        }
     active_ids = {str(item.get("run_id", "")) for item in active_runs_for_session(session_id)}
-    if run_id in active_ids:
-        return True
+    active_match = run_id in active_ids
+    if active_match:
+        return {
+            "allowed": True,
+            "active_match": True,
+            "db_match": False,
+            "active_count": len(active_ids),
+        }
     try:
         with db_connect() as conn:
             row = conn.execute(
                 "SELECT 1 FROM runs WHERE id = ? AND session_id = ?",
                 (run_id, session_id),
             ).fetchone()
-            return row is not None
+            db_match = row is not None
+            return {
+                "allowed": db_match,
+                "active_match": False,
+                "db_match": db_match,
+                "active_count": len(active_ids),
+            }
     except Exception:
         log.error("RUN_BROKER_SESSION_CHECK_ERROR", exc_info=True, extra={
             "run_id": run_id, "session": get_log_session_id(session_id),
         })
-        return False
+        return {
+            "allowed": False,
+            "active_match": False,
+            "db_match": False,
+            "active_count": len(active_ids),
+        }
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -1766,6 +1801,19 @@ def get_brokered_run_events(run_id):
 def stream_brokered_run(run_id):
     session_id = get_session_id()
     if not _run_belongs_to_session(run_id, session_id):
+        visibility = _run_session_visibility(run_id, session_id)
+        log.warning("RUN_BROKER_STREAM_MISS", extra={
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+            "ip": get_client_ip(),
+            "broker_mode": broker_mode(),
+            "active_match": bool(visibility["active_match"]),
+            "db_match": bool(visibility["db_match"]),
+            "active_count": int(visibility["active_count"]),
+            "after_id": str(request.args.get("after", "0-0") or "0-0"),
+            "owner_client_id_present": bool(_active_run_owner_value(request.headers.get("X-Client-ID", ""))),
+            "owner_tab_id_present": bool(_active_run_owner_value(request.args.get("tab_id", ""))),
+        })
         return jsonify({"error": "Run not found"}), 404
     after_id = str(request.args.get("after", "0-0") or "0-0")
     owner_client_id = _active_run_owner_value(request.headers.get("X-Client-ID", ""))

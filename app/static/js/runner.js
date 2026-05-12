@@ -1222,7 +1222,7 @@ function _isSessionTokenSubcommand(cmd) {
 
 function _isClientSideUiCommand(cmd) {
   const root = String(cmd || '').trim().split(/\s+/, 1)[0].toLowerCase();
-  return root === 'theme' || root === 'config';
+  return root === 'theme' || root === 'config' || root === 'tour';
 }
 
 function _isTabCloseCommand(cmd) {
@@ -3065,6 +3065,12 @@ function submitCommand(rawCmd) {
     if (root === 'config' && typeof handleConfigCommand === 'function') {
       void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
         handleConfigCommand(baseCommand, activeTabId)
+      ));
+      return true;
+    }
+    if (root === 'tour' && typeof handleTourCommand === 'function') {
+      void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
+        handleTourCommand(baseCommand, activeTabId)
       ));
       return true;
     }

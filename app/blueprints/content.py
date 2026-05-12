@@ -141,6 +141,7 @@ def _frontend_config_payload():
         "welcome_hint_rotations": cfg["welcome_hint_rotations"],
         "tour_enabled":           bool(cfg.get("tour_enabled", True)),
         "tour_version":           int(tour.get("version") or 0),
+        "tour_chapters":          tour.get("chapters") or [],
         "tour_chapter_count":      len(tour.get("chapters") or []),
         "diag_enabled": ip_is_in_cidrs(
             get_client_ip(),

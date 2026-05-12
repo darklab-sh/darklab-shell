@@ -902,7 +902,7 @@ test.describe('workspace modal', () => {
   })
 
   test('navigates nested file output folders and exposes viewer actions', async ({ page }) => {
-    test.setTimeout(60_000)
+    test.setTimeout(90_000)
     await page.locator('.rail-nav [data-action="workspace"]').click()
     await expect(page.locator('#workspace-overlay')).toHaveClass(/open/)
 
@@ -942,7 +942,12 @@ test.describe('workspace modal', () => {
 
     const file = page.locator('.workspace-file-row').filter({ hasText: 'amass.html' })
     await expect(file).toBeVisible()
-    await file.locator('[data-workspace-action="view"]').click()
+    // Pre-locate and wait for the action button so the click doesn't burn the
+    // test budget in its hidden auto-wait when the row renders before its
+    // action buttons mount on slow CI runners.
+    const viewBtn = file.locator('[data-workspace-action="view"]')
+    await expect(viewBtn).toBeVisible({ timeout: 15_000 })
+    await viewBtn.click()
 
     await expect(page.locator('#workspace-viewer')).toBeVisible()
     await expect(page.locator('#workspace-viewer-title')).toHaveText('amass-viz/amass.html')
@@ -1076,6 +1081,9 @@ test.describe('workflows modal', () => {
   })
 
   test('creates and edits a user workflow from the workflows modal', async ({ page }) => {
+    // Two save-and-render cycles plus modal open/close exceeds the default 30s
+    // budget on slow CI runners; give the test enough headroom.
+    test.setTimeout(60_000)
     await openWorkflowsModal(page)
 
     await expect(page.locator('#workflow-new-btn')).toHaveText('New Workflow')

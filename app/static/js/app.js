@@ -12,6 +12,7 @@ const _defaultMobilePromptLabel = (() => {
 let _composerPromptMode = null;
 let promptUsernameSavedDelayTimer = null;
 let promptUsernameSavedHideTimer = null;
+let _tourOpenedRecordedThisSession = false;
 const FIELD_SAVED_INDICATOR_DELAY_MS = 200;
 const FIELD_SAVED_INDICATOR_VISIBLE_MS = 1600;
 
@@ -689,6 +690,18 @@ async function recordTourOpened() {
   _writePreferenceSnapshotToStorage(prefs, { writeThemeToLocalStorage: false });
   _cacheSessionPreferences(prefs);
   return data;
+}
+
+async function _recordTourOpenedOnceThisSession() {
+  if (_tourOpenedRecordedThisSession) return true;
+  try {
+    await recordTourOpened();
+    _tourOpenedRecordedThisSession = true;
+    return true;
+  } catch (err) {
+    if (typeof logClientError === 'function') logClientError('failed to record tour open', err);
+    return false;
+  }
 }
 
 function _promptUsernameInputValid(value) {
@@ -2108,9 +2121,9 @@ function _setTsMode(mode) {
   try { _refreshFollowingOutputsAfterLayout(); } catch (_) {}
 }
 
-// ── Terminal-native theme/config commands ──
-function _cliAppendLine(text, cls = '', tabId = null) {
-  if (typeof appendLine === 'function') appendLine(text, cls, tabId);
+// ── Terminal-native theme/config/tour commands ──
+function _cliAppendLine(text, cls = '', tabId = null, metadata = null) {
+  if (typeof appendLine === 'function') appendLine(text, cls, tabId, metadata);
 }
 
 function _cliShouldPreserveOutputTail(tabId = null) {
@@ -2139,6 +2152,77 @@ function _cliSetStatus(statusValue) {
 
 function _cliRecordSuccess(command) {
   if (typeof _recordSuccessfulLocalCommand === 'function') _recordSuccessfulLocalCommand(command);
+}
+
+function _tourChaptersForCurrentViewport() {
+  const chapters = Array.isArray(APP_CONFIG?.tour_chapters) ? APP_CONFIG.tour_chapters : [];
+  const mobileMode = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
+  return chapters.filter((chapter) => {
+    if (!chapter || typeof chapter !== 'object') return false;
+    if (mobileMode && String(chapter.id || '') === 'interactive_pty') return false;
+    return true;
+  });
+}
+
+function _tourSummaryLines(summary) {
+  return String(summary || '')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean);
+}
+
+async function handleTourCommand(cmd, tabId = null) {
+  const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
+  const sub = String(parts[1] || '').toLowerCase();
+  const preserveTail = _cliShouldPreserveOutputTail(tabId);
+  if (typeof appendCommandEcho === 'function') appendCommandEcho(cmd, tabId);
+
+  if (!(APP_CONFIG && APP_CONFIG.tour_enabled === true)) {
+    _cliAppendLine('tour: onboarding tour is disabled on this shell', 'exit-fail', tabId);
+    _cliSetStatus('fail');
+    return true;
+  }
+
+  if (parts.length > 1 && !['help', '--help', '-h'].includes(sub)) {
+    _cliAppendLine('usage: tour', 'exit-fail', tabId);
+    _cliSetStatus('fail');
+    return true;
+  }
+
+  if (['help', '--help', '-h'].includes(sub)) {
+    _cliAppendLine('usage: tour', '', tabId);
+    _cliAppendLine('Print the onboarding tour inside the terminal.', 'builtin-note', tabId);
+    _cliRecordSuccess(cmd);
+    _cliSetStatus('ok');
+    return true;
+  }
+
+  await _recordTourOpenedOnceThisSession();
+  const chapters = _tourChaptersForCurrentViewport();
+  if (!chapters.length) {
+    _cliAppendLine('tour: no onboarding chapters are visible for this shell', 'exit-fail', tabId);
+    _cliSetStatus('fail');
+    return true;
+  }
+
+  chapters.forEach((chapter, index) => {
+    if (index > 0) _cliAppendLine('', 'builtin-spacer', tabId);
+    _cliAppendLine(String(chapter.title || '').trim(), 'builtin-section', tabId);
+    _tourSummaryLines(chapter.summary).forEach((line) => {
+      _cliAppendLine(line, 'builtin-note', tabId);
+    });
+    const sample = String(chapter.sample || '').trim();
+    if (sample) {
+      _cliAppendLine('Try this:', 'builtin-note', tabId);
+      _cliAppendLine(sample, 'builtin-help-row builtin-tour-sample', tabId, {
+        faq_command: sample,
+      });
+    }
+  });
+  _cliPreserveOutputTail(tabId, preserveTail);
+  _cliRecordSuccess(cmd);
+  _cliSetStatus('ok');
+  return true;
 }
 
 function _cliThemeSlug(entry) {
@@ -2509,11 +2593,18 @@ function isWorkspaceFeatureEnabled() {
   return !!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true);
 }
 
+function isTourFeatureEnabled() {
+  return !(typeof APP_CONFIG !== 'undefined' && APP_CONFIG) || APP_CONFIG.tour_enabled === true;
+}
+
 function _runtimeSpecEnabledForFeatures(root, spec) {
   const featureRequired = spec && spec.feature_required;
   const features = Array.isArray(featureRequired) ? featureRequired : [featureRequired];
   if (features.some(feature => String(feature || '').toLowerCase() === 'workspace')) {
     return isWorkspaceFeatureEnabled();
+  }
+  if (features.some(feature => String(feature || '').toLowerCase() === 'tour')) {
+    return isTourFeatureEnabled();
   }
   return !['file', 'cat', 'ls', 'rm'].includes(String(root || '').toLowerCase()) || isWorkspaceFeatureEnabled();
 }
@@ -3434,6 +3525,7 @@ function activateFaqCommandChip(cmd) {
     openAutocompleteForVisibleComposer();
   }, 0);
 }
+if (typeof globalThis !== 'undefined') globalThis.activateFaqCommandChip = activateFaqCommandChip;
 
 function showCommandCatalogOverlay() {
   if (!commandCatalogOverlay) return;
