@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,631
+- behavior tests: 2,638
 - docs/inventory meta-tests: 32
 - `pytest`: 1324 (1292 behavior + 32 meta)
-- `vitest`: 1092
+- `vitest`: 1099
 - `playwright`: 247
-- total: 2,663
+- total: 2,670
 
 This document is organized in two parts:
 
@@ -2459,6 +2459,17 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `reorders tabs through touch pointer dragging on mobile` | Verifies that reorders tabs through touch pointer dragging on mobile. |
 | `reorders desktop tabs through pointer dragging` | Verifies that reorders desktop tabs through pointer dragging. |
 
+#### `tour_modal.test.js`
+
+| Test | Description |
+| --- | --- |
+| `opens the desktop visual tour, records the version, and binds the focus trap` | Verifies that the desktop tour modal opens, records the current tour version, and binds the shared focus trap. |
+| `navigates chapters with the shared pressable controls` | Verifies that the tour modal Prev and Next controls move between chapters through the pressable contract. |
+| `loads sample chips into the composer without running them` | Verifies that visual tour sample chips load their command into the composer without submitting it. |
+| `closes through the shared dismissible dispatcher and backdrop` | Verifies that the tour modal closes through closeTopmostDismissible and backdrop dismissal. |
+| `stays unavailable when the tour is disabled, empty, or on mobile` | Verifies that the desktop visual tour is suppressed when the feature is disabled, no chapters are visible, or mobile mode is active. |
+| `renders each configured illustration key with a themed mini card fallback` | Verifies that every configured tour illustration key renders a non-empty themed mini card and unknown keys fall back safely. |
+
 #### `ui_confirm.test.js`
 
 | Test | Description |
@@ -2709,6 +2720,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `runWelcome re-emphasizes the tour CTA when the tour version changes` | Verifies that a newer tour version restores emphasis to the welcome tour CTA. |
 | `runWelcome suppresses the tour CTA when disabled or no chapters are visible` | Verifies that the welcome tour CTA is hidden when the tour is disabled or chapter filtering leaves nothing to show. |
 | `mobile welcome renders the CLI-only tour CTA copy` | Verifies that mobile welcome output keeps the tour CTA scoped to the terminal command entry point. |
+| `desktop visual tour CTA opens the modal without loading the CLI command` | Verifies that the desktop welcome CTA can open the visual tour without replacing the composer with the `tour` command. |
 | `renders the operator message inside the welcome banner when motd is configured` | Verifies that renders the operator message inside the welcome banner when motd is configured. |
 | `runWelcome falls back to darklab_shell banner text when /welcome/ascii fails` | Verifies that runWelcome falls back to darklab_shell banner text when /welcome/ascii fails. |
 | `runWelcome falls back to the static hint when /welcome/hints fails` | Verifies that runWelcome falls back to the static hint when /welcome/hints fails. |

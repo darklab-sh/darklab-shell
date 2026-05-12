@@ -12,6 +12,20 @@ export async function setupWelcomePage(page) {
       }),
     })
   })
+  await page.route('**/session/tour-seen', (route) => {
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        tour_version: 1,
+        preferences: {
+          pref_welcome_intro: 'animated',
+          pref_tour_seen_version: 1,
+        },
+      }),
+    })
+  })
   await page.route('**/history/commands**', (route) => {
     route.fulfill({
       status: 200,

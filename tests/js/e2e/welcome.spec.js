@@ -40,6 +40,19 @@ test.describe('welcome animation', () => {
     await expect(page.locator('.welcome-command-badge')).toContainText('try this first')
     await expect(page.locator('.welcome-tour-cta')).toContainText('Tour the app')
     await expect(page.locator('.welcome-tour-cta')).toHaveClass(/welcome-tour-cta-emphasis/)
+    await expect(page.locator('.welcome-tour-cta-visual')).toBeVisible()
+    await page.locator('.welcome-tour-cta-visual').click()
+    const tourOverlay = page.locator('#tour-overlay')
+    await expect(tourOverlay).toHaveClass(/open/)
+    await expect(tourOverlay.locator('#tour-chapter-title')).toContainText('Running commands')
+    const stepCount = await tourOverlay.locator('.tour-step-dot').count()
+    expect(stepCount).toBeGreaterThan(1)
+    for (let index = 1; index < stepCount; index += 1) {
+      await tourOverlay.locator('#tour-next-btn').click()
+    }
+    await expect(tourOverlay.locator('#tour-next-btn')).toHaveText('Done')
+    await page.keyboard.press('Escape')
+    await expect(tourOverlay).not.toHaveClass(/open/)
     await expect(page.locator('.welcome-section-header').nth(1)).toContainText('Helpful hints')
     await expect(page.locator('.line.welcome-hint')).toContainText(
       'Use the history panel to reopen saved runs.',

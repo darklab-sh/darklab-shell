@@ -477,6 +477,12 @@ function _loadWelcomeTourCommand(tabId) {
   }, 0);
 }
 
+function _openWelcomeVisualTour(tabId) {
+  if (typeof openTourModal !== 'function') return false;
+  if (_welcomeActive && welcomeOwnsTab(tabId)) settleWelcome(tabId);
+  return openTourModal({ source: 'welcome' });
+}
+
 function _appendWelcomeTourCta(tabId) {
   const state = _welcomeTourCtaState();
   const out = getOutput(tabId);
@@ -508,6 +514,26 @@ function _appendWelcomeTourCta(tabId) {
   });
 
   line.append(label, chip);
+  if (
+    !(typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode())
+    && typeof openTourModal === 'function'
+  ) {
+    const joiner = document.createElement('span');
+    joiner.className = 'welcome-tour-cta-label';
+    joiner.textContent = ' or ';
+    const visual = document.createElement('span');
+    visual.className = 'welcome-tour-cta-visual welcome-command-loadable';
+    visual.textContent = 'open the visual tour';
+    visual.tabIndex = 0;
+    visual.setAttribute('role', 'button');
+    visual.setAttribute('aria-label', 'Open the visual tour');
+    bindPressable(visual, {
+      refocusComposer: false,
+      clearPressStyle: true,
+      onActivate: () => _openWelcomeVisualTour(tabId),
+    });
+    line.append(joiner, visual);
+  }
   out.appendChild(line);
   out.scrollTop = out.scrollHeight;
   return line;

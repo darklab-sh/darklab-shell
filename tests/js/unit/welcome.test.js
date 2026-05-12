@@ -19,6 +19,7 @@ function loadWelcomeFns({
   mobile = false,
   welcomeIntroPreference = 'animated',
   tourSeenVersion = '',
+  openTourModal = vi.fn(() => true),
   randomValue = 0,
 } = {}) {
   document.body.innerHTML = '<div id="out"></div><input id="cmd" /><div class="prompt-wrap"></div>'
@@ -90,6 +91,7 @@ function loadWelcomeFns({
         useMobileTerminalViewportMode: () => mobile,
         getWelcomeIntroPreference: () => welcomeIntroPreference,
         getTourSeenVersionPreference: () => tourSeenVersion,
+        openTourModal,
         refocusComposerAfterAction: vi.fn(),
         setComposerValue: vi.fn(),
         requestAnimationFrame: (fn) => fn(),
@@ -119,6 +121,7 @@ function loadWelcomeFns({
     apiFetch,
     out,
     mountShellPrompt,
+    openTourModal,
   }
 }
 
@@ -175,7 +178,7 @@ describe('welcome helpers', () => {
     await runWelcome()
 
     const cta = out.querySelector('.welcome-tour-cta')
-    expect(cta?.textContent).toContain('Tour the app - type tour')
+    expect(cta?.textContent).toContain('Tour the app - type tour or open the visual tour')
     expect(cta?.classList.contains('welcome-tour-cta-emphasis')).toBe(true)
     expect(cta?.classList.contains('welcome-tour-cta-demoted')).toBe(false)
   })
@@ -256,6 +259,22 @@ describe('welcome helpers', () => {
     const cta = out.querySelector('.welcome-tour-cta')
     expect(cta?.textContent).toContain('Tour the app - type tour')
     expect(cta?.textContent).not.toContain('visual tour')
+  })
+
+  it('desktop visual tour CTA opens the modal without loading the CLI command', async () => {
+    const { runWelcome, out, openTourModal } = loadWelcomeFns({
+      welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one' }],
+      config: {
+        tour_enabled: true,
+        tour_version: 2,
+        tour_chapters: [{ id: 'running_commands', title: 'Running commands' }],
+      },
+    })
+
+    await runWelcome()
+
+    out.querySelector('.welcome-tour-cta-visual')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(openTourModal).toHaveBeenCalledWith({ source: 'welcome' })
   })
 
   it('renders the operator message inside the welcome banner when motd is configured', async () => {
