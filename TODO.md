@@ -17,6 +17,46 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 
 ## Open TODOs
 
+- **History multi-select bulk actions**
+  - **Scope**
+    - Add visible-page-only multi-select for run rows in the History drawer. Selection does not span pagination, search, filters, or type changes in v1.
+    - Bulk actions cover **delete**, **add to active project**, **add to project**, and **remove from project**.
+    - Keep all three project actions available for mixed selections so users can normalize selected runs regardless of current link state.
+    - Make project actions idempotent: already-linked runs are skipped during add, already-unlinked runs are skipped during remove, and neither case fails the whole bulk action.
+    - Reuse existing UI primitives for all controls: shared `btn` classes, `chrome-row` row behavior, `dropdown-surface` / save-menu patterns, app-native selects, `showConfirm`, `bindPressable`, focus helpers, and existing mobile sheet/dropdown placement rules.
+  - **Phase 1 - Selection state and row rendering**
+    - Add a small History selection model keyed by visible run id, storing the run object needed by bulk actions.
+    - Add a **Select mode** toggle beside **Select all**, **Clear selection**, and a top-level **Actions** menu.
+    - Show row checkboxes only when select mode is enabled.
+    - In select mode, make clicking a run row toggle selection instead of opening Run Details. Row-level buttons, row action menus, restore, permalink, compare, and delete should keep their existing behavior and stop propagation.
+    - Keep select mode enabled across page/filter/search changes, but clear selected rows when the visible result set changes.
+  - **Phase 2 - Bulk toolbar behavior**
+    - Render selected count in the toolbar, such as `3 selected`.
+    - Disable **Select all**, **Clear selection**, and **Actions** when there are no visible selectable rows or no selected rows as appropriate.
+    - **Select all** selects only visible run rows on the current page.
+    - **Clear selection** clears the current visible selection without closing select mode.
+    - After successful bulk actions, clear selected rows but leave select mode enabled.
+  - **Phase 3 - Batch backend routes**
+    - Add batch project link and unlink routes so ownership checks, skipped counts, and partial-success reporting stay server-owned.
+    - Suggested add route: `POST /projects/<project_id>/links/bulk` with `{"entity_type":"run","entity_ids":["run-1","run-2"]}`.
+    - Suggested remove route: `DELETE /projects/<project_id>/links/bulk` with the same payload shape.
+    - Return count groups such as `added`, `already_linked`, `removed`, `not_linked`, `not_found`, and `rejected`.
+    - Add a bulk history delete route for selected visible runs rather than firing one request per row.
+  - **Phase 4 - Bulk project actions**
+    - **Add to active project** resolves the current active project and posts all selected run ids to the batch link route.
+    - **Add to project** reuses the existing project picker, including active-project-first ordering, then posts all selected run ids to the batch link route.
+    - **Remove from project** removes selected runs from one chosen project. If selected runs are linked to multiple projects, show a project picker populated from their linked projects. Do not remove a run from every linked project unless a separate explicit action is added later.
+    - Refresh History and Projects state after successful bulk link/unlink so row menus and project views reflect the new state immediately.
+  - **Phase 5 - Bulk delete**
+    - Confirm destructive deletes with `showConfirm`, including a count such as `Delete 5 selected runs?`.
+    - Delete only selected run rows in v1. Snapshot multi-delete can be a follow-up if needed.
+    - After delete, refresh the current History page. If the page becomes empty and a previous page exists, move back one page.
+  - **Phase 6 - Feedback and tests**
+    - Show concise result feedback such as `Added 4 runs to darklab.sh - 2 already linked` or `Removed 3 runs from darklab.sh - 1 was not linked`.
+    - Add backend coverage for idempotent add/remove, cross-session rejection, missing ids, partial success, and bulk delete ownership checks.
+    - Add browser unit coverage for select mode, row-click selection, select all visible, clear selection, toolbar disabled states, project picker flows, and immediate menu refresh after bulk actions.
+    - Add one desktop and one mobile Playwright flow covering selection, project add/remove, and toolbar usability.
+
 - **Future Project Workspace enhancements**
   - **Security and lifecycle**
     - Validate `workspace_file` entity ownership during session migration, or document that labels/notes on workspace-file paths can drift when a migrated token lands in a session with a different file at the same path.

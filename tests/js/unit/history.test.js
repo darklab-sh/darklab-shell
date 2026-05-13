@@ -1038,6 +1038,7 @@ describe('history panel actions', () => {
 
   it('copies the run id and links runs to active or selected projects from the history menu', async () => {
     const showConfirm = vi.fn(() => Promise.resolve('add'))
+    let activeLinked = false
     const apiFetch = vi.fn((url, options = {}) => {
       if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
         return Promise.resolve({
@@ -1052,6 +1053,13 @@ describe('history panel actions', () => {
                 started: '2026-01-01T00:00:00Z',
                 created: '2026-01-01T00:00:00Z',
                 exit_code: 0,
+                project_links: activeLinked ? [{
+                  id: 'link-active',
+                  project_id: 'project-active',
+                  entity_type: 'run',
+                  entity_id: 'run-1',
+                  project: { id: 'project-active', name: 'Active scope', status: 'active' },
+                }] : [],
               }],
               runs: [],
             }),
@@ -1067,6 +1075,30 @@ describe('history panel actions', () => {
               { id: 'project-active', name: 'zeta active', status: 'active' },
             ],
           }),
+        })
+      }
+      if (url === '/projects/project-active/links' && options.method === 'POST') {
+        activeLinked = true
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            link: {
+              id: 'link-active',
+              project_id: 'project-active',
+              entity_type: 'run',
+              entity_id: 'run-1',
+              source: 'manual',
+              created: '2026-01-01T00:00:01Z',
+            },
+          }),
+        })
+      }
+      if (url === '/projects/project-active/links' && options.method === 'DELETE') {
+        activeLinked = false
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true }),
         })
       }
       return Promise.resolve({
@@ -1097,13 +1129,29 @@ describe('history panel actions', () => {
     entry.querySelector('[data-action="add-active-project"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await Promise.resolve()
     await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-active/links', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ entity_type: 'run', entity_id: 'run-1', source: 'manual' }),
     }))
+    expect(document.querySelector('#history-list .history-entry [data-action="remove-project"]').textContent).toBe('remove from project')
 
     apiFetch.mockClear()
-    entry.querySelector('[data-action="add-project"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    document.querySelector('#history-list .history-entry [data-action="remove-project"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-active/links', expect.objectContaining({
+      method: 'DELETE',
+      body: JSON.stringify({ entity_type: 'run', entity_id: 'run-1' }),
+    }))
+    expect(document.querySelector('#history-list .history-entry [data-action="add-active-project"]').textContent)
+      .toBe('add to active project')
+
+    apiFetch.mockClear()
+    document.querySelector('#history-list .history-entry [data-action="add-project"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await Promise.resolve()
     await Promise.resolve()
     await new Promise((resolve) => setImmediate(resolve))
@@ -1112,6 +1160,71 @@ describe('history panel actions', () => {
       method: 'POST',
       body: JSON.stringify({ entity_type: 'run', entity_id: 'run-1', source: 'manual' }),
     }))
+
+    let linked = true
+    const linkedApiFetch = vi.fn((url) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              roots: ['ping'],
+              items: [{
+                id: 'run-1',
+                type: 'run',
+                command: 'ping darklab.sh',
+                label: 'ping darklab.sh',
+                started: '2026-01-01T00:00:00Z',
+                created: '2026-01-01T00:00:00Z',
+                exit_code: 0,
+                project_links: linked ? [{
+                  id: 'link-1',
+                  project_id: 'project-1',
+                  entity_type: 'run',
+                  entity_id: 'run-1',
+                  project: { id: 'project-1', name: 'Linked Project', status: 'active' },
+                }] : [],
+              }],
+              runs: [],
+            }),
+        })
+      }
+      if (url === '/projects/project-1/links') {
+        linked = false
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ ok: true }),
+      })
+    })
+    const { refreshHistoryPanel: refreshLinkedHistoryPanel } = loadHistoryPanel({ apiFetchImpl: linkedApiFetch })
+
+    refreshLinkedHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const linkedEntry = document.querySelector('#history-list .history-entry')
+    const menuActions = [...linkedEntry.querySelectorAll('.history-action-menu [data-action]')].map(el => el.dataset.action)
+    expect(menuActions).toEqual([
+      'edit-metadata',
+      'permalink',
+      'compare',
+      'remove-project',
+      'copy-run-id',
+    ])
+    expect(linkedEntry.querySelector('[data-action="remove-project"]').textContent).toBe('remove from project')
+    expect(linkedEntry.querySelector('[data-action="add-active-project"]')).toBeNull()
+    expect(linkedEntry.querySelector('[data-action="add-project"]')).toBeNull()
+
+    linkedApiFetch.mockClear()
+    linkedEntry.querySelector('[data-action="remove-project"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(linkedApiFetch).toHaveBeenCalledWith('/projects/project-1/links', expect.objectContaining({
+      method: 'DELETE',
+      body: JSON.stringify({ entity_type: 'run', entity_id: 'run-1' }),
+    }))
+    expect(document.querySelector('#history-list .history-entry [data-action="add-project"]').textContent)
+      .toBe('add to project')
   })
 
   it('renders SIGTERM-terminated runs as neutral history rows instead of failures', async () => {

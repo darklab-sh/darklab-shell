@@ -3508,9 +3508,17 @@ describe('app helpers', () => {
 
   it('swallows composer keydown while the active tab is running', async () => {
     const acHide = vi.fn()
+    const createTab = vi.fn(() => 'tab-2')
+    const openProjectWorkspace = vi.fn(() => Promise.resolve(true))
+    const clearTab = vi.fn()
+    const closeTab = vi.fn()
     const { cmdInput } = await loadAppFns({
       tabs: [{ id: 'tab-1', st: 'running' }],
       acHide,
+      createTab,
+      openProjectWorkspace,
+      clearTab,
+      closeTab,
     })
 
     const ev = new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true })
@@ -3518,6 +3526,18 @@ describe('app helpers', () => {
 
     expect(ev.defaultPrevented).toBe(true)
     expect(acHide).toHaveBeenCalled()
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 't', altKey: true, bubbles: true }))
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', altKey: true, bubbles: true }))
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, bubbles: true }))
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, bubbles: true }))
+
+    expect(createTab).toHaveBeenCalledTimes(1)
+    expect(createTab).toHaveBeenCalledWith('shell 2')
+    expect(openProjectWorkspace).toHaveBeenCalledTimes(1)
+    expect(clearTab).toHaveBeenCalledTimes(1)
+    expect(clearTab).toHaveBeenCalledWith('tab-1', { preserveRunState: true })
+    expect(closeTab).not.toHaveBeenCalled()
   })
 
   it('uses Ctrl+C to jump to a new prompt line when no command is running', async () => {

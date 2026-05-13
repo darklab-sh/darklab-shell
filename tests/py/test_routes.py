@@ -5339,6 +5339,11 @@ class TestHistoryRoute:
             assert [item["id"] for item in data["items"]] == [linked_run]
             assert [run["id"] for run in data["runs"]] == [linked_run]
             assert data["roots"] == ["dig"]
+            assert data["items"][0]["project_link_count"] == 1
+            assert data["items"][0]["project_links"][0]["project_id"] == project["id"]
+            assert data["items"][0]["project_links"][0]["project"]["name"] == "History Project"
+            assert data["runs"][0]["project_link_count"] == 1
+            assert data["runs"][0]["project_links"][0]["project_id"] == project["id"]
 
             snapshots_resp = client.get(
                 f"/history?type=snapshots&project_id={project['id']}&include_total=1",

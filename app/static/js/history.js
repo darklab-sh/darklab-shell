@@ -671,7 +671,7 @@ function refreshHistoryPanel() {
   _ensureHistoryProjectFilterOptions().catch(() => {});
   _syncHistoryFilterControls();
   _renderHistoryActiveFilters();
-  apiFetch(_buildHistoryRequestUrl()).then(r => r.json()).then(data => {
+  return apiFetch(_buildHistoryRequestUrl()).then(r => r.json()).then(data => {
     historyList.replaceChildren();
     _historyPaging.page = Math.max(1, Number(data.page) || _historyPaging.page || 1);
     _historyPaging.pageSize = Math.max(1, Number(data.page_size) || _historyPaging.pageSize || 1);
@@ -839,6 +839,13 @@ function refreshHistoryPanel() {
         onActivate: () => {
           _closeHistoryActionMenus();
           _historyAddRunToProject(run).catch(() => showToast('Failed to add run to project', 'error'));
+        },
+      });
+      bindPressable(entry.querySelector('[data-action="remove-project"]'), {
+        refocusComposer: false,
+        onActivate: () => {
+          _closeHistoryActionMenus();
+          _historyRemoveRunFromProject(run).catch(() => showToast('Failed to remove run from project', 'error'));
         },
       });
       bindPressable(entry.querySelector('[data-action="copy-run-id"]'), {

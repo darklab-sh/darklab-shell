@@ -596,6 +596,46 @@ def _run_file_artifacts_by_run(conn, run_ids):
     return grouped
 
 
+def _project_links_by_run(conn, session_id, run_ids):
+    ids = [str(run_id) for run_id in run_ids if run_id]
+    if not ids:
+        return {}
+    if not (
+        _history_table_exists(conn, "project_links")
+        and _history_table_exists(conn, "projects")
+    ):
+        return {run_id: [] for run_id in ids}
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        "SELECT l.id, l.project_id, l.entity_id AS run_id, l.source, l.created, "
+        "p.name AS project_name, p.slug AS project_slug, p.status AS project_status "
+        "FROM project_links l "
+        "JOIN projects p ON p.id = l.project_id "
+        "WHERE p.session_id = ? "
+        "AND l.entity_type = 'run' "
+        f"AND l.entity_id IN ({placeholders}) "  # nosec B608
+        "ORDER BY p.name COLLATE NOCASE ASC, l.created ASC",
+        [session_id, *ids],
+    ).fetchall()
+    grouped = {run_id: [] for run_id in ids}
+    for row in rows:
+        grouped.setdefault(str(row["run_id"]), []).append({
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "entity_type": "run",
+            "entity_id": row["run_id"],
+            "source": row["source"],
+            "created": row["created"],
+            "project": {
+                "id": row["project_id"],
+                "name": row["project_name"],
+                "slug": row["project_slug"],
+                "status": row["project_status"],
+            },
+        })
+    return grouped
+
+
 def _run_metadata_counts_by_run(conn, run_ids):
     ids = [str(run_id) for run_id in run_ids if run_id]
     counts = {
@@ -914,6 +954,7 @@ def get_history():
         paged_runs = [item for item in paged_items if item.get("type") == "run"]
         paged_snapshots = [item for item in paged_items if item.get("type") == "snapshot"]
         artifacts_by_run = _run_file_artifacts_by_run(conn, [item["id"] for item in paged_runs])
+        project_links_by_run = _project_links_by_run(conn, session_id, [item["id"] for item in paged_runs])
         metadata_counts_by_run = _run_metadata_counts_by_run(conn, [item["id"] for item in paged_runs])
         labels_by_run = _entity_labels_by_entity_ids(conn, "run", [item["id"] for item in paged_runs])
         notes_by_run = _entity_notes_by_entity_ids(conn, "run", [item["id"] for item in paged_runs])
@@ -922,6 +963,8 @@ def get_history():
         for item in paged_runs:
             item["artifacts"] = artifacts_by_run.get(str(item["id"]), [])
             item["artifact_count"] = len(item["artifacts"])
+            item["project_links"] = project_links_by_run.get(str(item["id"]), [])
+            item["project_link_count"] = len(item["project_links"])
             item["labels"] = labels_by_run.get(str(item["id"]), [])
             item["note"] = (notes_by_run.get(str(item["id"]), []) or [None])[0]
             item.update(metadata_counts_by_run.get(str(item["id"]), {

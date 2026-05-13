@@ -89,14 +89,19 @@ function _createHistoryActionMenu(run, { includeDelete = false } = {}) {
   trigger.setAttribute('aria-expanded', 'false');
   const menu = document.createElement('div');
   menu.className = 'history-action-menu save-menu dropdown-surface';
+  const projectLinks = Array.isArray(run?.project_links) ? run.project_links : [];
   const items = [
     ['edit-metadata', 'edit'],
     ['permalink', 'permalink'],
     ['compare', 'compare'],
-    ['add-active-project', 'add to active project'],
-    ['add-project', 'add to project'],
-    ['copy-run-id', 'copy run id'],
   ];
+  if (projectLinks.length) {
+    items.push(['remove-project', 'remove from project']);
+  } else {
+    items.push(['add-active-project', 'add to active project']);
+    items.push(['add-project', 'add to project']);
+  }
+  items.push(['copy-run-id', 'copy run id']);
   if (includeDelete) items.push(['delete', 'delete']);
   items.forEach(([action, label]) => {
     const item = document.createElement('button');

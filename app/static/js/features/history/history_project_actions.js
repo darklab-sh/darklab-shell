@@ -123,11 +123,79 @@ async function _historyLinkRunToProject(run, project) {
     } catch (_) {}
     throw new Error(detail || `HTTP ${resp.status}`);
   }
+  let link = null;
+  try {
+    const data = await resp.json();
+    link = data && data.link ? data.link : null;
+  } catch (_) {}
+  if (link) {
+    run.project_links = (Array.isArray(run.project_links) ? run.project_links : [])
+      .filter(item => String(item && item.project_id || '') !== String(project.id || ''));
+    run.project_links.push({ ...link, project });
+    run.project_link_count = run.project_links.length;
+  }
   if (typeof refreshProjectWorkspace === 'function') {
     try { await refreshProjectWorkspace(); } catch (_) {}
   }
   const name = _historyProjectDisplayName(project) || 'project';
   showToast(`Run added to ${name}`);
+  if (typeof refreshHistoryPanel === 'function') {
+    try { await refreshHistoryPanel(); } catch (_) {}
+  }
+}
+
+function _historyProjectFromLink(link) {
+  if (!link || typeof link !== 'object') return null;
+  if (link.project && typeof link.project === 'object') return link.project;
+  const projectId = String(link.project_id || '').trim();
+  if (!projectId) return null;
+  return {
+    id: projectId,
+    name: link.project_name || '',
+    slug: link.project_slug || '',
+    status: link.project_status || '',
+  };
+}
+
+function _historyRunProjectLinks(run) {
+  return (Array.isArray(run?.project_links) ? run.project_links : [])
+    .map((link) => ({ link, project: _historyProjectFromLink(link) }))
+    .filter((item) => item.project && item.project.id)
+    .sort((a, b) => _historyProjectDisplayName(a.project).localeCompare(
+      _historyProjectDisplayName(b.project),
+      undefined,
+      { sensitivity: 'base', numeric: true },
+    ));
+}
+
+async function _historyUnlinkRunFromProject(run, project) {
+  if (!run || !run.id) throw new Error('Run is missing its identifier.');
+  if (!project || !project.id) throw new Error('Project is missing its identifier.');
+  const resp = await apiFetch(`/projects/${encodeURIComponent(project.id)}/links`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entity_type: 'run', entity_id: run.id }),
+  });
+  if (!resp.ok) {
+    let detail = '';
+    try {
+      const data = await resp.json();
+      detail = data && data.error ? data.error : '';
+    } catch (_) {}
+    throw new Error(detail || `HTTP ${resp.status}`);
+  }
+  if (typeof refreshProjectWorkspace === 'function') {
+    try { await refreshProjectWorkspace(); } catch (_) {}
+  }
+  if (Array.isArray(run.project_links)) {
+    run.project_links = run.project_links.filter(item => String(item && item.project_id || '') !== String(project.id || ''));
+    run.project_link_count = run.project_links.length;
+  }
+  const name = _historyProjectDisplayName(project) || 'project';
+  showToast(`Run removed from ${name}`);
+  if (typeof refreshHistoryPanel === 'function') {
+    try { await refreshHistoryPanel(); } catch (_) {}
+  }
 }
 
 async function _historyAddRunToActiveProject(run) {
@@ -137,6 +205,50 @@ async function _historyAddRunToActiveProject(run) {
     return;
   }
   await _historyLinkRunToProject(run, project);
+}
+
+function _historyProjectPickerContentForLinks(links) {
+  const projects = links.map(item => item.project).filter(Boolean);
+  const { wrap, select } = _historyProjectPickerContent(projects);
+  const help = wrap.querySelector('.history-project-picker-help');
+  if (help) help.textContent = 'Choose the project link to remove.';
+  return { wrap, select, projects };
+}
+
+async function _historyRemoveRunFromProject(run) {
+  const links = _historyRunProjectLinks(run);
+  if (!links.length) {
+    showToast('This run is not linked to a project', 'error');
+    return;
+  }
+  let project = links[0].project;
+  if (links.length > 1) {
+    const { wrap, select, projects } = _historyProjectPickerContentForLinks(links);
+    const choicePromise = showConfirm({
+      body: 'Remove this run from a project',
+      content: wrap,
+      tone: null,
+      defaultFocus: select,
+      actions: [
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+        { id: 'remove', label: 'Remove from project', role: 'destructive' },
+      ],
+    });
+    if (typeof enhanceAppSelects === 'function') {
+      enhanceAppSelects(wrap);
+      if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) {
+        wrap.querySelector('.app-select-menu')?.classList.add('dropdown-up');
+      }
+    }
+    const choice = await choicePromise;
+    if (choice !== 'remove') return;
+    project = projects.find(item => String(item.id || '') === select.value);
+  }
+  try {
+    await _historyUnlinkRunFromProject(run, project);
+  } catch (_) {
+    showToast('Failed to remove run from project', 'error');
+  }
 }
 
 function _historyProjectPickerContent(projects) {

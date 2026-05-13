@@ -60,6 +60,42 @@ if (typeof bindOutsideClickClose === 'function' && typeof shellPromptWrap !== 'u
   });
 }
 
+function _handleRunningComposerShortcut(e) {
+  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
+    e.preventDefault();
+    e.stopPropagation();
+    confirmKill(activeTabId);
+    return true;
+  }
+
+  const isCtrlD = e.ctrlKey && !e.metaKey && !e.altKey && (
+    e.key === 'd'
+    || e.key === 'D'
+    || (typeof eventMatchesLetter === 'function' && eventMatchesLetter(e, 'd'))
+  );
+  if (isCtrlD) {
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
+  }
+
+  if (typeof handleTabShortcut === 'function' && handleTabShortcut(e)) {
+    e.stopPropagation();
+    return true;
+  }
+
+  if (typeof handleActionShortcut === 'function' && handleActionShortcut(e)) {
+    e.stopPropagation();
+    return true;
+  }
+
+  if (typeof handleChromeShortcut === 'function' && handleChromeShortcut(e)) {
+    e.stopPropagation();
+    return true;
+  }
+  return false;
+}
+
 function _selectionTouchesElement(el) {
   if (!el || typeof window === 'undefined' || typeof window.getSelection !== 'function') return false;
   const selection = window.getSelection();
@@ -261,11 +297,7 @@ cmdInput.addEventListener('keydown', e => {
   }
 
   if (typeof isActiveTabRunning === 'function' && isActiveTabRunning()) {
-    if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
-      e.preventDefault();
-      confirmKill(activeTabId);
-      return;
-    }
+    if (_handleRunningComposerShortcut(e)) return;
     if (typeof acHide === 'function') acHide();
     e.preventDefault();
     return;
