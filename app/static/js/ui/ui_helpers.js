@@ -518,6 +518,7 @@
   };
   global.showHistoryPanel = () => showPanelOverlay(historyPanel);
   global.hideHistoryPanel = () => {
+    if (typeof global.resetHistorySelectionOnClose === 'function') global.resetHistorySelectionOnClose();
     hidePanelOverlay(historyPanel);
     if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
   };

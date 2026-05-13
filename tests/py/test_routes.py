@@ -25,6 +25,7 @@ import unittest.mock as mock
 
 import app as shell_app
 import blueprints.assets as shell_assets
+import blueprints.history as history_routes
 import blueprints.projects as project_routes
 import config
 import services.runs.comparison as run_comparison
@@ -1650,6 +1651,83 @@ class TestProjectRoutes:
                 headers={"X-Session-ID": session_id},
             )
             assert missing_note.status_code == 404
+
+    def test_bulk_project_links_report_mixed_results_and_keep_legacy_response(self):
+        client = get_client()
+        session_id = self._session_id("project-bulk-link")
+        other_session = self._session_id("project-bulk-other")
+        project = self._create_project(client, session_id)
+        first_run_id = self._seed_run(session_id, "nmap darklab.sh")
+        second_run_id = self._seed_run(session_id, "dig darklab.sh")
+        other_run_id = self._seed_run(other_session, "whois darklab.sh")
+        missing_run_id = "run-" + uuid.uuid4().hex
+
+        legacy_resp = client.post(
+            f"/projects/{project['id']}/links",
+            json={"entity_type": "run", "entity_id": first_run_id},
+            headers={"X-Session-ID": session_id},
+        )
+        assert legacy_resp.status_code == 201
+        legacy_data = json.loads(legacy_resp.data)
+        assert legacy_data["ok"] is True
+        assert "link" in legacy_data
+        assert "results" not in legacy_data
+
+        bulk_resp = client.post(
+            f"/projects/{project['id']}/links",
+            json={
+                "entity_type": "run",
+                "entity_ids": [first_run_id, second_run_id, other_run_id, missing_run_id],
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        assert bulk_resp.status_code == 200
+        bulk_data = json.loads(bulk_resp.data)
+        assert bulk_data["counts"] == {
+            "added": 1,
+            "already_linked": 1,
+            "removed": 0,
+            "not_linked": 0,
+            "not_found": 1,
+            "rejected": 1,
+        }
+        assert bulk_data["results"] == [
+            {"run_id": first_run_id, "status": "already_linked"},
+            {"run_id": second_run_id, "status": "added"},
+            {"run_id": other_run_id, "status": "rejected", "reason": "not_owned"},
+            {"run_id": missing_run_id, "status": "not_found"},
+        ]
+
+        unlink_resp = client.delete(
+            f"/projects/{project['id']}/links",
+            json={"entity_type": "run", "entity_ids": [first_run_id, second_run_id, missing_run_id]},
+            headers={"X-Session-ID": session_id},
+        )
+        assert unlink_resp.status_code == 200
+        unlink_data = json.loads(unlink_resp.data)
+        assert unlink_data["counts"] == {
+            "added": 0,
+            "already_linked": 0,
+            "removed": 2,
+            "not_linked": 0,
+            "not_found": 1,
+            "rejected": 0,
+        }
+
+    def test_bulk_project_links_reject_too_many_entity_ids(self):
+        client = get_client()
+        session_id = self._session_id("project-bulk-too-many")
+        project = self._create_project(client, session_id)
+        resp = client.post(
+            f"/projects/{project['id']}/links",
+            json={
+                "entity_type": "run",
+                "entity_ids": [f"run-{index}" for index in range(101)],
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        assert resp.status_code == 400
+        assert json.loads(resp.data) == {"error": "too_many", "limit": 100}
 
     def test_redacted_evidence_package_redacts_manifest_and_transcripts(self):
         client = get_client()
@@ -5035,6 +5113,53 @@ class TestHistoryRoute:
         )
         assert resp.status_code == 200
         assert json.loads(resp.data)["ok"] is True
+
+    def test_bulk_delete_history_reports_partial_results_and_rejects_running_runs(self):
+        client = get_client()
+        session_id = "bulk-delete-session"
+        owned_run_id = "run-" + uuid.uuid4().hex
+        running_run_id = "run-" + uuid.uuid4().hex
+        other_run_id = "run-" + uuid.uuid4().hex
+        missing_run_id = "run-" + uuid.uuid4().hex
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+                (owned_run_id, session_id, "nmap darklab.sh"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+                (running_run_id, session_id, "dig darklab.sh"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+                (other_run_id, "bulk-delete-other", "whois darklab.sh"),
+            )
+            conn.commit()
+
+        with mock.patch.object(history_routes, "active_runs_for_session", return_value=[{"run_id": running_run_id}]):
+            resp = client.post(
+                "/history/bulk-delete",
+                json={"run_ids": [owned_run_id, running_run_id, other_run_id, missing_run_id]},
+                headers={"X-Session-ID": session_id},
+            )
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["counts"] == {"deleted": 1, "not_found": 2, "rejected": 1}
+        assert data["results"] == [
+            {"run_id": owned_run_id, "status": "deleted"},
+            {"run_id": running_run_id, "status": "rejected", "reason": "running"},
+            {"run_id": other_run_id, "status": "not_found"},
+            {"run_id": missing_run_id, "status": "not_found"},
+        ]
+        with sqlite3.connect(DB_PATH) as conn:
+            remaining_ids = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT id FROM runs WHERE id IN (?, ?, ?)",
+                    (owned_run_id, running_run_id, other_run_id),
+                ).fetchall()
+            }
+        assert remaining_ids == {running_run_id, other_run_id}
 
     def test_get_run_nonexistent_returns_404(self):
         client = get_client()

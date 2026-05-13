@@ -19,6 +19,12 @@ let _historyMobileAdvancedOpen = false;
 let _historyProjectOptions = [];
 let _historyProjectOptionsLoaded = false;
 let _historyProjectOptionsLoading = null;
+let _historySelection = {
+  selectMode: false,
+  selected: new Map(),
+  visibleRuns: [],
+  bulkInFlight: false,
+};
 let _historyRootSuggestions = [];
 let _historyRootFiltered = [];
 let _historyRootIndex = -1;
@@ -332,6 +338,7 @@ function _historySetPage(nextPage, { refresh = true } = {}) {
   const page = Math.max(1, Number(nextPage) || 1);
   if (_historyPaging.page !== page) {
     _historyPaging.page = page;
+    _historyClearSelection({ render: false });
   }
   if (refresh) refreshHistoryPanel();
 }
@@ -411,6 +418,395 @@ function _renderHistoryActiveFilters() {
   });
 }
 
+function _historyIsSelectableRun(run) {
+  if (!run || String(run.type || 'run') !== 'run') return false;
+  return !!run.finished || run.exit_code !== null && typeof run.exit_code !== 'undefined';
+}
+
+function _historySelectedRuns() {
+  return Array.from(_historySelection.selected.values());
+}
+
+function _historyClearSelection({ render = true } = {}) {
+  _historySelection.selected.clear();
+  if (render) _renderHistoryBulkToolbar();
+}
+
+function _historyResetSelectionOnClose() {
+  _historySelection.selectMode = false;
+  _historySelection.selected.clear();
+  _historySelection.bulkInFlight = false;
+  _historySelection.visibleRuns = [];
+  _closeHistoryActionMenus();
+  _closeHistoryBulkActionMenu();
+  _renderHistoryBulkToolbar();
+}
+
+function _historySetSelectMode(enabled, { render = true } = {}) {
+  _historySelection.selectMode = !!enabled;
+  if (!_historySelection.selectMode) _historySelection.selected.clear();
+  if (render) {
+    _renderHistoryBulkToolbar();
+    refreshHistoryPanel();
+  }
+}
+
+function _historyToggleRunSelection(run, checked = null) {
+  if (!_historyIsSelectableRun(run) || _historySelection.bulkInFlight) return;
+  const runId = String(run.id || '');
+  if (!runId) return;
+  const shouldSelect = checked === null ? !_historySelection.selected.has(runId) : !!checked;
+  if (shouldSelect) _historySelection.selected.set(runId, run);
+  else _historySelection.selected.delete(runId);
+  _renderHistoryBulkToolbar();
+  const checkbox = historyList?.querySelector?.(`[data-history-select-run-id="${CSS.escape(runId)}"]`);
+  if (checkbox) checkbox.checked = _historySelection.selected.has(runId);
+}
+
+function _historySelectAllVisibleRuns() {
+  if (_historySelection.bulkInFlight) return;
+  _historySelection.visibleRuns.forEach((run) => {
+    if (_historyIsSelectableRun(run) && run.id) {
+      _historySelection.selected.set(String(run.id), run);
+    }
+  });
+  refreshHistoryPanel();
+}
+
+function _historySetBulkBusy(busy) {
+  _historySelection.bulkInFlight = !!busy;
+  _renderHistoryBulkToolbar();
+  if (historyList) {
+    historyList.querySelectorAll('[data-action], .history-entry-select-row input').forEach((el) => {
+      if ('disabled' in el) el.disabled = !!busy;
+    });
+  }
+}
+
+function _historyBulkCountsFromResponse(data) {
+  return data && typeof data === 'object' && data.counts && typeof data.counts === 'object'
+    ? data.counts
+    : {};
+}
+
+function _historyBulkToast(message, counts = {}) {
+  const hasPartial = Number(counts.rejected || 0) > 0 || Number(counts.not_linked || 0) > 0;
+  if (hasPartial) showToast(message, 'success', { label: 'dismiss', onClick: () => {} });
+  else showToast(message);
+}
+
+function _historyBulkResultText(action, projectName, counts = {}) {
+  if (action === 'add') {
+    const added = Number(counts.added || 0);
+    const already = Number(counts.already_linked || 0);
+    const rejected = Number(counts.rejected || 0) + Number(counts.not_found || 0);
+    const pieces = [`Added ${added} ${added === 1 ? 'run' : 'runs'} to ${projectName}`];
+    if (already) pieces.push(`${already} already linked`);
+    if (rejected) pieces.push(`${rejected} skipped`);
+    return pieces.join(' - ');
+  }
+  if (action === 'remove') {
+    const removed = Number(counts.removed || 0);
+    const notLinked = Number(counts.not_linked || 0);
+    const rejected = Number(counts.rejected || 0) + Number(counts.not_found || 0);
+    const pieces = [`Removed ${removed} ${removed === 1 ? 'run' : 'runs'} from ${projectName}`];
+    if (notLinked) pieces.push(`${notLinked} not linked`);
+    if (rejected) pieces.push(`${rejected} skipped`);
+    return pieces.join(' - ');
+  }
+  const deleted = Number(counts.deleted || 0);
+  const rejected = Number(counts.rejected || 0) + Number(counts.not_found || 0);
+  const pieces = [`Deleted ${deleted} ${deleted === 1 ? 'run' : 'runs'}`];
+  if (rejected) pieces.push(`${rejected} skipped`);
+  return pieces.join(' - ');
+}
+
+function _historySelectedRunIds() {
+  return _historySelectedRuns().map(run => String(run.id || '')).filter(Boolean);
+}
+
+async function _historyRefreshAfterBulk() {
+  try {
+    await refreshHistoryPanel();
+  } catch (_) {
+    showToast('Bulk action finished, but history could not refresh. Refresh to see the latest state.', 'error');
+  }
+}
+
+function _closeHistoryBulkActionMenu() {
+  const toolbar = typeof historyBulkToolbar !== 'undefined' ? historyBulkToolbar : null;
+  const wrap = toolbar?.querySelector?.('.history-bulk-actions-wrap.open');
+  if (!wrap) return;
+  wrap.classList.remove('open');
+  wrap.querySelector('[data-action="history-bulk-menu"]')?.setAttribute('aria-expanded', 'false');
+}
+
+function _historyProjectOptionsForSelectedLinks() {
+  const projectsById = new Map();
+  _historySelectedRuns().forEach((run) => {
+    const links = Array.isArray(run.project_links) ? run.project_links : [];
+    links.forEach((link) => {
+      const project = typeof _historyProjectFromLink === 'function' ? _historyProjectFromLink(link) : null;
+      if (project && project.id) projectsById.set(String(project.id), project);
+    });
+  });
+  return Array.from(projectsById.values()).sort((a, b) => _historyProjectDisplayName(a).localeCompare(
+    _historyProjectDisplayName(b),
+    undefined,
+    { sensitivity: 'base', numeric: true },
+  ));
+}
+
+async function _historyBulkPostProject(project, action) {
+  const runIds = _historySelectedRunIds();
+  if (!project || !project.id || !runIds.length) return;
+  _historySetBulkBusy(true);
+  try {
+    const resp = await apiFetch(`/projects/${encodeURIComponent(project.id)}/links`, {
+      method: action === 'remove' ? 'DELETE' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entity_type: 'run', entity_ids: runIds, source: 'manual' }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const counts = _historyBulkCountsFromResponse(data);
+    const projectName = _historyProjectDisplayName(project) || 'project';
+    _historySelection.selected.clear();
+    _historyBulkToast(_historyBulkResultText(action, projectName, counts), counts);
+    if (typeof refreshProjectWorkspace === 'function') {
+      try { await refreshProjectWorkspace(); } catch (_) {}
+    }
+    await _historyRefreshAfterBulk();
+  } catch (_) {
+    showToast(action === 'remove' ? 'Failed to remove selected runs from project' : 'Failed to add selected runs to project', 'error');
+  } finally {
+    _historySetBulkBusy(false);
+  }
+}
+
+async function _historyBulkAddToActiveProject() {
+  const project = await _historyLoadActiveProject();
+  if (!project || !project.id) {
+    showToast('No active project selected', 'error');
+    return;
+  }
+  await _historyBulkPostProject(project, 'add');
+}
+
+async function _historyBulkChooseProject(action) {
+  const selectedCount = _historySelection.selected.size;
+  let projects;
+  if (action === 'remove') {
+    projects = _historyProjectOptionsForSelectedLinks();
+  } else {
+    try {
+      const [loadedProjects, activeProject] = await Promise.all([
+        _historyLoadProjects(),
+        _historyLoadActiveProject().catch(() => null),
+      ]);
+      projects = _historyOrderProjectsForPicker(loadedProjects, activeProject);
+    } catch (_) {
+      showToast('Failed to load projects', 'error');
+      return;
+    }
+  }
+  if (!projects.length) {
+    showToast(action === 'remove' ? 'Selected runs are not linked to any project' : 'No projects available', 'error');
+    return;
+  }
+  const { wrap, select } = _historyProjectPickerContent(projects);
+  const help = wrap.querySelector('.history-project-picker-help');
+  if (help) {
+    help.textContent = action === 'remove'
+      ? 'Choose the project to remove selected runs from.'
+      : 'Choose a project to link selected runs.';
+  }
+  const choicePromise = showConfirm({
+    body: action === 'remove'
+      ? `Remove ${selectedCount} selected ${selectedCount === 1 ? 'run' : 'runs'} from project`
+      : `Add ${selectedCount} selected ${selectedCount === 1 ? 'run' : 'runs'} to project`,
+    content: wrap,
+    tone: null,
+    defaultFocus: select,
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: action, label: action === 'remove' ? 'Remove from project' : 'Add to project', role: action === 'remove' ? 'secondary' : 'primary' },
+    ],
+  });
+  if (typeof enhanceAppSelects === 'function') {
+    enhanceAppSelects(wrap);
+    if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) {
+      wrap.querySelector('.app-select-menu')?.classList.add('dropdown-up');
+    }
+  }
+  const choice = await choicePromise;
+  if (choice !== action) return;
+  const project = projects.find(item => String(item.id || '') === select.value);
+  await _historyBulkPostProject(project, action);
+}
+
+async function _historyBulkDeleteSelectedRuns() {
+  const runIds = _historySelectedRunIds();
+  if (!runIds.length) return;
+  const count = runIds.length;
+  const choice = await showConfirm({
+    body: {
+      text: `Delete ${count} selected ${count === 1 ? 'run' : 'runs'}?`,
+      note: 'This removes the selected run history and cannot be undone.',
+    },
+    tone: 'warning',
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'delete', label: 'Delete', role: 'destructive', tone: 'warning' },
+    ],
+  });
+  if (choice !== 'delete') return;
+  _historySetBulkBusy(true);
+  try {
+    const resp = await apiFetch('/history/bulk-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ run_ids: runIds }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const counts = _historyBulkCountsFromResponse(data);
+    _historySelection.selected.clear();
+    _historyBulkToast(_historyBulkResultText('delete', '', counts), counts);
+    await _historyRefreshAfterBulk();
+  } catch (_) {
+    showToast('Failed to delete selected runs', 'error');
+  } finally {
+    _historySetBulkBusy(false);
+  }
+}
+
+function _historyBuildBulkActionMenu(disabled) {
+  const wrap = document.createElement('div');
+  wrap.className = 'history-bulk-actions-wrap save-menu-wrap save-menu-down';
+  const trigger = document.createElement('button');
+  trigger.className = 'history-action-btn btn btn-secondary btn-compact';
+  trigger.type = 'button';
+  trigger.dataset.action = 'history-bulk-menu';
+  trigger.textContent = 'Actions';
+  trigger.setAttribute('aria-expanded', 'false');
+  trigger.disabled = disabled;
+  const menu = document.createElement('div');
+  menu.className = 'history-bulk-actions-menu save-menu dropdown-surface';
+  const activeProject = typeof getActiveProjectContext === 'function' ? getActiveProjectContext() : null;
+  [
+    ['bulk-add-active-project', 'add to active project'],
+    ['bulk-add-project', 'add to project'],
+    ['bulk-remove-project', 'remove from project'],
+    ['bulk-delete', 'delete'],
+  ].forEach(([action, label]) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'dropdown-item dropdown-item-compact';
+    item.dataset.action = action;
+    item.textContent = label;
+    item.disabled = disabled || (action === 'bulk-add-active-project' && !(activeProject && activeProject.id));
+    if (action === 'bulk-add-active-project' && !(activeProject && activeProject.id)) {
+      item.title = 'Select an active project first.';
+    }
+    menu.appendChild(item);
+  });
+  wrap.append(trigger, menu);
+  return wrap;
+}
+
+function _renderHistoryBulkToolbar() {
+  if (typeof historyBulkToolbar === 'undefined' || !historyBulkToolbar) return;
+  historyBulkToolbar.replaceChildren();
+  const visibleSelectable = _historySelection.visibleRuns.filter(_historyIsSelectableRun);
+  const shouldShow = _historySelection.selectMode || visibleSelectable.length > 0;
+  historyBulkToolbar.classList.toggle('u-hidden', !shouldShow);
+  if (!shouldShow) return;
+
+  const toggleLabel = document.createElement('label');
+  toggleLabel.className = 'history-filter-toggle history-bulk-toggle control-row form-control-compact';
+  const toggle = document.createElement('input');
+  toggle.type = 'checkbox';
+  toggle.checked = !!_historySelection.selectMode;
+  toggle.disabled = _historySelection.bulkInFlight;
+  const toggleText = document.createElement('span');
+  toggleText.textContent = 'select';
+  toggleLabel.append(toggle, toggleText);
+  toggle.addEventListener('change', () => _historySetSelectMode(toggle.checked));
+  historyBulkToolbar.appendChild(toggleLabel);
+
+  const count = document.createElement('span');
+  count.className = 'history-bulk-count';
+  const selectedCount = _historySelection.selected.size;
+  count.textContent = `${selectedCount} selected`;
+  count.setAttribute('aria-live', 'polite');
+  historyBulkToolbar.appendChild(count);
+
+  const allSelected = visibleSelectable.length > 0
+    && visibleSelectable.every(run => _historySelection.selected.has(String(run.id || '')));
+  const someSelected = visibleSelectable.some(run => _historySelection.selected.has(String(run.id || '')));
+  const selectAll = document.createElement('button');
+  selectAll.className = 'history-action-btn btn btn-secondary btn-compact';
+  selectAll.type = 'button';
+  selectAll.textContent = allSelected && someSelected ? 'Selected all' : 'Select all';
+  selectAll.disabled = !_historySelection.selectMode || !visibleSelectable.length || _historySelection.bulkInFlight;
+  selectAll.setAttribute('aria-pressed', allSelected && someSelected ? 'true' : someSelected ? 'mixed' : 'false');
+  selectAll.addEventListener('click', () => _historySelectAllVisibleRuns());
+  historyBulkToolbar.appendChild(selectAll);
+
+  const clear = document.createElement('button');
+  clear.className = 'history-action-btn btn btn-secondary btn-compact';
+  clear.type = 'button';
+  clear.textContent = 'Clear';
+  clear.disabled = selectedCount === 0 || _historySelection.bulkInFlight;
+  clear.addEventListener('click', () => {
+    _historyClearSelection({ render: false });
+    refreshHistoryPanel();
+  });
+  historyBulkToolbar.appendChild(clear);
+
+  const actions = _historyBuildBulkActionMenu(selectedCount === 0 || _historySelection.bulkInFlight);
+  historyBulkToolbar.appendChild(actions);
+  bindPressable(actions.querySelector('[data-action="history-bulk-menu"]'), {
+    refocusComposer: false,
+    onActivate: (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const open = !actions.classList.contains('open');
+      actions.classList.toggle('open', open);
+      actions.querySelector('[data-action="history-bulk-menu"]')?.setAttribute('aria-expanded', open ? 'true' : 'false');
+    },
+  });
+  bindPressable(actions.querySelector('[data-action="bulk-add-active-project"]'), {
+    refocusComposer: false,
+    onActivate: () => {
+      _closeHistoryBulkActionMenu();
+      _historyBulkAddToActiveProject();
+    },
+  });
+  bindPressable(actions.querySelector('[data-action="bulk-add-project"]'), {
+    refocusComposer: false,
+    onActivate: () => {
+      _closeHistoryBulkActionMenu();
+      _historyBulkChooseProject('add');
+    },
+  });
+  bindPressable(actions.querySelector('[data-action="bulk-remove-project"]'), {
+    refocusComposer: false,
+    onActivate: () => {
+      _closeHistoryBulkActionMenu();
+      _historyBulkChooseProject('remove');
+    },
+  });
+  bindPressable(actions.querySelector('[data-action="bulk-delete"]'), {
+    refocusComposer: false,
+    onActivate: () => {
+      _closeHistoryBulkActionMenu();
+      _historyBulkDeleteSelectedRuns();
+    },
+  });
+}
+
 function _buildHistoryRequestUrl() {
   return _historyCore.buildRequestUrl(_historyFilters, _historyPaging);
 }
@@ -464,6 +860,7 @@ function _setHistoryFilter(key, value, { debounce = false } = {}) {
   else _historyFilters[key] = _normalizeHistoryFilterValue(value) || (key === 'q' || key === 'commandRoot' ? '' : 'all');
   if (key === 'type' && _historyFilters.type === 'snapshots') _historyResetRunOnlyFilters();
   _historyPaging.page = 1;
+  _historyClearSelection({ render: false });
   if (debounce) _scheduleHistoryPanelRefresh();
   else refreshHistoryPanel();
 }
@@ -493,6 +890,7 @@ function openHistoryWithFilters(filters = {}) {
     starredOnly: !!nextFilters.starredOnly,
   };
   _historyPaging.page = 1;
+  _historyClearSelection({ render: false });
   _syncHistoryFilterControls();
   _renderHistoryActiveFilters();
   _hideHistoryRootDropdown();
@@ -516,6 +914,7 @@ function clearHistoryFilters() {
     starredOnly: false,
   };
   _historyPaging.page = 1;
+  _historyClearSelection({ render: false });
   _syncHistoryFilterControls();
   _renderHistoryActiveFilters();
   _hideHistoryRootDropdown();
@@ -664,6 +1063,7 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 
 
 window.openHistoryWithFilters = openHistoryWithFilters;
+window.resetHistorySelectionOnClose = _historyResetSelectionOnClose;
 
 function refreshHistoryPanel() {
   // The panel is populated on demand so we always fetch the latest persisted
@@ -680,6 +1080,8 @@ function refreshHistoryPanel() {
     _historyPaging.hasPrev = !!data.has_prev;
     _historyPaging.hasNext = !!data.has_next;
     const visibleItems = _applyHistoryClientFilters(Array.isArray(data.items) ? data.items : data.runs);
+    _historySelection.visibleRuns = visibleItems.filter(item => item && String(item.type || 'run') === 'run');
+    _renderHistoryBulkToolbar();
     _renderHistoryRootSuggestions(_historyFilters.type === 'snapshots' ? [] : (Array.isArray(data.roots) ? data.roots : data.runs));
     if (!visibleItems.length) {
       _historyRenderPagination(0);
@@ -735,15 +1137,33 @@ function refreshHistoryPanel() {
 
       const run = item;
       const isStarred = starred.has(run.command);
-      const entry = _createHistoryEntry(run, isStarred);
+      const selectable = _historyIsSelectableRun(run);
+      const selected = _historySelection.selected.has(String(run.id || ''));
+      const entry = _createHistoryEntry(run, isStarred, {
+        selectMode: _historySelection.selectMode,
+        selectable,
+        selected,
+      });
 
       // Click anywhere on the entry (except buttons) to inspect the run. The
       // modal keeps restore and re-run affordances available without hiding
       // structured findings behind project-only views.
       entry.addEventListener('click', e => {
         if (e.target.closest('[data-action]')) return;
+        if (_historySelection.selectMode) {
+          _historyToggleRunSelection(run);
+          return;
+        }
         openHistoryRunDetails(run);
       });
+
+      const selectionBox = entry.querySelector('[data-action="select-run"]');
+      if (selectionBox) {
+        selectionBox.addEventListener('change', e => {
+          e.stopPropagation();
+          _historyToggleRunSelection(run, e.target.checked);
+        });
+      }
 
       bindPressable(entry.querySelector('[data-action="star"]'), {
         onActivate: () => {
@@ -881,15 +1301,18 @@ function refreshHistoryPanel() {
 if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
   document.addEventListener('click', (event) => {
     if (event.target && event.target.closest && event.target.closest('.history-action-menu-wrap')) return;
+    if (event.target && event.target.closest && event.target.closest('.history-bulk-actions-wrap')) return;
     if (event.target && event.target.closest && event.target.closest('.history-compare-actions-menu-wrap')) return;
     if (event.target && event.target.closest && event.target.closest('.history-run-action-menu-wrap')) return;
     _closeHistoryActionMenus();
+    _closeHistoryBulkActionMenu();
     _closeHistoryCompareActionMenus();
     _closeHistoryRunActionMenus();
   });
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       _closeHistoryActionMenus();
+      _closeHistoryBulkActionMenu();
       _closeHistoryCompareActionMenus();
       _closeHistoryRunActionMenus();
     }
@@ -898,11 +1321,13 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
   window.addEventListener('resize', () => {
     _closeHistoryActionMenus();
+    _closeHistoryBulkActionMenu();
     _closeHistoryCompareActionMenus();
     _closeHistoryRunActionMenus();
   });
   window.addEventListener('scroll', () => {
     _closeHistoryActionMenus();
+    _closeHistoryBulkActionMenu();
     _closeHistoryCompareActionMenus();
     _closeHistoryRunActionMenus();
   }, true);

@@ -34,6 +34,7 @@ from services.projects.contracts import (
     ACTIVE_PROJECT_PREF_KEY,
     EvidencePackageTooLarge,
     FINDING_REVIEW_STATES,
+    MAX_BULK_RUN_ACTION_ITEMS,
     MAX_ENTITY_ID_LEN,
     MAX_ENTITY_NOTE_BODY_LEN,
     MAX_FINDING_TITLE_LEN,
@@ -3903,6 +3904,34 @@ def _normalize_link_payload(data):
     return entity_type, entity_id, source
 
 
+def _normalize_bulk_link_payload(data):
+    if not isinstance(data, dict):
+        raise ProjectWorkspaceError("project link payload must be an object")
+    try:
+        entity_type = validate_project_entity_type(_trim_text(data.get("entity_type"), 64))
+    except ValueError as exc:
+        raise ProjectWorkspaceError(str(exc)) from None
+    if entity_type not in PROJECT_LINK_ENTITY_TYPES:
+        raise ProjectWorkspaceError(f"project links do not support {entity_type}")
+    raw_ids = data.get("entity_ids")
+    if not isinstance(raw_ids, list):
+        raise ProjectWorkspaceError("entity_ids must be a list")
+    if len(raw_ids) > MAX_BULK_RUN_ACTION_ITEMS:
+        raise ProjectWorkspaceError("too_many")
+    entity_ids = []
+    seen = set()
+    for raw_id in raw_ids:
+        entity_id = _trim_text(raw_id, MAX_ENTITY_ID_LEN)
+        if not entity_id or entity_id in seen:
+            continue
+        seen.add(entity_id)
+        entity_ids.append(entity_id)
+    if not entity_ids:
+        raise ProjectWorkspaceError("entity_ids is required")
+    source = validate_project_link_source(_trim_text(data.get("source") or "manual", 64))
+    return entity_type, entity_ids, source
+
+
 def _normalize_target_payload(data, *, partial=False):
     if not isinstance(data, dict):
         raise ProjectWorkspaceError("target payload must be an object")
@@ -4205,6 +4234,87 @@ def link_project_entity(session_id, project_id, data):
         raise ProjectWorkspaceError("could not allocate a project link id")
 
 
+def _project_bulk_result(statuses, run_id, status, *, reason=None):
+    statuses[status] = statuses.get(status, 0) + 1
+    item = {"run_id": run_id, "status": status}
+    if reason:
+        item["reason"] = reason
+    return item
+
+
+def _bulk_project_run_maps(conn, session_id, run_ids):
+    placeholders = ",".join("?" for _ in run_ids)
+    owned_rows = conn.execute(
+        f"SELECT id FROM runs WHERE session_id = ? AND id IN ({placeholders})",  # nosec B608
+        [session_id, *run_ids],
+    ).fetchall()
+    any_rows = conn.execute(
+        f"SELECT id FROM runs WHERE id IN ({placeholders})",  # nosec B608
+        run_ids,
+    ).fetchall()
+    return {
+        "owned": {str(row["id"]) for row in owned_rows},
+        "any": {str(row["id"]) for row in any_rows},
+    }
+
+
+def link_project_entities(session_id, project_id, data):
+    entity_type, entity_ids, source = _normalize_bulk_link_payload(data)
+    counts = {
+        "added": 0,
+        "already_linked": 0,
+        "removed": 0,
+        "not_linked": 0,
+        "not_found": 0,
+        "rejected": 0,
+    }
+    results = []
+    with db_connect() as conn:
+        project = conn.execute(
+            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
+            (session_id, project_id),
+        ).fetchone()
+        if not project:
+            return None
+        run_maps = _bulk_project_run_maps(conn, session_id, entity_ids)
+        placeholders = ",".join("?" for _ in entity_ids)
+        link_rows = conn.execute(
+            "SELECT id, project_id, entity_type, entity_id, source, created "
+            "FROM project_links WHERE project_id = ? AND entity_type = ? "
+            f"AND entity_id IN ({placeholders})",  # nosec B608
+            [project_id, entity_type, *entity_ids],
+        ).fetchall()
+        linked_by_id = {str(row["entity_id"]): _row_to_link(row) for row in link_rows}
+        count_row = conn.execute(
+            "SELECT COUNT(*) AS count FROM project_links "
+            "WHERE project_id = ? AND entity_type = 'run'",
+            (project_id,),
+        ).fetchone()
+        current_count = int(count_row["count"] or 0) if count_row else 0
+        limit = int(_config.CFG.get("max_project_links_per_project", 1000) or 1000)
+        new_link_budget = max(0, limit - current_count)
+        links = []
+        for entity_id in entity_ids:
+            if entity_id in linked_by_id:
+                results.append(_project_bulk_result(counts, entity_id, "already_linked"))
+                continue
+            if entity_id not in run_maps["any"]:
+                results.append(_project_bulk_result(counts, entity_id, "not_found"))
+                continue
+            if entity_id not in run_maps["owned"]:
+                results.append(_project_bulk_result(counts, entity_id, "rejected", reason="not_owned"))
+                continue
+            if new_link_budget <= 0:
+                results.append(_project_bulk_result(counts, entity_id, "rejected", reason="policy_blocked"))
+                continue
+            link = _insert_project_link(conn, project_id, entity_type, entity_id, source)
+            links.append(link)
+            new_link_budget -= 1
+            results.append(_project_bulk_result(counts, entity_id, "added"))
+        conn.commit()
+    return {"ok": True, "counts": counts, "results": results, "links": links}
+
+
 def unlink_project_entity(session_id, project_id, data):
     raw = data if isinstance(data, dict) else {}
     entity_type, entity_id, _ = _normalize_link_payload({**raw, "source": "manual"})
@@ -4221,6 +4331,56 @@ def unlink_project_entity(session_id, project_id, data):
         )
         conn.commit()
     return result.rowcount > 0
+
+
+def unlink_project_entities(session_id, project_id, data):
+    entity_type, entity_ids, _ = _normalize_bulk_link_payload({**(data if isinstance(data, dict) else {}), "source": "manual"})
+    counts = {
+        "added": 0,
+        "already_linked": 0,
+        "removed": 0,
+        "not_linked": 0,
+        "not_found": 0,
+        "rejected": 0,
+    }
+    results = []
+    with db_connect() as conn:
+        project = conn.execute(
+            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
+            (session_id, project_id),
+        ).fetchone()
+        if not project:
+            return None
+        run_maps = _bulk_project_run_maps(conn, session_id, entity_ids)
+        placeholders = ",".join("?" for _ in entity_ids)
+        link_rows = conn.execute(
+            "SELECT entity_id FROM project_links WHERE project_id = ? AND entity_type = ? "
+            f"AND entity_id IN ({placeholders})",  # nosec B608
+            [project_id, entity_type, *entity_ids],
+        ).fetchall()
+        linked_ids = {str(row["entity_id"]) for row in link_rows}
+        removable_ids = []
+        for entity_id in entity_ids:
+            if entity_id not in run_maps["any"]:
+                results.append(_project_bulk_result(counts, entity_id, "not_found"))
+                continue
+            if entity_id not in run_maps["owned"]:
+                results.append(_project_bulk_result(counts, entity_id, "rejected", reason="not_owned"))
+                continue
+            if entity_id not in linked_ids:
+                results.append(_project_bulk_result(counts, entity_id, "not_linked"))
+                continue
+            removable_ids.append(entity_id)
+            results.append(_project_bulk_result(counts, entity_id, "removed"))
+        if removable_ids:
+            remove_placeholders = ",".join("?" for _ in removable_ids)
+            conn.execute(
+                "DELETE FROM project_links WHERE project_id = ? AND entity_type = ? "
+                f"AND entity_id IN ({remove_placeholders})",  # nosec B608
+                [project_id, entity_type, *removable_ids],
+            )
+        conn.commit()
+    return {"ok": True, "counts": counts, "results": results}
 
 
 def list_project_targets(session_id, project_id):

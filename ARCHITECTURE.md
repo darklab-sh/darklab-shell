@@ -219,6 +219,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | -------- | ---------- | ------------- |
 | `GET` | `/history` | Returns paginated current-session history items with run/snapshot/run-subtype filters, linked-run project filters, command/output search, starred-only filtering, labels/notes, and command-root summaries. |
 | `DELETE` | `/history` | Deletes all run history for the current session and removes matching full-output artifacts. |
+| `POST` | `/history/bulk-delete` | Deletes selected completed current-session runs, returning per-run results while rejecting running or missing runs without failing the whole request. |
 | `GET` | `/history/commands` | Returns newest distinct command strings for prompt history, desktop recents, and mobile recents. |
 | `GET` | `/history/stats` | Returns compact current-session counters for the Status Monitor dashboard. |
 | `GET` | `/history/insights` | Returns compact visual history data for Status Monitor constellation, heatmap, ticker, and command mix widgets. |
@@ -1233,10 +1234,10 @@ Current totals:
 
 - behavior tests: 2,646
 - docs/inventory meta-tests: 32
-- `pytest`: 1326 (1294 behavior + 32 meta)
+- `pytest`: 1329 (1297 behavior + 32 meta)
 - `vitest`: 1105
 - `playwright`: 247
-- total: 2,678
+- total: 2,681
 
 ### Testing Architecture
 

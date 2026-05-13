@@ -17,45 +17,351 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 
 ## Open TODOs
 
-- **History multi-select bulk actions**
+- **History multi-select bulk action follow-ups**
+  - Add broader browser unit coverage for select mode, row-click selection, checkbox state, select-all mixed state, clear selection, reset-on-close, row action propagation, in-flight action locking, project picker flows, and unknown rejected-reason fallback messaging.
+  - Add one desktop and one mobile Playwright flow covering visible-page selection, project add/remove, bulk delete, mobile toolbar wrapping, mobile select-mode row tap, and long-press no-op behavior.
+  - Consider snapshot bulk delete later if real use shows saved snapshots need the same workflow.
+
+- **Encrypted secrets vault**
   - **Scope**
-    - Add visible-page-only multi-select for run rows in the History drawer. Selection does not span pagination, search, filters, or type changes in v1.
-    - Bulk actions cover **delete**, **add to active project**, **add to project**, and **remove from project**.
-    - Keep all three project actions available for mixed selections so users can normalize selected runs regardless of current link state.
-    - Make project actions idempotent: already-linked runs are skipped during add, already-unlinked runs are skipped during remove, and neither case fails the whole bulk action.
-    - Reuse existing UI primitives for all controls: shared `btn` classes, `chrome-row` row behavior, `dropdown-surface` / save-menu patterns, app-native selects, `showConfirm`, `bindPressable`, focus helpers, and existing mobile sheet/dropdown placement rules.
-  - **Phase 1 - Selection state and row rendering**
-    - Add a small History selection model keyed by visible run id, storing the run object needed by bulk actions.
-    - Add a **Select mode** toggle beside **Select all**, **Clear selection**, and a top-level **Actions** menu.
-    - Show row checkboxes only when select mode is enabled.
-    - In select mode, make clicking a run row toggle selection instead of opening Run Details. Row-level buttons, row action menus, restore, permalink, compare, and delete should keep their existing behavior and stop propagation.
-    - Keep select mode enabled across page/filter/search changes, but clear selected rows when the visible result set changes.
-  - **Phase 2 - Bulk toolbar behavior**
-    - Render selected count in the toolbar, such as `3 selected`.
-    - Disable **Select all**, **Clear selection**, and **Actions** when there are no visible selectable rows or no selected rows as appropriate.
-    - **Select all** selects only visible run rows on the current page.
-    - **Clear selection** clears the current visible selection without closing select mode.
-    - After successful bulk actions, clear selected rows but leave select mode enabled.
-  - **Phase 3 - Batch backend routes**
-    - Add batch project link and unlink routes so ownership checks, skipped counts, and partial-success reporting stay server-owned.
-    - Suggested add route: `POST /projects/<project_id>/links/bulk` with `{"entity_type":"run","entity_ids":["run-1","run-2"]}`.
-    - Suggested remove route: `DELETE /projects/<project_id>/links/bulk` with the same payload shape.
-    - Return count groups such as `added`, `already_linked`, `removed`, `not_linked`, `not_found`, and `rejected`.
-    - Add a bulk history delete route for selected visible runs rather than firing one request per row.
-  - **Phase 4 - Bulk project actions**
-    - **Add to active project** resolves the current active project and posts all selected run ids to the batch link route.
-    - **Add to project** reuses the existing project picker, including active-project-first ordering, then posts all selected run ids to the batch link route.
-    - **Remove from project** removes selected runs from one chosen project. If selected runs are linked to multiple projects, show a project picker populated from their linked projects. Do not remove a run from every linked project unless a separate explicit action is added later.
-    - Refresh History and Projects state after successful bulk link/unlink so row menus and project views reflect the new state immediately.
-  - **Phase 5 - Bulk delete**
-    - Confirm destructive deletes with `showConfirm`, including a count such as `Delete 5 selected runs?`.
-    - Delete only selected run rows in v1. Snapshot multi-delete can be a follow-up if needed.
-    - After delete, refresh the current History page. If the page becomes empty and a previous page exists, move back one page.
-  - **Phase 6 - Feedback and tests**
-    - Show concise result feedback such as `Added 4 runs to darklab.sh - 2 already linked` or `Removed 3 runs from darklab.sh - 1 was not linked`.
-    - Add backend coverage for idempotent add/remove, cross-session rejection, missing ids, partial success, and bulk delete ownership checks.
-    - Add browser unit coverage for select mode, row-click selection, select all visible, clear selection, toolbar disabled states, project picker flows, and immediate menu refresh after bulk actions.
-    - Add one desktop and one mobile Playwright flow covering selection, project add/remove, and toolbar usability.
+    - Per-session-token encrypted store for tool API tokens and bearer values that must not appear in transcripts, history, snapshots, or logs.
+    - User CRUD via `secret set/list/unset/show-consumers` built-ins and an Options modal "Secrets" panel.
+    - AES-GCM at rest with a per-secret nonce; wrapping key derived from `SECRETS_MASTER_KEY` via HKDF-SHA256.
+    - Values are never echoed, never returned by listing routes, never expanded as `$VAR` like session command variables, never logged.
+    - `commands.yaml` declares which env var(s) a tool consumes; the registry injects only matching secrets at run time. Missing required secrets produce a clear pre-launch error.
+    - Session-token rotate/migrate re-keys secret rows to the new token; the master key is unchanged.
+  - **Phase 0 - Existing-code integration check**
+    - Audit the existing session-token rotate/migrate flow in `app/services/session/` and `app/blueprints/session.py` for extension points covering new per-session encrypted data.
+    - Confirm the runtime env-build path in `app/services/commands/registry.py` (where `XDG_CONFIG_HOME` is injected for ProjectDiscovery tools) is the right hook for secret injection. If not, identify the cleanest seam.
+    - Decide whether `commands.yaml` gets a new additive `requires_secrets` field or extends an existing block; design the schema and normalization in `app/services/commands/registry_loader.py`.
+    - Decide the bootstrap rule for the non-Docker dev path where `SECRETS_MASTER_KEY` is unset.
+  - **Phase 1 - Backend contracts**
+    - New `app/services/secrets/` service: `vault.py` (wrap/unwrap with AES-GCM + per-secret nonce), `storage.py` (SQLite `secrets` table `(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at)`), `audit.py` (emits structured events without value content).
+    - Master key sourced from `SECRETS_MASTER_KEY` env. Reject startup if shorter than 32 bytes (base64-decoded). HKDF-SHA256 with a fixed application salt derives the wrapping key.
+    - Routes in new `app/blueprints/secrets.py`:
+      - `GET /session/secrets` returns `[{name, consumer_envs, updated_at}]` only — never values.
+      - `POST /session/secrets` accepts `{name, value, consumer_envs?}`. `201` on create, `200` on update.
+      - `DELETE /session/secrets/<name>` removes one row.
+      - `POST /session/secrets/rotate` re-wraps all rows with the current master key (used after key rotation).
+    - Built-ins in new `app/services/commands/builtins_secrets.py`: `secret set NAME` (transcript-suppressed value entry; the command line that triggered the call must not include the value), `secret list`, `secret unset NAME`, `secret show-consumers` (lists tools in `commands.yaml` declaring each env).
+    - Audit log: `SECRET_CREATED`, `SECRET_UPDATED`, `SECRET_DELETED`, `SECRET_INJECTED` (one per run with consumer env names only).
+    - Rate-limit secrets routes with a dedicated limit so brute-force scanning of secret names is blocked.
+  - **Phase 2 - Storage and master key bootstrap**
+    - Add the `secrets` table migration in `app/core/database.py` with a unique index on `(session_token, name)`.
+    - Docker entrypoint generates `/data/.secrets_master_key` (mode `0600`, owner `appuser`) on first start if `SECRETS_MASTER_KEY` is unset; emits a one-time `MASTER_KEY_GENERATED` log line.
+    - Operator can override via `SECRETS_MASTER_KEY` env to use an externally managed key (KMS, Vault, manual operator key).
+    - Session-token rotate/migrate re-keys secret rows to the new session token but does not change ciphertext (only the row key); migration is idempotent.
+  - **Phase 3 - Registry injection and pre-launch guardrail**
+    - Extend `commands.yaml` schema with `requires_secrets: [{env: SHODAN_API_KEY, optional: false}]` (backwards compatible — absence means no injection).
+    - At command launch, `app/services/commands/registry.py` looks up matching vault rows by session token, decrypts in-memory, injects into the subprocess env alongside the existing `XDG_CONFIG_HOME` redirect. Decrypted values are zeroed after subprocess spawn.
+    - If a required secret is missing, block launch with a clear error: `Run requires secret SHODAN_API_KEY which is not set. Set it via "secret set SHODAN_API_KEY" or the Options → Secrets panel.`
+    - Optional secrets log a `SECRET_OPTIONAL_MISSING` warning but do not block.
+  - **Phase 4 - Browser surface**
+    - New `app/static/js/features/preferences/secrets_panel.js`: Options modal "Secrets" section sibling to "Session token". Rows show `name`, consumer-tool chips, last-updated, Edit / Delete.
+    - Edit modal uses a masked `<input type="password">` with an off-by-default reveal toggle; copy-to-clipboard requires an explicit click and clears the clipboard after a short countdown.
+    - Mobile parity: Options sheet gets the same Secrets section, reusing `mobile_sheet` placement helpers.
+    - Reuse `ui_confirm`, `ui_disclosure`, `ui_focus_trap`, `ui_outside_click`, `ui_pressable` helpers.
+  - **Phase 5 - Feedback and tests**
+    - Pre-launch missing-secret error UX matches the registry rewrite/denial messages already in use.
+    - Backend coverage: round-trip encrypt/decrypt, nonce uniqueness, master-key-missing/short rejects, session-token rotate re-keys all rows, migration moves rows without re-encrypting, `requires_secrets` validation, audit log shape (never contains values), missing-required-secret pre-launch error, injection only on matching envs, rate-limit on secrets routes, transcript suppression on `secret set`.
+    - Frontend coverage: panel CRUD, masked input + reveal toggle, clipboard copy guard, mobile sheet parity, Options modal integration, missing-secret pre-launch error rendering.
+    - Container smoke test confirms entrypoint master-key bootstrap on first start.
+  - **Future**
+    - KMS or HashiCorp Vault integration for master-key sourcing.
+    - Per-secret expiry and rotation reminders.
+    - Operator-scope deployment-wide default secrets (overridable per session).
+    - Per-secret consumption history (which runs used a secret in the last 30 days).
+    - Import/export of secret bundles for engagement handoff.
+    - Optional secret scopes (read-only / write-only) for tools that don't need full access.
+
+- **Findings triage inbox**
+  - **Scope**
+    - Cross-run queue of every classifier-emitted finding and warning for the active session, with stable dedupe across runs by finding signature.
+    - Per-finding triage status: `new`, `triaged`, `confirmed`, `false_positive`.
+    - Filters: severity, status, tool, project, time range, free-text.
+    - Detail side sheet with occurrence list, source-run permalinks, line snippets, and pin-to-project action.
+    - Bulk status updates with the same partial-success and `results[]` contract as the History multi-select bulk-actions plan.
+    - Standalone modal in v1. If the Session Entity Atlas plan ships, this scope folds into the Atlas Findings tab and the standalone modal is retired.
+  - **Phase 0 - Existing-code integration check**
+    - Audit `app/core/output_signals.py` for the finding event shape, persistence point in run finalization, and severity/kind taxonomy.
+    - Audit the existing Projects modal Findings tab for filter UI and row patterns to reuse.
+    - Confirm dedupe scope: per-session-token (recommended) so cross-tool overlap is captured.
+    - Confirm retention-pruning interaction so inbox rows are not orphaned when their source runs are pruned.
+  - **Phase 1 - Backend contracts and storage**
+    - New `app/services/findings/inbox.py` materializer that runs at run-finalize, consumes classified signals, computes a stable signature, and upserts inbox rows. Signature: `sha256(tool_root | normalized_kind | normalized_target | severity)`; normalization rules are documented in the module and shared with the frontend.
+    - New SQLite tables:
+      - `findings_inbox` `(id, session_token, signature_hash, tool_root, kind, severity, first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, status_updated_at)`.
+      - `findings_inbox_occurrences` `(finding_id, run_id, line_no, snippet, seen_at)` with retention pruning tied to run pruning.
+    - Routes in new `app/blueprints/findings_inbox.py`:
+      - `GET /findings/inbox` paginated list with filters.
+      - `GET /findings/inbox/<id>` detail with occurrences.
+      - `PUT /findings/inbox/<id>/status` single-status update.
+      - `PUT /findings/inbox/status` bulk-status update with `{finding_ids: [...], status}`. Same `results` and `reason` contract as the bulk-actions plan; max bulk size 100; `4xx` overflow.
+      - `POST /findings/inbox/<id>/pin` promotes into a project as a structured finding via existing `services.projects.workspace` helpers.
+    - Audit log: `FINDING_STATUS_CHANGED`, `FINDINGS_BULK_STATUS_CHANGED`, `FINDING_PINNED_TO_PROJECT`.
+    - Materialization is idempotent on re-finalization; signatures collapse duplicates.
+  - **Phase 2 - Schema migration and backfill**
+    - Migration in `app/core/database.py` with indexes on `(session_token, signature_hash)` and `(session_token, status)`.
+    - Backfill helper walks existing saved runs on first deploy and materializes findings.
+    - Pruning rule: occurrence rows follow their source run; inbox rows survive after the last occurrence is pruned (the pattern is the value).
+  - **Phase 3 - Browser surface**
+    - New `app/static/js/features/findings/findings_inbox.js` and `app/static/css/features/findings_inbox.css`.
+    - Top-level modal with sticky filter row and paginated row list. Row chrome: severity badge, kind, normalized target, occurrence count, first/last seen, status chip.
+    - Detail side sheet: occurrence list with permalinks and snippet excerpts, status controls, pin-to-project picker (active-project-first ordering).
+    - Entry points:
+      - Desktop chrome rail entry with unread `new` count badge.
+      - Mobile menu item.
+      - History row action: "Findings" opens inbox prefiltered to that run.
+      - Run Details: "Open in inbox" prefiltered to the run.
+      - Projects modal: "Open in inbox" prefiltered to the project.
+    - Reuses `ui_dismissible`, `ui_focus_trap`, `ui_outside_click`, `ui_pressable`, `ui_entity_metadata`, and the existing bulk-actions toast and `results[]` rendering.
+  - **Phase 4 - Cross-surface integration**
+    - `false_positive` status propagates to Run Details and the project Findings tab as a greyed-out row treatment.
+    - Project-pin creates a structured finding using existing `services.projects.workspace` writes; the pinned finding carries the inbox `finding_id` as a back-link.
+    - `?` shortcuts overlay gains "Open Findings inbox".
+    - Terminal-native built-ins: `findings list`, `findings show <id>`, `findings status <id> <state>`.
+  - **Phase 5 - Feedback and tests**
+    - Bulk status update uses the existing bulk-result toast policy (sticky when non-zero `rejected`/`not_found`).
+    - Backend coverage: signature stability across runs of the same tool/target/severity, re-finalize idempotency, status transition state machine, backfill correctness, bulk status update with mixed not_found/rejected entries (with inline reasons), project-pin creates structured finding and links back, cross-session rejection, max-bulk-size rejection.
+    - Frontend coverage: filter combinations, single and bulk status changes, project pin flow, occurrence list rendering, prefiltered entry-point parity (History, Run Details, Projects), unread badge accuracy after status changes.
+    - Playwright: one desktop and one mobile flow covering triage end-to-end (open, filter, change status, pin, see status reflect in Run Details).
+  - **Future**
+    - Bulk pin (pin many findings into one project in one click).
+    - Saved triage views (named filter combinations).
+    - Per-finding labels and notes via `ui_entity_metadata` helpers.
+    - Suppression rules — auto-mark certain signatures as `false_positive` based on regex or tool root.
+    - Export inbox snapshot as CSV/JSONL.
+    - Cross-session triage view for operators managing multiple sessions.
+    - Folded into the Session Entity Atlas Findings tab if the Atlas plan ships.
+
+- **External intel service integrations**
+  - **Scope**
+    - Three providers in v1: Shodan, VirusTotal, GreyNoise. Together they cover host/port intel, file/URL/domain reputation, and IP triage.
+    - Two delivery passes:
+      - CLI wrappers — `shodan`, `vt`, `greynoise` registered in `commands.yaml` with env injection from the encrypted secrets vault.
+      - App-native `intel ip|domain|hash` built-in producing a uniform card across providers.
+    - Provider abstraction with per-(session, provider) Redis token-bucket rate limiter and Redis-backed response cache with per-provider TTL.
+    - Audit log of every lookup (session, run, provider, entity type, cache hit, http status). Never logs response bodies or API keys.
+    - Entity-aware classifier hooks extract IPs, domains, hashes, and CVEs from any tool output as structured events for downstream consumers (Atlas, Findings, sidecar enrichment).
+    - Share-redaction baseline marks intel response bodies as raw-only — excluded from snapshot permalinks and saved HTML/PDF exports.
+    - Hard dependency: encrypted secrets vault is landed before any intel integration ships.
+  - **Provider access reference**
+    - Categorize providers by API-key and payment requirements so the v1 ship list and future expansion stay calibrated to what users can actually adopt. Re-check at integration time — vendor terms change.
+    - **Tier A — No key required (truly public, no signup):**
+      - `crt.sh` — Certificate Transparency log search. Anonymous; rate limits are undocumented; avoid scheduling per-minute queries against the same domain.
+      - BGPView — ASN / IP / prefix lookups; no auth.
+      - Team Cymru — ASN-to-origin lookup via DNS/whois; no auth.
+      - NVD CVE API — usable without a key at 5 requests per 30 seconds (rolling window). A free key raises the limit to 50 requests per 30 seconds.
+      - Mnemonic PassiveDNS public API — 10 req/min, 1000/day without auth. Higher limits and private TLP data require a key requested by email.
+      - HaveIBeenPwned Pwned Passwords (k-anonymity range endpoint) — free, no auth; separate from the paid breach-search API.
+      - ExploitDB — public Git repo and `searchsploit` CLI; no API key, no rate limit.
+    - **Tier B — Free API key (registration only, no payment):**
+      - AlienVault OTX (LevelBlue) — free signup; 10k req/hr authenticated vs 1k unauthenticated.
+      - Chaos (ProjectDiscovery) — free signup at `cloud.projectdiscovery.io`; required for both CLI and API; DNS API portions are invite-only.
+      - Hybrid Analysis — free account; restricted API key by default. A one-time vetting form upgrades the key to allow submissions and downloads.
+      - ThreatFox / abuse.ch — free Auth-Key via abuse.ch SSO under fair-use. Companies running commercial workflows are expected to move to the paid abuse.ch commercial subscription.
+      - GreyNoise Community — free Community API key for unlimited IP lookups; unauthenticated access caps at 10 lookups/day. Enterprise tier is paid.
+      - VirusTotal Public — free key with 500 req/day and 4 req/min. Strictly non-commercial use; commercial workflows must move to Premium.
+      - AbuseIPDB free tier — 1,000 lookups/day on the free plan; verified webmasters get 3,000/day.
+      - urlscan.io — free key strongly recommended; starting May 2026 some public endpoints reject unauthenticated requests entirely. Pro plan is paid for higher quotas, private scans, and richer search.
+      - Censys Search — free signup grants 100 credits/month at no cost; covers host, web property, and certificate lookups.
+      - NVD CVE API (with key) — free key raises the unauthenticated 5/30s window to 50/30s.
+      - Vulners (free tier) — free signup; `/api/v3/search/id/` is credit-free for CVE enrichment; broader API consumes credits. Researchers and OSS projects can request a free research license.
+      - SecurityTrails (free tier) — free key; documented quotas are inconsistent across vendor pages (50 queries/month entry vs 10k/month listed elsewhere). Verify the current dashboard quota at integration time.
+      - IntelX free tier — 7-day trial downgrades to a free account with rate-limited access; product integration requires a paid license.
+      - BuiltWith free — free API rate-limited to one request per second for basic tech-stack lookups.
+    - **Tier C — Paid plan required for meaningful use or API access:**
+      - Shodan — free account exists but issues no API credits. Membership is a one-time payment (~$50 standard, often promo at $5) and is the entry point for API use.
+      - VirusTotal Premium — paid subscription; pricing not publicly listed; required for commercial use, sample download, behavior data, and higher quotas.
+      - ZoomEye — API access is paid-only (one-time lifetime deals or subscription); free account is web-UI only.
+      - DeHashed — API requires a paid subscription or credit pack (roughly $3 per 100 credits); no free API tier.
+      - HaveIBeenPwned breach API — paid only; entry-tier Core starts at the "cost of a coffee", scales up to High-RPM commercial tiers.
+      - IntelX commercial — required for product integration; plans start around $2,000+/month.
+      - Recorded Future Triage cloud sandbox API — commercial license bundled with Threat Intelligence or SecOps modules; not a casual free integration.
+      - Joe Sandbox — paid, enterprise-priced.
+      - PassiveTotal / RiskIQ — paid; now under Microsoft Defender Threat Intelligence licensing.
+      - Farsight DNSDB — paid commercial.
+      - BuiltWith Advanced/Pro — $144/yr Advanced through $295–$495+/mo Pro; required for list-building or unlimited targets.
+      - SecurityTrails paid plans — required for IP DSL queries, DNS/WHOIS history, and professional features.
+    - **Tier D — Self-hosted or no vendor relationship:**
+      - MISP — operator-deployed instance; auth uses the operator's own keys; no vendor relationship beyond the OSS project.
+      - Wappalyzer community forks (`wappybird`, `wappalyzer-next`, `wappalyzer-cli`) — work locally without keys. Official OSS client was closed in 2023; the hosted Wappalyzer API is paid and key-gated, so any future Wappalyzer integration should target a community CLI rather than the hosted API.
+    - **Defunct — do not target:**
+      - BinaryEdge — standalone platform shut down March 2025; replaced by Coalition Control®. Remove from future-provider considerations.
+    - **Plan-impact notes informed by this reference:**
+      - The v1 ship list (Shodan, VirusTotal, GreyNoise) spans one paid-membership provider, one free-with-key public provider, and one free-with-key community provider — a balanced first set that exercises every secrets-vault and rate-limit path.
+      - The encrypted secrets vault stays a hard prerequisite even though some providers are free, because every Tier B and Tier C provider stores a credential that must not appear in transcripts, history, or shares.
+      - Tier A providers do not strictly require the vault. A "no-secret-required" early-value phase covering `crt.sh`, BGPView, Team Cymru, anonymous NVD, Mnemonic, and HIBP Pwned Passwords is viable as a phase 1.5 if the vault slips, and is the right home for "first-time users see immediate value before configuring secrets."
+      - Tier C providers should never be added without a clear cost/benefit case and an operator opt-in, because users will hit paywalls during normal recon. Document the cost expectation in the Options → Secrets panel and the `intel` help text.
+    - **Reference docs (re-check at integration time — vendor terms change):**
+      - Snapshot date: 2026-05-13. Re-verify each row before adding the provider to `commands.yaml` or the `intel` built-in.
+      - Tier A:
+        - crt.sh — [Certificate Transparency overview (Wikipedia)](https://en.wikipedia.org/wiki/Certificate_Transparency); rate limits undocumented.
+        - NVD CVE API (anonymous + with key) — [API Key Announcement](https://nvd.nist.gov/general/news/API-Key-Announcement).
+        - Mnemonic PassiveDNS — [Public API docs](https://docs.mnemonic.no/api/services/pdns/01-public_api.html).
+      - Tier B:
+        - AlienVault OTX (LevelBlue) — [DirectConnect API](https://otx.alienvault.com/api).
+        - Chaos (ProjectDiscovery) — [API Key docs](https://chaos.projectdiscovery.io/docs/api-key).
+        - Hybrid Analysis vetting — [Issuing full API key for automated submissions](https://hybrid-analysis.com/knowledge-base/issuing-full-api-key-for-automated-submissions).
+        - ThreatFox / abuse.ch — [Community API docs](https://threatfox.abuse.ch/api/).
+        - GreyNoise Community — [Using the GreyNoise Community API](https://docs.greynoise.io/docs/using-the-greynoise-community-api).
+        - VirusTotal Public vs Premium — [Public vs Premium API](https://docs.virustotal.com/reference/public-vs-premium-api).
+        - AbuseIPDB — [API Plans & Pricing](https://www.abuseipdb.com/pricing).
+        - urlscan.io — [API Documentation](https://urlscan.io/docs/api/). Note: starting May 2026 some public endpoints reject unauthenticated requests.
+        - Censys Search — [Data Access Tiers and Entitlements](https://docs.censys.com/docs/data-access-tiers-entitlements).
+        - Vulners — [2025 access update (CVE enrichment credit-free)](https://vulners.com/blog/access_update_2025/).
+        - SecurityTrails — [Pricing](https://securitytrails.com/corp/pricing); quotas inconsistent across vendor pages, verify in-dashboard.
+        - IPinfo free vs token — [Usage limit FAQ](https://ipinfo.io/faq/article/61-usage-limit-free-plan).
+        - IntelX free / commercial — [API help](https://help.intelx.io/docs/api/).
+        - BuiltWith free API — [Free API docs](https://api.builtwith.com/free-api).
+      - Tier C:
+        - Shodan Membership — [Account FAQ](https://help.shodan.io/the-basics/account-faq).
+        - VirusTotal Premium — [Public vs Premium API](https://docs.virustotal.com/reference/public-vs-premium-api).
+        - ZoomEye — [Pricing](https://www.zoomeye.ai/pricing).
+        - DeHashed — [API page](https://dehashed.com/api).
+        - HaveIBeenPwned breach API — [API key page](https://haveibeenpwned.com/API/Key).
+        - Recorded Future Triage cloud sandbox — [Sandbox API docs](https://tria.ge/docs/).
+        - BuiltWith Advanced/Pro — [Plans and Pricing Explained](https://kb.builtwith.com/general-questions/plans-and-pricing-explained/).
+      - Tier D:
+        - Wappalyzer OSS closure context — [HN discussion](https://news.ycombinator.com/item?id=37236746). Community forks: `wappybird`, `wappalyzer-next`, `wappalyzer-cli`.
+      - Defunct:
+        - BinaryEdge transition (shut down March 2025) — [Transition FAQ](https://www.binaryedge.io/pricing.html). Replaced by Coalition Control®.
+  - **Phase 0 - Existing-code integration check**
+    - Confirm the encrypted secrets vault plan is landed; this plan is gated on it.
+    - Audit `app/services/commands/registry.py` runtime env-build path for the secret injection hook.
+    - Audit `app/core/output_signals.py` for the cleanest place to extract IP/domain/hash/CVE entities. Decide between extending existing event types or adding `entity_ip`, `entity_domain`, `entity_hash`, `entity_cve` events.
+    - Verify the Dockerfile install pipeline can absorb new vendor CLIs (`shodan`, `vt-cli`, `greynoise`) under the scanner-user PATH.
+    - Confirm `app/core/redaction.py` extension points support flagging response bodies as raw-only.
+  - **Phase 1 - Provider abstraction**
+    - New `app/services/intel/` service:
+      - `base.py` — `Provider` ABC with `lookup_ip`, `lookup_domain`, `lookup_hash`, `lookup_cve`, `rate_limit`, `cache_ttl`.
+      - `rate_limiter.py` — Redis token-bucket keyed by `(session_token, provider)`.
+      - `cache.py` — Redis-backed `(provider, entity_type, entity_value)` cache with provider-tunable TTL; cache miss falls through to provider; results are normalized before caching so cache hits cannot leak raw response shapes.
+      - `audit.py` — emits `INTEL_LOOKUP` with `(session, run_id?, provider, entity_type, cache_hit, http_status)`. Never logs response bodies, API keys, or full entity lists.
+    - Provider modules `shodan.py`, `virustotal.py`, `greynoise.py`. Each reads its key from the vault at call time, never caches keys beyond the rate-limit window, and returns a provider-normalized payload.
+  - **Phase 2 - CLI wrapper pass**
+    - Install `shodan`, `vt-cli`, `greynoise` CLIs in the Dockerfile under the scanner-user PATH.
+    - Register `commands.yaml` entries with allowed subcommands, allowed flags, and `requires_secrets`:
+      - `shodan` → `SHODAN_API_KEY`.
+      - `vt` → `VT_API_KEY`.
+      - `greynoise` → `GREYNOISE_API_KEY`.
+    - Verify deny-prefix coverage so these CLIs cannot reach loopback or escape the allowlist.
+    - Add smoke-test fixtures for each CLI to the container smoke test corpus.
+  - **Phase 3 - App-native `intel` built-in**
+    - New `app/services/commands/builtins_intel.py`:
+      - `intel ip <ip>` fans out to Shodan + GreyNoise; uniform card shows ports/banners/CVEs and classification/confidence.
+      - `intel domain <domain>` uses VirusTotal; uniform card shows reputation, recent URLs, WHOIS summary.
+      - `intel hash <sha256|sha1|md5>` uses VirusTotal; uniform card shows verdict, scan engines, tags.
+      - `intel cve <id>` is deferred to the future provider list.
+    - Built-in output routes through the standard run-broker so it gets history persistence, autocomplete, and pipe support like any external command.
+    - Browser-side card module: `app/static/js/features/intel/intel_card.js` with a provider-uniform layout shared across `intel` subcommands and any future enrichment surfaces.
+  - **Phase 4 - Entity-aware classifier hooks**
+    - Extend `app/core/output_signals.py` to extract:
+      - IPv4 and IPv6 (with configurable public-context filter that drops loopback/RFC1918 by default).
+      - Hostnames / FQDNs (IDN-normalized, lowercased).
+      - SHA256, SHA1, MD5 hashes (algorithm-tagged).
+      - CVE identifiers (`CVE-YYYY-NNNNN`, uppercased).
+    - Emit `entity_ip`, `entity_domain`, `entity_hash`, `entity_cve` events with confidence and source line.
+    - These events are the foundation that the Session Entity Atlas plan and the Findings inbox consume.
+  - **Phase 5 - Sharing, redaction, audit, and tests**
+    - `app/core/redaction.py` marks intel response bodies as raw-only. Snapshot permalinks of `intel` runs render a "Intel data omitted from share" placeholder where the card would normally appear. Saved HTML/PDF exports follow the same rule.
+    - Backend coverage: provider mocks for each call path, rate-limit token-bucket behavior, cache hit/miss with TTL expiry, audit log shape, secrets-gate pre-launch error, normalized response schema parity across providers, entity extraction false-positive guardrails (loopback IPs, malformed CVE IDs, mid-string false matches).
+    - Frontend coverage: intel card render parity across providers, missing-secret pre-launch error UX, cache-hit chip rendering, share-export omits intel sections.
+    - Playwright: desktop and mobile flows for `intel ip`, `intel domain`, `intel hash` with mocked provider responses; one share-redaction flow proving intel content is omitted.
+  - **Future**
+    - Tier A (no-key) early-value pass: `crt.sh`, BGPView, Team Cymru, anonymous NVD, Mnemonic PassiveDNS, HIBP Pwned Passwords. Ship before the vault if scheduling requires it, since none of these consume secrets.
+    - Tier B (free-key) provider expansion: AlienVault OTX, Chaos (ProjectDiscovery), Hybrid Analysis, ThreatFox, AbuseIPDB, urlscan.io, Censys Search, Vulners (CVE enrichment), SecurityTrails free, IPinfo, BuiltWith free.
+    - Tier C (paid-plan) providers — only behind an operator opt-in with documented cost expectation: VirusTotal Premium (commercial workflows), ZoomEye, DeHashed, HaveIBeenPwned breach API, IntelX commercial, Recorded Future Triage, PassiveTotal / Defender TI, Farsight DNSDB, BuiltWith paid.
+    - Wappalyzer integration should target a community CLI fork (wappybird / wappalyzer-next / wappalyzer-cli) rather than the paid hosted API.
+    - MISP integration if operators ask for it — operator-supplied URL plus an instance API key stored in the vault.
+    - Sidecar enrichment panel — opt-in passive lookups fire alongside a scanner run and render in a collapsible side panel.
+    - Pipe helpers `| enrich-shodan`, `| enrich-greynoise` via `app/services/commands/postfilters.py`.
+    - Project workspace enrichment — pre-fetch passive snapshots when a host or domain is added as a project target.
+    - Findings enricher — auto-attach intel snapshots to findings in the inbox or Atlas.
+    - Workflow chain templates pairing native tools with intel lookups.
+    - Defunct — do not target: BinaryEdge (shut down March 2025; replaced by Coalition Control®).
+
+- **Session Entity Atlas (entity-first triage surface)**
+  - **Scope**
+    - Top-level Atlas surface with first-class chrome treatment: desktop left-rail entry between History and Workflows, mobile menu item, dedicated keyboard shortcut. Not a stacked modal.
+    - Tabs: Findings, Hosts/IPs, Domains, Hashes, CVEs, URLs. Each tab is a filterable, sortable list of distinct entities deduped across every saved run for the active session token.
+    - Entity Detail side sheet: identity strip, intel snapshot card, source-run list with jump-to-line, findings on entity, labels and notes (reusing `ui_entity_metadata`), promote-to-project action.
+    - Transcript ↔ Atlas wiring: tagged tokens click into entity detail, hover popover summarizes high-signal intel, "see in run" navigation jumps back to source line.
+    - Findings tab absorbs the Findings triage inbox plan if both are scheduled — the inbox modal is retired in favor of the Atlas tab.
+    - Project workspaces become a curation layer over the entity store; project_links are tags on entity rows, not parallel copies.
+    - Hard dependencies: entity-aware classifier hooks from the External intel service integrations plan are landed; encrypted secrets vault is landed for intel refresh actions.
+  - **Phase 0 - Existing-code integration check**
+    - Confirm classifier entity events (`entity_ip`, `entity_domain`, `entity_hash`, `entity_cve`) are landed.
+    - Audit `app/services/projects/workspace.py` and `app/services/projects/metadata.py` for label/note/finding/target storage that must be reused, not duplicated.
+    - Audit `app/services/runs/comparison.py` for cross-run finding helpers the Atlas should reuse.
+    - Audit `app/static/js/ui/ui_entity_metadata.js` to confirm label/note helpers work on Atlas entity types without changes.
+    - Decide migration approach for existing project targets — keep them as a typed convenience view backed by `entity_project_links`, or deprecate in favor of entity rows. Document the choice before any UI work.
+  - **Phase 1 - Backend contracts and storage**
+    - New SQLite tables:
+      - `entities` `(id, session_token, type, canonical_value, signature_hash, first_seen_at, last_seen_at, occurrence_count, created_at)` with unique index on `(session_token, type, signature_hash)`.
+      - `entity_run_links` `(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count)` for cross-run aggregation.
+      - `entity_intel_snapshots` `(entity_id, provider, payload_json, fetched_at, ttl)` for cached intel data.
+      - `entity_project_links` `(entity_id, project_id, linked_at)` replacing per-project entity copies.
+    - New `app/services/atlas/` service:
+      - `materializer.py` consumes entity events from `output_signals` at run-finalize. Idempotent on re-finalization. Computes stable canonical forms per type (lowercase IPv4/IPv6, IDN-normalized lowercase domain, lowercase hash with algorithm tag, uppercase `CVE-YYYY-NNNNN`).
+      - `lookup.py` exposes list/filter/detail queries used by both the Atlas and downstream surfaces.
+      - `intel_bridge.py` writes normalized intel payloads into `entity_intel_snapshots` when `intel` runs complete or when sidecar enrichment runs.
+    - Routes in new `app/blueprints/atlas.py`:
+      - `GET /atlas` tab summary (entity counts per type).
+      - `GET /atlas/entities` paginated list with filters (`type`, `q`, `status`, `seen_in_last`, `has_intel`, `project_id`).
+      - `GET /atlas/entities/<id>` detail with linked runs, intel snapshots, findings, labels, notes, project links.
+      - `POST /atlas/entities/<id>/refresh_intel` triggers a fresh provider fetch via the intel service (rate-limited).
+      - `POST /atlas/entities/<id>/project_links` promotes (tag).
+      - `DELETE /atlas/entities/<id>/project_links/<project_id>` unpromotes.
+      - Findings-status routes piggyback the findings-inbox plan's routes — the Atlas Findings tab reads and writes the same store.
+    - Audit log: `ATLAS_ENTITY_MATERIALIZED`, `ATLAS_INTEL_REFRESH`, `ATLAS_PROJECT_LINK_ADDED`, `ATLAS_PROJECT_LINK_REMOVED`.
+  - **Phase 2 - Materialization and backfill**
+    - Hook into the run-finalize path in `app/blueprints/run.py` after classification. Lazy extraction — only process classified entity events, never raw output lines, so cost scales with distinct entities rather than output volume.
+    - Backfill helper walks existing saved runs on first deploy and materializes their entities; idempotent so re-runs are safe.
+    - Retention pruning rule: `entity_run_links` rows follow their source run; entity rows survive after the last link is pruned so the historical pattern is preserved.
+  - **Phase 3 - Browser surface**
+    - New `app/static/js/features/atlas/`:
+      - `atlas_overlay.js` — full-surface controller wired into the desktop rail and mobile menu, not stacked over History.
+      - `atlas_tabs.js` — tab rendering and filter state.
+      - `atlas_entity_detail.js` — side sheet with identity, intel card, source runs, findings, labels/notes, project links.
+      - `atlas_transcript_links.js` — tagged-token hover popover and click/long-press handler.
+    - New `app/static/css/features/atlas.css`.
+    - Entry points: left-rail entry between History and Workflows; mobile menu item; keyboard shortcut documented in the `?` overlay; History row context menu "Open entities"; Run Details linked-entities sidebar; Projects modal "Open in Atlas (filtered to this project)".
+    - Reuses `ui_dismissible`, `ui_focus_trap`, `ui_outside_click`, `ui_pressable`, `ui_entity_metadata`, and the existing bulk-action toast contract.
+    - Hover popover shows the high-signal summary: type, occurrence count, last seen, GreyNoise verdict (if any), Shodan port count (if any), VT positives (if any).
+  - **Phase 4 - Transcript wiring**
+    - Output renderer in `app/static/js/output.js` decorates classifier-extracted entities as tagged spans.
+    - Click opens entity detail; long-press / right-click opens a shared action menu (label, note, promote, copy, lookup intel, open in Atlas, see in run). The action menu is the same primitive flagged for the project-workspace transcript right-click idea — that work and this plan share the implementation.
+    - "See in run" in entity detail focuses the History drawer or Run Details on the source line with scrollIntoView.
+  - **Phase 5 - Findings tab absorption**
+    - The Findings tab implements the full triage queue described in the Findings triage inbox plan (status transitions, dedupe, filters, project pinning, bulk status update).
+    - If the standalone inbox modal has already shipped, its entry points migrate to the Atlas Findings tab and the standalone modal is retired; the backing service and routes are reused unchanged.
+    - If the Atlas ships first, the inbox plan does not ship as a separate modal — its scope is absorbed entirely here.
+  - **Phase 6 - Projects as curation, not gating**
+    - Adding an entity to a project becomes a row in `entity_project_links` rather than a copy into a parallel project-side store.
+    - Existing project targets are reconciled per the Phase 0 decision: either deprecated in favor of `entity_project_links`, or kept as a typed convenience view backed by the entity store.
+    - Projects modal Findings tab reads from the Atlas service so it cannot drift from the Atlas Findings tab.
+    - Engagement report builder (separate idea) reads "targets", "findings", and "intel observations" sections from the entity store.
+  - **Phase 7 - Sharing, redaction, and exports**
+    - Entity rows never appear in snapshot permalinks; only the source-run transcript does. Existing share-redaction handles transcript content.
+    - Atlas export options ship in v1:
+      - Per-entity CSV/JSONL with selected fields.
+      - Per-project filtered entity export for engagement handoff.
+    - Honors share-redaction baseline so redacted exports omit raw intel response bodies.
+  - **Phase 8 - Feedback and tests**
+    - Empty-state UX: runs producing zero entities are normal and do not surface as warnings.
+    - Backend coverage: deduplication signature stability across every entity type, materialization idempotency on re-finalization, intel snapshot freshness/TTL behavior, project-link tag (not copy) semantics, label/note helper reuse, cross-session rejection, backfill correctness, retention pruning preserves entity rows when last link is pruned, Atlas Findings tab reads the inbox store cleanly.
+    - Frontend coverage: tab filter combinations, entity detail render with and without intel snapshots, transcript hover popover and action menu, see-in-run navigation, project promotion and unpromotion, rail entry plus mobile menu integration, keyboard shortcut, empty-state rendering.
+    - Playwright: one desktop and one mobile flow covering scan → atlas → entity detail → intel refresh → promote-to-project → see-in-run → unpromote.
+  - **Future**
+    - Entity graph view (visual link map across hosts, domains, hashes, CVEs).
+    - Saved Atlas views (named filter combinations).
+    - Atlas FTS search across entity values, labels, and notes.
+    - Auto-promote rules — entities matching saved patterns auto-promote into a project.
+    - Time-travel view: "what did the Atlas look like a week ago?" using retained snapshots.
+    - Side-by-side entity comparison (their runs, findings, intel snapshots).
+    - Cross-session Atlas view for operators managing multiple sessions or shared infrastructure.
+    - Atlas import from external triage tools.
 
 - **Future Project Workspace enhancements**
   - **Security and lifecycle**

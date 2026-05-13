@@ -89,6 +89,7 @@ const workspaceNewFolderBtn = document.getElementById('workspace-new-folder-btn'
 const workspaceCancelEditBtn = document.getElementById('workspace-cancel-edit-btn');
 const workspaceCloseViewerBtn = document.getElementById('workspace-close-viewer-btn');
 const historyList  = document.getElementById('history-list');
+const historyBulkToolbar = document.getElementById('history-bulk-toolbar');
 const historyLoadOverlay = document.getElementById('history-load-overlay');
 const historySearchInput = document.getElementById('history-search-input');
 const historyMobileFiltersToggle = document.getElementById('history-mobile-filters-toggle');

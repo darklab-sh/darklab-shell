@@ -10,6 +10,7 @@ from flask import Blueprint, jsonify, request, send_file
 from config import CFG
 from extensions import limiter
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
+from services.projects.contracts import BULK_AUDIT_FAILURE_LIMIT, MAX_BULK_RUN_ACTION_ITEMS
 from services.projects.workspace import (
     EvidencePackageTooLarge,
     ProjectWorkspaceError,
@@ -33,6 +34,7 @@ from services.projects.workspace import (
     get_project,
     get_project_run_file_artifact,
     get_project_summary,
+    link_project_entities,
     link_project_entity,
     list_entity_labels,
     list_evidence_packages,
@@ -41,6 +43,7 @@ from services.projects.workspace import (
     list_project_targets,
     list_run_findings,
     list_projects,
+    unlink_project_entities,
     set_active_project,
     unlink_project_entity,
     update_finding_review_state,
@@ -85,6 +88,28 @@ def _project_error_response(exc):
     else:
         status = 400
     return jsonify({"error": str(exc)}), status
+
+
+def _project_bulk_too_many_response():
+    return jsonify({"error": "too_many", "limit": MAX_BULK_RUN_ACTION_ITEMS}), 400
+
+
+def _project_bulk_failures(results):
+    failures = []
+    for item in results or []:
+        status = item.get("status") if isinstance(item, dict) else ""
+        if status not in {"not_found", "rejected"}:
+            continue
+        failure = {
+            "run_id": item.get("run_id") or "",
+            "status": status,
+        }
+        if item.get("reason"):
+            failure["reason"] = item.get("reason")
+        failures.append(failure)
+        if len(failures) >= BULK_AUDIT_FAILURE_LIMIT:
+            break
+    return failures
 
 
 def _workspace_project_artifact_error_response(exc):
@@ -237,8 +262,28 @@ def projects_links_list(project_id):
 @limiter.limit(_project_write_limit)
 def projects_links_create(project_id):
     session_id = get_session_id()
+    data = request.get_json(silent=True) or {}
+    if isinstance(data, dict) and "entity_ids" in data:
+        try:
+            result = link_project_entities(session_id, project_id, data)
+        except ProjectWorkspaceError as exc:
+            if str(exc) == "too_many":
+                return _project_bulk_too_many_response()
+            return _project_error_response(exc)
+        if result is None:
+            return jsonify({"error": "project not found"}), 404
+        counts = result.get("counts", {})
+        log.info("PROJECT_LINKS_BULK_ADDED", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "project_id": project_id,
+            "entity_type": data.get("entity_type") or "",
+            "counts": counts,
+            "failures": _project_bulk_failures(result.get("results")),
+        })
+        return jsonify(result)
     try:
-        link = link_project_entity(session_id, project_id, request.get_json(silent=True) or {})
+        link = link_project_entity(session_id, project_id, data)
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if link is None:
@@ -258,6 +303,25 @@ def projects_links_create(project_id):
 def projects_links_delete(project_id):
     session_id = get_session_id()
     data = request.get_json(silent=True) or {}
+    if isinstance(data, dict) and "entity_ids" in data:
+        try:
+            result = unlink_project_entities(session_id, project_id, data)
+        except ProjectWorkspaceError as exc:
+            if str(exc) == "too_many":
+                return _project_bulk_too_many_response()
+            return _project_error_response(exc)
+        if result is None:
+            return jsonify({"error": "project not found"}), 404
+        counts = result.get("counts", {})
+        log.info("PROJECT_LINKS_BULK_REMOVED", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "project_id": project_id,
+            "entity_type": data.get("entity_type") or "",
+            "counts": counts,
+            "failures": _project_bulk_failures(result.get("results")),
+        })
+        return jsonify(result)
     try:
         deleted = unlink_project_entity(session_id, project_id, data)
     except ProjectWorkspaceError as exc:

@@ -26,6 +26,7 @@ from core.helpers import (
 from core.output_signals import command_root as output_command_root
 from services.history.permalinks import _format_duration, _permalink_error_page, _permalink_page
 from core.process import active_runs_for_session
+from services.projects.contracts import BULK_AUDIT_FAILURE_LIMIT, MAX_BULK_RUN_ACTION_ITEMS
 from services.projects.workspace import ProjectWorkspaceError, compare_project_runs
 from core.redaction import redact_line_entries
 from services.runs.output_store import load_full_output_entries
@@ -1501,6 +1502,102 @@ def delete_run(run_id):
             "ip": get_client_ip(), "run_id": run_id, "session": get_log_session_id(session_id),
         })
     return jsonify({"ok": True})
+
+
+def _normalize_bulk_run_ids_payload(data):
+    if not isinstance(data, dict):
+        return None, (jsonify({"error": "Request body must be a JSON object"}), 400)
+    raw_ids = data.get("run_ids")
+    if not isinstance(raw_ids, list):
+        return None, (jsonify({"error": "run_ids must be a list"}), 400)
+    if len(raw_ids) > MAX_BULK_RUN_ACTION_ITEMS:
+        return None, (jsonify({"error": "too_many", "limit": MAX_BULK_RUN_ACTION_ITEMS}), 400)
+    run_ids = []
+    seen = set()
+    for raw_id in raw_ids:
+        run_id = str(raw_id or "").strip()
+        if not run_id or run_id in seen:
+            continue
+        seen.add(run_id)
+        run_ids.append(run_id)
+    if not run_ids:
+        return None, (jsonify({"error": "run_ids is required"}), 400)
+    return run_ids, None
+
+
+def _bulk_delete_result(counts, run_id, status, *, reason=None):
+    counts[status] = counts.get(status, 0) + 1
+    item = {"run_id": run_id, "status": status}
+    if reason:
+        item["reason"] = reason
+    return item
+
+
+def _bulk_delete_failures(results):
+    failures = []
+    for item in results:
+        if item.get("status") not in {"not_found", "rejected"}:
+            continue
+        failure = {
+            "run_id": item.get("run_id") or "",
+            "status": item.get("status") or "",
+        }
+        if item.get("reason"):
+            failure["reason"] = item.get("reason")
+        failures.append(failure)
+        if len(failures) >= BULK_AUDIT_FAILURE_LIMIT:
+            break
+    return failures
+
+
+@history_bp.route("/history/bulk-delete", methods=["POST"])
+def bulk_delete_history():
+    """Delete selected completed runs for this session."""
+    session_id = get_session_id()
+    run_ids, error_response = _normalize_bulk_run_ids_payload(request.get_json(silent=True) or {})
+    if error_response is not None:
+        return error_response
+    active_ids = {
+        str(item.get("run_id") or "")
+        for item in active_runs_for_session(session_id)
+        if item.get("run_id")
+    }
+    counts = {"deleted": 0, "not_found": 0, "rejected": 0}
+    results = []
+    deletable_ids = []
+    assert run_ids is not None
+    with db_connect() as conn:
+        placeholders = ",".join("?" for _ in run_ids)
+        rows = conn.execute(
+            f"SELECT id FROM runs WHERE session_id = ? AND id IN ({placeholders})",  # nosec B608
+            [session_id, *run_ids],
+        ).fetchall()
+        owned_ids = {str(row["id"]) for row in rows}
+        for run_id in run_ids:
+            if run_id in active_ids:
+                results.append(_bulk_delete_result(counts, run_id, "rejected", reason="running"))
+                continue
+            if run_id not in owned_ids:
+                results.append(_bulk_delete_result(counts, run_id, "not_found"))
+                continue
+            deletable_ids.append(run_id)
+            results.append(_bulk_delete_result(counts, run_id, "deleted"))
+        if deletable_ids:
+            delete_run_artifacts(conn, deletable_ids)
+            delete_placeholders = ",".join("?" for _ in deletable_ids)
+            conn.execute(
+                f"DELETE FROM runs WHERE session_id = ? AND id IN ({delete_placeholders})",  # nosec B608
+                [session_id, *deletable_ids],
+            )
+        conn.commit()
+    log.info("HISTORY_BULK_DELETED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "count": counts["deleted"],
+        "counts": counts,
+        "failures": _bulk_delete_failures(results),
+    })
+    return jsonify({"ok": True, "counts": counts, "results": results})
 
 
 @history_bp.route("/history", methods=["DELETE"])

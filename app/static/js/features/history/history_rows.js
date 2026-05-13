@@ -116,9 +116,14 @@ function _createHistoryActionMenu(run, { includeDelete = false } = {}) {
   return wrap;
 }
 
-function _createHistoryEntry(run, isStarred) {
+function _createHistoryEntry(run, isStarred, options = {}) {
   const entry = document.createElement('div');
-  entry.className = 'history-entry chrome-row chrome-row-clickable' + (isStarred ? ' starred row-accent-amber' : '');
+  const selectMode = !!options.selectMode;
+  const selectable = options.selectable !== false;
+  const selected = !!options.selected;
+  entry.className = 'history-entry chrome-row chrome-row-clickable'
+    + (isStarred ? ' starred row-accent-amber' : '')
+    + (selectMode ? ' history-entry-selecting' : '');
   const exitCls = _historyExitClass(run.exit_code);
   const startedAt = new Date(run.started);
   const now = new Date();
@@ -132,6 +137,23 @@ function _createHistoryEntry(run, isStarred) {
 
   const header = document.createElement('div');
   header.className = 'history-entry-header';
+
+  if (selectMode) {
+    const selectLabel = document.createElement('label');
+    selectLabel.className = 'history-entry-select-row' + (selectable ? '' : ' history-entry-select-disabled');
+    if (!selectable) {
+      selectLabel.title = 'This run cannot be selected until it has finished.';
+    }
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.dataset.action = 'select-run';
+    checkbox.dataset.historySelectRunId = String(run.id || '');
+    checkbox.checked = selected;
+    checkbox.disabled = !selectable;
+    checkbox.setAttribute('aria-label', `Select run: ${run.command || run.id || 'run'}`);
+    selectLabel.appendChild(checkbox);
+    header.appendChild(selectLabel);
+  }
 
   const starBtn = document.createElement('button');
   starBtn.className = 'history-entry-star' + (isStarred ? ' starred' : '');

@@ -73,6 +73,7 @@ function toggleHistoryPanelSurface(force = null) {
     if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
     refreshHistoryPanel();
   } else {
+    if (typeof resetHistorySelectionOnClose === 'function') resetHistorySelectionOnClose();
     refocusComposerAfterAction({ defer: true });
   }
   return isOpen;
