@@ -157,6 +157,60 @@ async function createProjectWithLinkedRuns(page, name, runIds) {
   }, { projectName: name, linkedRunIds: runIds })
 }
 
+async function createActiveProject(page, name) {
+  return page.evaluate(async ({ projectName }) => {
+    const createdResp = await apiFetch('/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: projectName }),
+    })
+    if (!createdResp.ok) throw new Error(`Failed to create project: ${createdResp.status}`)
+    const created = await createdResp.json()
+    const project = created.project
+    const activeResp = await apiFetch('/projects/active', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: project.id }),
+    })
+    if (!activeResp.ok) throw new Error(`Failed to set active project: ${activeResp.status}`)
+    if (typeof refreshActiveProjectContext === 'function') {
+      await refreshActiveProjectContext()
+    }
+    return project
+  }, { projectName: name })
+}
+
+async function projectRunLinkIds(page, projectId) {
+  return page.evaluate(async ({ id }) => {
+    const resp = await apiFetch(`/projects/${encodeURIComponent(id)}/links`, { cache: 'no-store' })
+    if (!resp.ok) throw new Error(`Failed to load project links: ${resp.status}`)
+    const data = await resp.json()
+    return (Array.isArray(data.links) ? data.links : [])
+      .filter(link => link && link.entity_type === 'run')
+      .map(link => String(link.entity_id || ''))
+      .sort()
+  }, { id: projectId })
+}
+
+async function activateHistoryBulkMenuItem(page, action) {
+  const item = page.locator(`#history-bulk-toolbar [data-action="${action}"]`)
+  await expect(item).toBeVisible()
+  await item.dispatchEvent('click')
+}
+
+async function ensureHistoryBulkSelectMode(page) {
+  await page.evaluate(async () => {
+    if (typeof showHistoryPanel === 'function') showHistoryPanel()
+    if (typeof refreshHistoryPanel === 'function') await refreshHistoryPanel()
+  })
+  await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
+  await page.locator('#history-list .history-entry').first().waitFor({ state: 'visible' })
+  const toggle = page.locator('#history-bulk-toolbar .history-bulk-toggle input')
+  if (!(await toggle.isChecked())) {
+    await toggle.check()
+  }
+}
+
 async function forceComparePaneOverflow(page) {
   await page.locator('.history-compare-pane').evaluateAll((panes) => {
     panes.forEach((pane) => {
@@ -441,6 +495,59 @@ test.describe('history drawer', () => {
     await entry.locator('[data-action="link"]').click()
     await expect(page.locator('#permalink-toast')).toContainText('Link copied to clipboard')
     await expect(page.locator('#history-panel')).not.toHaveClass(/open/)
+  })
+
+  test('history bulk select can add remove and delete visible runs', async ({ page }) => {
+    test.setTimeout(60_000)
+    await runCommand(page, CMD_A)
+    await waitForHistoryRuns(page, 1)
+    await runCommand(page, CMD_B)
+    const runs = await waitForHistoryRuns(page, 2)
+    const selectedRunIds = runs
+      .filter(run => [CMD_A, CMD_B].includes(run.command))
+      .map(run => String(run.id))
+      .sort()
+    expect(selectedRunIds).toHaveLength(2)
+    const project = await createActiveProject(page, `Bulk History ${Date.now()}`)
+
+    await openHistoryWithEntries(page)
+    const bulkToolbar = page.locator('#history-bulk-toolbar')
+    await bulkToolbar.locator('.history-bulk-toggle input').check()
+    await expect(page.locator('#history-list [data-action="select-run"]')).toHaveCount(2)
+    await page.locator('#history-list .history-entry').filter({ hasText: CMD_A }).click()
+    await page.locator('#history-list .history-entry').filter({ hasText: CMD_B }).click()
+    await expect(bulkToolbar.locator('.history-bulk-count')).toHaveText('2 selected')
+
+    await bulkToolbar.locator('[data-action="history-bulk-menu"]').click()
+    await activateHistoryBulkMenuItem(page, 'bulk-add-active-project')
+    await expect(page.locator('#permalink-toast')).toContainText('Added 2 runs')
+    await expect.poll(() => projectRunLinkIds(page, project.id)).toEqual(selectedRunIds)
+
+    await ensureHistoryBulkSelectMode(page)
+    await expect(bulkToolbar.locator('.history-bulk-count')).toHaveText('0 selected')
+    await page.locator('#history-list .history-entry').filter({ hasText: CMD_A }).click()
+    await page.locator('#history-list .history-entry').filter({ hasText: CMD_B }).click()
+    await bulkToolbar.locator('[data-action="history-bulk-menu"]').click()
+    await activateHistoryBulkMenuItem(page, 'bulk-remove-project')
+    await expect(page.locator('#confirm-host')).toBeVisible()
+    await expect(page.locator('#confirm-host')).toContainText('Remove 2 selected runs from project')
+    await page.locator('#confirm-host [data-confirm-action-id="remove"]').click()
+    await expect(page.locator('#permalink-toast')).toContainText('Removed 2 runs')
+    await expect.poll(() => projectRunLinkIds(page, project.id)).toEqual([])
+
+    await ensureHistoryBulkSelectMode(page)
+    await page.locator('#history-list .history-entry').filter({ hasText: CMD_A }).click()
+    await page.locator('#history-list .history-entry').filter({ hasText: CMD_B }).click()
+    await bulkToolbar.locator('[data-action="history-bulk-menu"]').click()
+    await activateHistoryBulkMenuItem(page, 'bulk-delete')
+    await expect(page.locator('#confirm-host')).toContainText('Delete 2 selected runs?')
+    await page.locator('#confirm-host [data-confirm-action-id="delete"]').click()
+    await expect(page.locator('#permalink-toast')).toContainText('Deleted 2 runs')
+    await expect.poll(async () => (await page.evaluate(async () => {
+      const resp = await apiFetch('/history?page_size=20&type=runs')
+      const data = await resp.json()
+      return (data.runs || []).filter(run => ['hostname', 'date'].includes(run.command)).length
+    }))).toBe(0)
   })
 
   test('run comparison split view works from history and project entry points', async ({ page }, testInfo) => {

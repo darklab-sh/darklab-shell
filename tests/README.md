@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,654
+- behavior tests: 2,656
 - docs/inventory meta-tests: 32
 - `pytest`: 1329 (1297 behavior + 32 meta)
 - `vitest`: 1113
-- `playwright`: 247
-- total: 2,689
+- `playwright`: 249
+- total: 2,691
 
 This document is organized in two parts:
 
@@ -2873,6 +2873,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `starred commands are remembered across page reload` | Verifies that starred commands stored server-side are restored to the history panel after a page reload, confirming that loadStarredFromServer is called on boot. |
 | `loading a synthetic tail run from history restores the filtered transcript` | Verifies that a synthetic tail transcript survives the history restore path without reintroducing the trimmed lines. |
 | `history drawer can filter to snapshots and shows snapshot actions` | Verifies that the history drawer can switch to snapshot-only mode, render the `SNAPSHOT` row treatment, and expose the snapshot action set. |
+| `history bulk select can add remove and delete visible runs` | Verifies that desktop History select mode can select visible runs, add them to the active project, remove them from a project, and bulk-delete them. |
 | `run comparison split view works from history and project entry points` | Verifies that seeded same-command runs render the split comparison from both the History drawer and Projects modal, including synced scrolling, lazy equal-line expansion, long-line expansion, counts, and project-scoped lazy fetches. |
 
 #### `interaction-contract.spec.js`
@@ -2954,6 +2955,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `mobile recents sheet restore action loads the run into the active tab` | Verifies that the per-row `restore` action button in the mobile recents sheet loads the corresponding run into the active tab — the pre-swap row-tap behavior now lives on an explicit button. |
 | `mobile history rows render relative time with absolute time in the tooltip` | Verifies that the mobile recents sheet shows relative timestamps ("just now", "3m ago", ...) and surfaces the absolute time through the span's title attribute. |
 | `mobile history permalink action keeps the drawer open` | Verifies that the permalink action in the mobile recents sheet does not dismiss the drawer after tap, reducing repeated reopen churn. |
+| `mobile full history select mode wraps toolbar and row tap selects without long-press side effects` | Verifies that the full mobile History sheet keeps the bulk toolbar wrapped inside the viewport, lets row-body taps select runs in select mode, and ignores long-press-style pointer holds. |
 | `mobile run button disables while a command is running` | Verifies that the mobile Run button follows the same running-state guard as desktop. |
 | `mobile permalink copies via the fallback path when clipboard writeText is unavailable` | Verifies that the mobile permalink flow still succeeds when the Clipboard API fallback path is required. |
 | `mobile keyboard helper moves the caret and deletes a word` | Verifies character moves, word jumps, and delete-word behavior through the real mobile helper row. |

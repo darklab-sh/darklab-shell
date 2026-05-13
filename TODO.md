@@ -18,7 +18,6 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 ## Open TODOs
 
 - **History multi-select bulk action follow-ups**
-  - Add one desktop and one mobile Playwright flow covering visible-page selection, project add/remove, bulk delete, mobile toolbar wrapping, mobile select-mode row tap, and long-press no-op behavior.
   - Consider snapshot bulk delete later if real use shows saved snapshots need the same workflow.
 
 - **Encrypted secrets vault**

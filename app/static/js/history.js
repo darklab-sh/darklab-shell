@@ -1181,7 +1181,11 @@ function refreshHistoryPanel() {
       // structured findings behind project-only views.
       entry.addEventListener('click', e => {
         if (e.target.closest('[data-action]')) return;
-        if (_historySelection.selectMode) {
+        const renderedForSelection = entry.classList.contains('history-entry-selecting')
+          || !!entry.querySelector('[data-action="select-run"]');
+        if (_historySelection.selectMode || renderedForSelection) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
           _historyToggleRunSelection(run);
           return;
         }

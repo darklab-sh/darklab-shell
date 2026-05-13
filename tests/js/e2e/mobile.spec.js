@@ -72,6 +72,22 @@ async function createMobileProject(page, name) {
   return row
 }
 
+async function openFullMobileHistoryPanel(page) {
+  await page.evaluate(() => {
+    if (typeof openHistoryWithFilters === 'function') {
+      openHistoryWithFilters({ type: 'runs' })
+    } else if (typeof toggleHistoryPanelSurface === 'function') {
+      toggleHistoryPanelSurface(true)
+    }
+  })
+  const panel = page.locator('#history-panel')
+  await expect(panel).toHaveClass(/\bopen\b/)
+  await page.evaluate(async () => {
+    if (typeof refreshHistoryPanel === 'function') await refreshHistoryPanel()
+  })
+  await page.locator('#history-list .history-entry').first().waitFor({ state: 'visible' })
+}
+
 // The e2e server (run_e2e_server.sh) writes a test config.local.yaml that adds
 // 127.0.0.0/8 to diagnostics_allowed_cidrs, so Playwright's loopback connection
 // reaches /diag without any extra header manipulation.
@@ -974,6 +990,62 @@ test.beforeEach(async ({ page }) => {
     await firstEntry.locator('.sheet-item-action-menu .dropdown-item', { hasText: 'permalink' }).click()
     await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
     await expect(page.locator('#permalink-toast')).toContainText('Link copied to clipboard')
+  })
+
+  test('mobile full history select mode wraps toolbar and row tap selects without long-press side effects', async ({ page }) => {
+    test.setTimeout(60_000)
+    await runCommandMobile(page, 'hostname')
+    await runCommandMobile(page, 'date')
+    await waitForHistoryRuns(page, 2)
+
+    await openFullMobileHistoryPanel(page)
+    const toolbar = page.locator('#history-bulk-toolbar')
+    await expect(toolbar).toBeVisible()
+    await expect(toolbar.locator('.history-bulk-toggle')).toBeVisible()
+    await toolbar.locator('.history-bulk-toggle').tap()
+    await expect(page.locator('#history-list [data-action="select-run"]')).toHaveCount(2)
+    await expect(page.locator('#history-list .history-entry').first()).toHaveClass(/\bhistory-entry-selecting\b/)
+
+    await expect
+      .poll(() => toolbar.evaluate((node) => {
+        const box = node.getBoundingClientRect()
+        const children = Array.from(node.children)
+        const overflow = children.some((child) => {
+          const childBox = child.getBoundingClientRect()
+          return childBox.left < box.left - 1 || childBox.right > box.right + 1
+        })
+        return {
+          flexWrap: getComputedStyle(node).flexWrap,
+          overflow,
+          height: Math.round(box.height),
+        }
+      }))
+      .toEqual(expect.objectContaining({ flexWrap: 'wrap', overflow: false }))
+
+    const firstRow = page.locator('#history-list .history-entry').filter({ hasText: 'hostname' }).first()
+    await firstRow.locator('.history-entry-cmd').tap()
+    await expect(toolbar.locator('.history-bulk-count')).toHaveText('1 selected')
+    await expect(page.locator('#history-run-overlay.open')).toHaveCount(0)
+
+    const secondRow = page.locator('#history-list .history-entry').filter({ hasText: 'date' }).first()
+    await secondRow.evaluate(async (node) => {
+      node.dispatchEvent(new PointerEvent('pointerdown', {
+        pointerId: 41,
+        pointerType: 'touch',
+        bubbles: true,
+        cancelable: true,
+      }))
+      await new Promise((resolve) => setTimeout(resolve, 650))
+      node.dispatchEvent(new PointerEvent('pointerup', {
+        pointerId: 41,
+        pointerType: 'touch',
+        bubbles: true,
+        cancelable: true,
+      }))
+    })
+    await expect(toolbar.locator('.history-bulk-count')).toHaveText('1 selected')
+    await expect(page.locator('#history-run-overlay.open')).toHaveCount(0)
+    await expect(page.locator('#history-list .history-action-menu-wrap.open')).toHaveCount(0)
   })
 
   test('mobile run button disables while a command is running', async ({ page }) => {
