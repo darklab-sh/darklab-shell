@@ -3,6 +3,9 @@
 // on mobile. Active-run attach/kill remains the bottom section.
 
 (function () {
+  const _statusMonitorCore = typeof DarklabStatusMonitorCore !== 'undefined' ? DarklabStatusMonitorCore : null;
+  if (!_statusMonitorCore) throw new Error('DarklabStatusMonitorCore is unavailable');
+
   let monitorEl = null;
   let scrimEl = null;
   let listEl = null;
@@ -29,8 +32,8 @@
   const POLL_MS = 3000;
   const CLOSED_POLL_MS = 8000;
   const CPU_SAMPLE_WARMUP_MS = 900;
-  const resourceStateByRunId = new Map();
-  const resourceTrendByRunId = new Map();
+  let statusMonitorResources = null;
+  let statusMonitorData = null;
   const pulseStateByStrip = new WeakMap();
   const pulseNodeCacheByStrip = new WeakMap();
   const activeRunByRow = new WeakMap();
@@ -52,30 +55,23 @@
   const CONSTELLATION_Y_BASELINE = 260;
   const CONSTELLATION_Y_RANGE = 205;
   const DAY_MS = 86400000;
-  const GRACEFUL_TERMINATION_EXIT_CODES = new Set([-15]);
-
-  function _normalizedExitCode(exitCode) {
-    if (exitCode === null || exitCode === undefined || exitCode === '') return null;
-    const number = Number(exitCode);
-    return Number.isFinite(number) ? number : null;
-  }
-
-  function _isGracefulTerminationExitCode(exitCode) {
-    const code = _normalizedExitCode(exitCode);
-    return code !== null && GRACEFUL_TERMINATION_EXIT_CODES.has(code);
-  }
-
-  function _isFailedExitCode(exitCode) {
-    const code = _normalizedExitCode(exitCode);
-    return code !== null && code !== 0 && !GRACEFUL_TERMINATION_EXIT_CODES.has(code);
-  }
-
-  function _exitCodeLabel(exitCode) {
-    const code = _normalizedExitCode(exitCode);
-    if (code === null) return 'active';
-    if (_isGracefulTerminationExitCode(code)) return 'terminated';
-    return `exit ${code}`;
-  }
+  const _normalizedExitCode = _statusMonitorCore.normalizedExitCode;
+  const _isGracefulTerminationExitCode = _statusMonitorCore.isGracefulTerminationExitCode;
+  const _isFailedExitCode = _statusMonitorCore.isFailedExitCode;
+  const _exitCodeLabel = _statusMonitorCore.exitCodeLabel;
+  const _formatElapsed = _statusMonitorCore.formatElapsed;
+  const _shortRunId = _statusMonitorCore.shortRunId;
+  const _formatCpuPercent = _statusMonitorCore.formatCpuPercent;
+  const _isTelemetryNumber = _statusMonitorCore.isTelemetryNumber;
+  const _formatMemoryBytes = _statusMonitorCore.formatMemoryBytes;
+  const _formatDurationSeconds = _statusMonitorCore.formatDurationSeconds;
+  const _formatCount = _statusMonitorCore.formatCount;
+  const _truncateText = _statusMonitorCore.truncateText;
+  const _normalizedHash = _statusMonitorCore.normalizedHash;
+  const _seededUnit = _statusMonitorCore.seededUnit;
+  const _parseIsoDateOnly = _statusMonitorCore.parseIsoDateOnly;
+  const _formatIsoDateOnly = _statusMonitorCore.formatIsoDateOnly;
+  const _isoWeekdayRow = _statusMonitorCore.isoWeekdayRow;
 
   function _isMobileStatusMonitor() {
     return !!(
@@ -84,107 +80,40 @@
     );
   }
 
-  function _formatElapsed(started) {
-    const start = Date.parse(String(started || ''));
-    if (!Number.isFinite(start)) return '-';
-    const total = Math.max(0, Math.floor((Date.now() - start) / 1000));
-    const hours = Math.floor(total / 3600);
-    const minutes = Math.floor((total % 3600) / 60);
-    const seconds = total % 60;
-    return [hours, minutes, seconds].map(value => String(value).padStart(2, '0')).join(':');
+  function _statusMonitorResources() {
+    if (!statusMonitorResources) {
+      if (typeof DarklabStatusMonitorResources === 'undefined' || !DarklabStatusMonitorResources?.create) {
+        throw new Error('DarklabStatusMonitorResources is unavailable');
+      }
+      statusMonitorResources = DarklabStatusMonitorResources.create({
+        core: _statusMonitorCore,
+        svgEl: _svgEl,
+        pathFromPoints: _pathFromPoints,
+      });
+    }
+    return statusMonitorResources;
   }
 
-  function _shortRunId(run) {
-    return String(run?.run_id || run?.id || '').slice(0, 8) || '-';
-  }
-
-  function _formatCpuPercent(value) {
-    if (value === null || value === undefined) return 'n/a';
-    if (!Number.isFinite(Number(value))) return 'collecting';
-    const cpu = Math.min(100, Math.max(0, Number(value)));
-    return `${cpu.toFixed(cpu >= 10 ? 0 : 1)}%`;
-  }
-
-  function _isTelemetryNumber(value) {
-    return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
+  function _statusMonitorData() {
+    if (!statusMonitorData) {
+      if (typeof DarklabStatusMonitorData === 'undefined' || !DarklabStatusMonitorData?.create) {
+        throw new Error('DarklabStatusMonitorData is unavailable');
+      }
+      statusMonitorData = DarklabStatusMonitorData.create({ apiFetch });
+    }
+    return statusMonitorData;
   }
 
   function _runResourceUsage(run) {
-    const runId = String(run?.run_id || run?.id || '');
-    const usage = run?.resource_usage && typeof run.resource_usage === 'object'
-      ? run.resource_usage
-      : {};
-    const previous = runId ? resourceStateByRunId.get(runId) : null;
-    const now = Date.now();
-    const cpuSeconds = _isTelemetryNumber(usage.cpu_seconds)
-      ? Number(usage.cpu_seconds)
-      : null;
-    let cpuPercent = previous?.cpu_percent;
-    if (cpuSeconds !== null && previous && _isTelemetryNumber(previous.cpu_seconds)) {
-      const elapsedSeconds = Math.max(0, (now - Number(previous.sampled_at || now)) / 1000);
-      const deltaCpu = cpuSeconds - Number(previous.cpu_seconds);
-      if (elapsedSeconds >= 0.25 && deltaCpu >= 0) {
-        cpuPercent = (deltaCpu / elapsedSeconds) * 100;
-      }
-    }
-    if (cpuSeconds !== null && !_isTelemetryNumber(cpuPercent)) {
-      cpuPercent = Number.NaN;
-    }
-    const memoryBytes = _isTelemetryNumber(usage.memory_bytes)
-      ? Number(usage.memory_bytes)
-      : previous?.memory_bytes;
-    const resolved = {
-      cpu_percent: cpuPercent,
-      cpu_seconds: cpuSeconds ?? previous?.cpu_seconds,
-      memory_bytes: memoryBytes,
-      sampled_at: cpuSeconds !== null ? now : previous?.sampled_at,
-    };
-    if (runId && (
-      _isTelemetryNumber(resolved.cpu_percent)
-      || _isTelemetryNumber(resolved.cpu_seconds)
-      || _isTelemetryNumber(resolved.memory_bytes)
-    )) {
-      resourceStateByRunId.set(runId, resolved);
-    }
-    return resolved;
+    return _statusMonitorResources().runResourceUsage(run);
   }
 
   function _recordResourceTrend(run, usage) {
-    const runId = String(run?.run_id || run?.id || '');
-    if (!runId) return [];
-    const samples = resourceTrendByRunId.get(runId) || [];
-    const now = Date.now();
-    const previous = samples[samples.length - 1];
-    if (!previous || now - previous.t >= 750) {
-      samples.push({
-        t: now,
-        cpu: _isTelemetryNumber(usage.cpu_percent) ? Number(usage.cpu_percent) : null,
-        mem: _isTelemetryNumber(usage.memory_bytes) ? Number(usage.memory_bytes) : null,
-      });
-      while (samples.length > 60) samples.shift();
-      resourceTrendByRunId.set(runId, samples);
-    }
-    return samples;
+    return _statusMonitorResources().recordResourceTrend(run, usage);
   }
 
   function _trendPath(samples, key, width = 160, height = 34) {
-    const values = samples.map(sample => sample[key]).filter(value => _isTelemetryNumber(value));
-    if (!values.length) {
-      const y = height / 2;
-      return `M0 ${y} L${width} ${y}`;
-    }
-    const max = key === 'cpu'
-      ? Math.max(100, ...values)
-      : Math.max(...values, 1);
-    const min = key === 'cpu' ? 0 : Math.min(...values, 0);
-    const spread = Math.max(1, max - min);
-    const points = samples.map((sample, index) => {
-      const value = _isTelemetryNumber(sample[key]) ? Number(sample[key]) : min;
-      const x = samples.length <= 1 ? width : (index / (samples.length - 1)) * width;
-      const y = height - (((value - min) / spread) * (height - 6)) - 3;
-      return [x, y];
-    });
-    return _pathFromPoints(points);
+    return _statusMonitorResources().trendPath(samples, key, width, height);
   }
 
   function _runMetaChip(text, className = '') {
@@ -195,75 +124,11 @@
   }
 
   function _runSparklinePanel(run, usage) {
-    const samples = _recordResourceTrend(run, usage);
-    const panel = document.createElement('div');
-    panel.className = 'status-monitor-spark-panel';
-
-    const header = document.createElement('div');
-    header.className = 'status-monitor-spark-header';
-    const title = document.createElement('span');
-    title.className = 'status-monitor-spark-title';
-    title.textContent = 'CPU/MEM 60s';
-    header.append(title);
-
-    const svg = _svgEl('svg', {
-      class: 'status-monitor-sparkline',
-      viewBox: '0 0 160 34',
-      role: 'img',
-      'aria-label': 'CPU and memory trend',
-      preserveAspectRatio: 'none',
-    });
-    svg.append(
-      _svgEl('path', {
-        class: 'status-monitor-sparkline-grid',
-        d: 'M0 17 L160 17 M40 0 L40 34 M80 0 L80 34 M120 0 L120 34',
-      }),
-      _svgEl('path', { class: 'status-monitor-sparkline-cpu', d: _trendPath(samples, 'cpu') }),
-      _svgEl('path', { class: 'status-monitor-sparkline-mem', d: _trendPath(samples, 'mem') }),
-    );
-
-    panel.append(header, svg);
-    return panel;
+    return _statusMonitorResources().runSparklinePanel(run, usage);
   }
 
   function _runsNeedCpuFollowup(runs) {
-    return (Array.isArray(runs) ? runs : []).some((run) => {
-      const runId = String(run?.run_id || run?.id || '');
-      if (!runId) return false;
-      const state = resourceStateByRunId.get(runId);
-      return state && _isTelemetryNumber(state.cpu_seconds) && !_isTelemetryNumber(state.cpu_percent);
-    });
-  }
-
-  function _formatMemoryBytes(value) {
-    if (value === null || value === undefined) return 'n/a';
-    const bytes = Number(value);
-    if (!Number.isFinite(bytes) || bytes < 0) return '-';
-    const units = ['B', 'KB', 'MB', 'GB'];
-    let size = bytes;
-    let unitIndex = 0;
-    while (size >= 1024 && unitIndex < units.length - 1) {
-      size /= 1024;
-      unitIndex += 1;
-    }
-    const precision = unitIndex === 0 || size >= 10 ? 0 : 1;
-    return `${size.toFixed(precision)} ${units[unitIndex]}`;
-  }
-
-  function _formatDurationSeconds(value) {
-    if (!_isTelemetryNumber(value)) return 'n/a';
-    const total = Math.max(0, Number(value));
-    if (total >= 3600) {
-      const hours = Math.floor(total / 3600);
-      const minutes = Math.floor((total % 3600) / 60);
-      return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
-    }
-    if (total >= 60) {
-      const minutes = Math.floor(total / 60);
-      const seconds = Math.round(total % 60);
-      return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
-    }
-    return `${total.toFixed(total >= 10 ? 0 : 1)}s`;
+    return _statusMonitorResources().runsNeedCpuFollowup(runs);
   }
 
   function _currentStatusUptimeSeconds(status = cachedStatus) {
@@ -277,12 +142,6 @@
   function _statusMonitorUptimeText(status = cachedStatus) {
     const uptime = _currentStatusUptimeSeconds(status);
     return uptime === null ? 'n/a' : _formatDurationSeconds(uptime);
-  }
-
-  function _formatCount(value) {
-    const count = Number(value);
-    if (!Number.isFinite(count)) return '0';
-    return new Intl.NumberFormat().format(count);
   }
 
   function _insightWindowInfo(key, fallbackDays = 30) {
@@ -299,26 +158,6 @@
 
   function _insightWindowLabel(key, fallbackDays = 30) {
     return _insightWindowInfo(key, fallbackDays).label;
-  }
-
-  function _truncateText(value, maxLength = 64) {
-    const text = String(value || '').trim();
-    if (text.length <= maxLength) return text;
-    return `${text.slice(0, Math.max(0, maxLength - 1))}…`;
-  }
-
-  function _hashString(value) {
-    let hash = 0;
-    const text = String(value || '');
-    for (let index = 0; index < text.length; index += 1) {
-      hash = ((hash << 5) - hash) + text.charCodeAt(index);
-      hash |= 0;
-    }
-    return Math.abs(hash);
-  }
-
-  function _normalizedHash(value) {
-    return _hashString(String(value || '').trim().toLowerCase());
   }
 
   function _categoryTone(category) {
@@ -418,11 +257,6 @@
     text.textContent = label;
     item.append(glyph, text);
     return item;
-  }
-
-  function _seededUnit(seed) {
-    const value = Math.sin(Number(seed) || 1) * 10000;
-    return value - Math.floor(value);
   }
 
   function _ambientConstellationSeed() {
@@ -585,25 +419,6 @@
       hour: 'numeric',
       minute: '2-digit',
     });
-  }
-
-  function _parseIsoDateOnly(value) {
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || '').trim());
-    if (!match) return null;
-    const year = Number(match[1]);
-    const month = Number(match[2]);
-    const day = Number(match[3]);
-    const timestamp = Date.UTC(year, month - 1, day);
-    return Number.isFinite(timestamp) ? timestamp : null;
-  }
-
-  function _formatIsoDateOnly(timestamp) {
-    return new Date(timestamp).toISOString().slice(0, 10);
-  }
-
-  function _isoWeekdayRow(timestamp) {
-    const day = new Date(timestamp).getUTCDay();
-    return day === 0 ? 7 : day;
   }
 
   function _heatmapCalendarDays(activityDays, firstRunDate) {
@@ -907,73 +722,39 @@
   }
 
   async function _loadActiveRuns() {
-    const resp = await apiFetch('/history/active');
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-    return Array.isArray(data?.runs) ? data.runs : [];
+    return _statusMonitorData().loadActiveRuns();
   }
 
   async function _loadSystemStatus() {
-    const startedAt = Date.now();
-    const resp = await apiFetch('/status');
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-    const payload = data && typeof data === 'object' ? data : {};
-    payload.latency_ms = Date.now() - startedAt;
-    payload.uptime_received_at_ms = Date.now();
-    return payload;
+    return _statusMonitorData().loadSystemStatus();
   }
 
   async function _loadWorkspaceStatus() {
-    const resp = await apiFetch('/workspace/files');
-    const data = await resp.json();
-    if (!resp.ok) return { enabled: false, error: data?.error || `HTTP ${resp.status}` };
-    return data && typeof data === 'object' ? data : {};
+    return _statusMonitorData().loadWorkspaceStatus();
   }
 
   async function _loadSessionStats() {
-    const resp = await apiFetch('/history/stats');
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-    return data && typeof data === 'object' ? data : {};
+    return _statusMonitorData().loadSessionStats();
   }
 
   async function _loadHistoryInsights() {
-    const resp = await apiFetch('/history/insights');
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
-    return data && typeof data === 'object' ? data : {};
+    return _statusMonitorData().loadHistoryInsights();
   }
 
   async function _refreshHistoryInsights() {
-    try {
-      cachedInsights = await _loadHistoryInsights();
-    } catch (err) {
-      cachedInsights = { error: err?.message || 'Unavailable' };
-    }
+    cachedInsights = await _statusMonitorData().refreshHistoryInsights();
     return cachedInsights;
   }
 
   async function _refreshDashboardData({ includeInsights = false } = {}) {
-    const shouldLoadInsights = includeInsights || !cachedInsights;
-    const [status, workspace, stats, insights] = await Promise.allSettled([
-      _loadSystemStatus(),
-      _loadWorkspaceStatus(),
-      _loadSessionStats(),
-      shouldLoadInsights ? _loadHistoryInsights() : Promise.resolve(cachedInsights),
-    ]);
-    cachedStatus = status.status === 'fulfilled'
-      ? status.value
-      : { error: status.reason?.message || 'Unavailable' };
-    cachedWorkspace = workspace.status === 'fulfilled'
-      ? workspace.value
-      : { enabled: false, error: workspace.reason?.message || 'Unavailable' };
-    cachedStats = stats.status === 'fulfilled'
-      ? stats.value
-      : { error: stats.reason?.message || 'Unavailable' };
-    if (shouldLoadInsights) cachedInsights = insights.status === 'fulfilled'
-      ? insights.value
-      : { error: insights.reason?.message || 'Unavailable' };
+    const data = await _statusMonitorData().refreshDashboardData({
+      cachedInsights,
+      includeInsights,
+    });
+    cachedStatus = data.status;
+    cachedWorkspace = data.workspace;
+    cachedStats = data.stats;
+    if (data.loadedInsights) cachedInsights = data.insights;
   }
 
   async function _refreshActiveRunCache({ render = false, renderWhileOpen = true } = {}) {
@@ -982,7 +763,7 @@
     runs.forEach(run => _runResourceUsage(run));
     if (render || (renderWhileOpen && isOpen)) _renderDashboard(runs);
     if (!runs.length) {
-      resourceStateByRunId.clear();
+      _statusMonitorResources().clear();
       _stopClosedPolling();
     }
     return runs;
@@ -1124,7 +905,7 @@
     const activeRuns = Array.isArray(runs) ? runs : [];
     const cpuValues = [];
     activeRuns.forEach((run) => {
-      const state = resourceStateByRunId.get(String(run?.run_id || run?.id || ''));
+      const state = _statusMonitorResources().getState(String(run?.run_id || run?.id || ''));
       if (_isTelemetryNumber(state?.cpu_percent)) {
         cpuValues.push(Math.max(0, Number(state.cpu_percent)));
       }
@@ -2835,15 +2616,7 @@
   }
 
   function _gcResourceStateForRuns(runs) {
-    const activeRunIds = new Set(
-      runs.map(run => String(run?.run_id || run?.id || '')).filter(Boolean),
-    );
-    for (const runId of [...resourceStateByRunId.keys()]) {
-      if (!activeRunIds.has(runId)) resourceStateByRunId.delete(runId);
-    }
-    for (const runId of [...resourceTrendByRunId.keys()]) {
-      if (!activeRunIds.has(runId)) resourceTrendByRunId.delete(runId);
-    }
+    _statusMonitorResources().gcForRuns(runs);
   }
 
   function _populateActiveRunMeta(meta, run) {

@@ -5,6 +5,10 @@ import { fileURLToPath } from 'url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
 const ENTITY_METADATA_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_entity_metadata.js'), 'utf8')
+const PROJECT_TARGET_VALIDATION_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_target_validation.js'),
+  'utf8',
+)
 const SHELL_CHROME_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/shell_chrome.js'), 'utf8')
 
 function tick() {
@@ -270,6 +274,7 @@ function loadShellChrome({
       const globalThis = global;
       const APP_CONFIG = global.APP_CONFIG || {};
       ${ENTITY_METADATA_SRC}
+      ${PROJECT_TARGET_VALIDATION_SRC}
       ${SHELL_CHROME_SRC}
     `,
   )(

@@ -1423,6 +1423,81 @@ describe('autocomplete helpers', () => {
     expect(getAutocompleteMatches('dig a', 5).map(item => item.value)).toEqual(['alpha.example.com', '<domain>'])
   })
 
+  it('keeps case-sensitive dnsrecon -d domain and -D wordlist slots separate', () => {
+    const { getAutocompleteMatches, rememberRecentDomainsFromCommand, _readRecentDomains } = fromDomScripts(
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        SESSION_ID: 'session-a',
+        acSuggestions: [],
+        acWordlists: [
+          {
+            value: '/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt',
+            label: 'Discovery/DNS/subdomains-top1million-5000.txt',
+            description: 'DNS wordlist',
+            wordlist_category: 'dns',
+          },
+        ],
+        acContextRegistry: {
+          dnsrecon: {
+            flags: [
+              { value: '-d', description: 'Target domain' },
+              { value: '-D', description: 'Wordlist' },
+              { value: '--xml', description: 'XML output' },
+            ],
+            expects_value: ['-d', '-D', '--xml'],
+            arg_hints: {
+              '-d': [{ value: '<domain>', hintOnly: true, value_type: 'domain', description: 'Target domain' }],
+              '-D': [{ value: '<wordlist>', hintOnly: true, value_type: 'wordlist', wordlist_category: 'dns' }],
+              '--xml': [{ value: 'dnsrecon-results.xml', description: 'Save XML DNS results' }],
+            },
+          },
+          subfinder: {
+            flags: [{ value: '-d', description: 'Target domain' }],
+            expects_value: ['-d'],
+            arg_hints: {
+              '-d': [{ value: '<domain>', hintOnly: true, value_type: 'domain', description: 'Target domain' }],
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+      rememberRecentDomainsFromCommand,
+      _readRecentDomains,
+    }`,
+    )
+
+    expect(rememberRecentDomainsFromCommand('dnsrecon -d delta.example.io --xml dnsrecon-results.xml')).toEqual([
+      'delta.example.io',
+    ])
+    expect(rememberRecentDomainsFromCommand('dnsrecon -D subdomains.txt')).toEqual([])
+    rememberRecentDomainsFromCommand('subfinder -d alpha.example.com')
+
+    expect(_readRecentDomains()).toEqual(['alpha.example.com', 'delta.example.io'])
+    const rootFlags = getAutocompleteMatches('dnsrecon ', 9).map(item => item.value)
+    expect(rootFlags).toContain('-d')
+    expect(rootFlags).toContain('-D')
+    expect(getAutocompleteMatches('dnsrecon -D', 11).map(item => item.value)).toEqual(['-D'])
+    expect(getAutocompleteMatches('dnsrecon -d', 11).map(item => item.value)).toEqual(['-d'])
+    expect(getAutocompleteMatches('dnsrecon -d ', 12).map(item => item.value)).toEqual([
+      'alpha.example.com',
+      'delta.example.io',
+      '<domain>',
+    ])
+    expect(getAutocompleteMatches('dnsrecon -D ', 12).map(item => item.value)).toEqual([
+      '/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt',
+      '<wordlist>',
+    ])
+  })
+
   it('suggests installed wordlists only inside marked wordlist slots', () => {
     const { getAutocompleteMatches } = fromDomScripts(
       ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],

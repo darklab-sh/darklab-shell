@@ -479,6 +479,8 @@ export async function loadAppFns({
       'app/static/js/output.js',
       'app/static/js/core/app_preferences_core.js',
       'app/static/js/app.js',
+      'app/static/js/features/preferences/preferences.js',
+      'app/static/js/features/command-registry/command_registry.js',
       'app/static/js/features/theme/theme.js',
       'app/static/js/features/terminal/local_commands.js',
       'app/static/js/features/autocomplete/runtime_context.js',

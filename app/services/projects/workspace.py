@@ -30,6 +30,52 @@ from core.database import (
 )
 from core.output_signals import strip_ansi_codes
 from services.history.permalinks import _font_face_css, _format_duration, _permalink_context
+from services.projects.contracts import (
+    ACTIVE_PROJECT_PREF_KEY,
+    EvidencePackageTooLarge,
+    FINDING_REVIEW_STATES,
+    MAX_ENTITY_ID_LEN,
+    MAX_ENTITY_NOTE_BODY_LEN,
+    MAX_FINDING_TITLE_LEN,
+    MAX_LABEL_LEN,
+    MAX_PACKAGE_DESCRIPTION_LEN,
+    MAX_PACKAGE_NAME_LEN,
+    MAX_PROJECT_COLOR_LEN,
+    MAX_PROJECT_DESCRIPTION_LEN,
+    MAX_PROJECT_NAME_LEN,
+    MAX_PROJECT_NOTES_LEN,
+    MAX_PROJECT_TARGET_DISCOVERY_FILE_BYTES,
+    MAX_PROJECT_TARGET_DISCOVERY_FILE_LINES,
+    MAX_PROJECT_TARGET_DISCOVERY_PER_RUN,
+    MAX_TARGET_VALUE_LEN,
+    PROJECT_LINK_ENTITY_TYPES,
+    PROJECT_STATUSES,
+    PROJECT_TARGET_REVIEW_STATES,
+    PROJECT_TARGET_SELECT_COLUMNS,
+    PROJECT_TARGET_SOURCES,
+    PROJECT_TARGET_TYPES,
+    ProjectWorkspaceError,
+    ProjectWorkspaceNotFound,
+    ProjectWorkspaceQuotaExceeded,
+)
+from services.projects.metadata import (
+    _attach_package_metadata,
+    _attach_project_labels,
+    _attach_project_notes,
+    _attach_target_metadata,
+    _count_entity_metadata_for_ids,
+    _entity_labels_by_id,
+    _entity_notes_by_id,
+    _save_project_note,
+)
+from services.projects import metadata as project_metadata
+from services.projects.preferences import (
+    clear_active_project_preference as _clear_active_project_preference,
+    load_session_preferences as _load_session_preferences,
+    migrate_active_project_preference as _migrate_active_project_preference,
+    project_auto_link_external_runs_enabled as _project_auto_link_external_runs_enabled,
+    save_session_preferences as _save_session_preferences,
+)
 from core.redaction import apply_redaction_rules, redact_line_entries
 from services.runs.output_store import load_full_output_entries
 from services.workspace.files import (
@@ -40,69 +86,21 @@ from services.workspace.files import (
     resolve_workspace_path,
 )
 
-MAX_PROJECT_NAME_LEN = 120
-MAX_PROJECT_DESCRIPTION_LEN = 1000
-MAX_PROJECT_COLOR_LEN = 32
-MAX_PROJECT_NOTES_LEN = 20000
-MAX_ENTITY_ID_LEN = 512
-MAX_LABEL_LEN = 80
-MAX_ENTITY_NOTE_BODY_LEN = 20000
-MAX_TARGET_VALUE_LEN = 512
-MAX_FINDING_TITLE_LEN = 240
-MAX_PACKAGE_NAME_LEN = 120
-MAX_PACKAGE_DESCRIPTION_LEN = 1000
 MAX_PROJECT_COMPARE_ITEMS_PER_SIDE = run_comparison.MAX_COMPARE_ITEMS_PER_SIDE
-MAX_PROJECT_TARGET_DISCOVERY_PER_RUN = 100
-MAX_PROJECT_TARGET_DISCOVERY_FILE_BYTES = 256 * 1024
-MAX_PROJECT_TARGET_DISCOVERY_FILE_LINES = 2000
-ACTIVE_PROJECT_PREF_KEY = "pref_active_project_id"
-PROJECT_AUTO_LINK_EXTERNAL_RUNS_PREF_KEY = "pref_project_auto_link_external_runs"
 
-PROJECT_STATUSES = frozenset({"active", "archived"})
-PROJECT_LINK_ENTITY_TYPES = frozenset({
-    "run",
-})
-ENTITY_METADATA_TYPES = frozenset({
-    "project",
-    "run",
-    "snapshot",
-    "workspace_file",
-    "run_file_artifact",
-    "finding",
-    "target",
-    "package",
-})
-PROJECT_TARGET_TYPES = frozenset({"domain", "url", "host", "ip", "cidr", "port_set"})
-PROJECT_TARGET_REVIEW_STATES = frozenset({"confirmed", "pending", "dismissed"})
-PROJECT_TARGET_SOURCES = frozenset({"user", "auto_command", "auto_input_file"})
-FINDING_REVIEW_STATES = frozenset({"new", "reviewed", "important", "false_positive", "needs_followup"})
-EVIDENCE_PACKAGE_STATUSES = frozenset({"draft"})
-PROJECT_TARGET_SELECT_COLUMNS = (
-    "id, project_id, type, value, source_run_id, confidence, "
-    "review_state, source, source_detail, seen_count, last_seen, dismissed_at, created, updated"
-)
+list_entity_labels = project_metadata.list_entity_labels
+add_entity_label = project_metadata.add_entity_label
+delete_entity_label = project_metadata.delete_entity_label
+entity_metadata_target_exists = project_metadata.entity_metadata_target_exists
+get_entity_note = project_metadata.get_entity_note
+upsert_entity_note = project_metadata.upsert_entity_note
+delete_entity_note = project_metadata.delete_entity_note
 
 _URL_RE = re.compile(r"https?://[^\s<>'\"`]+", re.I)
 _DOMAIN_RE = re.compile(
     r"\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\b",
     re.I,
 )
-
-
-class ProjectWorkspaceError(ValueError):
-    """Raised when project workspace input is invalid."""
-
-
-class ProjectWorkspaceNotFound(ProjectWorkspaceError):
-    """Raised when a referenced project workspace entity is missing."""
-
-
-class ProjectWorkspaceQuotaExceeded(ProjectWorkspaceError):
-    """Raised when a project workspace quota would be exceeded."""
-
-
-class EvidencePackageTooLarge(ProjectWorkspaceQuotaExceeded):
-    """Raised when an evidence package archive would exceed configured limits."""
 
 
 def _cfg_int(key, default, *, cfg=None):
@@ -213,76 +211,6 @@ def _row_to_project_run(row):
     }
 
 
-def _load_session_preferences(conn, session_id):
-    row = conn.execute(
-        "SELECT preferences FROM session_preferences WHERE session_id = ?",
-        (session_id,),
-    ).fetchone()
-    if not row:
-        return {}
-    try:
-        preferences = json.loads(row["preferences"] or "{}")
-    except (TypeError, ValueError):
-        return {}
-    return preferences if isinstance(preferences, dict) else {}
-
-
-def _save_session_preferences(conn, session_id, preferences):
-    updated = _now()
-    conn.execute(
-        "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (?, ?, ?) "
-        "ON CONFLICT(session_id) DO UPDATE SET preferences = excluded.preferences, updated = excluded.updated",
-        (session_id, json.dumps(preferences, sort_keys=True), updated),
-    )
-
-
-def _clear_active_project_preference(conn, session_id, *, project_id=None):
-    preferences = _load_session_preferences(conn, session_id)
-    current_project_id = str(preferences.get(ACTIVE_PROJECT_PREF_KEY) or "")
-    if not current_project_id or (project_id is not None and current_project_id != project_id):
-        return False
-    preferences.pop(ACTIVE_PROJECT_PREF_KEY, None)
-    _save_session_preferences(conn, session_id, preferences)
-    return True
-
-
-def _project_auto_link_external_runs_enabled(conn, session_id):
-    preferences = _load_session_preferences(conn, session_id)
-    value = str(preferences.get(PROJECT_AUTO_LINK_EXTERNAL_RUNS_PREF_KEY) or "on").strip().lower()
-    return value not in {"0", "false", "no", "off"}
-
-
-def _project_is_active_for_session(conn, session_id, project_id):
-    project_id = str(project_id or "")
-    if not project_id:
-        return False
-    row = conn.execute(
-        "SELECT 1 FROM projects WHERE session_id = ? AND id = ? AND status != 'archived'",
-        (session_id, project_id),
-    ).fetchone()
-    return row is not None
-
-
-def _migrate_active_project_preference(conn, from_session_id, to_session_id):
-    source_preferences = _load_session_preferences(conn, from_session_id)
-    source_project_id = str(source_preferences.get(ACTIVE_PROJECT_PREF_KEY) or "")
-    if not source_project_id:
-        return 0
-    if not _project_is_active_for_session(conn, to_session_id, source_project_id):
-        return 0
-
-    destination_preferences = _load_session_preferences(conn, to_session_id)
-    current_project_id = str(destination_preferences.get(ACTIVE_PROJECT_PREF_KEY) or "")
-    if current_project_id == source_project_id:
-        return 1
-    if _project_is_active_for_session(conn, to_session_id, current_project_id):
-        return 0
-
-    destination_preferences[ACTIVE_PROJECT_PREF_KEY] = source_project_id
-    _save_session_preferences(conn, to_session_id, destination_preferences)
-    return 1
-
-
 def _row_to_link(row):
     if not row:
         return None
@@ -293,34 +221,6 @@ def _row_to_link(row):
         "entity_id": row["entity_id"],
         "source": row["source"],
         "created": row["created"],
-    }
-
-
-def _row_to_label(row):
-    if not row:
-        return None
-    return {
-        "id": row["id"],
-        "session_id": row["session_id"],
-        "entity_type": row["entity_type"],
-        "entity_id": row["entity_id"],
-        "label": row["label"],
-        "source": row["source"],
-        "created": row["created"],
-    }
-
-
-def _row_to_entity_note(row):
-    if not row:
-        return None
-    return {
-        "id": row["id"],
-        "session_id": row["session_id"],
-        "entity_type": row["entity_type"],
-        "entity_id": row["entity_id"],
-        "body": row["body"],
-        "created": row["created"],
-        "updated": row["updated"],
     }
 
 
@@ -2231,143 +2131,6 @@ def _count_rows_for_ids(conn, table, column, ids):
     return int(row["count"] or 0) if row else 0
 
 
-def _count_entity_metadata_for_ids(conn, table, entity_type, entity_ids):
-    values = [str(value) for value in entity_ids if value]
-    if not values:
-        return 0
-    placeholders = ",".join("?" for _ in values)
-    row = conn.execute(
-        f"SELECT COUNT(*) AS count FROM {table} WHERE entity_type = ? AND entity_id IN ({placeholders})",  # nosec B608
-        [entity_type, *values],
-    ).fetchone()
-    return int(row["count"] or 0) if row else 0
-
-
-def _entity_labels_by_id(conn, session_id, entity_type, entity_ids):
-    values = [str(value) for value in entity_ids if value]
-    if not values:
-        return {}
-    placeholders = ",".join("?" for _ in values)
-    rows = conn.execute(
-        "SELECT id, session_id, entity_type, entity_id, label, source, created "
-        "FROM entity_labels WHERE session_id = ? AND entity_type = ? "
-        f"AND entity_id IN ({placeholders}) "  # nosec B608
-        "ORDER BY label COLLATE NOCASE ASC, created ASC",
-        [session_id, entity_type, *values],
-    ).fetchall()
-    grouped = {value: [] for value in values}
-    for row in rows:
-        grouped.setdefault(str(row["entity_id"]), []).append(_row_to_label(row))
-    return grouped
-
-
-def _entity_notes_by_id(conn, session_id, entity_type, entity_ids):
-    values = [str(value) for value in entity_ids if value]
-    if not values:
-        return {}
-    placeholders = ",".join("?" for _ in values)
-    rows = conn.execute(
-        "SELECT id, session_id, entity_type, entity_id, body, created, updated "
-        "FROM entity_notes WHERE session_id = ? AND entity_type = ? "
-        f"AND entity_id IN ({placeholders})",  # nosec B608
-        [session_id, entity_type, *values],
-    ).fetchall()
-    return {
-        str(row["entity_id"]): _row_to_entity_note(row)
-        for row in rows
-    }
-
-
-def _attach_project_notes(conn, session_id, projects):
-    items = [project for project in projects if project]
-    if not items:
-        return items
-    note_map = _entity_notes_by_id(conn, session_id, "project", [project["id"] for project in items])
-    for project in items:
-        project["note"] = note_map.get(str(project["id"]))
-    return items
-
-
-def _attach_project_labels(conn, session_id, projects):
-    items = [project for project in projects if project]
-    if not items:
-        return items
-    label_map = _entity_labels_by_id(conn, session_id, "project", [project["id"] for project in items])
-    for project in items:
-        project["labels"] = label_map.get(str(project["id"]), [])
-    return items
-
-
-def _attach_package_metadata(conn, session_id, packages):
-    items = [package for package in packages if package]
-    if not items:
-        return items
-    package_ids = [package["id"] for package in items]
-    label_map = _entity_labels_by_id(conn, session_id, "package", package_ids)
-    note_map = _entity_notes_by_id(conn, session_id, "package", package_ids)
-    for package in items:
-        package_id = str(package["id"])
-        package["labels"] = label_map.get(package_id, [])
-        package["note"] = note_map.get(package_id)
-    return items
-
-
-def _attach_target_metadata(conn, session_id, targets):
-    items = [target for target in targets if target]
-    if not items:
-        return items
-    target_ids = [target["id"] for target in items]
-    label_map = _entity_labels_by_id(conn, session_id, "target", target_ids)
-    note_map = _entity_notes_by_id(conn, session_id, "target", target_ids)
-    for target in items:
-        target_id = str(target["id"])
-        target["labels"] = label_map.get(target_id, [])
-        target["note"] = note_map.get(target_id)
-    return items
-
-
-def _save_project_note(conn, session_id, project_id, notes):
-    body = _trim_text(notes, MAX_PROJECT_NOTES_LEN)
-    now = _now()
-    if not body:
-        conn.execute(
-            "DELETE FROM entity_notes WHERE session_id = ? AND entity_type = 'project' AND entity_id = ?",
-            (session_id, project_id),
-        )
-        return
-    existing = conn.execute(
-        "SELECT id FROM entity_notes WHERE session_id = ? AND entity_type = 'project' AND entity_id = ?",
-        (session_id, project_id),
-    ).fetchone()
-    if existing:
-        conn.execute(
-            "UPDATE entity_notes SET body = ?, updated = ? WHERE session_id = ? AND entity_type = 'project' AND entity_id = ?",
-            (body, now, session_id, project_id),
-        )
-        return
-    session_count = conn.execute(
-        "SELECT COUNT(*) AS count FROM entity_notes WHERE session_id = ?",
-        (session_id,),
-    ).fetchone()
-    if _quota_exceeded(
-        int(session_count["count"] or 0) if session_count else 0,
-        "max_entity_notes_per_session",
-        2000,
-    ):
-        _raise_quota("note quota exceeded for this session")
-    for _ in range(10):
-        note_id = _new_entity_note_id()
-        result = conn.execute(
-            "INSERT OR IGNORE INTO entity_notes "
-            "(id, session_id, entity_type, entity_id, body, created, updated) "
-            "VALUES (?, ?, 'project', ?, ?, ?, ?)",
-            (note_id, session_id, project_id, body, now, now),
-        )
-        if result.rowcount:
-            return
-    raise ProjectWorkspaceError("could not allocate an entity note id")
-
-
 def get_project_summary(session_id, project_id):
     with db_connect() as conn:
         project_row = conn.execute(
@@ -4140,40 +3903,6 @@ def _normalize_link_payload(data):
     return entity_type, entity_id, source
 
 
-def _normalize_metadata_target(entity_type, entity_id):
-    try:
-        entity_type = validate_project_entity_type(_trim_text(entity_type, 64))
-    except ValueError as exc:
-        raise ProjectWorkspaceError(str(exc)) from None
-    if entity_type not in ENTITY_METADATA_TYPES:
-        raise ProjectWorkspaceError(f"entity metadata does not support {entity_type}")
-    entity_id = _trim_text(entity_id, MAX_ENTITY_ID_LEN)
-    if not entity_id:
-        raise ProjectWorkspaceError("entity_id is required")
-    return entity_type, entity_id
-
-
-def _normalize_label_payload(data):
-    if not isinstance(data, dict):
-        raise ProjectWorkspaceError("label payload must be an object")
-    label = _trim_text(data.get("label"), MAX_LABEL_LEN)
-    if not label:
-        raise ProjectWorkspaceError("label is required")
-    return label
-
-
-def _normalize_entity_note_payload(data, *, partial=False):
-    if not isinstance(data, dict):
-        raise ProjectWorkspaceError("note payload must be an object")
-    clean = {}
-    if "body" in data or not partial:
-        body = _trim_text(data.get("body"), MAX_ENTITY_NOTE_BODY_LEN)
-        if not body:
-            raise ProjectWorkspaceError("note body is required")
-        clean["body"] = body
-    return clean
-
-
 def _normalize_target_payload(data, *, partial=False):
     if not isinstance(data, dict):
         raise ProjectWorkspaceError("target payload must be an object")
@@ -4866,181 +4595,3 @@ def update_finding_review_state(session_id, finding_id, data):
         ).fetchone()
         conn.commit()
     return _row_to_finding(row)
-
-
-def list_entity_labels(session_id, entity_type, entity_id):
-    entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
-    with db_connect() as conn:
-        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
-            return None
-        rows = conn.execute(
-            "SELECT id, session_id, entity_type, entity_id, label, source, created "
-            "FROM entity_labels WHERE session_id = ? AND entity_type = ? AND entity_id = ? "
-            "ORDER BY label COLLATE NOCASE ASC, created ASC",
-            (session_id, entity_type, entity_id),
-        ).fetchall()
-    return [_row_to_label(row) for row in rows]
-
-
-def add_entity_label(session_id, entity_type, entity_id, data):
-    entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
-    label = _normalize_label_payload(data)
-    created = _now()
-    with db_connect() as conn:
-        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
-            return None
-        row = conn.execute(
-            "SELECT id, session_id, entity_type, entity_id, label, source, created "
-            "FROM entity_labels WHERE session_id = ? AND entity_type = ? "
-            "AND entity_id = ? AND label = ?",
-            (session_id, entity_type, entity_id, label),
-        ).fetchone()
-        if row:
-            return _row_to_label(row)
-        session_count = conn.execute(
-            "SELECT COUNT(*) AS count FROM entity_labels WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
-        if _quota_exceeded(
-            int(session_count["count"] or 0) if session_count else 0,
-            "max_entity_labels_per_session",
-            5000,
-        ):
-            _raise_quota("label quota exceeded for this session")
-        entity_count = conn.execute(
-            "SELECT COUNT(*) AS count FROM entity_labels "
-            "WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
-            (session_id, entity_type, entity_id),
-        ).fetchone()
-        if _quota_exceeded(
-            int(entity_count["count"] or 0) if entity_count else 0,
-            "max_entity_labels_per_entity",
-            20,
-        ):
-            _raise_quota("label quota exceeded for this entity")
-        for _ in range(10):
-            label_id = _new_entity_label_id()
-            conn.execute(
-                "INSERT OR IGNORE INTO entity_labels "
-                "(id, session_id, entity_type, entity_id, label, source, created) "
-                "VALUES (?, ?, ?, ?, ?, 'manual', ?)",
-                (label_id, session_id, entity_type, entity_id, label, created),
-            )
-            row = conn.execute(
-                "SELECT id, session_id, entity_type, entity_id, label, source, created "
-                "FROM entity_labels WHERE session_id = ? AND entity_type = ? "
-                "AND entity_id = ? AND label = ?",
-                (session_id, entity_type, entity_id, label),
-            ).fetchone()
-            if row:
-                conn.commit()
-                return _row_to_label(row)
-        raise ProjectWorkspaceError("could not allocate an entity label id")
-
-
-def delete_entity_label(session_id, entity_type, entity_id, data):
-    entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
-    label = _normalize_label_payload(data)
-    with db_connect() as conn:
-        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
-            return None
-        result = conn.execute(
-            "DELETE FROM entity_labels WHERE session_id = ? AND entity_type = ? "
-            "AND entity_id = ? AND label = ?",
-            (session_id, entity_type, entity_id, label),
-        )
-        conn.commit()
-    return result.rowcount > 0
-
-
-def entity_metadata_target_exists(session_id, entity_type, entity_id):
-    entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
-    with db_connect() as conn:
-        return _entity_belongs_to_session(conn, session_id, entity_type, entity_id)
-
-
-def get_entity_note(session_id, entity_type, entity_id):
-    entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
-    with db_connect() as conn:
-        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
-            return None
-        row = conn.execute(
-            "SELECT id, session_id, entity_type, entity_id, body, created, updated "
-            "FROM entity_notes WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
-            (session_id, entity_type, entity_id),
-        ).fetchone()
-    return _row_to_entity_note(row)
-
-
-def upsert_entity_note(session_id, entity_type, entity_id, data):
-    entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
-    payload = _normalize_entity_note_payload(data)
-    now = _now()
-    with db_connect() as conn:
-        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
-            return None
-        existing = conn.execute(
-            "SELECT id, session_id, entity_type, entity_id, body, created, updated "
-            "FROM entity_notes WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
-            (session_id, entity_type, entity_id),
-        ).fetchone()
-        if existing:
-            conn.execute(
-                "UPDATE entity_notes SET body = ?, updated = ? WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
-                (payload["body"], now, session_id, entity_type, entity_id),
-            )
-            row = conn.execute(
-                "SELECT id, session_id, entity_type, entity_id, body, created, updated "
-                "FROM entity_notes WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
-                (session_id, entity_type, entity_id),
-            ).fetchone()
-            conn.commit()
-            return _row_to_entity_note(row)
-        session_count = conn.execute(
-            "SELECT COUNT(*) AS count FROM entity_notes WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
-        if _quota_exceeded(
-            int(session_count["count"] or 0) if session_count else 0,
-            "max_entity_notes_per_session",
-            2000,
-        ):
-            _raise_quota("note quota exceeded for this session")
-        for _ in range(10):
-            note_id = _new_entity_note_id()
-            conn.execute(
-                "INSERT OR IGNORE INTO entity_notes "
-                "(id, session_id, entity_type, entity_id, body, created, updated) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (
-                    note_id,
-                    session_id,
-                    entity_type,
-                    entity_id,
-                    payload["body"],
-                    now,
-                    now,
-                ),
-            )
-            row = conn.execute(
-                "SELECT id, session_id, entity_type, entity_id, body, created, updated "
-                "FROM entity_notes WHERE id = ? AND session_id = ?",
-                (note_id, session_id),
-            ).fetchone()
-            if row:
-                conn.commit()
-                return _row_to_entity_note(row)
-        raise ProjectWorkspaceError("could not allocate an entity note id")
-
-
-def delete_entity_note(session_id, entity_type, entity_id):
-    entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
-    with db_connect() as conn:
-        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
-            return None
-        result = conn.execute(
-            "DELETE FROM entity_notes WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
-            (session_id, entity_type, entity_id),
-        )
-        conn.commit()
-    return result.rowcount > 0

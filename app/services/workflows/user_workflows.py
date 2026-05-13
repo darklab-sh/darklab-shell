@@ -8,8 +8,8 @@ import json
 import secrets
 from datetime import datetime, timezone
 
-from services.commands.registry import normalize_workflow_entry
 from core.database import db_connect
+from services.workflows.catalog import normalize_workflow_entry
 
 
 MAX_WORKFLOW_TITLE_LEN = 120

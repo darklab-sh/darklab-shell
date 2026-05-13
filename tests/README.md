@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,641
+- behavior tests: 2,644
 - docs/inventory meta-tests: 32
 - `pytest`: 1324 (1292 behavior + 32 meta)
-- `vitest`: 1102
+- `vitest`: 1105
 - `playwright`: 247
-- total: 2,673
+- total: 2,676
 
 This document is organized in two parts:
 
@@ -1747,6 +1747,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `persists captured recent domains without requiring browser storage` | Verifies that captured domain values are posted to the session endpoint while the local autocomplete cache remains usable immediately. |
 | `suggests recent domains only inside known domain value slots` | Verifies that recent domain autocomplete appears only where command metadata identifies a domain value. |
 | `does not infer recent-domain slots from placeholder text without value_type metadata` | Verifies that recent-domain capture and suggestions require explicit `value_type: domain` metadata. |
+| `keeps case-sensitive dnsrecon -d domain and -D wordlist slots separate` | Verifies that dnsrecon shows both case-sensitive flags, filters partial flag input exactly, and keeps domain and wordlist value slots separate. |
 | `suggests installed wordlists only inside marked wordlist slots` | Verifies that installed SecLists suggestions appear only in explicit `value_type: wordlist` slots and filter by category. |
 | `keeps workspace file hints while adding installed wordlists for wordlist slots` | Verifies that wordlist autocomplete adds installed SecLists paths without dropping session workspace file hints. |
 | `prefers runtime autocomplete suggestions for client-side commands` | Verifies that client-side commands can provide dynamic autocomplete suggestions before falling back to the static autocomplete registry. |
@@ -2001,6 +2002,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | --- | --- |
 | `renders notice lines with textContent (not HTML)` | Verifies that renders notice lines with textContent (not HTML). |
 | `renders non-plain classes through ansi_to_html` | Verifies that renders non-plain classes through ansi_to_html. |
+| `isolates ANSI parser state between tabs` | Verifies that unterminated ANSI color or style state in one tab does not affect output rendered in another tab. |
+| `resets ANSI parser state before replaying restored output` | Verifies that restored transcript replay starts with fresh ANSI parser state for the target tab. |
 | `renders shell as a normal workspace folder in the prompt` | Verifies that a workspace folder named `shell` is displayed normally in the prompt instead of being treated as a mount prefix. |
 | `falls back to plain-text rendering when AnsiUp is unavailable` | Verifies that falls back to plain-text rendering when AnsiUp is unavailable. |
 | `wraps output content in a line-content container so prefix mode does not reshape the line flow` | Verifies that wraps output content in a line-content container so prefix mode does not reshape the line flow. |

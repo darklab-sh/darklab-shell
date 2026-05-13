@@ -742,7 +742,13 @@ function loadRunnerFns({
   const showToast = showToastOverride || vi.fn()
 
   const fns = fromDomScripts(
-    ['app/static/js/core/runner_core.js', 'app/static/js/runner.js'],
+    [
+      'app/static/js/core/runner_core.js',
+      'app/static/js/features/runner/runner_active_restore.js',
+      'app/static/js/features/runner/runner_persistence.js',
+      'app/static/js/features/runner/runner_workspace.js',
+      'app/static/js/runner.js',
+    ],
     {
       document,
       Map,
@@ -2168,10 +2174,13 @@ function loadSeedFns({
   if (localStarred.length) {
     storage.setItem('starred', JSON.stringify(localStarred))
   }
-  const fns = fromDomScript(
-    'app/static/js/runner.js',
+  const fns = fromDomScripts(
+    [
+      'app/static/js/features/runner/runner_persistence.js',
+      'app/static/js/runner.js',
+    ],
     { localStorage: storage, apiFetch, loadStarredFromServer },
-    '_seedLocalStorageStarsToServer',
+    '{ _seedLocalStorageStarsToServer }',
   )
   return { ...fns, _storage: storage, apiFetch, loadStarredFromServer }
 }
@@ -2304,8 +2313,11 @@ function loadTokenSetFns({ apiFetch = vi.fn() } = {}) {
   const appendLine = vi.fn()
   const setStatus = vi.fn()
   const appendPromptNewline = vi.fn()
-  const fns = fromDomScript(
-    'app/static/js/runner.js',
+  const fns = fromDomScripts(
+    [
+      'app/static/js/features/runner/runner_persistence.js',
+      'app/static/js/runner.js',
+    ],
     {
       localStorage: storage,
       apiFetch,
@@ -2320,7 +2332,7 @@ function loadTokenSetFns({ apiFetch = vi.fn() } = {}) {
       SESSION_ID: 'uuid-base-session',
       maskSessionToken: (t) => (t ? t.slice(0, 8) + '••••' : '(none)'),
     },
-    '_sessionTokenSet',
+    '{ _sessionTokenSet }',
   )
   return { ...fns, appendLine, setStatus, appendPromptNewline, _storage: storage }
 }

@@ -23,7 +23,29 @@ function createAnsiUpRenderer() {
   };
 }
 
-const ansi_up = createAnsiUpRenderer();
+const _ansiRenderersByTab = new Map();
+
+function _ansiTabKey(tabId) {
+  return String(tabId || '__default__');
+}
+
+function _getAnsiRendererForTab(tabId) {
+  const key = _ansiTabKey(tabId);
+  let renderer = _ansiRenderersByTab.get(key);
+  if (!renderer) {
+    renderer = createAnsiUpRenderer();
+    _ansiRenderersByTab.set(key, renderer);
+  }
+  return renderer;
+}
+
+function resetAnsiRendererForTab(tabId) {
+  _ansiRenderersByTab.set(_ansiTabKey(tabId), createAnsiUpRenderer());
+}
+
+function dropAnsiRendererForTab(tabId) {
+  _ansiRenderersByTab.delete(_ansiTabKey(tabId));
+}
 
 // ── Timestamp mode ──
 // Cycles: 'off' → 'elapsed' → 'clock' → 'off'
@@ -448,7 +470,7 @@ function _buildOutputLine(text, cls, tabId, now, runStart, metadata = null) {
   } else if (metadata && typeof metadata.faq_command === 'string' && metadata.faq_command.trim()) {
     _appendOutputCommandChip(content, metadata.faq_command.trim(), String(text || '').trim());
   } else {
-    content.innerHTML = ansi_up.ansi_to_html(text);
+    content.innerHTML = _getAnsiRendererForTab(tabId).ansi_to_html(text);
   }
   span.appendChild(content);
 
@@ -558,7 +580,7 @@ function _syncTabRawLines(tab, rawLine) {
   }
 }
 
-function _appendRestoredOutputSpan(out, rawLine) {
+function _appendRestoredOutputSpan(out, rawLine, tabId) {
   const span = document.createElement('span');
   const cls = rawLine && typeof rawLine.cls === 'string' ? rawLine.cls : '';
   span.className = 'line' + (cls ? ' ' + cls : '');
@@ -583,7 +605,7 @@ function _appendRestoredOutputSpan(out, rawLine) {
   } else if (cls === 'notice' || cls === 'denied' || cls === 'exit-ok' || cls === 'exit-fail') {
     content.textContent = text;
   } else {
-    content.innerHTML = ansi_up.ansi_to_html(text);
+    content.innerHTML = _getAnsiRendererForTab(tabId).ansi_to_html(text);
   }
   span.appendChild(content);
   _appendOutputSpan(out, span);
@@ -605,9 +627,10 @@ function renderRestoredTabOutput(tabId, rawLines) {
     target: String(line && line.target || ''),
   })) : [];
   out.innerHTML = '';
+  resetAnsiRendererForTab(tabId);
   tab.rawLines = lines;
   _resetTabOutputSignalCounts(tab, lines);
-  lines.forEach(line => _appendRestoredOutputSpan(out, line));
+  lines.forEach(line => _appendRestoredOutputSpan(out, line, tabId));
   syncOutputPrefixes(out);
   if (lines.length) {
     tab.followOutput = true;

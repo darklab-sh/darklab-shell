@@ -5,6 +5,11 @@
 @import url('/static/css/shell-chrome.css');
 @import url('/static/css/mobile.css');
 @import url('/static/css/features/projects.css');
+@import url('/static/css/features/command-registry.css');
+@import url('/static/css/features/faq-shortcuts.css');
+@import url('/static/css/features/history.css');
 @import url('/static/css/features/run-comparison.css');
+@import url('/static/css/features/status-monitor.css');
 @import url('/static/css/features/workflows.css');
+@import url('/static/css/features/workspace.css');
 @import url('/static/css/mobile-chrome.css');

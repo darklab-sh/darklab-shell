@@ -819,6 +819,7 @@ function activateTab(id, { focusComposer = true } = {}) {
 
 function _resetPreservedSingleTabState(tab) {
   if (!tab) return;
+  if (typeof resetAnsiRendererForTab === 'function') resetAnsiRendererForTab(tab.id);
   tab.command = '';
   tab.runId = null;
   tab.historyRunId = null;
@@ -871,6 +872,7 @@ function _activateNeighborAfterClose(idx, id) {
 
 function _removeClosedTabView(id, idx) {
   tabs.splice(idx, 1);
+  if (typeof dropAnsiRendererForTab === 'function') dropAnsiRendererForTab(id);
   _getTabEl(id)?.remove();
   _getTabPanelEl(id)?.remove();
   _activateNeighborAfterClose(idx, id);
@@ -1060,6 +1062,7 @@ function getOutput(id) {
 
 function clearTab(id, { preserveRunState = false } = {}) {
   if (typeof _cancelPendingOutputBatch === 'function') _cancelPendingOutputBatch(id);
+  if (typeof resetAnsiRendererForTab === 'function') resetAnsiRendererForTab(id);
   const out = getOutput(id);
   if (out) {
     out.innerHTML = '';
@@ -1142,6 +1145,7 @@ function finalizeClosingTab(id) {
   }
 
   tabs.splice(idx, 1);
+  if (typeof dropAnsiRendererForTab === 'function') dropAnsiRendererForTab(id);
   _getTabEl(id)?.remove();
   _getTabPanelEl(id)?.remove();
   if (activeTabId === id && tabs.length) {
@@ -1313,9 +1317,10 @@ async function exportTabHtml(id) {
   }
   try {
     const exportModel = _buildTabExportModel(t);
+    const ansiRenderer = typeof createAnsiUpRenderer === 'function' ? createAnsiUpRenderer() : null;
     const { linesHtml, prefixWidth } = ExportHtmlUtils.buildExportLinesHtml(exportModel.rawLines, {
       getPrefix: (line, i) => _exportPrefix(line, i),
-      ansiToHtml: (text) => ansi_up.ansi_to_html(text),
+      ansiToHtml: (text) => ansiRenderer ? ansiRenderer.ansi_to_html(text) : escapeHtml(String(text ?? '')),
     });
     const [fontFacesCss, exportCss] = await Promise.all([
       ExportHtmlUtils.fetchVendorFontFacesCss().catch(() => ''),
@@ -1360,6 +1365,7 @@ async function exportTabPdf(id) {
   try {
     const { jsPDF } = window.jspdf;
     const exportModel = _buildTabExportModel(t);
+    const ansiRenderer = typeof createAnsiUpRenderer === 'function' ? createAnsiUpRenderer() : null;
     const doc = await ExportPdfUtils.buildTerminalExportPdf({
       jsPDF,
       appName: exportModel.appName,
@@ -1367,7 +1373,7 @@ async function exportTabPdf(id) {
       runMeta: exportModel.runMeta,
       rawLines: exportModel.rawLines,
       getPrefix: (line, i) => _exportPrefix(line, i),
-      ansiToHtml: (text) => ansi_up.ansi_to_html(text),
+      ansiToHtml: (text) => ansiRenderer ? ansiRenderer.ansi_to_html(text) : escapeHtml(String(text ?? '')),
     });
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     doc.save(`${exportModel.appName}-${ts}.pdf`);

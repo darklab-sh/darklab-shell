@@ -321,8 +321,7 @@ function _valueTypeSourceHints(type, spec, hints) {
 
 function _argHintsForTrigger(argHints, trigger) {
   if (Object.prototype.hasOwnProperty.call(argHints, trigger)) return argHints[trigger];
-  const lower = String(trigger || '').toLowerCase();
-  return Object.prototype.hasOwnProperty.call(argHints, lower) ? argHints[lower] : [];
+  return [];
 }
 
 function _argHintTriggersForValueType(spec, type) {
@@ -339,17 +338,21 @@ function _argHintTriggersForValueType(spec, type) {
 function _autocompletePreviousTokenExpectsValue(spec, previous) {
   if (!previous) return false;
   const expectsValue = Array.isArray(spec && spec.expects_value) ? spec.expects_value : [];
-  const previousLower = String(previous || '').toLowerCase();
-  return expectsValue.some(token => {
-    const value = String(token || '');
-    return value === previous || value.toLowerCase() === previousLower;
-  });
+  return expectsValue.some(token => String(token || '') === previous);
 }
 
 function _concreteAutocompleteTokens(spec) {
   return new Set((spec && Array.isArray(spec.flags) ? spec.flags : [])
     .map(flag => String(flag && flag.value || '').toLowerCase())
     .filter(value => value && !value.startsWith('-') && !value.startsWith('+')));
+}
+
+function _filterFlagItems(items, query) {
+  const q = String(query || '');
+  if (!q) return (Array.isArray(items) ? items : []).slice();
+  return (Array.isArray(items) ? items : []).filter((item) => (
+    autocompleteCore.itemInsertValue(item).startsWith(q)
+  ));
 }
 
 function _positionalHintPosition(hint) {
@@ -386,7 +389,6 @@ function _positionalHintSlotsForValueType(spec, type) {
 function _walkAutocompletePositionalValues(ctx, spec, contextSpec = {}, visitor = () => {}, options = {}) {
   const expectsValue = Array.isArray(spec && spec.expects_value) ? spec.expects_value : [];
   const expectsExact = new Set(expectsValue.map(token => String(token || '')));
-  const expectsLower = new Set(expectsValue.map(token => String(token || '').toLowerCase()));
   const concreteTokens = options.skipConcreteTokens ? _concreteAutocompleteTokens(spec) : new Set();
   const subTokens = contextSpec && Array.isArray(contextSpec.subcommandTokens)
     ? contextSpec.subcommandTokens
@@ -395,7 +397,6 @@ function _walkAutocompletePositionalValues(ctx, spec, contextSpec = {}, visitor 
     ? options.tokens
     : ctx.tokens.filter(token => token.end <= ctx.tokenStart);
   const triggerExact = new Set((options.triggers || []).map(trigger => String(trigger || '')));
-  const triggerLower = new Set((options.triggers || []).map(trigger => String(trigger || '').toLowerCase()));
   let skipNext = false;
   let positionalIndex = 0;
   for (let index = 1; index < tokens.length; index += 1) {
@@ -406,7 +407,7 @@ function _walkAutocompletePositionalValues(ctx, spec, contextSpec = {}, visitor 
     const previousLower = previous.toLowerCase();
     if (!tokenValue) continue;
     if (subTokens.some(subToken => subToken && token.start === subToken.start && token.end === subToken.end)) continue;
-    if (triggerExact.has(previous) || triggerLower.has(previousLower)) {
+    if (triggerExact.has(previous)) {
       visitor({
         triggered: true,
         token,
@@ -416,13 +417,14 @@ function _walkAutocompletePositionalValues(ctx, spec, contextSpec = {}, visitor 
         previousLower,
         positionalIndex,
       });
+      skipNext = false;
       continue;
     }
     if (skipNext) {
       skipNext = false;
       continue;
     }
-    if (expectsExact.has(tokenValue) || expectsLower.has(lower)) {
+    if (expectsExact.has(tokenValue)) {
       skipNext = true;
       continue;
     }
@@ -469,7 +471,7 @@ function _argHintTriggersForRecentDomains(spec) {
   const triggers = [];
   RECENT_DOMAIN_VALUE_TYPES.forEach((type) => {
     _argHintTriggersForValueType(spec, type).forEach((trigger) => {
-      const key = String(trigger || '').toLowerCase();
+      const key = String(trigger || '');
       if (!key || seen.has(key)) return;
       seen.add(key);
       triggers.push(trigger);
@@ -510,11 +512,10 @@ function _storeRecentDomains(found) {
 function _autocompleteValueTypeSlot(ctx, spec, contextSpec = {}, type = '') {
   if (!spec) return _emptyValueTypeSlot(type);
   const previous = String(ctx.previousToken || '');
-  const previousLower = previous.toLowerCase();
   const argHints = spec.arg_hints || {};
   const triggers = _argHintTriggersForValueType(spec, type);
   for (const trigger of triggers) {
-    if (trigger === previous || trigger.toLowerCase() === previousLower) {
+    if (trigger === previous) {
       return _valueTypeSlotFromHints(type, _argHintsForTrigger(argHints, trigger));
     }
   }
@@ -792,7 +793,7 @@ function _mergeAutocompleteSpecForSubcommand(baseSpec, subSpec) {
   const flags = [];
   const seenFlags = new Set();
   [...((baseSpec && baseSpec.flags) || []), ...((subSpec && subSpec.flags) || [])].forEach(flag => {
-    const key = String(flag && flag.value || '').toLowerCase();
+    const key = String(flag && flag.value || '');
     if (!key || seenFlags.has(key)) return;
     seenFlags.add(key);
     flags.push(flag);
@@ -992,7 +993,6 @@ function _buildContextAutocomplete(ctx) {
 
   const currentIsFlag = ctx.currentToken.startsWith('-') || ctx.currentToken.startsWith('+');
   const argHints = spec.arg_hints || {};
-  const previousLower = String(ctx.previousToken || '').toLowerCase();
   const argumentLimit = Number.isInteger(spec.argument_limit) && spec.argument_limit > 0
     ? spec.argument_limit
     : null;
@@ -1001,12 +1001,13 @@ function _buildContextAutocomplete(ctx) {
 
   const directHints = Object.prototype.hasOwnProperty.call(argHints, ctx.previousToken || '')
     ? argHints[ctx.previousToken || '']
-    : (Object.prototype.hasOwnProperty.call(argHints, previousLower) ? argHints[previousLower] : null);
+    : null;
   const completedTokens = ctx.tokens.filter(token => token.end <= ctx.tokenStart);
   const sequenceArgHints = spec.sequence_arg_hints || {};
   const priorToken = completedTokens.length >= 2
     ? String(completedTokens[completedTokens.length - 2].value || '').toLowerCase()
     : '';
+  const previousLower = String(ctx.previousToken || '').toLowerCase();
   const sequenceKey = `${priorToken} ${previousLower}`.trim();
   const sequenceHints = Object.prototype.hasOwnProperty.call(sequenceArgHints, sequenceKey)
     ? sequenceArgHints[sequenceKey]
@@ -1061,11 +1062,11 @@ function _buildContextAutocomplete(ctx) {
     const usedFlags = new Set(
       ctx.tokens
         .filter(token => token.start !== ctx.tokenStart)
-        .map(token => String(token.value || '').toLowerCase())
+        .map(token => String(token.value || ''))
         .filter(token => token.startsWith('-') || token.startsWith('+'))
     );
     const flags = (spec.flags || [])
-      .filter(flag => !usedFlags.has(String(flag.value || '').toLowerCase()))
+      .filter(flag => !usedFlags.has(String(flag.value || '')))
       .map(flag => autocompleteCore.buildItem({
         value: flag.value,
         description: flag.description || '',
@@ -1073,7 +1074,7 @@ function _buildContextAutocomplete(ctx) {
         replaceEnd: ctx.tokenEnd,
         insertValue: flag.value,
       }));
-    const filteredFlags = autocompleteCore.filterItems(flags, ctx.currentToken);
+    const filteredFlags = _filterFlagItems(flags, ctx.currentToken);
     if (!ctx.currentToken && ctx.atWhitespace && positionalHints.length && allowPositionalHints) {
       const resolved = _resolveAutocompleteHintSource(ctx, spec, positionalHints);
       const positionalItems = _hintsToItems(resolved.hints, ctx, { matchQuery: resolved.filterQuery });

@@ -458,17 +458,36 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── __init__.py     # Command service package marker
 │   │   │   ├── builtin_autocomplete.yaml # App-owned built-in command autocomplete grammar
 │   │   │   ├── builtins.py     # App-owned built-in shell helpers handled before external process spawn
+│   │   │   ├── builtins_catalog.py # Static built-in command help, shortcut, and special-command data
+│   │   │   ├── builtins_discovery.py # Help, FAQ, command catalog, man, type, and which built-in handlers
+│   │   │   ├── builtins_format.py # Shared formatting, ANSI styling, and output-line helpers for built-ins
+│   │   │   ├── builtins_misc.py # Miscellaneous and guardrail-flavored built-in command handlers
+│   │   │   ├── builtins_project.py # Project workspace built-in command family and project target helpers
+│   │   │   ├── builtins_runtime.py # Runtime/history/status built-in command handlers
+│   │   │   ├── builtins_session.py # Session token status and session variable built-in command handlers
+│   │   │   ├── builtins_shortcuts.py # Keyboard shortcut reference and shortcuts built-in command handler
+│   │   │   ├── builtins_system.py # Small system-style built-in command handlers
+│   │   │   ├── builtins_wordlist.py # Wordlist built-in command handler backed by the SecLists catalog service
+│   │   │   ├── builtins_workspace.py # Session file built-in command family and workspace aliases
+│   │   │   ├── postfilters.py  # Synthetic pipe-helper post-filter parser for app-native pipelines
 │   │   │   ├── registry.py     # Command loading, validation, autocomplete derivation, and registry-driven rewrites
+│   │   │   ├── registry_content.py # Welcome, tour, ASCII art, and hint content loaders
+│   │   │   ├── registry_loader.py # Command registry YAML loading, normalization, and overlay merging
+│   │   │   ├── registry_validation.py # Command tokenization, policy matching, deny checks, and runtime-command detection
 │   │   │   └── wordlists.py    # SecLists catalog loader and filtering helpers for wordlist command/autocomplete
 │   │   ├── history/
 │   │   │   ├── __init__.py     # History service package marker
 │   │   │   └── permalinks.py   # Flask context/render helpers for /history/<id> and /share/<id>
 │   │   ├── projects/
 │   │   │   ├── __init__.py     # Project service package marker
-│   │   │   └── workspace.py    # Session-scoped project helpers, targets, findings, artifacts, packages, labels, notes, and links
+│   │   │   ├── contracts.py    # Shared project workspace limits, allowed values, and exception classes
+│   │   │   ├── metadata.py     # Entity label/note helpers and project metadata attachment helpers
+│   │   │   ├── preferences.py  # Project-related session preference helpers
+│   │   │   └── workspace.py    # Session-scoped project helpers, targets, findings, artifacts, packages, and links
 │   │   ├── pty/
 │   │   │   ├── __init__.py     # PTY service package marker
-│   │   │   └── service.py      # Interactive PTY process/service helpers for allowlisted screen tools
+│   │   │   ├── service.py      # Interactive PTY process/service helpers for allowlisted screen tools
+│   │   │   └── transcript.py   # Completed PTY transcript shaping and transient redraw filtering
 │   │   ├── runs/
 │   │   │   ├── __init__.py     # Run service package marker
 │   │   │   ├── broker.py       # Brokered run event storage, replay, and SSE stream helpers
@@ -479,6 +498,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── variables.py    # Per-session command-variable storage and expansion helpers
 │   │   ├── workflows/
 │   │   │   ├── __init__.py     # Workflow service package marker
+│   │   │   ├── catalog.py      # Built-in/configured workflow catalog loading and normalization helpers
 │   │   │   └── user_workflows.py # Per-session user workflow storage, validation, and serialization helpers
 │   │   └── workspace/
 │   │       ├── __init__.py     # Workspace service package marker
@@ -490,22 +510,27 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   │   └── fonts.css   # @font-face declarations for vendored local fonts
 │   │   │   ├── diag.css        # Diagnostics-page-specific layout and responsive chrome
 │   │   │   ├── features/       # Feature-owned styles split out of shared shell/component stylesheets
+│   │   │   │   ├── command-registry.css # Command Registry modal and command catalog detail modal
+│   │   │   │   ├── faq-shortcuts.css # FAQ content, command chips, visual-tour entry, and shortcuts overlay
+│   │   │   │   ├── history.css # History drawer, history rows, Run Details modal, and history actions
 │   │   │   │   ├── projects.css # Projects modal, mobile project workspace, entity editors, compare picker, and package wizard
 │   │   │   │   ├── run-comparison.css # Run Comparison modal, split-view, controls, transcript diff, and mobile compare layout
-│   │   │   │   └── workflows.css # Workflows modal, workflow cards, editor, and rendered step controls
+│   │   │   │   ├── status-monitor.css # Status Monitor modal, visual cards, active-run rows, and mobile sheet layout
+│   │   │   │   ├── workflows.css # Workflows modal, workflow cards, editor, and rendered step controls
+│   │   │   │   └── workspace.css # Files modal, file viewer/editor, workspace rows, and workspace metadata chips
 │   │   │   ├── mobile-chrome.css # Mobile sheet handles, drag affordances, and pull-to-refresh suppression hooks
 │   │   │   ├── mobile.css      # Mobile composer, mobile shell layout, sheets, and viewport overrides
 │   │   │   ├── primitives/
-│   │   │   │   └── components.css # Tabs, search UI, permalink/history surfaces, toast, and shared menu components
-│   │   │   ├── shell-chrome.css # Desktop shell: left rail, tabbar row, and bottom HUD bar (mobile falls through to mobile.css)
-│   │   │   ├── shell.css       # Terminal shell frame, panels, history row, utility buttons, and modals
+│   │   │   │   └── components.css # Tabs, search UI, permalink surfaces, toast, and shared menu components
+│   │   │   ├── shell-chrome.css # Desktop shell: left rail, tabbar row, and bottom HUD bar
+│   │   │   ├── shell.css       # Terminal shell frame, panels, generic modal foundations, and utility buttons
 │   │   │   ├── styles.css      # Compatibility entrypoint that imports the modular CSS files in order
 │   │   │   ├── terminal_export.css # Shared export/permalink/diag header chrome
 │   │   │   └── welcome.css     # Welcome animation, operator notice, and onboarding-specific UI
 │   │   ├── favicon.ico         # Site favicon
 │   │   ├── fonts/              # Vendored local font files used by the app's vendor routes and permalink/export fallbacks
 │   │   └── js/
-│   │       ├── app.js          # Shared UI helpers, preferences, FAQ/Command Registry surfaces, and mobile-layout glue
+│   │       ├── app.js          # Shared UI helpers, preferences, keyboard shortcuts, tab-session state, and mobile-layout glue
 │   │       ├── autocomplete.js # Command autocomplete dropdown
 │   │       ├── controller.js   # Initialization and event wiring (loads after app.js)
 │   │       ├── core/
@@ -526,13 +551,37 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── features/
 │   │       │   ├── autocomplete/
 │   │       │   │   └── runtime_context.js # Runtime autocomplete contexts for built-ins, workspace paths, variables, and command lookup
+│   │       │   ├── command-registry/
+│   │       │   │   └── command_registry.js # FAQ command helpers plus Command Registry and Command Catalog modal logic
+│   │       │   ├── history/
+│   │       │   │   ├── history_actions.js # History star cache plus drawer/run action menu positioning helpers
+│   │       │   │   ├── history_links.js # History run permalink and snapshot link helpers
+│   │       │   │   ├── history_mutations.js # History delete/clear confirmations and loading overlay helpers
+│   │       │   │   ├── history_project_actions.js # History project filter options and add-run-to-project flows
+│   │       │   │   ├── history_recall.js # Command recall history and prompt navigation helpers
+│   │       │   │   ├── history_restore.js # Restoring saved runs into terminal tabs and source-line highlighting
+│   │       │   │   ├── history_rows.js # History drawer run/snapshot rows, metadata badges, and row action menus
+│   │       │   │   ├── history_run_details.js # Run Details modal rendering, tabs, loading, and actions
+│   │       │   │   └── history_search.js # Ctrl+R reverse-history search dropdown and keyboard handling
+│   │       │   ├── preferences/
+│   │       │   │   └── preferences.js # Session preference loading, persistence, and Options modal control syncing
+│   │       │   ├── projects/
+│   │       │   │   └── project_target_validation.js # Project target editor copy and value validation helpers
 │   │       │   ├── run-comparison/
-│   │       │       ├── history_compare_controls.js # Run Comparison view/context controls and actions menu
-│   │       │       ├── history_compare_core.js # Pure Run Comparison formatting, preference, and anchor-map helpers
-│   │       │       ├── history_compare_launcher.js # Run Comparison candidate picker and manual run-search flow
-│   │       │       ├── history_compare_navigation.js # Run Comparison row targeting, minimap, and previous/next-change controls
-│   │       │       ├── history_compare_overlay.js # Run Comparison modal shell, close handling, and initial focus lifecycle
-│   │       │       └── history_compare_renderer.js # Run Comparison transcript hunk renderer, object diff sections, restore actions, and compare fetch flow
+│   │       │   │   ├── history_compare_controls.js # Run Comparison view/context controls and actions menu
+│   │       │   │   ├── history_compare_core.js # Pure Run Comparison formatting, preference, and anchor-map helpers
+│   │       │   │   ├── history_compare_launcher.js # Run Comparison candidate picker and manual run-search flow
+│   │       │   │   ├── history_compare_navigation.js # Run Comparison row targeting, minimap, and previous/next-change controls
+│   │       │   │   ├── history_compare_overlay.js # Run Comparison modal shell, close handling, and initial focus lifecycle
+│   │       │   │   └── history_compare_renderer.js # Run Comparison transcript hunk renderer, object diff sections, restore actions, and compare fetch flow
+│   │       │   ├── runner/
+│   │       │   │   ├── runner_active_restore.js # Detached active-run restore markers shared by tabs, PTY, and runner reload recovery
+│   │       │   │   ├── runner_persistence.js # Client-side saved-run persistence for local runner commands
+│   │       │   │   └── runner_workspace.js # Workspace-terminal command parsing and path helpers
+│   │       │   ├── status-monitor/
+│   │       │   │   ├── status_monitor_core.js # Pure Status Monitor formatting, date, hashing, and telemetry helpers
+│   │       │   │   ├── status_monitor_data.js # Status Monitor endpoint loading and dashboard data aggregation
+│   │       │   │   └── status_monitor_resources.js # Status Monitor CPU/memory resource sampling and sparkline helpers
 │   │       │   ├── terminal/
 │   │       │   │   └── local_commands.js # Terminal-native theme/config command handlers and shared local-command helpers
 │   │       │   ├── theme/
@@ -541,7 +590,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   └── tour_cli.js # Terminal-guided onboarding tour command
 │   │       │   └── workflows/
 │   │       │       └── workflows.js # Workflows modal, editor, terminal command, and runtime autocomplete support
-│   │       ├── history.js      # Command history chips and drawer (with starring)
+│   │       ├── history.js      # Command history chips, drawer rows, filters, and compare entry points
 │   │       ├── mobile_chrome.js # Mobile shell chrome — recents sheet, viewport mode, pull-to-refresh suppression
 │   │       ├── output.js       # ANSI rendering and line management
 │   │       ├── permalink.js    # Permalink page controller — loaded only on /history/<id> and /share/<id>

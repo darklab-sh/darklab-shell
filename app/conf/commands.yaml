@@ -1070,11 +1070,6 @@ commands:
           suggest:
             - value: dnsrecon-results.xml
               description: Save XML DNS results
-      arguments:
-        - placeholder: <domain>
-          hint_only: true
-          value_type: domain
-          description: Usually provided through -d
   - root: subfinder
     description: Discovers subdomains from passive sources and optional provider configuration.
     category: Network Reconnaissance

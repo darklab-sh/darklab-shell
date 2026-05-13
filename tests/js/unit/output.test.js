@@ -1,6 +1,6 @@
 import { fromDomScripts } from './helpers/extract.js'
 
-function loadOutputFns({ appConfig = {}, extraGlobals = {} } = {}) {
+function loadOutputFns({ appConfig = {}, extraGlobals = {}, AnsiUpCtor = null } = {}) {
   class FakeAnsiUp {
     constructor() {
       this.use_classes = false
@@ -15,7 +15,7 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {} } = {}) {
     ['app/static/js/core/output_core.js', 'app/static/js/output.js'],
     {
       document,
-      AnsiUp: FakeAnsiUp,
+      AnsiUp: AnsiUpCtor || FakeAnsiUp,
       activeTabId: 'tab-1',
       tabs: [{ id: 'tab-1', rawLines: [], runStart: 1000 }],
       APP_CONFIG: { max_output_lines: 2, ...appConfig },
@@ -26,6 +26,7 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {} } = {}) {
     `{
     appendLine,
     appendLines,
+    renderRestoredTabOutput,
     _restoreOutputTailAfterLayout,
     _setTsMode,
     _setLnMode,
@@ -70,6 +71,69 @@ describe('appendLine', () => {
 
     const line = document.querySelector('.line')
     expect(line.innerHTML).toContain('<em>hello</em>')
+  })
+
+  it('isolates ANSI parser state between tabs', () => {
+    class StatefulAnsiUp {
+      constructor() {
+        this.use_classes = false
+        this.color = ''
+      }
+
+      ansi_to_html(text) {
+        const raw = String(text || '')
+        if (raw.includes('\x1b[31m')) this.color = 'red'
+        if (raw.includes('\x1b[0m')) this.color = ''
+        const clean = raw.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
+        return `<span class="${this.color || 'plain'}">${clean}</span>`
+      }
+    }
+    const { appendLine } = loadOutputFns({
+      AnsiUpCtor: StatefulAnsiUp,
+      appConfig: { max_output_lines: 10 },
+      extraGlobals: {
+        tabs: [
+          { id: 'tab-1', rawLines: [], runStart: 1000 },
+          { id: 'tab-2', rawLines: [], runStart: 1000 },
+        ],
+      },
+    })
+
+    appendLine('\x1b[31mred opener without reset', '', 'tab-1')
+    appendLine('plain output in another tab', '', 'tab-2')
+
+    const lines = Array.from(document.querySelectorAll('.line .line-content'))
+    expect(lines[0].innerHTML).toContain('class="red"')
+    expect(lines[1].innerHTML).toContain('class="plain"')
+  })
+
+  it('resets ANSI parser state before replaying restored output', () => {
+    class StatefulAnsiUp {
+      constructor() {
+        this.use_classes = false
+        this.color = ''
+      }
+
+      ansi_to_html(text) {
+        const raw = String(text || '')
+        if (raw.includes('\x1b[31m')) this.color = 'red'
+        if (raw.includes('\x1b[0m')) this.color = ''
+        const clean = raw.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
+        return `<span class="${this.color || 'plain'}">${clean}</span>`
+      }
+    }
+    const { appendLine, renderRestoredTabOutput } = loadOutputFns({
+      AnsiUpCtor: StatefulAnsiUp,
+      appConfig: { max_output_lines: 10 },
+    })
+
+    appendLine('\x1b[31mred opener without reset', '', 'tab-1')
+    renderRestoredTabOutput('tab-1', [{ text: 'restored plain output', cls: '' }])
+
+    const line = document.querySelector('.line .line-content')
+    expect(document.querySelectorAll('.line')).toHaveLength(1)
+    expect(line.innerHTML).toContain('class="plain"')
+    expect(line.innerHTML).not.toContain('class="red"')
   })
 
   it('renders shell as a normal workspace folder in the prompt', () => {

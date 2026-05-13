@@ -87,6 +87,7 @@ from services.pty.service import (
     stream_pty_events,
     write_pty_input,
 )
+from services.pty.transcript import shape_completed_pty_entries as _shape_completed_pty_entries
 
 log = logging.getLogger("shell")
 
@@ -487,59 +488,6 @@ def _finalize_completed_run(
         link_active_project=cmd_type == "real",
     )
     return {"elapsed": elapsed, "active_project_link": active_project_link}
-
-
-_PTY_TRANSIENT_LINE_PATTERNS = (
-    re.compile(r"^rate:\s+.*\bdone\b.*\bfound=\d+\b", re.IGNORECASE),
-    re.compile(r"^::\s*Progress:\s*\[", re.IGNORECASE),
-)
-
-
-def _normalize_pty_entry(entry) -> dict[str, str]:
-    if isinstance(entry, dict):
-        return {
-            "text": str(entry.get("text", "")),
-            "cls": str(entry.get("cls", "")),
-        }
-    return {"text": str(entry), "cls": ""}
-
-
-def _is_transient_pty_line(text: str) -> bool:
-    value = text.strip()
-    if not value:
-        return False
-    return any(pattern.search(value) for pattern in _PTY_TRANSIENT_LINE_PATTERNS)
-
-
-def _split_pty_entries(entries: list[dict[str, str]]) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
-    marker_index = next(
-        (index for index, entry in enumerate(entries) if entry.get("cls") == "pty-marker"),
-        -1,
-    )
-    if marker_index < 0:
-        return entries, []
-    return entries[:marker_index], entries[marker_index + 1:]
-
-
-def _filter_transient_pty_entries(entries: list[dict[str, str]]) -> list[dict[str, str]]:
-    return [
-        entry for entry in entries
-        if entry.get("cls") != "pty-marker" and not _is_transient_pty_line(entry.get("text", ""))
-    ]
-
-
-def _shape_completed_pty_entries(synthesized_lines, transcript_mode: object) -> list[dict[str, str]]:
-    mode = str(transcript_mode or "final_frame").strip().lower()
-    entries = [_normalize_pty_entry(item) for item in synthesized_lines]
-    scrollback, final_frame = _split_pty_entries(entries)
-    if mode == "scrollback_findings":
-        shaped = _filter_transient_pty_entries(scrollback)
-        if shaped:
-            return shaped
-        return _filter_transient_pty_entries(final_frame or entries)
-    if mode == "all_sanitized":
-        return _filter_transient_pty_entries(entries)
-    return final_frame if final_frame else _filter_transient_pty_entries(entries)
 
 
 def _persist_completed_pty_run(

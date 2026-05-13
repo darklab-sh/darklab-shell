@@ -124,8 +124,9 @@ def _save_session_preferences(conn, session_id, preferences, updated):
 
 def _current_tour_version():
     tour = load_tour()
+    version = tour.get("version", 0)
     try:
-        return int(tour.get("version") or 0)
+        return int(version)
     except (TypeError, ValueError):
         return 0
 

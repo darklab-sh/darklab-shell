@@ -147,7 +147,12 @@ function loadStatusMonitor({
   if (openHistoryWithFilters) window.openHistoryWithFilters = openHistoryWithFilters
   if (restoreHistoryRun) window.restoreHistoryRun = restoreHistoryRun
   return fromDomScripts(
-    ['app/static/js/status_monitor.js'],
+    [
+      'app/static/js/features/status-monitor/status_monitor_core.js',
+      'app/static/js/features/status-monitor/status_monitor_data.js',
+      'app/static/js/features/status-monitor/status_monitor_resources.js',
+      'app/static/js/status_monitor.js',
+    ],
     {
       document,
       window,

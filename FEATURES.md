@@ -443,7 +443,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** compare view and compare context defaults are saved user options. Server-side compare limits are fixed application constants rather than operator-facing `config.yaml` settings.
 
-**Related files:** `app/services/runs/comparison.py` (shared compare helpers), `app/blueprints/history.py` (history compare routes), `app/blueprints/projects.py` (project compare route), `app/static/js/history.js` (compare launcher and renderer), and `app/static/css/primitives/components.css` / `app/static/css/mobile.css` (desktop/mobile compare layout).
+**Related files:** `app/services/runs/comparison.py` (shared compare helpers), `app/blueprints/history.py` (history compare routes), `app/blueprints/projects.py` (project compare route), `app/static/js/features/run-comparison/` (compare launcher, controls, navigation, and renderer), and `app/static/css/features/run-comparison.css` (desktop/mobile compare layout).
 
 ---
 
@@ -762,7 +762,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Configuration:** Interactive PTY uses `interactive_pty_*` settings plus each command's `interactive` registry block; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/services/pty/service.py` (server-side PTY lifecycle and snapshots), `app/blueprints/run.py` (PTY routes), `app/static/js/pty.js` (browser terminal controller), `app/static/js/vendor/xterm.js`, `app/static/js/vendor/xterm-addon-fit.js`, and `app/conf/commands.yaml` (interactive command metadata).
+**Related files:** `app/services/pty/service.py` (server-side PTY lifecycle and snapshots), `app/services/pty/transcript.py` (saved transcript shaping), `app/blueprints/run.py` (PTY routes), `app/static/js/pty.js` (browser terminal controller), `app/static/js/vendor/xterm.js`, `app/static/js/vendor/xterm-addon-fit.js`, and `app/conf/commands.yaml` (interactive command metadata).
 
 ---
 

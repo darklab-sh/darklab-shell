@@ -1023,6 +1023,9 @@ class TestDerivedCommandRegistry:
     def test_real_registry_wordlist_metadata_covers_known_wordlist_flags(self):
         context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
 
+        dnsrecon_flags = [item["value"] for item in context["dnsrecon"]["flags"]]
+        assert "-d" in dnsrecon_flags
+        assert "-D" in dnsrecon_flags
         assert context["dnsrecon"]["arg_hints"]["-D"][0]["wordlist_category"] == "dns"
         assert context["dnsx"]["arg_hints"]["-w"][0]["wordlist_category"] == "dns"
         assert context["fierce"]["arg_hints"]["--subdomain-file"][0]["wordlist_category"] == "dns"

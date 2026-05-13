@@ -12,12 +12,29 @@ import ipaddress
 import os
 import re
 import shlex
-import shutil
 from typing import cast
 import yaml
 from urllib.parse import urlparse
 
 import config as app_config
+from services.commands import registry_content, registry_loader
+from services.commands.registry_content import TourPayload
+from services.commands.postfilters import parse_synthetic_postfilter
+from services.commands.registry_validation import (
+    LOOPBACK_RE as _LOOPBACK_RE,
+    PATH_DATA_RE as _PATH_DATA_RE,
+    PATH_TMP_RE as _PATH_TMP_RE,
+    SHELL_CHAIN_RE,
+    command_root,
+    is_allowed_by_policy,
+    is_denied,
+    nmap_raw_scan_restriction_reason,
+    resolve_runtime_command as _resolve_runtime_command,
+    runtime_missing_command_message as _runtime_missing_command_message,
+    split_chained_commands as _split_chained_commands,
+    split_command_argv,
+)
+from services.workflows import catalog as workflow_catalog
 from services.workspace.files import (
     ensure_session_workspace,
     InvalidWorkspacePath,
@@ -44,12 +61,6 @@ APP_HINTS_MOBILE_FILE = os.path.join(_CONF, "app_hints_mobile.txt")
 AMASS_DEFAULT_WORKSPACE_DIR = "tools/amass"
 RESTRICTABLE_VALUE_TYPES = {"cidr", "domain", "host", "ip", "target", "url"}
 PROJECT_TARGET_VALUE_TYPES = RESTRICTABLE_VALUE_TYPES | {"port_set"}
-NMAP_DENIED_RAW_FLAGS = {"-sS"}
-NMAP_SCAN_MODE_FLAGS = {
-    "-sA", "-sF", "-sI", "-sL", "-sM", "-sN", "-sO", "-sS",
-    "-sT", "-sU", "-sW", "-sX", "-sY", "-sZ", "-sn",
-}
-
 
 @dataclass(frozen=True)
 class CommandValidationResult:
@@ -497,195 +508,7 @@ def _load_yaml_list_with_local(path):
 
 
 def _dedupe_preserve_order(values):
-    return list(dict.fromkeys(values))
-
-# Shell metacharacters that can chain or redirect commands.
-# Used for detection (SHELL_CHAIN_RE.search) and splitting (split_chained_commands).
-# Both use >>? so > and >> are matched without allowing whitespace between them.
-SHELL_CHAIN_RE = re.compile(r'&&|\|\|?|;;?|`|\$\(|>>?|<')
-
-# Pre-compiled path blocking patterns — negative lookbehind prevents false
-# positives on URLs such as https://darklab.sh/data/ or /tmp/ path segments.
-_PATH_DATA_RE = re.compile(r'(?<![\w:/])/data\b')
-_PATH_TMP_RE  = re.compile(r'(?<![\w:/])/tmp\b')
-
-# Loopback address detection — catches bare hostnames and addresses embedded in
-# URLs (e.g. "curl http://localhost:8888/diag" or "curl 127.0.0.1:8888/faq").
-# Word-boundary anchors prevent false positives on hostnames that contain these
-# strings as a substring.
-_LOOPBACK_RE = re.compile(r'\blocalhost\b|127\.0\.0\.1|\b0\.0\.0\.0\b|\[::1\]', re.IGNORECASE)
-
-
-def _split_shell_control_tokens(command: str) -> list[str]:
-    """Split a shell-like command while keeping control operators as tokens."""
-    try:
-        lexer = shlex.shlex(command, posix=True, punctuation_chars='|&;<>')
-        lexer.whitespace_split = True
-        lexer.commenters = ''
-        return list(lexer)
-    except ValueError:
-        return []
-
-
-def _parse_synthetic_grep_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
-    """Parse the post-filter stage for the narrow app-native grep helper."""
-    if stage_tokens[0].lower() != 'grep':
-        return None, None
-
-    options = {"ignore_case": False, "invert_match": False, "extended": False}
-    pattern = None
-    for token in stage_tokens[1:]:
-        if pattern is not None:
-            return None, "Synthetic grep only supports a single pattern argument."
-        if token.startswith('-') and token != '-':
-            if token.startswith('--'):
-                return None, "Synthetic grep supports only -i, -v, and -E."
-            for flag in token[1:]:
-                if flag == 'i':
-                    options["ignore_case"] = True
-                elif flag == 'v':
-                    options["invert_match"] = True
-                elif flag == 'E':
-                    options["extended"] = True
-                else:
-                    return None, "Synthetic grep supports only -i, -v, and -E."
-            continue
-        pattern = token
-
-    if pattern is None:
-        return None, "Synthetic grep requires a pattern."
-
-    return {
-        "kind": "grep",
-        "pattern": pattern,
-        **options,
-    }, None
-
-
-def _parse_synthetic_head_tail_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
-    """Parse narrow app-native head/tail helpers with default count, -n, or -<number>."""
-    command_name = stage_tokens[0].lower()
-    if command_name not in {"head", "tail"}:
-        return None, None
-
-    count = 10
-    if len(stage_tokens) == 1:
-        return {"kind": command_name, "count": count}, None
-
-    if len(stage_tokens) == 2 and stage_tokens[1].startswith('-') and stage_tokens[1][1:].isdigit():
-        return {"kind": command_name, "count": int(stage_tokens[1][1:])}, None
-
-    if len(stage_tokens) != 3 or stage_tokens[1] != "-n":
-        return None, f"Synthetic {command_name} supports only `-n <count>` or `-<count>`."
-    if not stage_tokens[2].isdigit():
-        return None, f"Synthetic {command_name} requires a non-negative numeric count."
-
-    return {"kind": command_name, "count": int(stage_tokens[2])}, None
-
-
-def _parse_synthetic_wc_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
-    """Parse the narrow app-native `wc -l` helper."""
-    if stage_tokens[0].lower() != "wc":
-        return None, None
-    if stage_tokens[1:] == ["-l"]:
-        return {"kind": "wc_l"}, None
-    return None, "Synthetic wc supports only `wc -l`."
-
-
-_SORT_VALID_FLAGS = frozenset("rnu")
-
-
-def _parse_synthetic_sort_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
-    """Parse the narrow app-native sort helper. Supports -r, -n, -u in any combination."""
-    if stage_tokens[0].lower() != "sort":
-        return None, None
-    if len(stage_tokens) == 1:
-        return {"kind": "sort", "reverse": False, "numeric": False, "unique": False}, None
-    if len(stage_tokens) == 2:
-        flag = stage_tokens[1]
-        if flag.startswith('-') and flag[1:] and set(flag[1:]).issubset(_SORT_VALID_FLAGS):
-            chars = set(flag[1:])
-            return {"kind": "sort", "reverse": "r" in chars,
-                    "numeric": "n" in chars, "unique": "u" in chars}, None
-    return None, "Synthetic sort supports only -r, -n, and -u flags."
-
-
-def _parse_synthetic_uniq_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
-    """Parse the narrow app-native uniq helper. Supports uniq and uniq -c."""
-    if stage_tokens[0].lower() != "uniq":
-        return None, None
-    if len(stage_tokens) == 1:
-        return {"kind": "uniq", "count": False}, None
-    if len(stage_tokens) == 2 and stage_tokens[1] == "-c":
-        return {"kind": "uniq", "count": True}, None
-    return None, "Synthetic uniq supports only -c."
-
-
-def _parse_synthetic_postfilter_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
-    for parser in (
-        _parse_synthetic_grep_stage,
-        _parse_synthetic_head_tail_stage,
-        _parse_synthetic_wc_stage,
-        _parse_synthetic_sort_stage,
-        _parse_synthetic_uniq_stage,
-    ):
-        spec, error = parser(stage_tokens)
-        if spec or error:
-            return spec, error
-    return None, None
-
-
-def parse_synthetic_postfilter(command: str) -> tuple[dict | None, str | None]:
-    """Parse a narrow app-native `command | helper ...` post-filter pipeline.
-
-    Returns (spec, error_message). spec is None when the command does not use
-    the synthetic post-filter path. error_message is populated only when the
-    input is clearly trying to use a supported helper but the stage is invalid.
-    """
-    stripped = command.strip()
-    if '|' not in stripped:
-        return None, None
-    if '`' in stripped or '$(' in stripped:
-        return None, None
-
-    tokens = _split_shell_control_tokens(stripped)
-    if not tokens:
-        return None, None
-
-    disallowed_control = {'&&', '||', ';', ';;', '>', '>>', '<', '&'}
-    if any(token in disallowed_control for token in tokens):
-        return None, None
-
-    pipe_indexes = [index for index, token in enumerate(tokens) if token == '|']
-    if not pipe_indexes:
-        return None, None
-
-    base_tokens = tokens[:pipe_indexes[0]]
-    if not base_tokens:
-        return None, "Synthetic post-filters require `command | helper ...`."
-
-    stage_specs: list[dict] = []
-    stage_start = pipe_indexes[0] + 1
-    for pipe_index in pipe_indexes[1:] + [len(tokens)]:
-        stage_tokens = tokens[stage_start:pipe_index]
-        if not stage_tokens:
-            return None, "Synthetic post-filters require `command | helper ...`."
-
-        spec, error = _parse_synthetic_postfilter_stage(stage_tokens)
-        if error:
-            return None, error
-        if not spec:
-            return None, None
-
-        stage_specs.append(spec)
-        stage_start = pipe_index + 1
-
-    return {
-        "base_command": shlex.join(base_tokens),
-        "stages": stage_specs,
-        "kind": stage_specs[0]["kind"],
-    }, None
-
+    return registry_loader.dedupe_preserve_order(values)
 
 def _empty_autocomplete_context_entry() -> dict:
     return {
@@ -705,185 +528,31 @@ def _empty_autocomplete_context_entry() -> dict:
 
 
 def _normalize_policy_list(items, *, lowercase: bool) -> list[str]:
-    result = []
-    seen = set()
-    for item in items or []:
-        value = str(item or "").strip()
-        if not value:
-            continue
-        if lowercase:
-            value = value.lower()
-        if value in seen:
-            continue
-        seen.add(value)
-        result.append(value)
-    return result
+    return registry_loader.normalize_policy_list(items, lowercase=lowercase)
 
 
 def _normalize_workspace_flags(items) -> list[dict[str, object]]:
-    result: list[dict[str, object]] = []
-    seen = set()
-    for item in items or []:
-        if not isinstance(item, dict):
-            continue
-        flag = str(item.get("flag") or "").strip()
-        mode = str(item.get("mode") or "").strip().lower()
-        value = str(item.get("value") or "").strip().lower()
-        if not flag or mode not in {"read", "write", "read_write"}:
-            continue
-        if value not in {"required", "separate", "attached", "separate_or_attached"}:
-            value = "required"
-        subcommands = tuple(
-            sorted(
-                str(subcommand).strip().lower()
-                for subcommand in item.get("subcommands", []) or []
-                if str(subcommand).strip()
-            )
-        )
-        key = (flag, mode, value, str(item.get("kind") or "").strip().lower(), subcommands)
-        if key in seen:
-            continue
-        seen.add(key)
-        normalized: dict[str, object] = {"flag": flag, "mode": mode, "value": value}
-        if subcommands:
-            normalized["subcommands"] = list(subcommands)
-        kind = str(item.get("kind") or "").strip().lower()
-        if kind == "directory":
-            normalized["kind"] = kind
-        output_format = str(item.get("format") or "").strip().lower()
-        if output_format:
-            normalized["format"] = output_format
-        max_file_mb = item.get("max_file_mb")
-        if isinstance(max_file_mb, int | float) and max_file_mb > 0:
-            normalized["max_file_mb"] = max_file_mb
-        result.append(normalized)
-    return result
+    return registry_loader.normalize_workspace_flags(items)
 
 
 def _normalize_allow_grouping_flags(raw_entry: dict) -> list[str]:
-    result: list[str] = []
-    seen = set()
-    autocomplete = raw_entry.get("autocomplete")
-    raw_flags = autocomplete.get("flags", []) if isinstance(autocomplete, dict) else []
-    for raw_flag in raw_flags or []:
-        if not isinstance(raw_flag, dict) or not raw_flag.get("allow_grouping") or raw_flag.get("takes_value"):
-            continue
-        value = str(raw_flag.get("value") or "").strip()
-        if not re.fullmatch(r"-[A-Za-z]", value):
-            continue
-        if value in seen:
-            continue
-        seen.add(value)
-        result.append(value)
-    return result
+    return registry_loader.normalize_allow_grouping_flags(raw_entry)
 
 
 def _normalize_runtime_inject_flags(items) -> list[dict[str, object]]:
-    result: list[dict[str, object]] = []
-    for item in items or []:
-        if not isinstance(item, dict):
-            continue
-        raw_flags = item.get("flags") or item.get("tokens") or []
-        flags = [
-            str(flag).strip()
-            for flag in raw_flags
-            if str(flag).strip()
-        ] if isinstance(raw_flags, list) else []
-        if not flags:
-            continue
-        position = str(item.get("position") or "prepend").strip().lower()
-        if position == "prefix":
-            position = "command_prefix"
-        if position not in {"prepend", "append", "command_prefix"}:
-            position = "prepend"
-        unless_any = [
-            str(token).strip()
-            for token in item.get("unless_any", []) or []
-            if str(token).strip()
-        ]
-        unless_any_regex = [
-            str(pattern).strip()
-            for pattern in item.get("unless_any_regex", []) or []
-            if str(pattern).strip()
-        ]
-        normalized: dict[str, object] = {
-            "flags": flags,
-            "position": position,
-            "unless_any": unless_any,
-            "unless_any_regex": unless_any_regex,
-        }
-        notice = str(item.get("notice") or item.get("output_notice") or "").strip()
-        if notice:
-            normalized["notice"] = notice
-        if item.get("requires_workspace"):
-            normalized["requires_workspace"] = True
-        result.append(normalized)
-    return result
+    return registry_loader.normalize_runtime_inject_flags(items)
 
 
 def _normalize_runtime_managed_workspace_directory(item) -> dict[str, object]:
-    if not isinstance(item, dict):
-        return {}
-    flag = str(item.get("flag") or "").strip()
-    directory = str(item.get("directory") or item.get("path") or "").strip().strip("/")
-    if not flag or not directory:
-        return {}
-    subcommands = [
-        str(subcommand).strip().lower()
-        for subcommand in item.get("subcommands", []) or []
-        if str(subcommand).strip()
-    ]
-    skip_if_any = [
-        str(token).strip()
-        for token in item.get("skip_if_any", []) or []
-        if str(token).strip()
-    ]
-    result: dict[str, object] = {
-        "flag": flag,
-        "directory": directory,
-        "subcommands": _dedupe_preserve_order(subcommands),
-        "skip_if_any": _dedupe_preserve_order(skip_if_any),
-        "reject_alternate": bool(item.get("reject_alternate", True)),
-        "counts_as_workspace_write": bool(item.get("counts_as_workspace_write", True)),
-    }
-    reject_message = str(item.get("reject_message") or "").strip()
-    if reject_message:
-        result["reject_message"] = reject_message
-    return result
+    return registry_loader.normalize_runtime_managed_workspace_directory(item)
 
 
 def _normalize_runtime_environment(items) -> list[dict[str, object]]:
-    result: list[dict[str, object]] = []
-    for item in items or []:
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get("name") or "").strip()
-        value = str(item.get("value") or "").strip()
-        if not name or not value:
-            continue
-        normalized: dict[str, object] = {"name": name, "value": value}
-        managed_flag = str(item.get("managed_directory_flag") or "").strip()
-        if managed_flag:
-            normalized["managed_directory_flag"] = managed_flag
-        result.append(normalized)
-    return result
+    return registry_loader.normalize_runtime_environment(items)
 
 
 def _normalize_runtime_adaptations(raw_value) -> dict[str, object]:
-    raw = raw_value if isinstance(raw_value, dict) else {}
-    adaptations: dict[str, object] = {}
-    inject_flags = _normalize_runtime_inject_flags(raw.get("inject_flags"))
-    if inject_flags:
-        adaptations["inject_flags"] = inject_flags
-    managed_directory = _normalize_runtime_managed_workspace_directory(
-        raw.get("managed_workspace_directory")
-    )
-    if managed_directory:
-        adaptations["managed_workspace_directory"] = managed_directory
-    environment = _normalize_runtime_environment(raw.get("environment"))
-    if environment:
-        adaptations["environment"] = environment
-    return adaptations
+    return registry_loader.normalize_runtime_adaptations(raw_value)
 
 
 def _normalize_registry_autocomplete(root: str, raw_spec) -> dict:
@@ -893,239 +562,51 @@ def _normalize_registry_autocomplete(root: str, raw_spec) -> dict:
 
 
 def _coerce_positive_int(value: object, default: int) -> int:
-    if isinstance(value, bool):
-        return default
-    if isinstance(value, int):
-        number = value
-    elif isinstance(value, float):
-        number = int(value)
-    elif isinstance(value, (str, bytes, bytearray)):
-        try:
-            number = int(value)
-        except ValueError:
-            return default
-    else:
-        return default
-    return number if number > 0 else default
+    return registry_loader.coerce_positive_int(value, default)
 
 def _normalize_interactive_spec(raw_spec: object) -> dict:
-    if not isinstance(raw_spec, dict) or not raw_spec:
-        return {}
-    mode = str(raw_spec.get("mode") or "").strip().lower()
-    trigger_flag = str(raw_spec.get("trigger_flag") or "").strip()
-    if mode != "pty" or not trigger_flag:
-        return {}
-    transcript_mode = str(raw_spec.get("transcript_mode") or "final_frame").strip().lower()
-    if transcript_mode not in {"final_frame", "scrollback_findings", "all_sanitized"}:
-        transcript_mode = "final_frame"
-    allow_input = bool(raw_spec.get("allow_input", True))
-    input_safety = str(raw_spec.get("input_safety") or "").strip().lower()
-    allowed_input_safety = {"no_input", "navigation_only", "scanner_controls"}
-    if not input_safety and not allow_input:
-        input_safety = "no_input"
-    if input_safety not in allowed_input_safety:
-        return {}
-    if allow_input and input_safety == "no_input":
-        return {}
-    return {
-        "mode": "pty",
-        "trigger_flag": trigger_flag,
-        "default_rows": _coerce_positive_int(raw_spec.get("default_rows"), 24),
-        "default_cols": _coerce_positive_int(raw_spec.get("default_cols"), 100),
-        "max_runtime_seconds": _coerce_positive_int(raw_spec.get("max_runtime_seconds"), 900),
-        "allow_input": allow_input,
-        "requires_args": bool(raw_spec.get("requires_args", False)),
-        "transcript_mode": transcript_mode,
-        "input_safety": input_safety,
-    }
+    return registry_loader.normalize_interactive_spec(raw_spec)
 
 
 def _normalize_commands_registry_entry(raw_entry, *, pipe_helper: bool = False) -> dict | None:
-    if not isinstance(raw_entry, dict):
-        return None
-    root = str(raw_entry.get("root") or "").strip().lower()
-    if not root:
-        return None
-
-    entry = {
-        "root": root,
-        "autocomplete": _normalize_registry_autocomplete(root, raw_entry.get("autocomplete")),
-    }
-    description = str(raw_entry.get("description") or "").strip()
-    if description:
-        entry["description"] = description
-    feature_required = raw_entry.get("feature_required") or raw_entry.get("requires_feature") or raw_entry.get("feature")
-    if feature_required:
-        if isinstance(feature_required, (list, tuple, set)):
-            entry["feature_required"] = [
-                str(value).strip().lower() for value in feature_required if str(value).strip()
-            ]
-        else:
-            entry["feature_required"] = str(feature_required).strip().lower()
-    if pipe_helper:
-        return entry
-
-    raw_policy_value = raw_entry.get("policy")
-    raw_policy = raw_policy_value if isinstance(raw_policy_value, dict) else {}
-    entry["category"] = str(raw_entry.get("category") or "").strip()
-    entry["policy"] = {
-        "allow": _normalize_policy_list(raw_policy.get("allow"), lowercase=True),
-        "deny": _normalize_policy_list(raw_policy.get("deny"), lowercase=False),
-    }
-    entry["workspace_flags"] = _normalize_workspace_flags(raw_entry.get("workspace_flags"))
-    entry["allow_grouping_flags"] = _normalize_allow_grouping_flags(raw_entry)
-    entry["runtime_adaptations"] = _normalize_runtime_adaptations(raw_entry.get("runtime_adaptations"))
-    interactive = _normalize_interactive_spec(raw_entry.get("interactive"))
-    if interactive:
-        entry["interactive"] = interactive
-    return entry
+    return registry_loader.normalize_commands_registry_entry(
+        raw_entry,
+        _normalize_registry_autocomplete,
+        pipe_helper=pipe_helper,
+    )
 
 
 def _load_commands_registry_file(path: str) -> dict:
-    loaded = _load_yaml_mapping(path)
-    commands = []
-    pipe_helpers = []
-    for raw_entry in loaded.get("commands", []) or []:
-        entry = _normalize_commands_registry_entry(raw_entry)
-        if entry:
-            commands.append(entry)
-    for raw_entry in loaded.get("pipe_helpers", []) or []:
-        entry = _normalize_commands_registry_entry(raw_entry, pipe_helper=True)
-        if entry:
-            pipe_helpers.append(entry)
-    return {
-        "version": int(loaded.get("version") or 1),
-        "commands": commands,
-        "pipe_helpers": pipe_helpers,
-    }
+    return registry_loader.load_commands_registry_file(path, _normalize_registry_autocomplete)
 
 
 def _merge_command_registry_entries(base_entry: dict, overlay_entry: dict, *, pipe_helper: bool = False) -> dict:
-    merged = deepcopy(base_entry)
-    if not pipe_helper:
-        if overlay_entry.get("category"):
-            merged["category"] = overlay_entry["category"]
-        policy = merged.setdefault("policy", {"allow": [], "deny": []})
-        for allow in overlay_entry.get("policy", {}).get("allow", []) or []:
-            if allow not in policy.setdefault("allow", []):
-                policy["allow"].append(allow)
-        for deny in overlay_entry.get("policy", {}).get("deny", []) or []:
-            if deny not in policy.setdefault("deny", []):
-                policy["deny"].append(deny)
-        allow_grouping_flags = merged.setdefault("allow_grouping_flags", [])
-        for flag in overlay_entry.get("allow_grouping_flags", []) or []:
-            if flag not in allow_grouping_flags:
-                allow_grouping_flags.append(flag)
-        workspace_flags = merged.setdefault("workspace_flags", [])
-        existing_workspace_flags = {
-            (
-                item.get("flag"),
-                item.get("mode"),
-                item.get("value"),
-                item.get("kind"),
-                tuple(item.get("subcommands", []) or []),
-            )
-            for item in workspace_flags if isinstance(item, dict)
-        }
-        for workspace_flag in overlay_entry.get("workspace_flags", []) or []:
-            key = (
-                workspace_flag.get("flag"),
-                workspace_flag.get("mode"),
-                workspace_flag.get("value"),
-                workspace_flag.get("kind"),
-                tuple(workspace_flag.get("subcommands", []) or []),
-            )
-            if key not in existing_workspace_flags:
-                workspace_flags.append(deepcopy(workspace_flag))
-                existing_workspace_flags.add(key)
-
-        runtime_adaptations = merged.setdefault("runtime_adaptations", {})
-        overlay_runtime = overlay_entry.get("runtime_adaptations") or {}
-        if overlay_runtime.get("managed_workspace_directory"):
-            runtime_adaptations["managed_workspace_directory"] = deepcopy(
-                overlay_runtime["managed_workspace_directory"]
-            )
-        if overlay_runtime.get("inject_flags"):
-            existing_inject = {
-                (
-                    tuple(item.get("flags", []) or []),
-                    item.get("position"),
-                    tuple(item.get("unless_any", []) or []),
-                    tuple(item.get("unless_any_regex", []) or []),
-                )
-                for item in runtime_adaptations.setdefault("inject_flags", [])
-                if isinstance(item, dict)
-            }
-            for inject in overlay_runtime.get("inject_flags", []) or []:
-                key = (
-                    tuple(inject.get("flags", []) or []),
-                    inject.get("position"),
-                    tuple(inject.get("unless_any", []) or []),
-                    tuple(inject.get("unless_any_regex", []) or []),
-                )
-                if key not in existing_inject:
-                    runtime_adaptations.setdefault("inject_flags", []).append(deepcopy(inject))
-                    existing_inject.add(key)
-        if overlay_runtime.get("environment"):
-            existing_env = {
-                (item.get("name"), item.get("value"), item.get("managed_directory_flag"))
-                for item in runtime_adaptations.setdefault("environment", [])
-                if isinstance(item, dict)
-            }
-            for env_item in overlay_runtime.get("environment", []) or []:
-                key = (env_item.get("name"), env_item.get("value"), env_item.get("managed_directory_flag"))
-                if key not in existing_env:
-                    runtime_adaptations.setdefault("environment", []).append(deepcopy(env_item))
-                    existing_env.add(key)
-        if overlay_entry.get("interactive"):
-            interactive = merged.setdefault("interactive", {})
-            interactive.update(deepcopy(overlay_entry["interactive"]))
-
-    base_autocomplete = merged.get("autocomplete") or _empty_autocomplete_context_entry()
-    overlay_autocomplete = overlay_entry.get("autocomplete") or {}
-    if overlay_autocomplete:
-        merged["autocomplete"] = _merge_autocomplete_context(
-            {merged["root"]: base_autocomplete},
-            {merged["root"]: overlay_autocomplete},
-        )[merged["root"]]
-    elif "autocomplete" not in merged:
-        merged["autocomplete"] = {}
-    return merged
+    return registry_loader.merge_command_registry_entries(
+        base_entry,
+        overlay_entry,
+        _empty_autocomplete_context_entry,
+        _merge_autocomplete_context,
+        pipe_helper=pipe_helper,
+    )
 
 
 def _merge_commands_registry(base: dict, overlay: dict) -> dict:
-    merged = {
-        "version": int(base.get("version") or 1),
-        "commands": deepcopy(base.get("commands") or []),
-        "pipe_helpers": deepcopy(base.get("pipe_helpers") or []),
-    }
-
-    def merge_list(key: str, *, pipe_helper: bool = False) -> None:
-        existing = {entry["root"]: index for index, entry in enumerate(merged[key])}
-        for overlay_entry in overlay.get(key) or []:
-            root = overlay_entry["root"]
-            if root in existing:
-                index = existing[root]
-                merged[key][index] = _merge_command_registry_entries(
-                    merged[key][index],
-                    overlay_entry,
-                    pipe_helper=pipe_helper,
-                )
-            else:
-                existing[root] = len(merged[key])
-                merged[key].append(deepcopy(overlay_entry))
-
-    merge_list("commands")
-    merge_list("pipe_helpers", pipe_helper=True)
-    return merged
+    return registry_loader.merge_commands_registry(
+        base,
+        overlay,
+        _empty_autocomplete_context_entry,
+        _merge_autocomplete_context,
+    )
 
 
 def load_commands_registry():
     """Read commands.yaml plus optional commands.local.yaml overlays."""
-    base = _load_commands_registry_file(COMMANDS_REGISTRY_FILE)
-    root, ext = os.path.splitext(COMMANDS_REGISTRY_FILE)
-    local = _load_commands_registry_file(f"{root}.local{ext}")
-    return _merge_commands_registry(base, local)
+    return registry_loader.load_commands_registry(
+        COMMANDS_REGISTRY_FILE,
+        _normalize_registry_autocomplete,
+        _empty_autocomplete_context_entry,
+        _merge_autocomplete_context,
+    )
 
 
 def interactive_pty_specs_from_registry(registry: dict | None = None) -> list[dict[str, object]]:
@@ -1864,98 +1345,17 @@ def _builtin_workflows():
     ]
 
 
-_WORKFLOW_INPUT_TYPES = {"domain", "host", "url", "port", "path"}
-_WORKFLOW_INPUT_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-_WORKFLOW_TOKEN_RE = re.compile(r"{{\s*([a-z][a-z0-9_]*)\s*}}")
-
-
 def _workflow_tokens(value: str) -> set[str]:
-    return set(_WORKFLOW_TOKEN_RE.findall(value or ""))
+    return workflow_catalog.workflow_tokens(value)
 
 
 def _render_workflow_text(value: str, inputs: dict[str, str]) -> str:
-    return _WORKFLOW_TOKEN_RE.sub(lambda match: inputs.get(match.group(1), ""), value or "")
-
-
-def _normalize_workflow_inputs(raw_inputs):
-    if not isinstance(raw_inputs, list):
-        return []
-    result = []
-    seen_ids = set()
-    for item in raw_inputs:
-        if not isinstance(item, dict):
-            continue
-        input_id = str(item.get("id") or "").strip().lower()
-        input_type = str(item.get("type") or "").strip().lower()
-        if (
-            not input_id
-            or input_id in seen_ids
-            or not _WORKFLOW_INPUT_ID_RE.fullmatch(input_id)
-            or input_type not in _WORKFLOW_INPUT_TYPES
-        ):
-            continue
-        label = str(item.get("label") or input_id.replace("_", " ").title()).strip()
-        placeholder = str(item.get("placeholder") or "").strip()
-        default = str(item.get("default") or "").strip()
-        help_text = str(item.get("help") or "").strip()
-        normalized = {
-            "id": input_id,
-            "label": label or input_id.replace("_", " ").title(),
-            "type": input_type,
-            "required": bool(item.get("required", False)),
-            "placeholder": placeholder,
-            "default": default,
-            "help": help_text,
-        }
-        result.append(normalized)
-        seen_ids.add(input_id)
-    return result
-
-
-def _normalize_workflow_entry(entry):
-    if not isinstance(entry, dict):
-        return None
-    title = str(entry.get("title") or "").strip()
-    description = str(entry.get("description") or "").strip()
-    steps = entry.get("steps") or []
-    if not title or not isinstance(steps, list):
-        return None
-    inputs = _normalize_workflow_inputs(entry.get("inputs") or [])
-    declared_ids = {item["id"] for item in inputs}
-    clean_steps = []
-    for step in steps:
-        if not isinstance(step, dict):
-            continue
-        cmd = str(step.get("cmd") or "").strip()
-        note = str(step.get("note") or "").strip()
-        if not cmd:
-            continue
-        tokens = _workflow_tokens(cmd) | _workflow_tokens(note)
-        if tokens and not tokens.issubset(declared_ids):
-            continue
-        clean_steps.append({"cmd": cmd, "note": note})
-    if not clean_steps:
-        return None
-    normalized = {
-        "title": title,
-        "description": description,
-        "inputs": inputs,
-        "steps": clean_steps,
-    }
-    feature_required = entry.get("feature_required") or entry.get("requires_feature") or entry.get("feature")
-    if feature_required:
-        if isinstance(feature_required, (list, tuple, set)):
-            normalized["feature_required"] = [
-                str(value).strip().lower() for value in feature_required if str(value).strip()
-            ]
-        else:
-            normalized["feature_required"] = str(feature_required).strip().lower()
-    return normalized
+    return workflow_catalog.render_workflow_text(value, inputs)
 
 
 def normalize_workflow_entry(entry):
     """Return a normalized workflow entry or None when the payload is invalid."""
-    return _normalize_workflow_entry(entry)
+    return workflow_catalog.normalize_workflow_entry(entry)
 
 
 def _workflow_entry_enabled(entry, cfg=None):
@@ -1964,38 +1364,18 @@ def _workflow_entry_enabled(entry, cfg=None):
 
 def load_workflows():
     """Read workflows.yaml and return a list of workflow dicts."""
-    data = _load_yaml_list_with_local(WORKFLOWS_FILE)
-    if not data:
-        return []
-    result = []
-    for entry in data:
-        normalized = _normalize_workflow_entry(entry)
-        if normalized:
-            result.append(normalized)
-    return result
-
-
-def _workflow_slug(title: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", str(title or "").strip().lower()).strip("-")
-    return slug or "workflow"
-
-
-def _workflow_with_catalog_metadata(entry, source, index):
-    item = dict(entry)
-    item["source"] = source
-    item.setdefault("id", f"{source}:{_workflow_slug(item.get('title', 'workflow'))}-{index + 1}")
-    return item
+    return workflow_catalog.load_workflows(WORKFLOWS_FILE)
 
 
 def load_all_workflows(cfg=None):
     """Return the built-in workflows followed by any custom workflows.yaml entries."""
     builtins = []
     for idx, entry in enumerate(_builtin_workflows()):
-        normalized = _normalize_workflow_entry(entry)
+        normalized = normalize_workflow_entry(entry)
         if normalized and _workflow_entry_enabled(normalized, cfg):
-            builtins.append(_workflow_with_catalog_metadata(normalized, "builtin", idx))
+            builtins.append(workflow_catalog.workflow_with_catalog_metadata(normalized, "builtin", idx))
     custom = [
-        _workflow_with_catalog_metadata(workflow, "config", idx)
+        workflow_catalog.workflow_with_catalog_metadata(workflow, "config", idx)
         for idx, workflow in enumerate(load_workflows())
         if _workflow_entry_enabled(workflow, cfg)
     ]
@@ -2005,201 +1385,37 @@ def load_all_workflows(cfg=None):
 def load_welcome():
     """Read welcome.yaml and return startup blocks for the welcome typeout.
     Returns an empty list if the file is missing or empty, disabling the welcome animation."""
-    data = _load_yaml_list_with_local(WELCOME_FILE)
-    return [
-        {
-            "cmd": str(item.get("cmd", "")).strip(),
-            "out": str(item.get("out", "")).rstrip() if item.get("out") else "",
-            "group": str(item.get("group", "")).strip().lower() if item.get("group") else "",
-            "featured": bool(item.get("featured", False)),
-        }
-        for item in data
-        if isinstance(item, dict) and item.get("cmd")
-    ]
+    return registry_content.load_welcome(WELCOME_FILE)
 
 
-_TOUR_ALLOWED_REQUIRES = {"workspace_enabled", "interactive_pty_enabled"}
-_TOUR_REQUIRED_STRING_FIELDS = ("id", "title", "summary")
-_TOUR_OPTIONAL_STRING_FIELDS = ("sample", "illustration")
-
-
-def _tour_config(cfg=None):
-    return app_config.CFG if cfg is None else cfg
-
-
-def _tour_error(message):
-    return ValueError(f"Invalid tour.yaml: {message}")
-
-
-def _read_tour_payload(path):
-    if not os.path.exists(path):
-        return None
-    with open(path) as f:
-        loaded = yaml.safe_load(f) or {}
-    if not isinstance(loaded, dict):
-        raise _tour_error("top-level value must be a mapping")
-    return loaded
-
-
-def _tour_requires_values(raw, index):
-    if raw is None:
-        return []
-    if isinstance(raw, str):
-        values = [raw]
-    elif isinstance(raw, list):
-        values = raw
-    else:
-        raise _tour_error(f"chapter {index} requires must be a string or list of strings")
-    normalized = []
-    for value in values:
-        if not isinstance(value, str) or not value.strip():
-            raise _tour_error(f"chapter {index} requires must contain non-empty strings")
-        key = value.strip()
-        if key not in _TOUR_ALLOWED_REQUIRES:
-            raise _tour_error(f"chapter {index} has unknown requires key {key!r}")
-        normalized.append(key)
-    return normalized
-
-
-def _normalize_tour_chapter(raw, index):
-    if not isinstance(raw, dict):
-        raise _tour_error(f"chapter {index} must be a mapping")
-    chapter = {}
-    for field_name in _TOUR_REQUIRED_STRING_FIELDS:
-        value = raw.get(field_name)
-        if not isinstance(value, str) or not value.strip():
-            raise _tour_error(f"chapter {index} missing required {field_name!r}")
-        chapter[field_name] = value.strip()
-    for field_name in _TOUR_OPTIONAL_STRING_FIELDS:
-        value = raw.get(field_name)
-        if value is None:
-            continue
-        if not isinstance(value, str):
-            raise _tour_error(f"chapter {index} {field_name!r} must be a string")
-        stripped = value.strip()
-        if stripped:
-            chapter[field_name] = stripped
-    requires = _tour_requires_values(raw.get("requires"), index)
-    if len(requires) == 1:
-        chapter["requires"] = requires[0]
-    elif len(requires) > 1:
-        chapter["requires"] = requires
-    return chapter
-
-
-def _tour_chapter_requires(chapter):
-    requires = chapter.get("requires")
-    if not requires:
-        return []
-    if isinstance(requires, str):
-        return [requires]
-    return [str(value) for value in requires]
-
-
-def _tour_chapter_enabled(chapter, cfg=None, mobile=False):
-    if mobile and chapter.get("id") == "interactive_pty":
-        return False
-    active_cfg = _tour_config(cfg)
-    return all(bool(active_cfg.get(key, False)) for key in _tour_chapter_requires(chapter))
-
-
-def load_tour(cfg=None, *, mobile=False):
+def load_tour(cfg=None, *, mobile: bool = False) -> TourPayload:
     """Read tour.yaml and return the visible onboarding tour chapters.
 
     Missing tour.yaml returns an empty disabled tour. Invalid files raise a
     ValueError so docs/tests catch stale or malformed chapter content.
     """
-    payload = _read_tour_payload(TOUR_FILE)
-    if payload is None:
-        return {"version": 0, "chapters": []}
-    version = payload.get("version")
-    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
-        raise _tour_error("version must be a positive integer")
-    raw_chapters = payload.get("chapters")
-    if not isinstance(raw_chapters, list):
-        raise _tour_error("chapters must be a list")
-    chapters = [
-        _normalize_tour_chapter(item, index)
-        for index, item in enumerate(raw_chapters, start=1)
-    ]
-    active_cfg = _tour_config(cfg)
-    if not bool(active_cfg.get("tour_enabled", True)):
-        return {"version": version, "chapters": []}
-    return {
-        "version": version,
-        "chapters": [
-            chapter for chapter in chapters
-            if _tour_chapter_enabled(chapter, active_cfg, mobile=mobile)
-        ],
-    }
+    return registry_content.load_tour(TOUR_FILE, cfg, mobile=mobile)
 
 
 def load_ascii_art():
     """Read ascii.txt and return the welcome banner art as plain text.
     Returns an empty string if the file is missing or empty."""
-    local_path = _local_overlay_path(ASCII_FILE)
-    if os.path.exists(local_path):
-        with open(local_path) as f:
-            return f.read().rstrip()
-    if not os.path.exists(ASCII_FILE):
-        return ""
-    with open(ASCII_FILE) as f:
-        return f.read().rstrip()
+    return registry_content.load_ascii_art(ASCII_FILE)
 
 
 def load_ascii_mobile_art():
     """Read ascii_mobile.txt and return the compact mobile banner art."""
-    local_path = _local_overlay_path(ASCII_MOBILE_FILE)
-    if os.path.exists(local_path):
-        with open(local_path) as f:
-            return f.read().rstrip()
-    if not os.path.exists(ASCII_MOBILE_FILE):
-        return ""
-    with open(ASCII_MOBILE_FILE) as f:
-        return f.read().rstrip()
-
-
-def _hint_category_enabled(category, cfg=None):
-    active_cfg = app_config.CFG if cfg is None else cfg
-    normalized = str(category or "general").strip().lower()
-    if normalized in ("", "general"):
-        return True
-    if normalized == "workspace":
-        return bool(active_cfg.get("workspace_enabled", False))
-    if normalized in {"interactive_pty", "pty"}:
-        return bool(active_cfg.get("interactive_pty_enabled", False))
-    return True
-
-
-def _load_scoped_hints(path, cfg=None):
-    hints = []
-    seen = set()
-    for candidate in (path, _local_overlay_path(path)):
-        if not os.path.exists(candidate):
-            continue
-        category = "general"
-        with open(candidate) as f:
-            for raw_line in f:
-                line = raw_line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if line.startswith("[") and line.endswith("]"):
-                    category = line[1:-1].strip().lower() or "general"
-                    continue
-                if _hint_category_enabled(category, cfg) and line not in seen:
-                    hints.append(line)
-                    seen.add(line)
-    return hints
+    return registry_content.load_ascii_art(ASCII_MOBILE_FILE)
 
 
 def load_welcome_hints(cfg=None):
     """Read app_hints.txt and return enabled app-usage hints."""
-    return _load_scoped_hints(APP_HINTS_FILE, cfg)
+    return registry_content.load_scoped_hints(APP_HINTS_FILE, cfg)
 
 
 def load_mobile_welcome_hints(cfg=None):
     """Read app_hints_mobile.txt and return enabled mobile-specific hints."""
-    return _load_scoped_hints(APP_HINTS_MOBILE_FILE, cfg)
+    return registry_content.load_scoped_hints(APP_HINTS_MOBILE_FILE, cfg)
 
 
 def _load_yaml_mapping(path):
@@ -2412,7 +1628,7 @@ def _normalize_single_autocomplete_spec(raw_spec: dict, *, include_pipe: bool = 
         flag = _normalize_context_suggestion(raw_flag)
         if not flag:
             continue
-        key = str(flag["value"]).lower()
+        key = str(flag["value"])
         if key in seen_flags:
             continue
         seen_flags.add(key)
@@ -2425,7 +1641,7 @@ def _normalize_single_autocomplete_spec(raw_spec: dict, *, include_pipe: bool = 
 
     def _hint_bucket(trigger):
         bucket = arg_hints.setdefault(trigger, [])
-        seen = {str(item.get("value", "")).lower() for item in bucket if isinstance(item, dict)}
+        seen = {str(item.get("value", "")) for item in bucket if isinstance(item, dict)}
         return bucket, seen
 
     for raw_flag in raw_spec.get("flags", []) or []:
@@ -2498,7 +1714,7 @@ def _normalize_single_autocomplete_spec(raw_spec: dict, *, include_pipe: bool = 
             }
             normalized_sub = _normalize_context_suggestion(display)
             if normalized_sub:
-                key = str(normalized_sub["value"]).lower()
+                key = str(normalized_sub["value"])
                 if key not in positional_seen:
                     positional_seen.add(key)
                     positional_bucket.append(normalized_sub)
@@ -2661,9 +1877,9 @@ def _merge_autocomplete_context(base, overlay):
         if not current.get("pipe_label") and current.get("pipe_insert_value"):
             current["pipe_label"] = current["pipe_insert_value"]
 
-        seen_flags = {item["value"].lower() for item in current.get("flags", []) if isinstance(item, dict)}
+        seen_flags = {str(item["value"]) for item in current.get("flags", []) if isinstance(item, dict)}
         for flag in spec.get("flags", []) or []:
-            key = str(flag["value"]).lower()
+            key = str(flag["value"])
             if key in seen_flags:
                 continue
             seen_flags.add(key)
@@ -2878,45 +2094,6 @@ def load_container_smoke_test_interactive_commands():
     return commands
 
 
-def split_command_argv(command: str) -> list[str]:
-    """Split a shell-like command string into argv tokens for simple root-command inspection."""
-    # Validation works on argv-style tokens only. The app never invokes a shell
-    # parser here because that would blur the security model.
-    try:
-        return shlex.split(command)
-    except ValueError:
-        return command.strip().split()
-
-
-def command_root(command: str) -> str | None:
-    """Return the first argv token from a command string, lowercased."""
-    parts = split_command_argv(command)
-    if not parts:
-        return None
-    return parts[0].strip().lower() or None
-
-
-def _nmap_scan_mode_from_token(token: str) -> str | None:
-    for flag in NMAP_SCAN_MODE_FLAGS:
-        if token == flag or token.startswith(f"{flag}="):
-            return flag
-        if token.startswith(flag) and token.startswith("-s") and len(token) > len(flag):
-            return flag
-    return None
-
-
-def _nmap_raw_scan_restriction_reason(command: str) -> str:
-    tokens = split_command_argv(command)
-    if not tokens or tokens[0].lower() != "nmap":
-        return ""
-    if "--privileged" in tokens:
-        return "nmap raw-socket mode is not supported; use TCP connect scans with -sT."
-    for token in tokens[1:]:
-        if _nmap_scan_mode_from_token(token) in NMAP_DENIED_RAW_FLAGS:
-            return "nmap SYN scans (-sS) are not supported; use TCP connect scans with -sT."
-    return ""
-
-
 def _runtime_injection_blocked(tokens: list[str], inject: dict[str, object]) -> bool:
     raw_unless_any = inject.get("unless_any")
     unless_any = [
@@ -3015,7 +2192,7 @@ def _apply_runtime_inject_flags(
 
 def resolve_runtime_command(command_name: str) -> str | None:
     """Return the absolute path to command_name if installed on this instance."""
-    return shutil.which(command_name)
+    return _resolve_runtime_command(command_name)
 
 
 def runtime_missing_command_name(command: str) -> str | None:
@@ -3037,105 +2214,24 @@ def runtime_missing_command_name(command: str) -> str | None:
 
 def runtime_missing_command_message(command_name: str) -> str:
     """Return the standard instance-level message for missing runtime commands."""
-    return f"Command is not installed on this instance: {command_name}"
+    return _runtime_missing_command_message(command_name)
 
 
 def split_chained_commands(command: str) -> list[str]:
-    """Split a command string on any shell chaining/piping/redirection operator
-    and return the individual command tokens so each can be validated."""
-    parts = SHELL_CHAIN_RE.split(command)
-    return [p.strip() for p in parts if p.strip()]
-
-
-def _tokens_start_with(command_tokens: list[str], prefix_tokens: list[str]) -> bool:
-    if len(command_tokens) < len(prefix_tokens):
-        return False
-    return all(cmd.lower() == prefix.lower() for cmd, prefix in zip(command_tokens, prefix_tokens))
-
-
-def _flag_matches_token(flag: str, token: str) -> bool:
-    if not flag:
-        return False
-    if flag.startswith("--"):
-        return token == flag
-    if len(flag) == 2 and flag[0] == '-' and flag[1].isalpha():
-        if token == flag:
-            return True
-        # Combined short-flag group matching: `-ve` matches `-e`.
-        # Only applies when the token looks like a POSIX short-flag bundle:
-        # single dash, all-lowercase alphabetic, at most 4 chars (e.g. -ef, -zvn).
-        # Mixed-case tokens such as ProjectDiscovery's -oD or nmap's -sV are
-        # long-form/specialized single-dash options and must match exactly.
-        if (token.startswith('-') and not token.startswith('--')
-                and len(token) <= 4 and token[1:].isalpha() and token[1:].islower()):
-            return flag[1] in token[1:]
-        return False
-    return token == flag
-
-
-def _grouped_short_flag_members(token: str, allow_grouping_flags: set[str]) -> set[str] | None:
-    if not token.startswith("-") or token.startswith("--") or len(token) < 2:
-        return None
-    if not token[1:].isalpha() or not token[1:].islower():
-        return None
-    members = {f"-{char}" for char in token[1:]}
-    if not members or not members.issubset(allow_grouping_flags):
-        return None
-    return members
-
-
-def _allowed_prefix_matches_with_grouping(
-    command_tokens: list[str],
-    prefix_tokens: list[str],
-    allow_grouping_flags: set[str],
-) -> bool:
-    if not command_tokens or not prefix_tokens or not allow_grouping_flags:
-        return False
-    if command_tokens[0].lower() != prefix_tokens[0].lower():
-        return False
-
-    required_grouped_flags = set()
-    for token in prefix_tokens[1:]:
-        if token in allow_grouping_flags:
-            required_grouped_flags.add(token)
-            continue
-        members = _grouped_short_flag_members(token, allow_grouping_flags)
-        if members:
-            required_grouped_flags.update(members)
-            continue
-        # Keep non-groupable prefixes on the original exact-prefix path.
-        return False
-    if not required_grouped_flags:
-        return False
-
-    command_grouped_flags = set()
-    for token in command_tokens[1:]:
-        members = _grouped_short_flag_members(token, allow_grouping_flags)
-        if members:
-            command_grouped_flags.update(members)
-
-    return required_grouped_flags.issubset(command_grouped_flags)
+    """Split a command string on any shell chaining/piping/redirection operator."""
+    return _split_chained_commands(command)
 
 
 def _is_allowed_by_policy(command_tokens: list[str], allowed: list[str], allow_grouping: dict[str, set[str]]) -> bool:
-    cmd_lower = shlex.join(command_tokens).lower()
-    for prefix in allowed:
-        if cmd_lower == prefix or cmd_lower.startswith(prefix + " "):
-            return True
-        prefix_tokens = split_command_argv(prefix)
-        root = prefix_tokens[0].lower() if prefix_tokens else ""
-        if _allowed_prefix_matches_with_grouping(command_tokens, prefix_tokens, allow_grouping.get(root, set())):
-            return True
-    return False
+    return is_allowed_by_policy(command_tokens, allowed, allow_grouping)
 
 
-def _nmap_output_deny_matches(flag: str, token: str) -> bool:
-    if flag != "-o":
-        return False
-    return any(
-        token == output_flag or token.startswith(output_flag)
-        for output_flag in ("-oN", "-oX", "-oG", "-oA", "-oS")
-    )
+def _is_denied(command: str, deny_entries: list[str], *, exempt_flags: set[str] | None = None) -> bool:
+    return is_denied(command, deny_entries, exempt_flags=exempt_flags)
+
+
+def _nmap_raw_scan_restriction_reason(command: str) -> str:
+    return nmap_raw_scan_restriction_reason(command)
 
 
 def _workspace_flag_specs_by_root() -> dict[str, list[dict[str, object]]]:
@@ -3874,55 +2970,6 @@ def _apply_workspace_runtime_environment(command: str) -> str:
     return shlex.join(["env", *env_tokens, *tokens]) if env_tokens else command
 
 
-def _is_denied(command: str, deny_entries: list[str], *, exempt_flags: set[str] | None = None) -> bool:
-    """Return True if command matches any deny entry.
-    Deny entries match tool/subcommand prefixes case-insensitively, but flags are
-    matched exactly as written. A deny entry like 'curl -o' is matched if:
-      - the command starts with the deny prefix, OR
-      - the tool prefix matches AND the flag appears anywhere after it in the command,
-        so 'curl -s -o file' is caught as well as 'curl -o file'.
-    For single-character flags (e.g. -e, -c), the flag is also matched when combined
-    with other single-char flags in a group: 'nc -ve' is caught by '!nc -e', and
-    'nc -vc' is caught by '!nc -c'. Multi-char flags (--script, -oN) use exact-token
-    matching only.
-    Exception: a denied output flag is allowed when its argument is /dev/null,
-    permitting common patterns like 'curl -o /dev/null -w "%{http_code}" <url>'.
-    """
-    command_tokens = split_command_argv(command)
-    if not command_tokens:
-        return False
-
-    exempt_flags = exempt_flags or set()
-    for d in deny_entries:
-        deny_tokens = split_command_argv(d)
-        if not deny_tokens:
-            continue
-
-        if len(deny_tokens) == 1:
-            if command_tokens[0].lower() == deny_tokens[0].lower():
-                return True
-            continue
-
-        tool_prefix = deny_tokens[:-1]
-        flag = deny_tokens[-1]
-        if flag in exempt_flags:
-            continue
-        if not _tokens_start_with(command_tokens, tool_prefix):
-            continue
-
-        tail = command_tokens[len(tool_prefix):]
-        for idx, token in enumerate(tail):
-            if not (
-                _flag_matches_token(flag, token)
-                or (command_tokens[0].lower() == "nmap" and _nmap_output_deny_matches(flag, token))
-            ):
-                continue
-            if idx + 1 < len(tail) and tail[idx + 1] == "/dev/null":
-                break
-            return True
-    return False
-
-
 def validate_command(
     command: str,
     *,
@@ -3975,7 +3022,7 @@ def validate_command(
             display_command=command, exec_command=command_to_validate,
         )
 
-    nmap_raw_reason = _nmap_raw_scan_restriction_reason(command_to_validate)
+    nmap_raw_reason = nmap_raw_scan_restriction_reason(command_to_validate)
     if nmap_raw_reason:
         return CommandValidationResult(
             False,
@@ -4024,7 +3071,7 @@ def validate_command(
     command_tokens = split_command_argv(command_to_validate.strip())
 
     # Deny prefixes take priority — checked before allow list
-    if denied and _is_denied(command_to_validate.strip(), denied, exempt_flags=exempt_flags):
+    if denied and is_denied(command_to_validate.strip(), denied, exempt_flags=exempt_flags):
         return CommandValidationResult(
             False,
             f"Command not allowed: '{command.strip()}'",
@@ -4032,7 +3079,7 @@ def validate_command(
             exec_command=command_to_validate,
         )
 
-    if not _is_allowed_by_policy(command_tokens, allowed, allow_grouping):
+    if not is_allowed_by_policy(command_tokens, allowed, allow_grouping):
         return CommandValidationResult(
             False,
             f"Command not allowed: '{command.strip()}'",

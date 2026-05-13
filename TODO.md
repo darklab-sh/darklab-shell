@@ -98,30 +98,32 @@ No known issues are currently tracked.
 
 - **Restructure large app modules by feature responsibility**
   - Several app-side JS, CSS, and Python files are now large enough that focused follow-up work is harder than it needs to be. Split these gradually when touching the relevant area instead of doing one broad mechanical rewrite.
-  - **Strong split candidates**
-    - `app/static/js/shell_chrome.js` — split desktop rail/HUD chrome, Projects mobile/detail helpers, Run Details/history actions, and shared shell navigation glue.
-    - `app/static/css/shell.css` — split terminal output, generic modals, Command Registry, FAQ/shortcuts, and any remaining feature-specific sections.
-    - `app/static/js/app.js` — split preferences, FAQ/Command Registry, and any remaining shell glue that still lives in the shared app module.
-    - `app/services/projects/workspace.py` — split project CRUD, targets/discovery, findings, artifacts, evidence package/export rendering, labels/notes, and compare/link helpers.
-    - `app/static/js/history.js` — split History drawer, Run Details modal, compare launcher, compare renderer, compare controls, and share/delete actions.
-    - `app/services/commands/registry.py` — split registry loading/schema normalization, autocomplete derivation, command validation, workspace flag rewriting, restriction checks, and runtime environment handling.
-    - `app/static/js/status_monitor.js` — split data polling/state, modal/sheet rendering, visual cards, active-run rows, attach/kill actions, and mobile behavior.
-    - `app/static/js/runner.js` — split SSE streaming, run lifecycle/state, stalled-run recovery, PTY handoff/finalization, output persistence, and composer submit glue.
-    - `app/services/commands/builtins.py` — split command families such as help/status/history/config/theme/tour/project/workspace/workflow commands.
-    - `app/static/css/primitives/components.css` — keep true primitives together, but move any remaining history-specific rules into feature stylesheets.
+  - **Completed strong split pass**
+    - `app/static/js/shell_chrome.js` now delegates project target editor copy/value validation to `app/static/js/features/projects/project_target_validation.js`.
+    - `app/services/projects/workspace.py` now delegates project limits/allowed values/exceptions, project-related session preference helpers, and entity label/note helpers to `app/services/projects/contracts.py`, `app/services/projects/preferences.py`, and `app/services/projects/metadata.py`.
+    - `app/static/js/history.js` now delegates reverse-history search, command recall helpers, shared star/action-menu helpers, delete/clear confirmations, share/permalink helpers, restore/highlight helpers, project-linking helpers, drawer row rendering, and Run Details modal code to feature files.
+    - `app/services/commands/registry.py` now delegates welcome/tour/ASCII/hint content loading, registry YAML loading/schema normalization/overlay merging, command tokenization/policy matching/deny checks/runtime-command detection, synthetic post-filter parsing, and workflow catalog loading/normalization to focused service modules.
+    - `app/static/js/status_monitor.js` now delegates pure formatting/date/hash helpers, endpoint loading/dashboard aggregation, and CPU/memory sampling/sparkline helpers to `status_monitor_core.js`, `status_monitor_data.js`, and `status_monitor_resources.js`.
+    - `app/static/js/runner.js` now delegates detached active-run restore markers, client-side saved-run persistence, and workspace-terminal command parsing/path helpers to `runner_active_restore.js`, `runner_persistence.js`, and `runner_workspace.js`.
   - **Worth considering during related work**
-    - `app/static/css/shell-chrome.css` — split shell chrome from Status Monitor styling.
+    - `app/static/js/shell_chrome.js` — split desktop rail/HUD chrome, deeper Projects mobile/detail helpers, and shared shell navigation glue when related work touches those flows.
+    - `app/services/projects/workspace.py` — split project CRUD, targets/discovery, findings, artifacts, evidence package/export rendering, and compare/link helpers as those areas get new work.
+    - `app/services/commands/registry.py` — split autocomplete derivation, workspace flag rewriting, restriction checks that read command values, and runtime environment handling when the command-registry surface changes again.
+    - `app/static/js/status_monitor.js` — split polling state, modal/sheet rendering, visual cards, active-run rows, attach/kill actions, and mobile behavior when those views get substantive updates.
+    - `app/static/js/runner.js` — split SSE streaming, run lifecycle/state, stalled-run recovery, PTY handoff/finalization, and composer submit glue when runner behavior changes next.
+    - `app/static/js/app.js` — after the preference and Command Registry splits, split any remaining shell glue only if a related change makes the boundary obvious.
+    - `app/static/css/shell.css` — after the feature stylesheet splits, keep watching for remaining feature-specific sections inside the terminal shell foundations.
     - `app/static/js/controller.js` — split mobile menu wiring, options/session-token controls, global shortcuts, autocomplete input handling, and bootstrap wiring.
-    - `app/blueprints/run.py` — split run routes from persistence/finalization helpers, PTY persistence shaping, workspace artifact capture, and SSE streaming helpers.
+    - `app/blueprints/run.py` — split run routes from persistence/finalization helpers, workspace artifact capture, and SSE streaming helpers.
     - `app/static/js/workspace.js` — split browser/list rendering, viewer rendering/search, editor/actions, drag/drop/move, and autocomplete cache helpers.
     - `app/blueprints/history.py` — split history list/stats routes, run details payload helpers, compare routes, and share/permalink routes.
     - `app/static/js/mobile_chrome.js` — split mobile menu, mobile History sheet, mobile status/peek behavior, and mobile shell state sync.
     - `app/static/js/tabs.js` — split tab state/rendering, drag/reorder, restore/session hydration, and close/kill prompts.
     - `app/static/js/autocomplete.js` — split menu rendering/navigation from suggestion resolution/application.
-    - `app/static/css/mobile.css` — split mobile composer/shell layout from sheet-specific and orientation-specific rules.
-    - `app/services/pty/service.py` — split terminal capture/snapshot code from process lifecycle, Redis broker state, controls, and stream helpers.
-    - `app/static/js/pty.js` — split xterm asset/init handling, PTY stream lifecycle, modal controls, snapshots/reattach, and input batching.
+    - `app/services/pty/service.py` — after transcript shaping moved out, split terminal capture/snapshot code from process lifecycle, Redis broker state, controls, and stream helpers only when touching PTY internals.
+    - `app/static/js/pty.js` — split xterm asset/init handling, PTY stream lifecycle, modal controls, snapshots/reattach, and input batching when the PTY browser controller gets new work.
   - **Probably fine for now**
+    - `app/static/css/shell-chrome.css`, `app/static/css/mobile.css`, and `app/static/css/primitives/components.css` are much narrower after the feature stylesheet split. Keep them cohesive unless a future change exposes another clear feature-owned block.
     - `app/static/js/search.js`, `app/services/workspace/files.py`, and `app/static/js/welcome.js` are large, but each still reads as one coherent feature module. Split them only when related work makes the boundary obvious.
   - **Progress**
     - Run Comparison browser code now lives in `app/static/js/features/run-comparison/`: formatting/preference/count helpers in `history_compare_core.js`, modal lifecycle in `history_compare_overlay.js`, launcher/candidate search in `history_compare_launcher.js`, row targeting/minimap/previous-next controls in `history_compare_navigation.js`, view/context/action controls in `history_compare_controls.js`, and transcript/object rendering plus compare fetch flow in `history_compare_renderer.js`.
@@ -129,6 +131,20 @@ No known issues are currently tracked.
     - Theme selection, terminal-native theme/config commands, the terminal tour command, and runtime autocomplete contexts now live in `app/static/js/features/theme/`, `app/static/js/features/terminal/`, `app/static/js/features/tour/`, and `app/static/js/features/autocomplete/`.
     - Projects, Run Comparison, and Workflows styles now live in `app/static/css/features/`, including their mobile-specific overrides.
     - The app now uses the hybrid folder layout: the root `app/` folder keeps the Flask entrypoint, config, extensions, route blueprints, templates, static assets, and runtime config; Python shared helpers live under `app/core/`; Python service code lives under `app/services/`; reusable browser globals live under `app/static/js/core/`; shared browser UI primitives live under `app/static/js/ui/`; and reusable CSS primitives live under `app/static/css/primitives/`.
+    - Shared shell CSS is narrower: Command Registry, FAQ/shortcuts, Files/workspace, History/Run Details, and Status Monitor styles now live in feature-owned stylesheets under `app/static/css/features/`.
+    - Project target editor copy and value validation now lives in `app/static/js/features/projects/project_target_validation.js`, keeping that form-specific validation out of the shared shell chrome controller.
+    - Command Registry and Command Catalog browser logic now lives in `app/static/js/features/command-registry/command_registry.js`, keeping `app.js` focused on shared shell state, shortcuts, tab-session state, and layout glue.
+    - Session preference loading, persistence, and Options modal preference syncing now live in `app/static/js/features/preferences/preferences.js`, keeping `app.js` focused on shared shell state, shortcuts, tab-session state, and layout glue.
+    - Ctrl+R reverse-history search, command recall helpers, History delete/clear confirmations, share/permalink helpers, restore/highlight helpers, project-linking helpers, drawer row rendering/action menus, and Run Details modal code now live in `app/static/js/features/history/`, keeping `history.js` focused on drawer fetch/filter/page orchestration.
+    - Detached active-run restore markers, client-side saved-run persistence, and workspace-terminal command parsing/path helpers now live in `app/static/js/features/runner/runner_active_restore.js`, `app/static/js/features/runner/runner_persistence.js`, and `app/static/js/features/runner/runner_workspace.js`, keeping `runner.js`, `pty.js`, and `tabs.js` on one shared reload-detach helper while leaving local-run history persistence and workspace-terminal path logic outside the streaming controller.
+    - Status Monitor endpoint loading/dashboard aggregation now lives in `app/static/js/features/status-monitor/status_monitor_data.js`, and CPU/memory sampling, trend storage, active-run resource cleanup, and sparkline rendering now live in `app/static/js/features/status-monitor/status_monitor_resources.js`, leaving `status_monitor.js` to orchestrate polling and monitor rendering.
+    - Built-in command catalog data, shared built-in output formatting, and the discovery/help/FAQ/catalog/man/type/which, miscellaneous/guardrail, `project`/runtime/history/status/session/shortcuts/system-style/workspace/wordlist command families now live in `app/services/commands/builtins_catalog.py`, `app/services/commands/builtins_discovery.py`, `app/services/commands/builtins_format.py`, `app/services/commands/builtins_misc.py`, `app/services/commands/builtins_project.py`, `app/services/commands/builtins_runtime.py`, `app/services/commands/builtins_session.py`, `app/services/commands/builtins_shortcuts.py`, `app/services/commands/builtins_system.py`, `app/services/commands/builtins_workspace.py`, and `app/services/commands/builtins_wordlist.py`, leaving `builtins.py` focused on command routing.
+    - Welcome, tour, ASCII art, and hint loading now lives in `app/services/commands/registry_content.py`, leaving `registry.py` more focused on command registry, autocomplete, workflow, and validation behavior.
+    - Command registry YAML loading, schema normalization, and local-overlay merging now lives in `app/services/commands/registry_loader.py`, while command tokenization, policy matching, deny checks, chain splitting, runtime-command availability checks, and the nmap raw-scan guard now live in `app/services/commands/registry_validation.py`, leaving `registry.py` to expose compatibility wrappers and use normalized registry data.
+    - Synthetic pipe-helper post-filter parsing now lives in `app/services/commands/postfilters.py`, leaving `registry.py` to call into the parser during validation and runtime rewrite decisions.
+    - Workflow catalog loading and normalization now lives in `app/services/workflows/catalog.py`, leaving `registry.py` to expose compatibility wrappers and merge built-in/configured workflows.
+    - Project workspace contracts, project-related session preference helpers, and entity label/note helpers now live in `app/services/projects/contracts.py`, `app/services/projects/preferences.py`, and `app/services/projects/metadata.py`, leaving `workspace.py` focused on project entities and evidence flows.
+    - Completed PTY transcript shaping and transient redraw filtering now live in `app/services/pty/transcript.py`, leaving the run blueprint to call the service helper during PTY completion persistence.
 
 ---
 

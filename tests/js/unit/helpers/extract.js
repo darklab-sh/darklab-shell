@@ -13,7 +13,7 @@
  *
  *   // For functions that use localStorage, access the store via _storage:
  *   const { _getStarred, _saveStarred, _storage } =
- *     fromScript('app/static/js/history.js', '_getStarred', '_saveStarred')
+ *     fromScript('app/static/js/features/history/history_actions.js', '_getStarred', '_saveStarred')
  *   _storage.setItem('starred', JSON.stringify(['cmd1']))
  */
 
