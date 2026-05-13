@@ -502,6 +502,26 @@ function _historyBulkToast(message, counts = {}) {
   else showToast(message);
 }
 
+function _historyBulkReasonSummary(results = []) {
+  if (!Array.isArray(results)) return '';
+  const rejected = results.filter(item => item && item.status === 'rejected');
+  if (!rejected.length) return '';
+  const reasons = rejected.reduce((acc, item) => {
+    const reason = String(item.reason || '').trim();
+    acc.set(reason, (acc.get(reason) || 0) + 1);
+    return acc;
+  }, new Map());
+  const labels = {
+    running: 'still running',
+    not_owned: 'not available in this session',
+    policy_blocked: 'blocked by policy',
+  };
+  return Array.from(reasons.entries()).map(([reason, count]) => {
+    const label = labels[reason] || 'skipped';
+    return `${count} ${label}`;
+  }).join(' - ');
+}
+
 function _historyBulkResultText(action, projectName, counts = {}) {
   if (action === 'add') {
     const added = Number(counts.added || 0);
@@ -579,7 +599,9 @@ async function _historyBulkPostProject(project, action) {
     const counts = _historyBulkCountsFromResponse(data);
     const projectName = _historyProjectDisplayName(project) || 'project';
     _historySelection.selected.clear();
-    _historyBulkToast(_historyBulkResultText(action, projectName, counts), counts);
+    const reasonSummary = _historyBulkReasonSummary(data.results);
+    const message = [_historyBulkResultText(action, projectName, counts), reasonSummary].filter(Boolean).join(' - ');
+    _historyBulkToast(message, counts);
     if (typeof refreshProjectWorkspace === 'function') {
       try { await refreshProjectWorkspace(); } catch (_) {}
     }
@@ -679,7 +701,9 @@ async function _historyBulkDeleteSelectedRuns() {
     const data = await resp.json();
     const counts = _historyBulkCountsFromResponse(data);
     _historySelection.selected.clear();
-    _historyBulkToast(_historyBulkResultText('delete', '', counts), counts);
+    const reasonSummary = _historyBulkReasonSummary(data.results);
+    const message = [_historyBulkResultText('delete', '', counts), reasonSummary].filter(Boolean).join(' - ');
+    _historyBulkToast(message, counts);
     await _historyRefreshAfterBulk();
   } catch (_) {
     showToast('Failed to delete selected runs', 'error');

@@ -18,7 +18,6 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 ## Open TODOs
 
 - **History multi-select bulk action follow-ups**
-  - Add broader browser unit coverage for select mode, row-click selection, checkbox state, select-all mixed state, clear selection, reset-on-close, row action propagation, in-flight action locking, project picker flows, and unknown rejected-reason fallback messaging.
   - Add one desktop and one mobile Playwright flow covering visible-page selection, project add/remove, bulk delete, mobile toolbar wrapping, mobile select-mode row tap, and long-press no-op behavior.
   - Consider snapshot bulk delete later if real use shows saved snapshots need the same workflow.
 
@@ -88,8 +87,9 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - Confirm dedupe scope: per-session-token (recommended) so cross-tool overlap is captured.
     - Confirm retention-pruning interaction so inbox rows are not orphaned when their source runs are pruned.
   - **Phase 1 - Backend contracts and storage**
+    - The `findings_inbox` and `findings_inbox_occurrences` tables described here are the **standalone-shipping schema**. If the Session Entity Atlas plan ships first or alongside, the inbox tables are not created — the Atlas's unified entity-owned `findings` and `findings_occurrences` tables carry triage state directly, and this plan's routes are rewired to read from those instead. The two schemas are intentionally column-compatible so this collapse is a route-level swap, not a data migration.
     - New `app/services/findings/inbox.py` materializer that runs at run-finalize, consumes classified signals, computes a stable signature, and upserts inbox rows. Signature: `sha256(tool_root | normalized_kind | normalized_target | severity)`; normalization rules are documented in the module and shared with the frontend.
-    - New SQLite tables:
+    - New SQLite tables (standalone path only):
       - `findings_inbox` `(id, session_token, signature_hash, tool_root, kind, severity, first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, status_updated_at)`.
       - `findings_inbox_occurrences` `(finding_id, run_id, line_no, snippet, seen_at)` with retention pruning tied to run pruning.
     - Routes in new `app/blueprints/findings_inbox.py`:
@@ -289,36 +289,71 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - Transcript ↔ Atlas wiring: tagged tokens click into entity detail, hover popover summarizes high-signal intel, "see in run" navigation jumps back to source line.
     - Findings tab absorbs the Findings triage inbox plan if both are scheduled — the inbox modal is retired in favor of the Atlas tab.
     - Project workspaces become a curation layer over the entity store; project_links are tags on entity rows, not parallel copies.
+    - Schema cleanup is destructive. The run-centric `findings`, project-scoped `project_targets`, and `finding_targets` tables are dropped and replaced by an entity-first schema. Pre-release single-user app — no backwards-compatibility shim, no dual-write phase, no data backfill from legacy rows. The Findings triage inbox's `findings_inbox` table is also collapsed into the unified entity-owned `findings` table here.
     - Hard dependencies: entity-aware classifier hooks from the External intel service integrations plan are landed; encrypted secrets vault is landed for intel refresh actions.
   - **Phase 0 - Existing-code integration check**
     - Confirm classifier entity events (`entity_ip`, `entity_domain`, `entity_hash`, `entity_cve`) are landed.
     - Audit `app/services/projects/workspace.py` and `app/services/projects/metadata.py` for label/note/finding/target storage that must be reused, not duplicated.
     - Audit `app/services/runs/comparison.py` for cross-run finding helpers the Atlas should reuse.
     - Audit `app/static/js/ui/ui_entity_metadata.js` to confirm label/note helpers work on Atlas entity types without changes.
-    - Decide migration approach for existing project targets — keep them as a typed convenience view backed by `entity_project_links`, or deprecate in favor of entity rows. Document the choice before any UI work.
+    - Inventory every SQL call site against `findings`, `project_targets`, and `finding_targets` across `app/services/projects/workspace.py`, `app/services/projects/metadata.py`, and `app/blueprints/projects.py`. Expect ~30+ touch sites in `workspace.py` alone. The rewrite of these call sites lands with the schema migration in Phase 1, not as a follow-up.
+    - Confirm the existing generic `project_links` table (`project_id, entity_type, entity_id`) can absorb entity-to-project tagging by introducing `entity_type='atlas_entity'`. This drops the previously proposed standalone `entity_project_links` table from the plan.
+    - Lock the destructive-migration decision: pre-release, single-user app, so v1 drops `project_targets`, `finding_targets`, and the existing run-centric `findings` schema outright. No backfill, no compat shim, no dual-write phase. Document this in the migration commit message so any future operator with persisted data sees the warning.
   - **Phase 1 - Backend contracts and storage**
-    - New SQLite tables:
-      - `entities` `(id, session_token, type, canonical_value, signature_hash, first_seen_at, last_seen_at, occurrence_count, created_at)` with unique index on `(session_token, type, signature_hash)`.
-      - `entity_run_links` `(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count)` for cross-run aggregation.
-      - `entity_intel_snapshots` `(entity_id, provider, payload_json, fetched_at, ttl)` for cached intel data.
-      - `entity_project_links` `(entity_id, project_id, linked_at)` replacing per-project entity copies.
-    - New `app/services/atlas/` service:
-      - `materializer.py` consumes entity events from `output_signals` at run-finalize. Idempotent on re-finalization. Computes stable canonical forms per type (lowercase IPv4/IPv6, IDN-normalized lowercase domain, lowercase hash with algorithm tag, uppercase `CVE-YYYY-NNNNN`).
-      - `lookup.py` exposes list/filter/detail queries used by both the Atlas and downstream surfaces.
+    - **Destructive schema migration in `app/core/database.py`:**
+      - **Drop tables:** `project_targets`, `finding_targets`, and the existing run-centric `findings` table.
+      - **Drop indexes:** `idx_findings_session_run_created`, `idx_findings_target_created`, `idx_finding_targets_finding`, `idx_finding_targets_target_created`, `idx_finding_targets_run`, `idx_project_targets_project_type_value`.
+      - **Keep unchanged:** `runs`, `run_output_artifacts`, `run_file_artifacts`, `snapshots`, `session_tokens`, `session_preferences`, `starred_commands`, `session_variables`, `user_workflows`, `recent_domains`, `projects`, `project_links`, `entity_labels`, `entity_notes`, `evidence_packages`.
+      - **Reuse `entity_labels` and `entity_notes`** for Atlas entities by adopting `entity_type='atlas_entity'`. The tables are already keyed by `(session_id, entity_type, entity_id)` so no schema change is needed.
+      - **Reuse `project_links`** for entity-to-project tagging with `entity_type='atlas_entity'`. Same generic `(project_id, entity_type, entity_id)` shape that already serves `run` and `finding` links — no parallel `entity_project_links` table.
+    - **New `entities` table:**
+      - `(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, occurrence_count, created)`.
+      - `type` values: `ip`, `domain`, `url`, `hash`, `cve`. The legacy `host` target type is collapsed into `domain` unless the Phase 0 audit surfaces a meaningful distinction.
+      - `canonical_value`: pre-normalized form (lowercase IPv4/IPv6, IDN-normalized lowercase domain, lowercase algorithm-tagged hash, uppercase `CVE-YYYY-NNNNN`, percent-encoded URL).
+      - `signature_hash`: stable `sha256(type | canonical_value)` for dedup.
+      - UNIQUE `(session_id, type, signature_hash)`.
+      - Indexes: `idx_entities_session_type_last_seen ON entities (session_id, type, last_seen_at DESC)` for Atlas tab listing; `idx_entities_session_value ON entities (session_id, canonical_value)` for transcript-token hover lookups.
+    - **New `entity_run_links` table:**
+      - `(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count, PRIMARY KEY (entity_id, run_id))`.
+      - Replaces the role of `seen_count` / `last_seen` / `source_run_id` formerly on `project_targets`.
+      - Index: `idx_entity_run_links_run ON entity_run_links (run_id)` so run pruning can sweep entity links cleanly.
+    - **New `entity_intel_snapshots` table:**
+      - `(entity_id, provider, payload_json, fetched_at, ttl_seconds, http_status, cache_hit_count, PRIMARY KEY (entity_id, provider))`.
+      - One row per (entity, provider). Refresh replaces in place.
+      - Index: `idx_entity_intel_snapshots_fetched ON entity_intel_snapshots (fetched_at)` for TTL expiry sweeps.
+    - **New entity-owned `findings` table (rewritten, not migrated):**
+      - `(id, session_id, entity_id, signature_hash, severity, kind, tool_root, first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, status_updated_at, fingerprint, created)`.
+      - `status` values: `new`, `triaged`, `confirmed`, `false_positive`. **Triage state lives directly on `findings`** — the Findings triage inbox plan's separate `findings_inbox` table is collapsed into this row.
+      - `entity_id` is required; every finding pertains to an entity. Findings whose entity does not yet exist materialize the entity first.
+      - UNIQUE `(session_id, signature_hash)` for cross-run dedup. Signature: `sha256(tool_root | kind | severity | entity.signature_hash)`.
+      - Indexes: `(session_id, status)`, `(session_id, entity_id, last_seen_at DESC)`, `(session_id, tool_root, last_seen_at DESC)`, `(session_id, severity, last_seen_at DESC)`.
+    - **New `findings_occurrences` table (per-run sightings):**
+      - `(finding_id, run_id, line_number, snippet, seen_at, PRIMARY KEY (finding_id, run_id, line_number))`.
+      - Pruned with its source run; the parent `findings` row survives so the historical pattern is preserved.
+      - Index: `idx_findings_occurrences_run ON findings_occurrences (run_id)` for prune sweeps.
+    - **Service-layer rewrite (lands with the schema migration, not after):**
+      - `app/services/projects/workspace.py` — rewrite every helper that reads or writes `project_targets`, `findings`, or `finding_targets`. Non-exhaustive list: `_row_to_target`, `_row_to_finding`, `_row_to_project_finding`, `_finding_target_ids_*`, `_finding_severity_from_text`, `_finding_fingerprint`, `_target_candidate_*`, `list_project_findings`, target listing/dedup/dismiss flows, and evidence-package selection move to `entities` / `findings` / `entity_run_links` reads with `project_links` joins for project membership.
+      - `app/services/projects/metadata.py` — `entity_metadata_target_exists` and finding-existence checks switch to the new tables.
+      - `app/blueprints/projects.py` — `/projects/<id>/targets*` becomes a typed view over `entities` filtered by `project_links`; `/projects/<id>/findings` reads from the rewritten `findings` table joined to `project_links`; `/findings/<id>/review` becomes a status-update route on the unified `findings` table; `/entities/run/<id>/findings` reads via `entity_run_links` join.
+      - `app/services/commands/builtins_project.py` and any `project` built-in target lookups shift from `project_targets`-backed to entity-store-backed via `project_links`.
+      - Evidence package builders that emit "targets" sections derive them from project-linked Atlas entities of type `host` / `domain` / `ip` / `url`.
+    - **New `app/services/atlas/` service:**
+      - `materializer.py` consumes entity events from `output_signals` at run-finalize. Idempotent on re-finalization. Computes stable canonical forms per type.
+      - `lookup.py` exposes list/filter/detail queries used by both the Atlas and the rewritten Projects routes.
       - `intel_bridge.py` writes normalized intel payloads into `entity_intel_snapshots` when `intel` runs complete or when sidecar enrichment runs.
-    - Routes in new `app/blueprints/atlas.py`:
+    - **Routes in new `app/blueprints/atlas.py`:**
       - `GET /atlas` tab summary (entity counts per type).
       - `GET /atlas/entities` paginated list with filters (`type`, `q`, `status`, `seen_in_last`, `has_intel`, `project_id`).
       - `GET /atlas/entities/<id>` detail with linked runs, intel snapshots, findings, labels, notes, project links.
       - `POST /atlas/entities/<id>/refresh_intel` triggers a fresh provider fetch via the intel service (rate-limited).
-      - `POST /atlas/entities/<id>/project_links` promotes (tag).
+      - `POST /atlas/entities/<id>/project_links` promotes by writing into `project_links` with `entity_type='atlas_entity'`.
       - `DELETE /atlas/entities/<id>/project_links/<project_id>` unpromotes.
-      - Findings-status routes piggyback the findings-inbox plan's routes — the Atlas Findings tab reads and writes the same store.
-    - Audit log: `ATLAS_ENTITY_MATERIALIZED`, `ATLAS_INTEL_REFRESH`, `ATLAS_PROJECT_LINK_ADDED`, `ATLAS_PROJECT_LINK_REMOVED`.
-  - **Phase 2 - Materialization and backfill**
+      - Findings-status routes live next to the rewritten Projects findings routes — there is one `findings` table, one set of status routes, used by both Atlas and Projects surfaces.
+    - **Audit log:** `ATLAS_ENTITY_MATERIALIZED`, `ATLAS_INTEL_REFRESH`, `ATLAS_PROJECT_LINK_ADDED` (extends the existing `PROJECT_LINK_ADDED` family with `entity_type='atlas_entity'`), `ATLAS_PROJECT_LINK_REMOVED`.
+  - **Phase 2 - Materialization**
     - Hook into the run-finalize path in `app/blueprints/run.py` after classification. Lazy extraction — only process classified entity events, never raw output lines, so cost scales with distinct entities rather than output volume.
-    - Backfill helper walks existing saved runs on first deploy and materializes their entities; idempotent so re-runs are safe.
-    - Retention pruning rule: `entity_run_links` rows follow their source run; entity rows survive after the last link is pruned so the historical pattern is preserved.
+    - No backfill is shipped. Pre-release single-user app drops all historic findings/targets in Phase 1 and starts the entity store fresh from the first new run finalized after the migration. Saved runs from before the migration have no Atlas entities; entity-tab counts simply omit them.
+    - Retention pruning rule: `entity_run_links` and `findings_occurrences` rows follow their source run; `entities` and `findings` rows survive after the last link is pruned so the historical pattern is preserved.
   - **Phase 3 - Browser surface**
     - New `app/static/js/features/atlas/`:
       - `atlas_overlay.js` — full-surface controller wired into the desktop rail and mobile menu, not stacked over History.
@@ -338,10 +373,10 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - If the standalone inbox modal has already shipped, its entry points migrate to the Atlas Findings tab and the standalone modal is retired; the backing service and routes are reused unchanged.
     - If the Atlas ships first, the inbox plan does not ship as a separate modal — its scope is absorbed entirely here.
   - **Phase 6 - Projects as curation, not gating**
-    - Adding an entity to a project becomes a row in `entity_project_links` rather than a copy into a parallel project-side store.
-    - Existing project targets are reconciled per the Phase 0 decision: either deprecated in favor of `entity_project_links`, or kept as a typed convenience view backed by the entity store.
-    - Projects modal Findings tab reads from the Atlas service so it cannot drift from the Atlas Findings tab.
-    - Engagement report builder (separate idea) reads "targets", "findings", and "intel observations" sections from the entity store.
+    - Adding an entity to a project writes a row in the existing generic `project_links` table with `entity_type='atlas_entity'`. No new project-link table is introduced.
+    - The `project_targets` table is dropped in Phase 1 and not preserved. The "Targets" view in the Projects modal becomes a server-side filter over project-linked Atlas entities of type `host` / `domain` / `ip` / `url`, computed in the rewritten `/projects/<id>/targets` route.
+    - Projects modal Findings tab reads from the unified `findings` table joined to `project_links` so it cannot drift from the Atlas Findings tab — there is one findings store, not two.
+    - Engagement report builder (separate idea) reads "targets", "findings", and "intel observations" sections from the entity store via the same Atlas service the Projects routes use.
   - **Phase 7 - Sharing, redaction, and exports**
     - Entity rows never appear in snapshot permalinks; only the source-run transcript does. Existing share-redaction handles transcript content.
     - Atlas export options ship in v1:
@@ -349,10 +384,11 @@ This file tracks open work, known issues, technical debt, and product ideas for 
       - Per-project filtered entity export for engagement handoff.
     - Honors share-redaction baseline so redacted exports omit raw intel response bodies.
   - **Phase 8 - Feedback and tests**
-    - Empty-state UX: runs producing zero entities are normal and do not surface as warnings.
-    - Backend coverage: deduplication signature stability across every entity type, materialization idempotency on re-finalization, intel snapshot freshness/TTL behavior, project-link tag (not copy) semantics, label/note helper reuse, cross-session rejection, backfill correctness, retention pruning preserves entity rows when last link is pruned, Atlas Findings tab reads the inbox store cleanly.
-    - Frontend coverage: tab filter combinations, entity detail render with and without intel snapshots, transcript hover popover and action menu, see-in-run navigation, project promotion and unpromotion, rail entry plus mobile menu integration, keyboard shortcut, empty-state rendering.
-    - Playwright: one desktop and one mobile flow covering scan → atlas → entity detail → intel refresh → promote-to-project → see-in-run → unpromote.
+    - Empty-state UX: runs producing zero entities are normal and do not surface as warnings. Saved runs from before the migration also produce no Atlas rows and must not appear as broken.
+    - Backend coverage: destructive migration drops the legacy `project_targets`, `finding_targets`, and run-centric `findings` tables and re-initializes the new schema from scratch; deduplication signature stability across every entity type; materialization idempotency on re-finalization; intel snapshot freshness and TTL expiry behavior; `project_links` `entity_type='atlas_entity'` round-trip (promote/unpromote); label/note helper reuse against entity rows; cross-session rejection; retention pruning preserves `entities` and `findings` rows when their last run-link or occurrence row is pruned; one consolidated `findings` table services both Projects routes and Atlas routes without divergence.
+    - Service-layer regression coverage: rewritten Projects routes (`/projects/<id>/targets*`, `/projects/<id>/findings`, `/findings/<id>/review`, `/entities/run/<id>/findings`) return parity-equivalent shapes to the pre-migration responses where possible, so the Projects modal UI does not need to be reskinned just because the backing store changed.
+    - Frontend coverage: tab filter combinations, entity detail render with and without intel snapshots, transcript hover popover and action menu, see-in-run navigation, project promotion and unpromotion, rail entry plus mobile menu integration, keyboard shortcut, empty-state rendering, Projects modal Targets and Findings tabs continue to function against the rewritten routes.
+    - Playwright: one desktop and one mobile flow covering scan → atlas → entity detail → intel refresh → promote-to-project → see-in-run → unpromote, plus one regression flow exercising the Projects modal Targets/Findings tabs end-to-end against the rewritten store.
   - **Future**
     - Entity graph view (visual link map across hosts, domains, hashes, CVEs).
     - Saved Atlas views (named filter combinations).

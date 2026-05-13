@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,649
+- behavior tests: 2,654
 - docs/inventory meta-tests: 32
 - `pytest`: 1329 (1297 behavior + 32 meta)
-- `vitest`: 1108
+- `vitest`: 1113
 - `playwright`: 247
-- total: 2,684
+- total: 2,689
 
 This document is organized in two parts:
 
@@ -1901,6 +1901,11 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `renders select mode checkboxes and toggles row selection without opening run details` | Verifies that History select mode renders row checkboxes, disables unfinished runs, and turns row clicks into selection instead of opening Run Details. |
 | `selects all visible completed runs, reports mixed state, and clears selection` | Verifies that History select-all only includes visible completed runs, announces mixed selection state, and clears selected rows. |
 | `resets select mode and selection before the next history drawer open` | Verifies that closing the History drawer clears stale select mode and selection before the next refresh. |
+| `keeps row actions from toggling selection while select mode is enabled` | Verifies row-level action controls do not toggle selection or open Run Details while select mode is active. |
+| `locks the bulk toolbar and selected rows while a bulk action is in flight` | Verifies bulk requests disable select-mode controls and keep row selection stable until the request finishes. |
+| `bulk add uses the project picker with the active project first` | Verifies the bulk add-to-project picker lists the active project first and posts selected run ids in one batch. |
+| `bulk remove picker only lists projects linked to selected runs` | Verifies bulk remove offers only projects linked to the selected runs and posts a batch unlink request. |
+| `bulk delete result messages include known reasons and generic fallback for unknown rejected reasons` | Verifies bulk delete feedback explains known rejection reasons while keeping a generic fallback for unknown future reasons. |
 | `copies the run id and links runs to active or selected projects from the history menu` | Verifies that the history drawer row menu can copy a run id and link a run to either the active project or a selected project. |
 | `renders SIGTERM-terminated runs as neutral history rows instead of failures` | Verifies that SIGTERM-terminated history rows render as neutral terminated entries instead of failed runs. |
 | `opens the run comparison launcher from a history row` | Verifies that the history row compare action opens the comparison launcher with the suggested previous run. |
