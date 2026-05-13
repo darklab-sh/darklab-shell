@@ -6,7 +6,19 @@ const SEARCH_CORE_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/core/
 const SEARCH_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/search.js'), 'utf8')
 const CORE_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/core/workspace_core.js'), 'utf8')
 const ENTITY_METADATA_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/ui/ui_entity_metadata.js'), 'utf8')
+const VIEWER_FORMATS_SRC = readFileSync(
+  resolve(process.cwd(), 'app/static/js/features/workspace/workspace_viewer_formats.js'),
+  'utf8',
+)
 const SRC = readFileSync(resolve(process.cwd(), 'app/static/js/workspace.js'), 'utf8')
+const AUTOCOMPLETE_CACHE_SRC = readFileSync(
+  resolve(process.cwd(), 'app/static/js/features/workspace/workspace_autocomplete_cache.js'),
+  'utf8',
+)
+const DRAG_DROP_SRC = readFileSync(
+  resolve(process.cwd(), 'app/static/js/features/workspace/workspace_drag_drop.js'),
+  'utf8',
+)
 
 export function responseJson(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -176,6 +188,9 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
       promptWorkspaceMove,
     };
   `
-  const fns = new Function(...names, `${SEARCH_CORE_SRC}\n${SEARCH_SRC}\n${CORE_SRC}\n${ENTITY_METADATA_SRC}\n${SRC}\n${returnExpr}`)(...values)
+  const fns = new Function(
+    ...names,
+    `${SEARCH_CORE_SRC}\n${SEARCH_SRC}\n${CORE_SRC}\n${ENTITY_METADATA_SRC}\n${VIEWER_FORMATS_SRC}\n${SRC}\n${AUTOCOMPLETE_CACHE_SRC}\n${DRAG_DROP_SRC}\n${returnExpr}`,
+  )(...values)
   return { ...fns, apiFetch, globals }
 }

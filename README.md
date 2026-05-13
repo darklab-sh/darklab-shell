@@ -423,7 +423,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── content.py          # /, /config, /themes, /faq, /autocomplete, /welcome*
 │   │   ├── history.py          # /history*, /share*; preview/full-output shaping helpers
 │   │   ├── projects.py         # /projects* project workspace CRUD and relationship routes
-│   │   ├── run.py              # /runs broker starts/streams, /run/client history persistence, /kill, and run-output capture helpers
+│   │   ├── run.py              # /runs broker starts/streams, /run/client history persistence, /kill, and run orchestration
 │   │   ├── session.py          # /session/token/*, /session/preferences, /session/variables, /session/workflows*, /session/recent-domains, /session/migrate, /session/starred*
 │   │   └── workspace.py        # /workspace/files* app-managed session file routes
 │   ├── conf/                   # Operator-configurable files — edit these to customize the deployment
@@ -486,13 +486,16 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── workspace.py    # Session-scoped project helpers, targets, findings, artifacts, packages, and links
 │   │   ├── pty/
 │   │   │   ├── __init__.py     # PTY service package marker
+│   │   │   ├── capture.py      # Interactive PTY terminal capture and ANSI snapshot helpers
 │   │   │   ├── service.py      # Interactive PTY process/service helpers for allowlisted screen tools
 │   │   │   └── transcript.py   # Completed PTY transcript shaping and transient redraw filtering
 │   │   ├── runs/
 │   │   │   ├── __init__.py     # Run service package marker
 │   │   │   ├── broker.py       # Brokered run event storage, replay, and SSE stream helpers
 │   │   │   ├── comparison.py   # Shared run comparison helpers for history and project compare APIs
-│   │   │   └── output_store.py # Preview/full-output capture and artifact persistence helpers
+│   │   │   ├── output_store.py # Preview/full-output capture and artifact persistence helpers
+│   │   │   ├── streaming.py    # Low-level subprocess stdout readiness, nonblocking read, and cleanup helpers
+│   │   │   └── workspace_artifacts.py # Run-scoped workspace artifact detection and size helpers
 │   │   ├── session/
 │   │   │   ├── __init__.py     # Session service package marker
 │   │   │   └── variables.py    # Per-session command-variable storage and expansion helpers
@@ -550,7 +553,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── export_pdf.js   # Shared PDF export module — used by the desktop tab bar and permalink page
 │   │       ├── features/
 │   │       │   ├── autocomplete/
-│   │       │   │   └── runtime_context.js # Runtime autocomplete contexts for built-ins, workspace paths, variables, and command lookup
+│   │       │   │   ├── runtime_context.js # Runtime autocomplete contexts for built-ins, workspace paths, variables, and command lookup
+│   │       │   │   └── suggestions.js # Command autocomplete suggestion resolution, recent values, and value-slot application
 │   │       │   ├── command-registry/
 │   │       │   │   └── command_registry.js # FAQ command helpers plus Command Registry and Command Catalog modal logic
 │   │       │   ├── history/
@@ -563,8 +567,13 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── history_rows.js # History drawer run/snapshot rows, metadata badges, and row action menus
 │   │       │   │   ├── history_run_details.js # Run Details modal rendering, tabs, loading, and actions
 │   │       │   │   └── history_search.js # Ctrl+R reverse-history search dropdown and keyboard handling
+│   │       │   ├── mobile/
+│   │       │   │   ├── mobile_menu_actions.js # Mobile hamburger menu action dispatch
+│   │       │   │   ├── mobile_running_indicator.js # Mobile background-running tab chip and tab-edge glow behavior
+│   │       │   │   └── mobile_shell_layout.js # Mobile shell DOM reparenting, viewport mode, and keyboard state
 │   │       │   ├── preferences/
-│   │       │   │   └── preferences.js # Session preference loading, persistence, and Options modal control syncing
+│   │       │   │   ├── preferences.js # Session preference loading, persistence, and Options modal control syncing
+│   │       │   │   └── session_token_controls.js # Options modal session token generation, migration, and clearing controls
 │   │       │   ├── projects/
 │   │       │   │   └── project_target_validation.js # Project target editor copy and value validation helpers
 │   │       │   ├── run-comparison/
@@ -578,18 +587,33 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── runner_active_restore.js # Detached active-run restore markers shared by tabs, PTY, and runner reload recovery
 │   │       │   │   ├── runner_persistence.js # Client-side saved-run persistence for local runner commands
 │   │       │   │   └── runner_workspace.js # Workspace-terminal command parsing and path helpers
+│   │       │   ├── shortcuts/
+│   │       │   │   ├── global_shortcuts.js # Global tab/action/chrome shortcut matching and dispatch
+│   │       │   │   └── shortcuts_key_handler.js # Global ? keyboard shortcut for the shortcuts overlay
 │   │       │   ├── status-monitor/
 │   │       │   │   ├── status_monitor_core.js # Pure Status Monitor formatting, date, hashing, and telemetry helpers
 │   │       │   │   ├── status_monitor_data.js # Status Monitor endpoint loading and dashboard data aggregation
 │   │       │   │   └── status_monitor_resources.js # Status Monitor CPU/memory resource sampling and sparkline helpers
+│   │       │   ├── tabs/
+│   │       │   │   ├── tab_close_lifecycle.js # Tab close, detach, kill-confirmation, and deferred-removal helpers
+│   │       │   │   ├── tab_drag_reorder.js # Tab pointer/touch drag reordering behavior
+│   │       │   │   ├── tab_exports.js # Tab transcript copy, export, and permalink actions
+│   │       │   │   └── tab_session_state.js # Tab session persistence and restore after reload
 │   │       │   ├── terminal/
-│   │       │   │   └── local_commands.js # Terminal-native theme/config command handlers and shared local-command helpers
+│   │       │   │   ├── composer_controller.js # Terminal composer paste, focus, autocomplete input, and keyboard handling
+│   │       │   │   ├── composer_editing.js # Terminal composer caret, selection, and word-boundary helpers
+│   │       │   │   ├── local_commands.js # Terminal-native theme/config command handlers and shared local-command helpers
+│   │       │   │   └── mobile_composer_keyboard.js # Mobile composer keyboard, viewport-height, and submit listeners
 │   │       │   ├── theme/
 │   │       │   │   └── theme.js # Theme registry lookup, preview card rendering, and theme selection lifecycle
 │   │       │   ├── tour/
 │   │       │   │   └── tour_cli.js # Terminal-guided onboarding tour command
-│   │       │   └── workflows/
-│   │       │       └── workflows.js # Workflows modal, editor, terminal command, and runtime autocomplete support
+│   │       │   ├── workflows/
+│   │       │   │   └── workflows.js # Workflows modal, editor, terminal command, and runtime autocomplete support
+│   │       │   └── workspace/
+│   │       │       ├── workspace_autocomplete_cache.js # Files autocomplete cache refresh and path hint helpers
+│   │       │       ├── workspace_drag_drop.js # Files browser drag/drop move behavior
+│   │       │       └── workspace_viewer_formats.js # Files viewer format detection and preview payload shaping
 │   │       ├── history.js      # Command history chips, drawer rows, filters, and compare entry points
 │   │       ├── mobile_chrome.js # Mobile shell chrome — recents sheet, viewport mode, pull-to-refresh suppression
 │   │       ├── output.js       # ANSI rendering and line management

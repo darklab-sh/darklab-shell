@@ -7,7 +7,7 @@ function loadAutocompleteFns({ isActiveTabRunning = () => false } = {}) {
   const mobileCmdInput = document.getElementById('mobile-cmd')
 
   return fromDomScripts(
-    ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+    ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
     {
       document,
       cmdInput,
@@ -88,7 +88,7 @@ describe('autocomplete helpers', () => {
   it('renders suggestions from the shared composer value accessor when present', () => {
     document.getElementById('cmd').value = ''
     const { acShow } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -159,7 +159,7 @@ describe('autocomplete helpers', () => {
     input.value = 'workflow run work'
     input.selectionStart = input.selectionEnd = input.value.length
     const { acShow } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: input,
@@ -195,7 +195,7 @@ describe('autocomplete helpers', () => {
 
   it('honors explicit snake_case hint_only hints without placeholder autodetect', () => {
     const { getAutocompleteMatches, acAccept } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -302,7 +302,7 @@ describe('autocomplete helpers', () => {
     try {
       const openAutocompleteForVisibleComposer = vi.fn(() => true)
       const { acAccept } = fromDomScripts(
-        ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+        ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
         {
           document,
           cmdInput: document.getElementById('cmd'),
@@ -343,7 +343,7 @@ describe('autocomplete helpers', () => {
 
   it('acAccept suppresses one synthetic input cycle so the dropdown does not immediately reopen', () => {
     const { acAccept } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -456,7 +456,7 @@ describe('autocomplete helpers', () => {
 
   it('returns root-aware contextual matches and suppresses already-used flags', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -491,7 +491,7 @@ describe('autocomplete helpers', () => {
 
   it('prefers matching subcommand tokens over positional placeholders while typing', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -529,7 +529,7 @@ describe('autocomplete helpers', () => {
 
   it('shows nested subcommands and root flags after a command root', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -569,7 +569,7 @@ describe('autocomplete helpers', () => {
 
   it('shows root and subcommand examples while a unique command root is being typed', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -614,7 +614,7 @@ describe('autocomplete helpers', () => {
 
   it('shows scoped examples while typing a unique command root prefix', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -669,7 +669,7 @@ describe('autocomplete helpers', () => {
 
   it('keeps fuzzy root matches tight, supports adjacent swaps, and preserves substring matches', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -700,7 +700,7 @@ describe('autocomplete helpers', () => {
 
   it('uses subcommand-scoped flags without leaking sibling flags', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -751,7 +751,7 @@ describe('autocomplete helpers', () => {
 
   it('shows subcommand-scoped examples when a subcommand token is complete', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -806,7 +806,7 @@ describe('autocomplete helpers', () => {
 
   it('shows subcommand-scoped examples when a partial subcommand uniquely matches', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -861,7 +861,7 @@ describe('autocomplete helpers', () => {
 
   it('keeps ambiguous partial subcommands as token suggestions instead of examples', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -909,7 +909,7 @@ describe('autocomplete helpers', () => {
 
   it('uses subcommand-scoped value hints', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -951,7 +951,7 @@ describe('autocomplete helpers', () => {
 
   it('walks nested subcommands before suggesting the next project argument', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -1041,7 +1041,7 @@ describe('autocomplete helpers', () => {
 
   it('tracks recent domains from structured flag and positional slots, capped in memory', () => {
     const { rememberRecentDomainsFromCommand, _readRecentDomains } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -1120,7 +1120,7 @@ describe('autocomplete helpers', () => {
 
   it('stores complete IPv4 values from domain slots without keeping partial numeric hosts', () => {
     const { rememberRecentDomainsFromCommand, _readRecentDomains } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -1159,7 +1159,7 @@ describe('autocomplete helpers', () => {
       }),
     }))
     const { loadRecentDomains, _readRecentDomains } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -1205,7 +1205,7 @@ describe('autocomplete helpers', () => {
       return Promise.reject(new Error(`Unexpected URL: ${url}`))
     })
     const { _readProjectTargets } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -1243,7 +1243,7 @@ describe('autocomplete helpers', () => {
       json: () => Promise.resolve({ domains: ['alpha.example.com'] }),
     }))
     const { rememberRecentDomainsFromCommand, _readRecentDomains } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -1284,7 +1284,7 @@ describe('autocomplete helpers', () => {
 
   it('suggests recent domains only inside known domain value slots', () => {
     const { getAutocompleteMatches, rememberRecentDomainsFromCommand, setProjectAutocompleteTargets } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -1396,7 +1396,7 @@ describe('autocomplete helpers', () => {
 
   it('does not infer recent-domain slots from placeholder text without value_type metadata', () => {
     const { getAutocompleteMatches, rememberRecentDomainsFromCommand, _readRecentDomains } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -1438,7 +1438,7 @@ describe('autocomplete helpers', () => {
 
   it('keeps case-sensitive dnsrecon -d domain and -D wordlist slots separate', () => {
     const { getAutocompleteMatches, rememberRecentDomainsFromCommand, _readRecentDomains } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -1513,7 +1513,7 @@ describe('autocomplete helpers', () => {
 
   it('suggests installed wordlists only inside marked wordlist slots', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -1570,7 +1570,7 @@ describe('autocomplete helpers', () => {
 
   it('keeps workspace file hints while adding installed wordlists for wordlist slots', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -1618,7 +1618,7 @@ describe('autocomplete helpers', () => {
 
   it('prefers runtime autocomplete suggestions for client-side commands', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -1662,7 +1662,7 @@ describe('autocomplete helpers', () => {
 
   it('merges runtime autocomplete context with the YAML-loaded context registry', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -1723,7 +1723,7 @@ describe('autocomplete helpers', () => {
 
   it('uses sequence-specific runtime value hints without leaking them to sibling subcommands', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -1775,7 +1775,7 @@ describe('autocomplete helpers', () => {
 
   it('stops suggesting var subcommands after a complete var command shape', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -1836,7 +1836,7 @@ describe('autocomplete helpers', () => {
 
   it('keeps an exact single flag match visible so its description is still shown', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -1873,7 +1873,7 @@ describe('autocomplete helpers', () => {
 
   it('still collapses an exact single non-flag match', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -1897,7 +1897,7 @@ describe('autocomplete helpers', () => {
 
   it('shows positional hints alongside flag hints at command-root whitespace', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -1939,7 +1939,7 @@ describe('autocomplete helpers', () => {
 
   it('keeps positional hints visible when the displayed autocomplete list is capped', () => {
     const { getAutocompleteMatches, limitAutocompleteMatchesForDisplay } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -1982,7 +1982,7 @@ describe('autocomplete helpers', () => {
 
   it('marks <placeholder> arg_hints as hintOnly and preserves insertValue whitespace', () => {
     const { getAutocompleteMatches, acAccept } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -2049,7 +2049,7 @@ describe('autocomplete helpers', () => {
 
   it('keeps direct placeholder hints visible while typing the argument value', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -2084,7 +2084,7 @@ describe('autocomplete helpers', () => {
 
   it('returns value hints after a value-taking flag and trailing space', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -2118,7 +2118,7 @@ describe('autocomplete helpers', () => {
 
   it('keeps placeholder guidance after concrete value hints and preserves ordering', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -2156,7 +2156,7 @@ describe('autocomplete helpers', () => {
 
   it('keeps positional placeholder hints visible while typing the argument value', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -2195,7 +2195,7 @@ describe('autocomplete helpers', () => {
 
   it('drops positional placeholder guidance once the token context changes to a new flag slot', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -2232,7 +2232,7 @@ describe('autocomplete helpers', () => {
 
   it('shows starter values together with placeholders and then leaves only the placeholder while typing', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -2271,7 +2271,7 @@ describe('autocomplete helpers', () => {
 
   it('honors ordered positional hints one argument slot at a time', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -2324,7 +2324,7 @@ describe('autocomplete helpers', () => {
 
   it('stops suggesting more positional arguments after reaching argument_limit, but still allows flags', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -2369,7 +2369,7 @@ describe('autocomplete helpers', () => {
 
   it('suggests built-in pipe commands after a supported command pipe', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -2405,7 +2405,7 @@ describe('autocomplete helpers', () => {
 
   it('uses live workspace file hints for workspace read flags instead of static examples', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -2444,7 +2444,7 @@ describe('autocomplete helpers', () => {
 
   it('uses cwd-relative workspace file hints for external workspace read flags', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -2512,7 +2512,7 @@ describe('autocomplete helpers', () => {
       ],
     }
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -2585,7 +2585,7 @@ describe('autocomplete helpers', () => {
 
   it('returns pipe-stage flag hints for grep', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -2622,7 +2622,7 @@ describe('autocomplete helpers', () => {
 
   it('returns pipe-stage count hints after head -n and wc flag hints after wc space', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -2669,7 +2669,7 @@ describe('autocomplete helpers', () => {
 
   it('suggests additional pipe helpers after an earlier helper stage', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -2704,7 +2704,7 @@ describe('autocomplete helpers', () => {
 
   it('returns chained pipe-stage flag and value hints from the last helper stage', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -2750,7 +2750,7 @@ describe('autocomplete helpers', () => {
 
   it('does not offer chained pipe autocomplete after an invalid earlier stage', () => {
     const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
         cmdInput: document.getElementById('cmd'),

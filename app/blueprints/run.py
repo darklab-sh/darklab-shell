@@ -8,8 +8,6 @@ import json
 import logging
 import os
 import re
-import selectors
-import codecs
 import shlex
 import shutil
 import signal
@@ -19,12 +17,11 @@ import uuid
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TypedDict, cast
+from typing import TypedDict
 
 from flask import Blueprint, Response, jsonify, request
 
 from services.commands.registry import (
-    AMASS_DEFAULT_WORKSPACE_DIR,
     CommandValidationResult,
     command_project_target_inputs,
     command_root,
@@ -65,6 +62,18 @@ from services.runs.broker import (
     stream_run_events,
 )
 from services.runs.output_store import RunOutputCapture, load_full_output_entries
+from services.runs.streaming import (
+    cleanup_proc_stream as _cleanup_proc_stream,
+    make_nonblocking_stream_reader as _make_nonblocking_stream_reader,
+    read_available_stream_lines as _read_available_stream_lines,
+    stdout_ready as _stdout_ready,
+    timeout_notice as _timeout_notice,
+    wait_for_proc_exit_code as _wait_for_proc_exit_code,
+)
+from services.runs.workspace_artifacts import (
+    workspace_artifacts_from_validation as _workspace_artifacts_from_validation,
+    workspace_artifacts_with_sizes as _workspace_artifacts_with_sizes,
+)
 from core.output_signals import OutputSignalClassifier
 from services.projects.workspace import (
     link_run_to_active_project,
@@ -73,7 +82,7 @@ from services.projects.workspace import (
     record_run_findings,
 )
 from services.session.variables import SessionVariableError, expand_session_variables
-from services.workspace.files import InvalidWorkspacePath, resolve_workspace_path, session_workspace_dir, WorkspaceDisabled
+from services.workspace.files import WorkspaceDisabled, session_workspace_dir
 from services.pty.service import (
     PtyDependencyError,
     notify_pty_killed_event,
@@ -166,11 +175,6 @@ CLIENT_SIDE_RUN_ROOTS = {
     "wc",
 }
 
-APP_MANAGED_WORKSPACE_ARTIFACT_PREFIXES = (
-    AMASS_DEFAULT_WORKSPACE_DIR.strip("/"),
-)
-
-
 def _variable_notice_line(expanded_command: str, used_names: tuple[str, ...]) -> str:
     variables = ", ".join(f"${name}" for name in used_names)
     return f"[vars] expanded {variables}: {expanded_command}"
@@ -244,65 +248,6 @@ def _extract_output_search_text(preview_lines):
         for line in preview_lines
         if line is not None
     )
-
-
-def _workspace_artifact_size(session_id: str, workspace_path: str) -> int:
-    try:
-        path = resolve_workspace_path(session_id, workspace_path, CFG)
-        if path.is_file():
-            return max(0, int(path.stat().st_size))
-    except (InvalidWorkspacePath, OSError, WorkspaceDisabled):
-        return 0
-    return 0
-
-
-def _workspace_artifacts_from_validation(validation: CommandValidationResult, session_id: str) -> list[dict]:
-    reads = list(dict.fromkeys(validation.workspace_reads))
-    writes = list(dict.fromkeys(validation.workspace_writes))
-    read_set = set(reads)
-    write_set = set(writes)
-    ordered_paths = reads + [path for path in writes if path not in read_set]
-    artifacts = []
-    for workspace_path in ordered_paths:
-        if _is_app_managed_workspace_artifact_path(workspace_path):
-            continue
-        if workspace_path in read_set and workspace_path in write_set:
-            kind = "read_write"
-        elif workspace_path in write_set:
-            kind = "output"
-        else:
-            kind = "input"
-        artifacts.append({
-            "workspace_path": workspace_path,
-            "display_name": workspace_path.rsplit("/", 1)[-1],
-            "kind": kind,
-            "detected_by": "workspace_flag",
-        })
-    return artifacts
-
-
-def _is_app_managed_workspace_artifact_path(workspace_path: str) -> bool:
-    normalized = str(workspace_path or "").strip().replace("\\", "/").strip("/")
-    if not normalized:
-        return False
-    return any(
-        normalized == prefix or normalized.startswith(f"{prefix}/")
-        for prefix in APP_MANAGED_WORKSPACE_ARTIFACT_PREFIXES
-        if prefix
-    )
-
-
-def _workspace_artifacts_with_sizes(session_id: str, artifacts) -> list[dict]:
-    sized = []
-    artifact_items = artifacts if isinstance(artifacts, list) else []
-    for item in artifact_items:
-        if not isinstance(item, dict):
-            continue
-        artifact = dict(item)
-        workspace_path = str(artifact.get("workspace_path") or "")
-        artifact["byte_size"] = _workspace_artifact_size(session_id, workspace_path)
-        sized.append(artifact)
-    return sized
 
 
 def _save_completed_run(
@@ -522,100 +467,6 @@ def _persist_completed_pty_run(
         "output_line_count": capture.output_line_count,
         "full_output_available": capture.full_output_available,
     }
-
-
-def _timeout_notice(command_timeout):
-    return f"[timeout] Command exceeded {command_timeout}s limit and was killed."
-
-
-def _stdout_ready(stream, timeout):
-    sel = selectors.DefaultSelector()
-    try:
-        sel.register(stream, selectors.EVENT_READ)
-        return bool(sel.select(timeout))
-    finally:
-        sel.close()
-
-
-def _make_nonblocking_stream_reader(stream):
-    fileno = getattr(stream, "fileno", None)
-    if not callable(fileno):
-        return {"stream": stream, "fd": None, "decoder": None, "pending": ""}
-    fd = fileno()
-    if not isinstance(fd, int):
-        return {"stream": stream, "fd": None, "decoder": None, "pending": ""}
-    fd = cast(int, fd)
-    try:
-        os.set_blocking(fd, False)
-    except OSError as exc:
-        log.warning("RUN_STREAM_NONBLOCKING_UNAVAILABLE", extra={"fd": fd, "error": str(exc)})
-        return {"stream": stream, "fd": None, "decoder": None, "pending": ""}
-    encoding = getattr(stream, "encoding", None) or "utf-8"
-    errors = getattr(stream, "errors", None) or "replace"
-    return {
-        "fd": fd,
-        "decoder": codecs.getincrementaldecoder(encoding)(errors=errors),
-        "pending": "",
-    }
-
-
-def _read_available_stream_lines(reader_state, *, finalize=False):
-    if reader_state.get("fd") is None:
-        line = reader_state["stream"].readline()
-        if line:
-            return [line], False
-        return [], True
-
-    lines = []
-    pending = str(reader_state.get("pending", ""))
-    eof = False
-
-    while True:
-        try:
-            chunk = os.read(reader_state["fd"], 4096)
-        except BlockingIOError:
-            break
-        if not chunk:
-            eof = True
-            break
-        pending += reader_state["decoder"].decode(chunk)
-        split = pending.splitlines(keepends=True)
-        if split and not split[-1].endswith(("\n", "\r")):
-            pending = split.pop()
-        else:
-            pending = ""
-        lines.extend(split)
-
-    if finalize:
-        pending += reader_state["decoder"].decode(b"", final=True)
-        if pending:
-            lines.append(pending)
-            pending = ""
-
-    reader_state["pending"] = pending
-    return lines, eof
-
-
-def _cleanup_proc_stream(proc):
-    stdout = getattr(proc, "stdout", None)
-    if stdout is not None and not getattr(stdout, "closed", False):
-        try:
-            stdout.close()
-        except Exception:
-            pass
-    if getattr(proc, "returncode", None) is None:
-        _wait_for_proc_exit_code(proc)
-
-
-def _wait_for_proc_exit_code(proc):
-    if getattr(proc, "returncode", None) is not None:
-        return proc.returncode
-    try:
-        return proc.wait(timeout=5)
-    except TypeError:
-        return proc.wait()
-    except Exception:
-        return getattr(proc, "returncode", None)
 
 
 def _client_side_run_command_allowed(command: str) -> bool:

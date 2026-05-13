@@ -96,56 +96,6 @@ No known issues are currently tracked.
 
 ## Technical Debt
 
-- **Restructure large app modules by feature responsibility**
-  - Several app-side JS, CSS, and Python files are now large enough that focused follow-up work is harder than it needs to be. Split these gradually when touching the relevant area instead of doing one broad mechanical rewrite.
-  - **Completed strong split pass**
-    - `app/static/js/shell_chrome.js` now delegates project target editor copy/value validation to `app/static/js/features/projects/project_target_validation.js`.
-    - `app/services/projects/workspace.py` now delegates project limits/allowed values/exceptions, project-related session preference helpers, and entity label/note helpers to `app/services/projects/contracts.py`, `app/services/projects/preferences.py`, and `app/services/projects/metadata.py`.
-    - `app/static/js/history.js` now delegates reverse-history search, command recall helpers, shared star/action-menu helpers, delete/clear confirmations, share/permalink helpers, restore/highlight helpers, project-linking helpers, drawer row rendering, and Run Details modal code to feature files.
-    - `app/services/commands/registry.py` now delegates welcome/tour/ASCII/hint content loading, registry YAML loading/schema normalization/overlay merging, command tokenization/policy matching/deny checks/runtime-command detection, synthetic post-filter parsing, and workflow catalog loading/normalization to focused service modules.
-    - `app/static/js/status_monitor.js` now delegates pure formatting/date/hash helpers, endpoint loading/dashboard aggregation, and CPU/memory sampling/sparkline helpers to `status_monitor_core.js`, `status_monitor_data.js`, and `status_monitor_resources.js`.
-    - `app/static/js/runner.js` now delegates detached active-run restore markers, client-side saved-run persistence, and workspace-terminal command parsing/path helpers to `runner_active_restore.js`, `runner_persistence.js`, and `runner_workspace.js`.
-  - **Worth considering during related work**
-    - `app/static/js/shell_chrome.js` — split desktop rail/HUD chrome, deeper Projects mobile/detail helpers, and shared shell navigation glue when related work touches those flows.
-    - `app/services/projects/workspace.py` — split project CRUD, targets/discovery, findings, artifacts, evidence package/export rendering, and compare/link helpers as those areas get new work.
-    - `app/services/commands/registry.py` — split autocomplete derivation, workspace flag rewriting, restriction checks that read command values, and runtime environment handling when the command-registry surface changes again.
-    - `app/static/js/status_monitor.js` — split polling state, modal/sheet rendering, visual cards, active-run rows, attach/kill actions, and mobile behavior when those views get substantive updates.
-    - `app/static/js/runner.js` — split SSE streaming, run lifecycle/state, stalled-run recovery, PTY handoff/finalization, and composer submit glue when runner behavior changes next.
-    - `app/static/js/app.js` — after the preference and Command Registry splits, split any remaining shell glue only if a related change makes the boundary obvious.
-    - `app/static/css/shell.css` — after the feature stylesheet splits, keep watching for remaining feature-specific sections inside the terminal shell foundations.
-    - `app/static/js/controller.js` — split mobile menu wiring, options/session-token controls, global shortcuts, autocomplete input handling, and bootstrap wiring.
-    - `app/blueprints/run.py` — split run routes from persistence/finalization helpers, workspace artifact capture, and SSE streaming helpers.
-    - `app/static/js/workspace.js` — split browser/list rendering, viewer rendering/search, editor/actions, drag/drop/move, and autocomplete cache helpers.
-    - `app/blueprints/history.py` — split history list/stats routes, run details payload helpers, compare routes, and share/permalink routes.
-    - `app/static/js/mobile_chrome.js` — split mobile menu, mobile History sheet, mobile status/peek behavior, and mobile shell state sync.
-    - `app/static/js/tabs.js` — split tab state/rendering, drag/reorder, restore/session hydration, and close/kill prompts.
-    - `app/static/js/autocomplete.js` — split menu rendering/navigation from suggestion resolution/application.
-    - `app/services/pty/service.py` — after transcript shaping moved out, split terminal capture/snapshot code from process lifecycle, Redis broker state, controls, and stream helpers only when touching PTY internals.
-    - `app/static/js/pty.js` — split xterm asset/init handling, PTY stream lifecycle, modal controls, snapshots/reattach, and input batching when the PTY browser controller gets new work.
-  - **Probably fine for now**
-    - `app/static/css/shell-chrome.css`, `app/static/css/mobile.css`, and `app/static/css/primitives/components.css` are much narrower after the feature stylesheet split. Keep them cohesive unless a future change exposes another clear feature-owned block.
-    - `app/static/js/search.js`, `app/services/workspace/files.py`, and `app/static/js/welcome.js` are large, but each still reads as one coherent feature module. Split them only when related work makes the boundary obvious.
-  - **Progress**
-    - Run Comparison browser code now lives in `app/static/js/features/run-comparison/`: formatting/preference/count helpers in `history_compare_core.js`, modal lifecycle in `history_compare_overlay.js`, launcher/candidate search in `history_compare_launcher.js`, row targeting/minimap/previous-next controls in `history_compare_navigation.js`, view/context/action controls in `history_compare_controls.js`, and transcript/object rendering plus compare fetch flow in `history_compare_renderer.js`.
-    - Workflows browser code now lives in `app/static/js/features/workflows/workflows.js`.
-    - Theme selection, terminal-native theme/config commands, the terminal tour command, and runtime autocomplete contexts now live in `app/static/js/features/theme/`, `app/static/js/features/terminal/`, `app/static/js/features/tour/`, and `app/static/js/features/autocomplete/`.
-    - Projects, Run Comparison, and Workflows styles now live in `app/static/css/features/`, including their mobile-specific overrides.
-    - The app now uses the hybrid folder layout: the root `app/` folder keeps the Flask entrypoint, config, extensions, route blueprints, templates, static assets, and runtime config; Python shared helpers live under `app/core/`; Python service code lives under `app/services/`; reusable browser globals live under `app/static/js/core/`; shared browser UI primitives live under `app/static/js/ui/`; and reusable CSS primitives live under `app/static/css/primitives/`.
-    - Shared shell CSS is narrower: Command Registry, FAQ/shortcuts, Files/workspace, History/Run Details, and Status Monitor styles now live in feature-owned stylesheets under `app/static/css/features/`.
-    - Project target editor copy and value validation now lives in `app/static/js/features/projects/project_target_validation.js`, keeping that form-specific validation out of the shared shell chrome controller.
-    - Command Registry and Command Catalog browser logic now lives in `app/static/js/features/command-registry/command_registry.js`, keeping `app.js` focused on shared shell state, shortcuts, tab-session state, and layout glue.
-    - Session preference loading, persistence, and Options modal preference syncing now live in `app/static/js/features/preferences/preferences.js`, keeping `app.js` focused on shared shell state, shortcuts, tab-session state, and layout glue.
-    - Ctrl+R reverse-history search, command recall helpers, History delete/clear confirmations, share/permalink helpers, restore/highlight helpers, project-linking helpers, drawer row rendering/action menus, and Run Details modal code now live in `app/static/js/features/history/`, keeping `history.js` focused on drawer fetch/filter/page orchestration.
-    - Detached active-run restore markers, client-side saved-run persistence, and workspace-terminal command parsing/path helpers now live in `app/static/js/features/runner/runner_active_restore.js`, `app/static/js/features/runner/runner_persistence.js`, and `app/static/js/features/runner/runner_workspace.js`, keeping `runner.js`, `pty.js`, and `tabs.js` on one shared reload-detach helper while leaving local-run history persistence and workspace-terminal path logic outside the streaming controller.
-    - Status Monitor endpoint loading/dashboard aggregation now lives in `app/static/js/features/status-monitor/status_monitor_data.js`, and CPU/memory sampling, trend storage, active-run resource cleanup, and sparkline rendering now live in `app/static/js/features/status-monitor/status_monitor_resources.js`, leaving `status_monitor.js` to orchestrate polling and monitor rendering.
-    - Built-in command catalog data, shared built-in output formatting, and the discovery/help/FAQ/catalog/man/type/which, miscellaneous/guardrail, `project`/runtime/history/status/session/shortcuts/system-style/workspace/wordlist command families now live in `app/services/commands/builtins_catalog.py`, `app/services/commands/builtins_discovery.py`, `app/services/commands/builtins_format.py`, `app/services/commands/builtins_misc.py`, `app/services/commands/builtins_project.py`, `app/services/commands/builtins_runtime.py`, `app/services/commands/builtins_session.py`, `app/services/commands/builtins_shortcuts.py`, `app/services/commands/builtins_system.py`, `app/services/commands/builtins_workspace.py`, and `app/services/commands/builtins_wordlist.py`, leaving `builtins.py` focused on command routing.
-    - Welcome, tour, ASCII art, and hint loading now lives in `app/services/commands/registry_content.py`, leaving `registry.py` more focused on command registry, autocomplete, workflow, and validation behavior.
-    - Command registry YAML loading, schema normalization, and local-overlay merging now lives in `app/services/commands/registry_loader.py`, while command tokenization, policy matching, deny checks, chain splitting, runtime-command availability checks, and the nmap raw-scan guard now live in `app/services/commands/registry_validation.py`, leaving `registry.py` to expose compatibility wrappers and use normalized registry data.
-    - Synthetic pipe-helper post-filter parsing now lives in `app/services/commands/postfilters.py`, leaving `registry.py` to call into the parser during validation and runtime rewrite decisions.
-    - Workflow catalog loading and normalization now lives in `app/services/workflows/catalog.py`, leaving `registry.py` to expose compatibility wrappers and merge built-in/configured workflows.
-    - Project workspace contracts, project-related session preference helpers, and entity label/note helpers now live in `app/services/projects/contracts.py`, `app/services/projects/preferences.py`, and `app/services/projects/metadata.py`, leaving `workspace.py` focused on project entities and evidence flows.
-    - Completed PTY transcript shaping and transient redraw filtering now live in `app/services/pty/transcript.py`, leaving the run blueprint to call the service helper during PTY completion persistence.
-
 ---
 
 ## Ideas
@@ -220,6 +170,237 @@ These are product ideas and possible enhancements, not committed TODOs or planne
     - save/share actions tuned for one-handed use
     - clearer copy/share/export affordances inside the mobile shell
     - better share handoff after snapshot creation
+
+- **Scheduled and recurring runs**
+  - Cron-style scheduler so any command or workflow can fire on a cadence (daily nmap, hourly httpx, weekly subdomain sweep) without keeping the tab open. Nothing in the app is currently time-driven.
+  - **Entry-level scope:**
+    - Save a schedule from any command or workflow with a cron expression or a small cadence preset (hourly/daily/weekly).
+    - Schedules belong to the active session token and migrate with it.
+    - Fired runs land in normal history tagged `scheduled` with the originating schedule ID.
+    - List/pause/delete schedules through a new `schedule` built-in plus a Schedules modal beside Workflows.
+  - **Architecture:**
+    - New `app/services/scheduler/` service backed by APScheduler (or a small Redis sorted-set tick loop) running in a dedicated `scheduler` process so worker restarts do not lose ticks.
+    - SQLite `schedules` table: id, session_token, command/workflow ref, cron, enabled, last_run_at, next_run_at.
+    - At fire time the scheduler enqueues through the existing `/runs` broker under the owning session so allowlist, deny-prefix, registry rewrite, and history persistence are reused unchanged.
+    - New `app/blueprints/schedules.py` for CRUD; new `schedule` handler in the session built-in family; new `app/static/js/features/schedules/` for the modal and runtime autocomplete.
+    - Gotchas: cron string validation, surfacing missed fires after a container restart, and tearing down schedules when their session token is revoked.
+
+- **Watchers (change-detection monitors)**
+  - Pair a recurring command with a stored baseline and notify only when output diverges (new open port, new subdomain, new finding signature, TLS cert change). Builds on the run-comparison diff engine but exposes it as a persistent first-class object, not a one-off compare.
+  - **Entry-level scope:**
+    - Create a watcher from any completed run ("watch this nmap for new open ports").
+    - Watchers reuse the scheduler service to re-run on a cadence.
+    - Each fire stores a structured diff against the prior accepted baseline; notifications fire only on non-empty diffs.
+    - A Watchers modal shows status (ok / changed / firing), last fire, last diff, with accept-new-baseline and pause actions.
+  - **Architecture:**
+    - New `app/services/watchers/` service composing the scheduler service with the existing comparison helpers in `app/services/runs/comparison.py`.
+    - SQLite `watchers` table: id, session_token, command, schedule_ref, baseline_run_id, last_run_id, last_diff_summary, state.
+    - Reuses the structured finding/signal model when present; falls back to textual added/removed line diffs otherwise. The structured output model called out in Architecture is the natural long-term substrate.
+    - Fires through the new outbound-notifications surface so a watcher hit can reach Slack/email/push without duplicating delivery code.
+
+- **Outbound notifications (webhooks, Slack, Discord, email)**
+  - Run-complete, finding-classified, and watcher-fired events fan out to external channels per session or per project. Existing notifications are browser-foreground only; this closes the loop for solo operators running long scans away from the tab.
+  - **Entry-level scope:**
+    - Configure one or more channels per session token. Start with a generic JSON webhook; layer Slack, Discord, and SMTP email on the same channel abstraction.
+    - Triggers: run-complete (per exit-code policy), finding-classified, watcher-fired, scheduled-run-failed.
+    - Per-channel mute plus a global "do not disturb" toggle.
+    - Notification body uses only the command root, matching the existing browser desktop-notification policy that intentionally avoids exposing arguments or token values.
+  - **Architecture:**
+    - New `app/services/notifications/` service with a `Channel` base class and `WebhookChannel`, `SlackChannel`, `DiscordChannel`, `EmailChannel` implementations. SMTP is operator-config-gated in `app/conf/config.yaml`.
+    - SQLite `notification_channels` table (per session token, encrypted secret column for webhook URL / bot token) and `notification_events` for delivery audit and retry.
+    - Hook points: run finalization in `app/blueprints/run.py`, watcher fire path, scheduler error path.
+    - Browser surface: Options modal "Notifications" section; new `app/static/js/features/preferences/notification_channels.js`.
+    - Secret storage rides on the encrypted-secrets-vault idea below rather than introducing a parallel ciphertext path.
+
+- **Encrypted secrets vault**
+  - First-class store for tool API keys (Shodan, VirusTotal, WPScan token, custom auth headers) that get injected as env vars into commands declared in `commands.yaml` as needing them. Distinct from session command variables, which are plaintext convenience and are visible in typed transcripts.
+  - **Entry-level scope:**
+    - Operator generates a per-deployment master key in config; user-facing CRUD via `secret set NAME`, `secret list`, `secret unset NAME` built-ins and an Options-modal panel.
+    - Values are AES-GCM encrypted at rest, never echoed, never expanded into typed history.
+    - `commands.yaml` declares the env var a tool consumes (for example `WPSCAN_API_TOKEN`, `SHODAN_API_KEY`); the registry injects only the secrets that match.
+    - Audit log records which run consumed which secret name (never the value).
+  - **Architecture:**
+    - New `app/services/secrets/` service with key wrap/unwrap helpers and a SQLite `secrets` table (session_token, name, ciphertext, nonce, consumer_envs).
+    - Crypto via Python's `cryptography` library; master key sourced from `SECRETS_MASTER_KEY` env with a documented init flow in CONFIGURATION.md.
+    - Injection happens in the runtime-environment build path in `app/services/commands/registry.py`, alongside the existing `XDG_CONFIG_HOME` Files redirect, and is logged through the structured log channel.
+    - Built-ins join the session built-in family. Secrets are strictly env-only — never expanded as `$VAR` — so they cannot leak into shared transcripts, snapshot exports, or permalinks.
+
+- **Headless API and CLI client**
+  - Stable REST endpoints plus a thin `darklab` CLI, authenticated by an existing session token, that can launch runs, poll history, and pull artifacts from CI pipelines or local scripts.
+  - **Entry-level scope:**
+    - REST: `POST /api/v1/runs`, `GET /api/v1/runs/<id>`, `GET /api/v1/runs/<id>/stream` (SSE), `GET /api/v1/history`, `GET /api/v1/history/<id>/output`, authenticated via `Authorization: Bearer tok_...`.
+    - CLI: `darklab run "nmap …"`, `darklab tail <id>`, `darklab history`, `darklab download <id> [--workspace]`.
+    - Same allowlist, deny-prefix, registry-rewrite, and rate-limit bucket as the browser path so headless use cannot bypass per-session limits.
+  - **Architecture:**
+    - New `app/blueprints/api_v1.py` reusing the existing run broker, history service, and validation; OpenAPI/JSON schema published at `/api/v1/openapi.json` for clients to consume.
+    - CLI ships as a tiny Python package under `tools/darklab_cli/` with its own `pyproject.toml`; communicates only via the REST blueprint, no shared imports with the server runtime.
+    - Output streaming reuses the broker SSE path so multi-worker reattach already works.
+    - Documented in a new `docs/api.md` plus a CONFIGURATION.md section.
+
+- **PWA install and service-worker push**
+  - Make the mobile shell installable and deliver completion pings via web-push so phone users get notified when the tab is closed or the device is asleep. Today mobile notifications are intentionally hidden because foreground-only notifications are not useful on phones.
+  - **Entry-level scope:**
+    - Add a manifest, app icons, and a small service worker so users can "Add to Home Screen" and launch into a standalone mobile shell.
+    - VAPID-signed web-push subscription tied to the active session token; subscribe and unsubscribe from the Options sheet.
+    - Reuse the run-complete event hook from the outbound-notifications surface so push is just another channel.
+  - **Architecture:**
+    - New `app/static/manifest.webmanifest`, icon assets under `app/static/icons/`, and `app/static/sw.js` registered from `app.js` only when the runtime supports it.
+    - New `WebPushChannel` in the notifications service; VAPID keys stored as operator config; per-session-token subscription endpoint at `/session/push/subscribe`.
+    - Service worker scope is intentionally narrow — render notifications and open the tab on click; no caching of dynamic transcript content so users never see stale output.
+    - Gotchas: iOS Safari requires the user to install the PWA before push works; document this in CONFIGURATION.md.
+
+- **Engagement report builder**
+  - Turn a project workspace into a styled markdown/PDF engagement report — methodology, scope, targets, findings table, remediation notes, screenshots. Evidence packages today are raw bundles; this is the narrative deliverable a customer reads.
+  - **Entry-level scope:**
+    - One-click "Generate report" from a project, with an editable cover page (engagement name, dates, operator, contact).
+    - Sections auto-populated from project data: targets, findings grouped by severity, included runs (with permalinks), artifacts.
+    - Output formats: markdown source plus rendered HTML and PDF, reusing the existing export pipeline.
+    - Operator-editable section templates in a new `app/conf/report_templates.yaml`.
+  - **Architecture:**
+    - New `app/services/reports/` service composing project-workspace data with existing finding/run/artifact serializers; templating via Jinja autoescape (aligns with the package HTML rendering follow-up in Open TODOs).
+    - Adds `GET/POST /projects/<id>/report` to `app/blueprints/projects.py`.
+    - Browser surface: a "Report" tab inside the existing Projects modal; renderer reuses `export_html.js` and `export_pdf.js`.
+    - Honors share-redaction defaults; the draft is always previewed before download so this stays additive to evidence packages, not a replacement.
+
+- **Prometheus `/metrics` endpoint**
+  - Operator observability beyond `/diag`: active-run gauge, exit-code distribution, per-tool runtime histograms, rate-limit rejections — scrapeable for Grafana.
+  - **Entry-level scope:**
+    - New IP-gated `/metrics` route exposing OpenMetrics-format text. Same IP allowlist as `/diag` so it is not internet-exposed by default.
+    - Initial metric set:
+      - `darklab_active_runs`
+      - `darklab_run_total{tool,exit_code}`
+      - `darklab_run_duration_seconds{tool}` (histogram)
+      - `darklab_rate_limit_rejections_total`
+      - `darklab_pty_active`
+      - `darklab_workspace_quota_bytes{state}`
+  - **Architecture:**
+    - Use the `prometheus_client` Python library with a multiprocess collector compatible with Gunicorn workers (`PROMETHEUS_MULTIPROC_DIR` writable inside the container).
+    - Counters/histograms are updated from the run-finalize path in `app/blueprints/run.py`, the rate limiter in `app/extensions.py`, and the PTY service.
+    - Route lives next to `/diag` in `app/blueprints/assets.py`; documented in CONFIGURATION.md alongside the existing diagnostics surface.
+
+- **Findings triage inbox**
+  - Folded into the Session Entity Atlas idea below as phase 4 (the Findings tab becomes the inbox surface). Kept here so the standalone scope/architecture stays reviewable if the Atlas does not land first.
+  - Cross-run, cross-project queue of every finding and warning the classifier has emitted, with status (new / triaged / confirmed / false-positive) and a "seen before in run X" dedupe link. Today findings live per-run; this surfaces patterns over time.
+  - **Entry-level scope:**
+    - A Findings modal listing all classifier-emitted findings and warnings across saved runs for the active session, with filters for severity, status, tool, and project.
+    - Per-finding actions: mark triaged, confirm, mark false-positive, jump to source run, optionally pin into a project as a structured finding.
+    - Dedupe: identical finding signature across runs collapses into one row with a count and first/last-seen timestamps.
+  - **Architecture:**
+    - New `app/services/findings/` service that materializes per-run finding records from `app/core/output_signals.py` into a `findings_inbox` SQLite table at run-finalize time. Each row carries a stable signature hash for dedupe.
+    - New `app/blueprints/findings.py` for list, filter, and status routes.
+    - Browser surface: new `app/static/js/features/findings/findings_inbox.js` and `app/static/css/features/findings.css`; entry points from the History drawer, Run Details modal, and Projects modal.
+    - The natural consumer of the structured output model in Architecture: design the inbox schema so it can move onto richer line/event data later without breaking the dedupe signature.
+
+- **External intel service integrations**
+  - Connect darklab_shell to passive recon and reputation services (Shodan, VirusTotal, GreyNoise, and friends) so scanner output and findings can be enriched without leaving the shell. Existing tools answer "what does this host expose right now?"; intel services answer "what does the rest of the internet already know about it?".
+  - **v1 ship list — Shodan, VirusTotal, GreyNoise**
+    - Rationale:
+      - Shodan covers passive ports, banners, and historical CVE data.
+      - VirusTotal covers file hashes, URLs, domains, and passive DNS.
+      - GreyNoise classifies whether an IP is internet background noise or targeted.
+      - Together they answer most "should I care about this host?" triage questions.
+    - Ship in two passes:
+      - Pass 1 (CLI wrapper): install `shodan`, `vt-cli`, and a `greynoise` CLI in the Dockerfile and register allowed subcommands/flags in `commands.yaml` with declared env-consumer slots (`SHODAN_API_KEY`, `VT_API_KEY`, `GREYNOISE_API_KEY`). Users get the same allowlist, autocomplete, history, Files, and rate-limit behavior as every other tool.
+      - Pass 2 (app-native built-in): add an `intel ip|domain|hash` built-in backed by Python provider modules so users have one uniform output card across all three providers.
+    - Hard dependencies:
+      - Encrypted secrets vault (existing Ideas entry) — every provider needs an API key, and a parallel per-integration ciphertext path should not exist.
+      - Provider abstraction (below) — landed once, reused by every future provider.
+    - Architecture:
+      - New `app/services/intel/` service with a `Provider` base class and `shodan.py`, `virustotal.py`, `greynoise.py` modules implementing `lookup_ip`, `lookup_domain`, `lookup_hash`, `lookup_cve` as applicable.
+      - Per-provider token-bucket rate limiter plus a Redis-backed response cache with provider-tunable TTL (passive intel data changes slowly).
+      - Audit log of which run hit which provider with which entity, written through the structured log channel; never logs the response body.
+      - Built-in lives in a new `app/services/commands/builtins_intel.py`; browser surface is a uniform `intel` result card rendered by a new `app/static/js/features/intel/intel_card.js`.
+      - Sharing: intel response bodies are treated as raw-only and excluded from snapshot permalinks by the existing share-redaction baseline.
+  - **Cross-cutting infrastructure to land once, before or with v1**
+    - Encrypted secrets vault — already an Ideas entry above; required for every integration here.
+    - Provider abstraction (`app/services/intel/providers/`):
+      - `Provider` base class with shared lookup methods.
+      - Per-provider token-bucket rate limiter.
+      - Redis-backed response cache.
+      - Run/entity audit log.
+    - Entity-aware output classifier hooks:
+      - Extend `app/core/output_signals.py` to surface extracted IPs, domains, hashes, and CVEs as structured events.
+      - Downstream features (sidecar panel, findings enricher, pipe helpers) all consume the same event stream.
+      - Aligns with the structured output model called out in Architecture below.
+  - **Integration patterns (each can land independently once the shared infra exists)**
+    - CLI wrapper — install vendor CLI in the Dockerfile, register in `commands.yaml`, inject the secret. Lightest path; first home for Shodan, VT, Censys, BuiltWith, urlscan.
+    - App-native `intel` built-in — single command (`intel ip|domain|hash|cve`) aggregating multiple providers behind one uniform output card via `app/services/intel/`.
+    - Sidecar enrichment panel — opt-in passive lookups fire alongside a scanner run; render Shodan ports, GreyNoise verdict, IPinfo ASN, VT reputation in a collapsible panel next to the transcript. Off by default per session; auditable per run.
+    - Findings enricher — when the classifier extracts an entity, the findings inbox auto-attaches enrichment from relevant providers, turning the inbox from a queue into a triage workbench.
+    - Workflow steps — Workflows can chain native tools with intel lookups (for example `subfinder → dnsx → pd-httpx → virustotal-domain → urlscan`).
+    - Pipe helper enrichment — new `| enrich-shodan` / `| enrich-greynoise` post-filters that walk stdin for entities and append one annotation per line. Fits the existing synthetic pipe-helper model in `app/services/commands/postfilters.py`.
+    - Project workspace enrichment — when a host/domain is added as a project target, optionally pre-fetch passive snapshots and store them as workspace artifacts under `/intel/<target>/`, becoming part of evidence packages and the engagement report builder idea.
+  - **Future provider candidates (after v1)**
+    - Host/port intel — Censys, BinaryEdge, ZoomEye.
+    - URL/file reputation — urlscan.io, Hybrid Analysis, Triage, Joe Sandbox.
+    - Passive DNS / asset discovery — SecurityTrails, AlienVault OTX, Chaos (ProjectDiscovery; integrates naturally with the already-shipped subfinder/dnsx/pd-httpx via env var), crt.sh (free, no key needed).
+    - Threat intel / reputation — AbuseIPDB, ThreatFox, MISP.
+    - ASN / WHOIS / geo — IPinfo, Team Cymru, BGPView (free).
+    - Breach / credential exposure — HaveIBeenPwned, DeHashed, IntelX.
+    - Tech detection — BuiltWith, Wappalyzer CLI.
+    - CVE / vuln data — NVD, Vulners, ExploitDB.
+  - **Anti-patterns to avoid**
+    - Do not call live intel APIs during a scanner run by default. It costs API quota and surprises users; sidecar enrichment must be opt-in per session or project.
+    - Do not log API keys, full response bodies, or raw entity lists into shared transcripts, snapshot permalinks, or exports. Treat intel response bodies as raw-only in the share-redaction baseline.
+    - Do not reimplement what a vendor CLI already does well — wrap it, inject the secret, log usage, move on.
+
+- **Session Entity Atlas (entity-first triage surface)**
+  - Reframe darklab_shell's exploration model so entities (findings, hosts/IPs, domains, hashes, CVEs, URLs) become the primary navigation primitive — not runs, not projects. Runs become the *source* of entities. Projects become a *curated subset* of entities for engagement work. The active session token owns the entity graph.
+  - **The gap it closes:**
+    - Every run already produces classified findings, but the rich exploration UI lives inside Projects. Runs not linked to a project surface findings only inside Run Details with no aggregation, triage state, or cross-run pivot.
+    - The proposed `intel` built-in widens the gap because intel data is inherently entity-shaped — a Shodan record is about an IP, not the nmap run that produced it. Without an entity-first surface, Findings, Intel, and Projects each grow parallel triage modals that show fragments of the same picture.
+    - Project membership stops being a gate on tooling. Users can recon casually and curate later without losing the engagement-grade Projects surface.
+  - **UI shape:**
+    - New top-level **Atlas** surface with the same prominence as History — desktop left-rail entry, mobile menu item, keyboard shortcut. Not a stacked modal.
+    - Atlas tabs across the top: Findings, Hosts/IPs, Domains, Hashes, CVEs, URLs. Each tab is a filterable, sortable list of distinct entities extracted across every saved run for the active session token.
+    - Entity Detail side sheet opens from any row or from a tagged transcript token:
+      - Identity strip — type, canonical value, first/last seen, run count.
+      - Intel snapshot card — Shodan / VT / GreyNoise / IPinfo / etc., with explicit refresh so cache state is visible.
+      - Source runs list — every run that mentioned the entity, with command, tool, finding count, jump-to-line link.
+      - Findings extracted on the entity across all runs.
+      - Labels and notes via the existing `ui_entity_metadata.js` helper.
+      - Promote-to-project action.
+    - Transcript ↔ Atlas wiring:
+      - Tagged tokens become click targets; click opens entity detail; long-press / right-click exposes the full action menu (label, note, promote, copy, lookup intel).
+      - Hover popover on tagged tokens shows the high-signal summary (GreyNoise verdict, Shodan port count, VT positives) without leaving the transcript.
+      - "See in run" inside entity detail jumps back to the source line in the original run.
+  - **Phased rollout:**
+    - Phase 1 — Read-only Atlas: render Findings, Hosts, Domains, Hashes, CVEs tabs from data already classified by `app/core/output_signals.py`. Rows click into their source run; no new metadata yet. Ships value alone.
+    - Phase 2 — Entity Detail: aggregate across runs, attach labels/notes, dedupe via stable signature, "see in run" navigation.
+    - Phase 3 — Intel attachment: explicit `intel` results, sidecar enrichment, and pipe-helper enrichment all write into entity-keyed intel rows; entity detail renders them.
+    - Phase 4 — Findings triage state: promote the Findings triage inbox actions (new / triaged / confirmed / false-positive, signature dedupe) onto the Findings tab. The standalone Findings triage inbox idea folds in here instead of shipping as its own surface.
+    - Phase 5 — Project linking: adding to a project becomes a tag on the entity row; project workspace, evidence packages, and engagement report builder all read from the same entity store.
+  - **Architecture:**
+    - Storage:
+      - New `entities` table keyed by (session_token, type, canonical_value, signature_hash) for stable dedupe across runs.
+      - `entity_run_links` (entity_id, run_id, first_seen, last_seen, occurrence_count) so cross-run aggregation is a single join.
+      - `entity_intel_snapshots` (entity_id, provider, payload_json, fetched_at, ttl) keyed by provider so refresh and quota stories stay tractable.
+      - `entity_project_links` (entity_id, project_id) replaces a per-project copy of entity rows.
+    - Services:
+      - New `app/services/atlas/` service with materialization helpers that run at run-finalize time, consuming entity events surfaced by the entity-aware output classifier hooks called out under the intel integrations idea.
+      - Entities are extracted lazily and deduped via stable signature so long sessions do not balloon SQLite. Materialization is idempotent so re-finalizing a run does not double-count.
+      - Reuses the existing label/note helpers, run-comparison structured-finding model, and intel provider modules.
+    - Routes:
+      - New `app/blueprints/atlas.py` for list, filter, detail, and entity-mutation routes (labels, notes, project links, intel refresh).
+      - Existing Findings, Run Details, and Projects routes read from the same entity store rather than maintaining parallel finding queues.
+    - Browser surface:
+      - New `app/static/js/features/atlas/` for the Atlas surface, tab list rendering, entity detail side sheet, transcript hover popover, and tagged-token action menu.
+      - New `app/static/css/features/atlas.css`.
+      - Run Details, Projects, and the `intel` result card all link into entity detail rather than re-rendering entity data locally.
+    - Sharing and exports:
+      - Entity rows themselves never appear in snapshot permalinks; only the source run transcript does. The existing share-redaction baseline already covers raw transcript content.
+      - Engagement report builder (separate idea) reads from the entity store for "targets", "findings", and "intel observations" sections, replacing per-project ad-hoc aggregation.
+  - **Anti-patterns to avoid:**
+    - Do not build the Atlas as yet-another-modal stacked over History. It needs first-class chrome treatment (rail entry, shortcut, mobile menu item) or it will be invisible.
+    - Do not duplicate entity metadata between Atlas and Projects. Project membership is a tag on the entity row; labels, notes, and intel live on the entity.
+    - Do not materialize entities eagerly for every line of output. Extract lazily from classifier events at finalization and dedupe with stable signatures so SQLite cost scales with distinct entities, not output volume.
+    - Do not gate intel data on the user calling `intel` explicitly. Sidecar enrichment, pipe-helper enrichment, and explicit `intel` calls must all write through the same per-entity intel rows so a user who never types `intel` still sees enriched data.
+    - Do not break runs that have no findings. Utility commands and failed commands produce zero entities; the Atlas must treat that as the normal case, not an empty state worth surfacing.
+  - **Relationships to other ideas:**
+    - Folds in the **Findings triage inbox** idea as phase 4 — the inbox becomes the Findings lens on the Atlas, not a separate surface.
+    - Provides the natural home for **External intel service integrations** — entity detail is where intel snapshots live; sidecar enrichment, the `intel` built-in, and pipe-helper enrichment all write here.
+    - Consumes the entity-aware output classifier hooks called out under intel integrations and the **structured output model** under Architecture.
+    - Reframes **Project workspaces** as a curation layer over the entity store rather than the only triage surface; project linking is a tag, not a copy.
 
 ---
 

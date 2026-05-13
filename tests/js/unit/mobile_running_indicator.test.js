@@ -1,8 +1,7 @@
 /**
- * Contract-layer coverage for the mobile running-indicator surface in
- * app/static/js/mobile_chrome.js (`// ── Mobile non-active running-state
- * indicator ──` block). The running indicator is the trailing chip and pair
- * of edge-glow overlays that surface background-tab run state on mobile;
+ * Contract-layer coverage for the mobile running-indicator surface. The
+ * running indicator is the trailing chip and pair of edge-glow overlays that
+ * surface background-tab run state on mobile;
  * iOS-Safari-specific behavior (cold-container smooth-scroll drop, momentum-
  * scroll destabilization from sticky/absolute children) cannot run in jsdom
  * and is covered by the Playwright suite, but the contract layer — mount,
@@ -23,6 +22,10 @@ import { fileURLToPath } from 'url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
+const MOBILE_RUNNING_INDICATOR_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/mobile/mobile_running_indicator.js'),
+  'utf8',
+)
 const MOBILE_CHROME_SRC = readFileSync(
   resolve(REPO_ROOT, 'app/static/js/mobile_chrome.js'),
   'utf8',
@@ -115,6 +118,9 @@ function mountModule({
     return 0
   }
 
+  // Execute the feature IIFE, then the mobile chrome IIFE. mobile_chrome.js
+  // owns the mobile-DOM guard and wires the feature to the real tab bar.
+  new Function('window', MOBILE_RUNNING_INDICATOR_SRC)(injectedGlobal)
   // Execute the IIFE. The file wraps itself in
   // `(function initMobileChrome(global) {...})(typeof window !== 'undefined' ? window : this);`
   // so re-evaluating the source runs the init block once against our DOM.

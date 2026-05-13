@@ -218,7 +218,7 @@ test.describe('interactive PTY command execution', () => {
     await expect(page.locator('#pty-modal-screen')).toContainText('smoke hop darklab.sh')
 
     await page.evaluate(() => window.localStorage.setItem('__ptyExposeActiveRun', '1'))
-    await page.reload()
+    await page.reload({ waitUntil: 'domcontentloaded' })
     await page.locator('#cmd').waitFor()
 
     await expect(page.locator('#pty-overlay')).toHaveClass(/\bopen\b/)
