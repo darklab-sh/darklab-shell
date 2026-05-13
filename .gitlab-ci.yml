@@ -103,7 +103,7 @@ lint-py:
   script:
     - flake8 app/ tests/py/
     - bandit -r app/ -ll -q
-    - yamllint -c config/yamllint.yml $(find . \( -name '*.yml' -o -name '*.yaml' \) -not -path './.git/*' -not -path './node_modules/*')
+    - yamllint -c .tooling/yamllint.yml $(find . \( -name '*.yml' -o -name '*.yaml' \) -not -path './.git/*' -not -path './node_modules/*')
 
 lint-js:
   stage: lint

@@ -177,7 +177,7 @@ def get_session_id():
             return session_id
         return ""
     # Local import avoids a circular dependency at module load time.
-    from database import db_connect  # noqa: PLC0415
+    from core.database import db_connect  # noqa: PLC0415
     with db_connect() as conn:
         row = conn.execute(
             "SELECT 1 FROM session_tokens WHERE token = ?", (session_id,)

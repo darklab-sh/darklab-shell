@@ -34,7 +34,7 @@ import {
 import {
   CAPTURE_SESSION_TOKEN,
   MOBILE_VISUAL_CONTRACT,
-} from '../../../config/playwright.visual.contracts.js'
+} from '../../../.tooling/playwright.visual.contracts.js'
 
 const __dir = dirname(fileURLToPath(import.meta.url))
 const KEYBOARD_SRC = `data:image/png;base64,${readFileSync(resolve(__dir, 'fixtures/ios-keyboard-dark.png')).toString('base64')}`

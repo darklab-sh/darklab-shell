@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
 const UI_OUTSIDE_CLICK_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/ui_outside_click.js'),
+  resolve(REPO_ROOT, 'app/static/js/ui/ui_outside_click.js'),
   'utf8',
 )
 

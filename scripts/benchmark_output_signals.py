@@ -16,7 +16,7 @@ from time import perf_counter
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "app"))
 
-from output_signals import OutputSignalClassifier  # noqa: E402
+from core.output_signals import OutputSignalClassifier  # noqa: E402
 
 
 SAMPLE_LINES = [

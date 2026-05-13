@@ -10,15 +10,15 @@ import uuid
 import unittest.mock as mock
 
 import app as shell_app
-import commands
-from builtin_commands import (
+import services.commands.registry as commands
+from services.commands.builtins import (
     _DOCUMENTED_BUILTIN_COMMANDS,
     _BUILTIN_COMMAND_DISPATCH,
     _SPECIAL_BUILTIN_COMMANDS,
     _run_builtin_commands,
     resolve_builtin_command,
 )
-from commands import (
+from services.commands.registry import (
     load_welcome,
     is_command_allowed,
     validate_command,
@@ -32,7 +32,7 @@ def _command_validation_helpers():
     global _COMMAND_VALIDATION_HELPERS
     if _COMMAND_VALIDATION_HELPERS is None:
         registry = commands.load_commands_registry()
-        with mock.patch("commands.load_commands_registry", return_value=registry):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
             _COMMAND_VALIDATION_HELPERS = {
                 "allow_grouping": commands.load_allow_grouping_flags(),
                 "workspace_flags": commands._workspace_flag_specs_by_root(),
@@ -188,7 +188,7 @@ class TestWelcomeLoadingEdges:
 """)
             path = f.name
         try:
-            with mock.patch("commands.WELCOME_FILE", path):
+            with mock.patch("services.commands.registry.WELCOME_FILE", path):
                 result = load_welcome()
         finally:
             os.unlink(path)
@@ -198,7 +198,7 @@ class TestWelcomeLoadingEdges:
         assert result[0]["out"] == "appuser"
 
     def test_missing_file_returns_empty(self):
-        with mock.patch("commands.WELCOME_FILE", "/missing.yaml"):
+        with mock.patch("services.commands.registry.WELCOME_FILE", "/missing.yaml"):
             assert load_welcome() == []
 
 
@@ -207,10 +207,10 @@ class TestIsCommandAllowedEdges:
         a = allow if allow is not None else ["ls", "curl", "echo", "nmap"]
         d = deny if deny is not None else []
         helpers = _command_validation_helpers()
-        with mock.patch("commands.load_command_policy", return_value=(a, d)), \
-             mock.patch("commands.load_allow_grouping_flags", return_value=helpers["allow_grouping"]), \
-             mock.patch("commands._workspace_flag_specs_by_root", return_value=helpers["workspace_flags"]), \
-             mock.patch("commands._runtime_adaptations_by_root", return_value=helpers["runtime_adaptations"]):
+        with mock.patch("services.commands.registry.load_command_policy", return_value=(a, d)), \
+             mock.patch("services.commands.registry.load_allow_grouping_flags", return_value=helpers["allow_grouping"]), \
+             mock.patch("services.commands.registry._workspace_flag_specs_by_root", return_value=helpers["workspace_flags"]), \
+             mock.patch("services.commands.registry._runtime_adaptations_by_root", return_value=helpers["runtime_adaptations"]):
             return is_command_allowed(cmd)
 
     def test_prefix_exactness_ls_does_not_allow_lsblk(self):
@@ -272,8 +272,8 @@ class TestIsCommandAllowedEdges:
                 ],
                 "pipe_helpers": [],
             }
-            with mock.patch("commands.load_commands_registry", return_value=registry):
-                from workspace import session_workspace_name, write_workspace_text_file
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+                from services.workspace.files import session_workspace_name, write_workspace_text_file
                 write_workspace_text_file("session-1", "targets.txt", "ip.darklab.sh\n", cfg)
                 target_path = os.path.join(
                     tmp,
@@ -330,8 +330,8 @@ class TestIsCommandAllowedEdges:
                 ],
                 "pipe_helpers": [],
             }
-            with mock.patch("commands.load_commands_registry", return_value=registry):
-                from workspace import resolve_workspace_path, write_workspace_text_file
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+                from services.workspace.files import resolve_workspace_path, write_workspace_text_file
                 write_workspace_text_file("session-1", "darklab/targets.txt", "ip.darklab.sh\n", cfg)
 
                 result = validate_command(
@@ -374,8 +374,8 @@ class TestIsCommandAllowedEdges:
                 ],
                 "pipe_helpers": [],
             }
-            with mock.patch("commands.load_commands_registry", return_value=registry):
-                from workspace import write_workspace_text_file
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+                from services.workspace.files import write_workspace_text_file
                 write_workspace_text_file("session-1", "targets.txt", "ip.darklab.sh\n", cfg)
 
                 result = validate_command(
@@ -417,7 +417,7 @@ class TestIsCommandAllowedEdges:
             ],
             "pipe_helpers": [],
         }
-        with mock.patch("commands.load_commands_registry", return_value=registry):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
             result = validate_command(
                 "nmap -iL targets.txt",
                 session_id="session-1",
@@ -452,8 +452,8 @@ class TestIsCommandAllowedEdges:
                 ],
                 "pipe_helpers": [],
             }
-            with mock.patch("commands.load_commands_registry", return_value=registry):
-                from workspace import write_workspace_text_file
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+                from services.workspace.files import write_workspace_text_file
                 write_workspace_text_file("session-1", "words.txt", "admin\nlogin\n", cfg)
 
                 workspace_result = validate_command(
@@ -499,7 +499,7 @@ class TestIsCommandAllowedEdges:
                 "workspace_max_files": 10,
                 "workspace_inactivity_ttl_hours": 1,
             }
-            from workspace import write_workspace_text_file
+            from services.workspace.files import write_workspace_text_file
             write_workspace_text_file("session-1", "urls.txt", "https://ip.darklab.sh\n", cfg)
             write_workspace_text_file("session-1", "hosts.txt", "ip.darklab.sh\n", cfg)
             write_workspace_text_file("session-1", "words.txt", "admin\nlogin\n", cfg)
@@ -559,16 +559,16 @@ class TestIsCommandAllowedEdges:
             ]
 
             registry = commands.load_commands_registry()
-            with mock.patch("commands.load_commands_registry", return_value=registry):
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
                 command_policy = commands.load_command_policy()
                 allow_grouping = commands.load_allow_grouping_flags()
                 workspace_flags = commands._workspace_flag_specs_by_root()
                 runtime_adaptations = commands._runtime_adaptations_by_root()
 
-            with mock.patch("commands.load_command_policy", return_value=command_policy), \
-                 mock.patch("commands.load_allow_grouping_flags", return_value=allow_grouping), \
-                 mock.patch("commands._workspace_flag_specs_by_root", return_value=workspace_flags), \
-                 mock.patch("commands._runtime_adaptations_by_root", return_value=runtime_adaptations):
+            with mock.patch("services.commands.registry.load_command_policy", return_value=command_policy), \
+                 mock.patch("services.commands.registry.load_allow_grouping_flags", return_value=allow_grouping), \
+                 mock.patch("services.commands.registry._workspace_flag_specs_by_root", return_value=workspace_flags), \
+                 mock.patch("services.commands.registry._runtime_adaptations_by_root", return_value=runtime_adaptations):
                 results = [
                     (validate_command(command, session_id="session-1", cfg=cfg), reads, writes)
                     for command, reads, writes in cases
@@ -649,7 +649,7 @@ class TestIsCommandAllowedEdges:
             "restricted_command_input_cidrs": ["10.0.0.0/8", "169.254.169.254/32"],
             "workspace_enabled": False,
         }
-        with mock.patch("commands.load_commands_registry", return_value=registry):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
             ip_result = validate_command("probe 10.1.2.3", cfg=cfg)
             url_result = validate_command("probe -u http://169.254.169.254/latest", cfg=cfg)
             domain_result = validate_command("probe darklab.sh", cfg=cfg)
@@ -683,7 +683,7 @@ class TestIsCommandAllowedEdges:
             "restricted_command_input_cidrs": ["10.0.0.0/8"],
             "workspace_enabled": False,
         }
-        with mock.patch("commands.load_commands_registry", return_value=registry):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
             result = validate_command("scan 10.2.0.0/16", cfg=cfg)
 
         assert not result.allowed
@@ -727,10 +727,10 @@ class TestIsCommandAllowedEdges:
                 ],
                 "pipe_helpers": [],
             }
-            from workspace import write_workspace_text_file
+            from services.workspace.files import write_workspace_text_file
             write_workspace_text_file("session-1", "targets.txt", "darklab.sh\n10.9.8.7\n", cfg)
 
-            with mock.patch("commands.load_commands_registry", return_value=registry):
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
                 result = validate_command(
                     "scan -iL targets.txt",
                     session_id="session-1",
@@ -828,7 +828,7 @@ class TestBuiltinCommandResolution:
             "pipe_helpers": [{"root": "grep"}],
         }
 
-        with mock.patch("builtin_commands.load_commands_registry", return_value=registry) as loader:
+        with mock.patch("services.commands.builtins.load_commands_registry", return_value=registry) as loader:
             lines = _run_builtin_commands("commands --external")
 
         text = "\n".join(line.get("text", "") for line in lines)
@@ -867,7 +867,7 @@ class TestBuiltinCommandResolution:
             "pipe_helpers": [],
         }
 
-        with mock.patch("commands.load_commands_registry", return_value=registry):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
             lines = _run_builtin_commands("commands info sentinel-scan")
 
         text = "\n".join(line.get("text", "") for line in lines)
@@ -879,7 +879,7 @@ class TestBuiltinCommandResolution:
         assert "Adds `--safe` automatically when needed." in text
 
     def test_commands_info_unknown_root_returns_usage_hint(self):
-        with mock.patch("commands.load_commands_registry", return_value={"commands": [], "pipe_helpers": []}):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value={"commands": [], "pipe_helpers": []}):
             lines = _run_builtin_commands("commands info nope")
 
         assert lines[0]["text"] == "commands: no catalog entry for nope"

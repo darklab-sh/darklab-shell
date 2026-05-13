@@ -71,7 +71,7 @@ body.mobile-terminal-mode {
   }
 
   /* Single source of truth for every mobile bottom-sheet gesture handle.
-     Behavior is wired in app/static/js/mobile_sheet.js::bindMobileSheet —
+     Behavior is wired in app/static/js/ui/mobile_sheet.js::bindMobileSheet —
      visual + cursor + touch-action + brighten on press all live here so the
      menu, recents, history panel, workflows, FAQ, options, kill, hist-del,
      and share-redaction sheets cannot drift. Outside mobile-terminal-mode the

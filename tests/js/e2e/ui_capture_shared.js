@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { dirname, relative, resolve } from 'path'
 import { fileURLToPath } from 'url'
 
-import { CAPTURE_SESSION_TOKEN } from '../../../config/playwright.visual.contracts.js'
+import { CAPTURE_SESSION_TOKEN } from '../../../.tooling/playwright.visual.contracts.js'
 
 import { ensurePromptReady } from './helpers.js'
 import { assertVisualFlowGuardrails } from './visual_guardrails.js'

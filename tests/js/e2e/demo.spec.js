@@ -27,7 +27,7 @@ import {
   installCommonCaptureMocks,
   openCaptureRunComparison,
 } from './ui_capture_shared.js'
-import { CAPTURE_SESSION_TOKEN } from '../../../config/playwright.visual.contracts.js'
+import { CAPTURE_SESSION_TOKEN } from '../../../.tooling/playwright.visual.contracts.js'
 
 // Keystroke delay — intentionally closer to a real person than a script.
 const TYPE_DELAY_MS = 62

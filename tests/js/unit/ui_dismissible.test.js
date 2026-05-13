@@ -10,11 +10,11 @@ import { fileURLToPath } from 'url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
 const UI_PRESSABLE_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/ui_pressable.js'),
+  resolve(REPO_ROOT, 'app/static/js/ui/ui_pressable.js'),
   'utf8',
 )
 const UI_DISMISSIBLE_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/ui_dismissible.js'),
+  resolve(REPO_ROOT, 'app/static/js/ui/ui_dismissible.js'),
   'utf8',
 )
 

@@ -7,7 +7,7 @@ import os
 import pwd
 from pathlib import Path
 import yaml
-from redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
+from core.redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
 
 APP_VERSION = "1.7"
 PROJECT_NAME = "darklab_shell"

@@ -16,9 +16,9 @@ from config import (
     get_theme_entry,
     theme_runtime_css_vars,
 )
-from helpers import FONT_FILES, current_theme_name
+from core.helpers import FONT_FILES, current_theme_name
 
-_FONT_DIR = Path(__file__).resolve().parent / "static" / "fonts"
+_FONT_DIR = Path(__file__).resolve().parents[2] / "static" / "fonts"
 
 
 def _font_face_css(*, embed: bool = False) -> str:

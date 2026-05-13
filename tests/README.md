@@ -64,7 +64,7 @@ You need different local dependencies depending on the suite:
 | --- | --- | --- |
 | `pytest` | Python, repo virtualenv, Python dev dependencies | Normal backend coverage does not require Docker |
 | `Vitest` | Node.js, npm dependencies | Runs in jsdom; no Flask server required |
-| `Playwright` | Node.js, npm dependencies, Playwright browsers | Uses a real browser; `config/playwright.config.js` is the single-project editor/debug config and `config/playwright.parallel.config.js` is the isolated parallel CLI config |
+| `Playwright` | Node.js, npm dependencies, Playwright browsers | Uses a real browser; `.tooling/playwright.config.js` is the single-project editor/debug config and `.tooling/playwright.parallel.config.js` is the isolated parallel CLI config |
 | Container Smoke Test | Docker + Docker Compose | Opt-in verification path for image/tooling changes |
 
 Recommended local baseline:
@@ -111,7 +111,7 @@ npm run test:e2e
 Run focused slices while iterating:
 
 ```bash
-bash scripts/run_pytest.sh -c config/pytest.ini --rootdir=. tests/py/test_routes.py -v
+bash scripts/run_pytest.sh -c .tooling/pytest.ini --rootdir=. tests/py/test_routes.py -v
 npm run test:unit -- tests/js/unit/history.test.js tests/js/unit/runner.test.js
 npm run test:e2e -- tests/js/e2e/failure-paths.spec.js
 bash scripts/run_playwright.sh tests/js/e2e/failure-paths.spec.js --grep "history"
@@ -119,9 +119,9 @@ bash scripts/run_playwright.sh tests/js/e2e/failure-paths.spec.js --grep "histor
 
 Playwright notes:
 
-- `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps local Playwright output quiet by default, captures isolated server logs under `test-results/e2e-server-logs/`, and prints server log tails only when Playwright exits non-zero. It uses [config/playwright.parallel.config.js](../config/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
+- `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps local Playwright output quiet by default, captures isolated server logs under `test-results/e2e-server-logs/`, and prints server log tails only when Playwright exits non-zero. It uses [.tooling/playwright.parallel.config.js](../.tooling/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
 - The wrapper defaults `PW_DISABLE_TS_ESM=1` because the repo's current Playwright configs/specs are plain JavaScript and do not require Playwright's TypeScript/ESM loader. Set `PW_DISABLE_TS_ESM=0` only when adding TypeScript Playwright files that need the loader.
-- plain `npx playwright test` uses [config/playwright.config.js](../config/playwright.config.js), the single-project config intended for VS Code Test Explorer and focused local debugging
+- plain `npx playwright test` uses [.tooling/playwright.config.js](../.tooling/playwright.config.js), the single-project config intended for VS Code Test Explorer and focused local debugging
 - each parallel project gets its own Flask server port plus isolated `APP_DATA_DIR` state, so SQLite history, run-output artifacts, and limiter/process state do not leak between workers
 - modal interaction specs wait for app-level `data-interaction-ready` markers before driving real keyboard focus movement, keeping focus-trap coverage browser-native without fixed sleeps or synthetic key events
 
@@ -169,8 +169,8 @@ Large jsdom setup lives in focused helper modules under `tests/js/unit/helpers/`
 
 The browser layer now uses a split config model:
 
-- [config/playwright.config.js](../config/playwright.config.js) keeps a simple single-project run path for editor integration and focused debugging
-- [config/playwright.parallel.config.js](../config/playwright.parallel.config.js) is the normal CLI path and balances the suite across 5 isolated projects using measured per-file runtime weights
+- [.tooling/playwright.config.js](../.tooling/playwright.config.js) keeps a simple single-project run path for editor integration and focused debugging
+- [.tooling/playwright.parallel.config.js](../.tooling/playwright.parallel.config.js) is the normal CLI path and balances the suite across 5 isolated projects using measured per-file runtime weights
 
 ### Demo Recording
 
@@ -231,7 +231,7 @@ Mobile OBS preset:
   - Bounds: `Stretch`, `Width 502 px`, `Height 932 px`
   - Crop: `Left 0 px`, `Right 4 px`, `Top 174 px`, `Bottom 0 px`
 
-Desktop and mobile demo configs share a central visual contract in [config/playwright.visual.contracts.js](../config/playwright.visual.contracts.js), and both specs assert that contract at startup through `tests/js/e2e/visual_guardrails.js`. That keeps viewport, pixel density, touch/mobile-mode assumptions, and `/status` health aligned with the wrapper/config setup instead of drifting silently.
+Desktop and mobile demo configs share a central visual contract in [.tooling/playwright.visual.contracts.js](../.tooling/playwright.visual.contracts.js), and both specs assert that contract at startup through `tests/js/e2e/visual_guardrails.js`. That keeps viewport, pixel density, touch/mobile-mode assumptions, and `/status` health aligned with the wrapper/config setup instead of drifting silently.
 
 Both demo specs also read from one named visual-history fixture in `tests/js/e2e/visual_history_fixture.js`, which returns realistic paginated `/history` payloads with enough rows to keep the history drawer and mobile recents sheet in their pagination state during recordings.
 

@@ -6,13 +6,13 @@ from collections import Counter
 from datetime import datetime
 from difflib import SequenceMatcher
 
-from output_signals import (
+from core.output_signals import (
     classify_line,
     command_root as output_command_root,
     extract_target,
     strip_ansi_codes,
 )
-from run_output_store import load_full_output_entries
+from services.runs.output_store import load_full_output_entries
 
 MAX_COMPARE_ITEMS_PER_SIDE = 5000
 COMPARE_MAX_LINES = 20_000

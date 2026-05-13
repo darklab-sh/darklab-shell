@@ -107,11 +107,11 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - After `|`, autocomplete switches into the built-in pipe stage (`grep`, `head`, `tail`, `wc -l`, `sort`, `uniq`).
 - Already-used singleton-style flags are suppressed from contextual suggestions.
 
-**Limits:** external-tool completions come from the command-registry YAML, while app-owned built-ins come from the browser runtime. The app does not inspect the live shell and does not parse `--help` output.
+**Limits:** external-tool completions come from the command-registry YAML, while app-owned built-ins come from the app's built-in autocomplete YAML. The app does not inspect the live shell and does not parse `--help` output.
 
-**Configuration:** external-tool suggestions use `conf/commands.yaml` plus optional local overlays; see [CONFIGURATION.md#command-registry-autocomplete](CONFIGURATION.md#command-registry-autocomplete) and [docs/external-command-integrations.md](docs/external-command-integrations.md). App-owned built-ins use `app/builtin_autocomplete.yaml`.
+**Configuration:** external-tool suggestions use `conf/commands.yaml` plus optional local overlays; see [CONFIGURATION.md#command-registry-autocomplete](CONFIGURATION.md#command-registry-autocomplete) and [docs/external-command-integrations.md](docs/external-command-integrations.md). App-owned built-ins use `app/services/commands/builtin_autocomplete.yaml`.
 
-**Related files:** `app/static/js/autocomplete.js`, `app/static/js/app.js`, `app/builtin_autocomplete.yaml`, `app/conf/commands.yaml`, `app/blueprints/session.py`, `app/database.py`.
+**Related files:** `app/static/js/autocomplete.js`, `app/static/js/app.js`, `app/services/commands/builtin_autocomplete.yaml`, `app/conf/commands.yaml`, `app/blueprints/session.py`, `app/core/database.py`.
 
 **Keyboard controls:**
 
@@ -160,9 +160,9 @@ Autocomplete schema and authoring details live in [CONFIGURATION.md#command-regi
 
 **Limits:** browser-native combos like `Cmd+T`, `Cmd+W`, and `Ctrl+Tab` are optional fallbacks only — browser interception is inconsistent across environments, especially on macOS.
 
-**Configuration:** none — the chord list is defined in `app/builtin_commands.py` and not user-tunable.
+**Configuration:** none — the chord list is defined in `app/services/commands/builtins.py` and not user-tunable.
 
-**Related files:** `app/static/js/app.js` (`handleTabShortcut` / `handleChromeShortcut` / `handleActionShortcut`), `app/static/js/controller.js` (document keydown cascade), `app/builtin_commands.py` (`_CURRENT_SHORTCUTS`), `app/blueprints/content.py` (`GET /shortcuts`).
+**Related files:** `app/static/js/app.js` (`handleTabShortcut` / `handleChromeShortcut` / `handleActionShortcut`), `app/static/js/controller.js` (document keydown cascade), `app/services/commands/builtins.py` (`_CURRENT_SHORTCUTS`), `app/blueprints/content.py` (`GET /shortcuts`).
 
 Shipped app-safe shortcuts:
 
@@ -237,7 +237,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 
 **Configuration:** none — the kill path is not user-tunable.
 
-**Related files:** `app/static/js/runner.js` (client-side kill + confirmation dialog), `app/blueprints/run.py` (`POST /kill`), `app/process.py` (`pid_register` / `pid_pop`).
+**Related files:** `app/static/js/runner.js` (client-side kill + confirmation dialog), `app/blueprints/run.py` (`POST /kill`), `app/core/process.py` (`pid_register` / `pid_pop`).
 
 ---
 
@@ -291,9 +291,9 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 
 **Limits:** only the six helper stages above are recognised. Combinable flags are supported within a stage (e.g. `sort -rn`) and supported stages can be chained together (e.g. `command | grep pattern | wc -l`).
 
-**Configuration:** none — the supported stage set is hard-coded in `app/commands.py`.
+**Configuration:** none — the supported stage set is hard-coded in `app/services/commands/registry.py`.
 
-**Related files:** `app/commands.py` (pipe-stage parser + validator), `app/blueprints/run.py` (applies the pipe filter to streamed output).
+**Related files:** `app/services/commands/registry.py` (pipe-stage parser + validator), `app/blueprints/run.py` (applies the pipe filter to streamed output).
 
 **Supported pipe forms:**
 
@@ -376,7 +376,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 
 **Configuration:** none — the current scopes, server matchers, and summary format are app-defined and not operator-configurable.
 
-**Related files:** `app/output_signals.py` (server-side signal classification), `app/blueprints/run.py` (SSE metadata), `app/run_output_store.py` (signal metadata persistence), `app/static/js/search.js` (metadata-driven scoped navigation and summaries), `app/static/js/controller.js` (chip-to-search navigation), `app/static/js/output.js` (metadata rendering and summary line behavior), `app/static/css/components.css` and `app/static/css/shell-chrome.css` (tabbar signal controls).
+**Related files:** `app/core/output_signals.py` (server-side signal classification), `app/blueprints/run.py` (SSE metadata), `app/services/runs/output_store.py` (signal metadata persistence), `app/static/js/search.js` (metadata-driven scoped navigation and summaries), `app/static/js/controller.js` (chip-to-search navigation), `app/static/js/output.js` (metadata rendering and summary line behavior), `app/static/css/primitives/components.css` and `app/static/css/shell-chrome.css` (tabbar signal controls).
 
 ---
 
@@ -418,7 +418,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 
 **Configuration:** `max_tabs` in `config.yaml` (default 8; `0` for unlimited).
 
-**Related files:** `app/static/js/tabs.js` (tab lifecycle + drag + rename), `app/static/js/history.js` (history drawer + search UI), `app/blueprints/history.py` (history API + FTS queries), `app/database.py` (SQLite schema + FTS5 trigger wiring).
+**Related files:** `app/static/js/tabs.js` (tab lifecycle + drag + rename), `app/static/js/history.js` (history drawer + search UI), `app/blueprints/history.py` (history API + FTS queries), `app/core/database.py` (SQLite schema + FTS5 trigger wiring).
 
 **Full-text search:** the history surfaces support a shared `type` filter, run-subtype filters, project filters for linked runs, and full-text search across command text and stored run output for run rows, with additional filters for command name, exit status, recent date range, and starred-only. The search field placeholder reads "search history". Search is backed by a SQLite FTS5 virtual table (`runs_fts`) indexed on `command` and `output_search_text`. When full-output persistence is enabled, `output_search_text` is populated from the complete gzip artifact so early lines of long runs stay reachable; otherwise it falls back to the capped preview window. Snapshot search in the first pass matches the snapshot label only, and snapshots remain share/history records rather than project-linked records. On mobile, advanced filters stay behind a dedicated `filters` toggle to preserve result space, the command-name field uses app-owned autocomplete, and row actions keep the sheet open where that matches the desktop action contract.
 
@@ -443,7 +443,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** compare view and compare context defaults are saved user options. Server-side compare limits are fixed application constants rather than operator-facing `config.yaml` settings.
 
-**Related files:** `app/run_comparison.py` (shared compare helpers), `app/blueprints/history.py` (history compare routes), `app/blueprints/projects.py` (project compare route), `app/static/js/history.js` (compare launcher and renderer), and `app/static/css/components.css` / `app/static/css/mobile.css` (desktop/mobile compare layout).
+**Related files:** `app/services/runs/comparison.py` (shared compare helpers), `app/blueprints/history.py` (history compare routes), `app/blueprints/projects.py` (project compare route), `app/static/js/history.js` (compare launcher and renderer), and `app/static/css/primitives/components.css` / `app/static/css/mobile.css` (desktop/mobile compare layout).
 
 ---
 
@@ -495,7 +495,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - `note` — optional; helper text shown alongside the command.
 - `feature_required` — optional feature gate such as `workspace`; hides the workflow when the required app feature is disabled.
 
-**Related files:** `app/conf/workflows.yaml` (operator workflow definitions), `app/user_workflows.py` (session workflow storage), `app/static/js/app.js` (workflow editor and CLI), `app/static/js/shell_chrome.js` (Workflows panel rendering), `app/blueprints/content.py` and `app/blueprints/session.py` (workflow API endpoints).
+**Related files:** `app/conf/workflows.yaml` (operator workflow definitions), `app/services/workflows/user_workflows.py` (session workflow storage), `app/static/js/app.js` (workflow editor and CLI), `app/static/js/shell_chrome.js` (Workflows panel rendering), `app/blueprints/content.py` and `app/blueprints/session.py` (workflow API endpoints).
 
 ---
 
@@ -513,7 +513,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** `permalink_retention_days` in `config.yaml` (default 365).
 
-**Related files:** `app/blueprints/history.py` (share + permalink routes), `app/permalinks.py` (ID generation + storage), `app/run_output_store.py` (full-output artifact lookup), `app/templates/permalink.html` (rendered share/permalink page).
+**Related files:** `app/blueprints/history.py` (share + permalink routes), `app/services/history/permalinks.py` (ID generation + storage), `app/services/runs/output_store.py` (full-output artifact lookup), `app/templates/permalink.html` (rendered share/permalink page).
 
 ---
 
@@ -532,7 +532,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** baseline rules are built in; custom regex rules extend them. The raw-vs-redacted default is stored in the Options modal.
 
-**Related files:** `app/redaction.py` (baseline + custom rule engine), `app/blueprints/history.py` (snapshot redaction entry point), `app/static/js/tabs.js` (share snapshot prompt + default handling).
+**Related files:** `app/core/redaction.py` (baseline + custom rule engine), `app/blueprints/history.py` (snapshot redaction entry point), `app/static/js/tabs.js` (share snapshot prompt + default handling).
 
 ---
 
@@ -596,7 +596,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** none. Built-in commands are defined in application code, not in operator config.
 
-**Related files:** `app/builtin_commands.py` (built-in command registry + output rendering), `app/commands.py` (dispatch, autocomplete loading, and man routing), `app/builtin_autocomplete.yaml` (built-in autocomplete grammar), `app/static/js/app.js` (dynamic autocomplete hooks, client-side command flows, and Options/theme command handling), `app/static/js/runner.js` (client-side command interception).
+**Related files:** `app/services/commands/builtins.py` (built-in command registry + output rendering), `app/services/commands/registry.py` (dispatch, autocomplete loading, and man routing), `app/services/commands/builtin_autocomplete.yaml` (built-in autocomplete grammar), `app/static/js/app.js` (dynamic autocomplete hooks, client-side command flows, and Options/theme command handling), `app/static/js/runner.js` (client-side command interception).
 
 ---
 
@@ -616,7 +616,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Limits:** variables are intended for targets, ports, and paths, not secrets. Values are not redacted and are visible in `var list`, autocomplete descriptions, and the expansion notice.
 
-**Related files:** `app/session_variables.py`, `app/builtin_commands.py`, `app/blueprints/run.py`, `app/static/js/app.js`.
+**Related files:** `app/services/session/variables.py`, `app/services/commands/builtins.py`, `app/blueprints/run.py`, `app/static/js/app.js`.
 
 ---
 
@@ -645,7 +645,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** Files use `workspace_*` settings in `conf/config.yaml` and per-command `workspace_flags` in `conf/commands.yaml`; see [CONFIGURATION.md](CONFIGURATION.md) for storage recipes.
 
-**Related files:** `app/workspace.py` (path, quota, permission, and cleanup helpers), `app/blueprints/workspace.py` (workspace file routes), `app/static/js/workspace.js` (Files panel), `app/builtin_commands.py` (`file` built-in), `app/commands.py` (workspace flag validation and rewrite).
+**Related files:** `app/services/workspace/files.py` (path, quota, permission, and cleanup helpers), `app/blueprints/workspace.py` (workspace file routes), `app/static/js/workspace.js` (Files panel), `app/services/commands/builtins.py` (`file` built-in), `app/services/commands/registry.py` (workspace flag validation and rewrite).
 
 ---
 
@@ -669,7 +669,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** project, metadata, and evidence-package limits are configured in `conf/config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/project_workspace.py` (project relationship, metadata, and package helpers), `app/blueprints/projects.py` (project routes), `app/static/js/shell_chrome.js` (Projects modal), `app/static/js/history.js` (history project filters and metadata actions), `app/static/js/workspace.js` (workspace file metadata), and `app/database.py` (project workspace schema).
+**Related files:** `app/services/projects/workspace.py` (project relationship, metadata, and package helpers), `app/blueprints/projects.py` (project routes), `app/static/js/shell_chrome.js` (Projects modal), `app/static/js/history.js` (history project filters and metadata actions), `app/static/js/workspace.js` (workspace file metadata), and `app/core/database.py` (project workspace schema).
 
 ---
 
@@ -688,7 +688,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** evidence-package limits are configured in `conf/config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/project_workspace.py` (manifest and archive builder), `app/blueprints/projects.py` (package routes), and `app/static/js/shell_chrome.js` (wizard, package rows, and manifest preview).
+**Related files:** `app/services/projects/workspace.py` (manifest and archive builder), `app/blueprints/projects.py` (package routes), and `app/static/js/shell_chrome.js` (wizard, package rows, and manifest preview).
 
 ---
 
@@ -730,7 +730,7 @@ commands:
 - `category` — command catalog grouping.
 - `autocomplete.*.value_type` — declares target-like values for autocomplete and optional restricted-input checks.
 
-**Related files:** `app/conf/commands.yaml` (command registry), `app/commands.py` (allow/deny matching logic), `app/blueprints/run.py` (policy gate at the `/runs` entry point).
+**Related files:** `app/conf/commands.yaml` (command registry), `app/services/commands/registry.py` (allow/deny matching logic), `app/blueprints/run.py` (policy gate at the `/runs` entry point).
 
 ### Deny Prefixes
 
@@ -762,7 +762,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Configuration:** Interactive PTY uses `interactive_pty_*` settings plus each command's `interactive` registry block; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/pty_service.py` (server-side PTY lifecycle and snapshots), `app/blueprints/run.py` (PTY routes), `app/static/js/pty.js` (browser terminal controller), `app/static/js/vendor/xterm.js`, `app/static/js/vendor/xterm-addon-fit.js`, and `app/conf/commands.yaml` (interactive command metadata).
+**Related files:** `app/services/pty/service.py` (server-side PTY lifecycle and snapshots), `app/blueprints/run.py` (PTY routes), `app/static/js/pty.js` (browser terminal controller), `app/static/js/vendor/xterm.js`, `app/static/js/vendor/xterm-addon-fit.js`, and `app/conf/commands.yaml` (interactive command metadata).
 
 ---
 
@@ -789,7 +789,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Configuration:** `app/conf/wordlists.yaml` defines curated category globs under the fixed install path. External command value slots opt into installed-wordlist autocomplete through `value_type: wordlist` and `wordlist_category` in `app/conf/commands.yaml`.
 
-**Related files:** `Dockerfile` (SecLists install step), `app/conf/wordlists.yaml` (curated catalog), `app/wordlists.py` (catalog loader), `app/conf/commands.yaml` (typed wordlist slots), `app/static/js/autocomplete.js` (slot-aware suggestions).
+**Related files:** `Dockerfile` (SecLists install step), `app/conf/wordlists.yaml` (curated catalog), `app/services/commands/wordlists.py` (catalog loader), `app/conf/commands.yaml` (typed wordlist slots), `app/static/js/autocomplete.js` (slot-aware suggestions).
 
 **Layout reference:**
 
@@ -925,7 +925,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Configuration:** theme variants live under `app/conf/themes/`; see [THEME.md](THEME.md) for authoring details (variable names, fallbacks, and how a new variant is registered).
 
-**Related files:** `app/conf/themes/` (theme variant files), `app/static/js/app.js` (selector modal, terminal command, and preference persistence), `app/static/css/base.css` (runtime theme variable surface), `app/templates/theme_vars_style.html` and `app/templates/theme_vars_script.html` (server-rendered theme metadata), `THEME.md` (authoring guide).
+**Related files:** `app/conf/themes/` (theme variant files), `app/static/js/app.js` (selector modal, terminal command, and preference persistence), `app/static/css/core/base.css` (runtime theme variable surface), `app/templates/theme_vars_style.html` and `app/templates/theme_vars_script.html` (server-rendered theme metadata), `THEME.md` (authoring guide).
 
 ---
 
@@ -978,7 +978,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Configuration:** `permalink_retention_days` in `config.yaml` (default 365; `0` disables pruning).
 
-**Related files:** `app/database.py` (schema, migrations, FTS5 wiring, and startup pruning), `app/run_output_store.py` (compressed artifact writer + reader), `app/blueprints/history.py` (reads + writes through the persistence layer). See [ARCHITECTURE.md](ARCHITECTURE.md) for full schema.
+**Related files:** `app/core/database.py` (schema, migrations, FTS5 wiring, and startup pruning), `app/services/runs/output_store.py` (compressed artifact writer + reader), `app/blueprints/history.py` (reads + writes through the persistence layer). See [ARCHITECTURE.md](ARCHITECTURE.md) for full schema.
 
 **Useful direct checks:**
 
@@ -1035,7 +1035,7 @@ If a session has run history, workspace files, project workspace records, user w
 
 **Configuration:** no config keys — token issuance is always enabled. Token scope covers runs, snapshots, starred commands, session variables, user workflows, project workspace records, recent domains, active-project context, saved user options, and app-managed workspace files when Files are enabled.
 
-**Related files:** `app/static/js/session.js` (client-side token flow + cross-tab `storage` sync), `app/blueprints/session.py` (`/session/token/*`, `/session/preferences`, and `/session/migrate` routes), `app/database.py` (`session_tokens`, `session_preferences`, and `starred_commands` tables).
+**Related files:** `app/static/js/session.js` (client-side token flow + cross-tab `storage` sync), `app/blueprints/session.py` (`/session/token/*`, `/session/preferences`, and `/session/migrate` routes), `app/core/database.py` (`session_tokens`, `session_preferences`, and `starred_commands` tables).
 
 ---
 
@@ -1059,7 +1059,7 @@ If a session has run history, workspace files, project workspace records, user w
 - `diagnostics_allowed_cidrs` in `config.yaml` — CIDRs permitted to reach `/diag`.
 - `docker-compose.yml` — `read_only: true`, `init: true`, `user` directives, and the port-egress guard.
 
-**Related files:** `app/commands.py` (metacharacter, loopback, allow/deny, and rewrite validation), `app/blueprints/run.py` (subprocess spawn and `/kill` route), `app/process.py` (Redis PID tracking), `docker-compose.yml` (filesystem + user isolation). See [ARCHITECTURE.md](ARCHITECTURE.md) for cross-worker signalling, the Redis-backed multi-worker kill path, and the `nmap` capability model.
+**Related files:** `app/services/commands/registry.py` (metacharacter, loopback, allow/deny, and rewrite validation), `app/blueprints/run.py` (subprocess spawn and `/kill` route), `app/core/process.py` (Redis PID tracking), `docker-compose.yml` (filesystem + user isolation). See [ARCHITECTURE.md](ARCHITECTURE.md) for cross-worker signalling, the Redis-backed multi-worker kill path, and the `nmap` capability model.
 
 ---
 
@@ -1078,7 +1078,7 @@ If a session has run history, workspace files, project workspace records, user w
 
 **Configuration:** `log_format` and `log_level` in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/logging_setup.py` (format + level wiring), `app/blueprints/run.py` (run lifecycle events), `app/blueprints/history.py` (history/share events), `app/blueprints/session.py` (token, preference, and starred-command events), `app/blueprints/assets.py` (diagnostics events).
+**Related files:** `app/core/logging_setup.py` (format + level wiring), `app/blueprints/run.py` (run lifecycle events), `app/blueprints/history.py` (history/share events), `app/blueprints/session.py` (token, preference, and starred-command events), `app/blueprints/assets.py` (diagnostics events).
 
 ---
 

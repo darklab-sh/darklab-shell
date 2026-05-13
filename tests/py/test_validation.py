@@ -8,8 +8,8 @@ Run with: pytest tests/ (from the repo root)
 
 import unittest.mock as mock
 
-import commands
-from commands import (
+import services.commands.registry as commands
+from services.commands.registry import (
     command_root,
     is_command_allowed,
     parse_synthetic_postfilter,
@@ -31,7 +31,7 @@ def _validation_registry_helpers():
     global _VALIDATION_REGISTRY_HELPERS
     if _VALIDATION_REGISTRY_HELPERS is None:
         registry = commands.load_commands_registry()
-        with mock.patch("commands.load_commands_registry", return_value=registry):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
             _VALIDATION_REGISTRY_HELPERS = {
                 "allow_grouping": commands.load_allow_grouping_flags(),
                 "workspace_flags": commands._workspace_flag_specs_by_root(),
@@ -45,10 +45,10 @@ def _check(cmd, allow=None, deny=None):
     a = allow if allow is not None else ALLOW
     d = deny  if deny  is not None else DENY
     helpers = _validation_registry_helpers()
-    with mock.patch("commands.load_command_policy", return_value=(a, d)), \
-         mock.patch("commands.load_allow_grouping_flags", return_value=helpers["allow_grouping"]), \
-         mock.patch("commands._workspace_flag_specs_by_root", return_value=helpers["workspace_flags"]), \
-         mock.patch("commands._runtime_adaptations_by_root", return_value=helpers["runtime_adaptations"]):
+    with mock.patch("services.commands.registry.load_command_policy", return_value=(a, d)), \
+         mock.patch("services.commands.registry.load_allow_grouping_flags", return_value=helpers["allow_grouping"]), \
+         mock.patch("services.commands.registry._workspace_flag_specs_by_root", return_value=helpers["workspace_flags"]), \
+         mock.patch("services.commands.registry._runtime_adaptations_by_root", return_value=helpers["runtime_adaptations"]):
         return is_command_allowed(cmd)
 
 
@@ -187,7 +187,7 @@ class TestAllowlist:
         assert not ok
 
     def test_unrestricted_when_no_file(self):
-        with mock.patch("commands.load_command_policy", return_value=(None, [])):
+        with mock.patch("services.commands.registry.load_command_policy", return_value=(None, [])):
             ok, _ = is_command_allowed("anything goes")
         assert ok
 
@@ -533,18 +533,18 @@ class TestRuntimeCommandHelpers:
         assert command_root("   ") is None
 
     def test_runtime_missing_command_name_returns_none_when_installed(self):
-        with mock.patch("commands.resolve_runtime_command", return_value="/usr/bin/curl"):
+        with mock.patch("services.commands.registry.resolve_runtime_command", return_value="/usr/bin/curl"):
             assert runtime_missing_command_name("curl https://darklab.sh") is None
 
     def test_runtime_missing_command_name_returns_root_when_missing(self):
-        with mock.patch("commands.resolve_runtime_command", return_value=None):
+        with mock.patch("services.commands.registry.resolve_runtime_command", return_value=None):
             assert runtime_missing_command_name("nmap -sV darklab.sh") == "nmap"
 
     def test_runtime_missing_command_name_skips_env_assignments(self):
         def fake_resolve(name):
             return "/usr/bin/env" if name == "env" else None
 
-        with mock.patch("commands.resolve_runtime_command", side_effect=fake_resolve):
+        with mock.patch("services.commands.registry.resolve_runtime_command", side_effect=fake_resolve):
             assert runtime_missing_command_name("env XDG_CONFIG_HOME=/tmp nmap -sV darklab.sh") == "nmap"
 
     def test_runtime_missing_command_message_is_stable(self):

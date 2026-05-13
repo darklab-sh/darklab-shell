@@ -2,10 +2,10 @@ import { vi } from 'vitest'
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
 
-const SEARCH_CORE_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/search_core.js'), 'utf8')
+const SEARCH_CORE_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/core/search_core.js'), 'utf8')
 const SEARCH_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/search.js'), 'utf8')
-const CORE_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/workspace_core.js'), 'utf8')
-const ENTITY_METADATA_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/ui_entity_metadata.js'), 'utf8')
+const CORE_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/core/workspace_core.js'), 'utf8')
+const ENTITY_METADATA_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/ui/ui_entity_metadata.js'), 'utf8')
 const SRC = readFileSync(resolve(process.cwd(), 'app/static/js/workspace.js'), 'utf8')
 
 export function responseJson(body, status = 200) {

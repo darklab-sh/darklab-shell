@@ -32,19 +32,19 @@ from typing import cast
 
 import pytest
 import yaml
-import process
-import pty_service
-import run_broker
-import database
-import project_workspace
+import core.process as process
+import services.pty.service as pty_service
+import services.runs.broker as run_broker
+import core.database as database
+import services.projects.workspace as project_workspace
 import app as shell_app
 import config as app_config
-import commands  # noqa: F401 — used as mock.patch("commands.X") target
-import builtin_commands
-import session_variables
-import workspace as workspace_module
-import wordlists
-from commands import (
+import services.commands.registry as commands  # noqa: F401 — used as mock.patch("services.commands.registry.X") target
+import services.commands.builtins as builtin_commands
+import services.session.variables as session_variables
+import services.workspace.files as workspace_module
+import services.commands.wordlists as wordlists
+from services.commands.registry import (
     split_chained_commands, load_all_faq, load_all_workflows, load_faq,
     load_welcome, load_tour, load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
     load_mobile_welcome_hints, autocomplete_context_from_commands_registry,
@@ -53,10 +53,16 @@ from commands import (
     interactive_pty_specs_from_registry,
     command_catalog_entry, command_catalog_from_registry, is_command_allowed, rewrite_command,
 )
-from permalinks import _format_retention, _expiry_note, _permalink_error_page, _normalize_permalink_lines, _prompt_echo_text
-from output_signals import OutputSignalClassifier, classify_line, command_root, extract_target
-from run_output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_entries, load_full_output_lines
-from workspace import (
+from services.history.permalinks import (
+    _expiry_note,
+    _format_retention,
+    _normalize_permalink_lines,
+    _permalink_error_page,
+    _prompt_echo_text,
+)
+from core.output_signals import OutputSignalClassifier, classify_line, command_root, extract_target
+from services.runs.output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_entries, load_full_output_lines
+from services.workspace.files import (
     InvalidWorkspacePath, WorkspaceDisabled, WorkspacePermissionDenied, WorkspaceQuotaExceeded,
     cleanup_inactive_workspaces, create_workspace_directory, delete_workspace_file, delete_workspace_path,
     expand_workspace_path_pattern,
@@ -292,7 +298,7 @@ class TestSessionWorkspace:
     def test_session_workspace_logs_chmod_failures_without_blocking_creation(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            with mock.patch("workspace.os.chmod", side_effect=OSError("chmod blocked")):
+            with mock.patch("services.workspace.files.os.chmod", side_effect=OSError("chmod blocked")):
                 with mock.patch.object(workspace_module.log, "warning") as warning:
                     path = ensure_session_workspace("session-1", cfg)
 
@@ -335,9 +341,9 @@ class TestSessionWorkspace:
             path = Path(tmp) / "amass"
             path.mkdir()
 
-            with mock.patch("workspace.shutil.which", return_value="/usr/bin/sudo"), \
-                    mock.patch("workspace.pwd.getpwnam", return_value=object()), \
-                    mock.patch("workspace.subprocess.run") as run:
+            with mock.patch("services.workspace.files.shutil.which", return_value="/usr/bin/sudo"), \
+                    mock.patch("services.workspace.files.pwd.getpwnam", return_value=object()), \
+                    mock.patch("services.workspace.files.subprocess.run") as run:
                 prepare_workspace_directory_for_command(path, mode="read_write")
 
             commands = [call.args[0] for call in run.call_args_list]
@@ -356,7 +362,7 @@ class TestSessionWorkspace:
             os.chmod(command_dir, 0o2700)
             os.chmod(command_file, 0o600)
 
-            with mock.patch("workspace._scanner_uid", return_value=command_dir.stat().st_uid):
+            with mock.patch("services.workspace.files._scanner_uid", return_value=command_dir.stat().st_uid):
                 assert list_workspace_files("session-1", cfg)[0]["path"] == "subfinder/provider-config.yaml"
                 assert list_workspace_directories("session-1", cfg)[0]["path"] == "subfinder"
                 assert read_workspace_text_file("session-1", "subfinder/provider-config.yaml", cfg) == "sources: []\n"
@@ -369,7 +375,7 @@ class TestSessionWorkspace:
             cfg = self._cfg(tmp)
             write_workspace_text_file("session-1", "provider-config.yaml", "sources: []\n", cfg)
 
-            with mock.patch("workspace.os.open", side_effect=PermissionError(errno.EACCES, "denied")):
+            with mock.patch("services.workspace.files.os.open", side_effect=PermissionError(errno.EACCES, "denied")):
                 with pytest.raises(WorkspacePermissionDenied):
                     read_workspace_text_file("session-1", "provider-config.yaml", cfg)
 
@@ -379,10 +385,10 @@ class TestSessionWorkspace:
             write_workspace_text_file("session-1", "nmap-dot/amass.dot", "digraph {}\n", cfg)
             path = resolve_workspace_path("session-1", "nmap-dot/amass.dot", cfg)
 
-            with mock.patch("workspace.Path.unlink", side_effect=PermissionError), \
-                    mock.patch("workspace.shutil.which", return_value="/usr/bin/sudo"), \
-                    mock.patch("workspace.pwd.getpwnam", return_value=object()), \
-                    mock.patch("workspace.subprocess.run") as run:
+            with mock.patch("services.workspace.files.Path.unlink", side_effect=PermissionError), \
+                    mock.patch("services.workspace.files.shutil.which", return_value="/usr/bin/sudo"), \
+                    mock.patch("services.workspace.files.pwd.getpwnam", return_value=object()), \
+                    mock.patch("services.workspace.files.subprocess.run") as run:
                 delete_workspace_file("session-1", "nmap-dot/amass.dot", cfg)
 
             run.assert_called_once_with(
@@ -505,7 +511,7 @@ class TestSessionWorkspace:
                 if target.exists() or target.is_symlink():
                     target.unlink()
                 target.write_text("inside\n", encoding="utf-8")
-                with mock.patch("workspace.resolve_workspace_path", side_effect=swap_final_component):
+                with mock.patch("services.workspace.files.resolve_workspace_path", side_effect=swap_final_component):
                     with pytest.raises(InvalidWorkspacePath):
                         operation()
                 assert outside.read_text(encoding="utf-8") == "outside\n"
@@ -710,7 +716,7 @@ class TestDerivedCommandRegistry:
                     - value: -i
                       description: Ignore case
             """))
-            with mock.patch("commands.COMMANDS_REGISTRY_FILE", str(path)):
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
                 registry = load_commands_registry()
 
         ping = registry["commands"][0]
@@ -926,7 +932,7 @@ class TestDerivedCommandRegistry:
                     - value: -i
                       description: Ignore case
             """))
-            with mock.patch("commands.COMMANDS_REGISTRY_FILE", str(base_path)):
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(base_path)):
                 registry = load_commands_registry()
 
         by_root = {entry["root"]: entry for entry in registry["commands"]}
@@ -1292,16 +1298,16 @@ class TestDerivedCommandRegistry:
             }
 
             registry = commands.load_commands_registry()
-            with mock.patch("commands.load_commands_registry", return_value=registry):
+            with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
                 command_policy = commands.load_command_policy()
                 allow_grouping = commands.load_allow_grouping_flags()
                 workspace_flags = commands._workspace_flag_specs_by_root()
                 runtime_adaptations = commands._runtime_adaptations_by_root()
 
-            with mock.patch("commands.load_command_policy", return_value=command_policy), \
-                 mock.patch("commands.load_allow_grouping_flags", return_value=allow_grouping), \
-                 mock.patch("commands._workspace_flag_specs_by_root", return_value=workspace_flags), \
-                 mock.patch("commands._runtime_adaptations_by_root", return_value=runtime_adaptations):
+            with mock.patch("services.commands.registry.load_command_policy", return_value=command_policy), \
+                 mock.patch("services.commands.registry.load_allow_grouping_flags", return_value=allow_grouping), \
+                 mock.patch("services.commands.registry._workspace_flag_specs_by_root", return_value=workspace_flags), \
+                 mock.patch("services.commands.registry._runtime_adaptations_by_root", return_value=runtime_adaptations):
                 for command, (reads, writes) in cases.items():
                     result = commands.validate_command(command, session_id=session_id, cfg=cfg)
                     assert result.allowed, f"{command!r} should be workspace-allowed: {result.reason}"
@@ -1515,7 +1521,7 @@ class TestDerivedCommandRegistry:
                 )
             )
 
-            with mock.patch("commands.COMMANDS_REGISTRY_FILE", str(path)):
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
                 allow, deny = load_command_policy()
 
         assert allow == ["curl", "nmap"]
@@ -1551,7 +1557,7 @@ class TestDerivedCommandRegistry:
                 )
             )
 
-            with mock.patch("commands.COMMANDS_REGISTRY_FILE", str(path)):
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
                 grouped = load_allow_grouping_flags()
 
         assert grouped == {"nc": {"-z", "-v", "-n"}}
@@ -1591,7 +1597,7 @@ class TestDerivedCommandRegistry:
                 )
             )
 
-            with mock.patch("commands.COMMANDS_REGISTRY_FILE", str(path)):
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
                 assert is_command_allowed("nc -zv darklab.sh 80")[0]
                 assert is_command_allowed("nc -vz darklab.sh 80")[0]
                 assert is_command_allowed("nc -n -v -z darklab.sh 80")[0]
@@ -1608,7 +1614,7 @@ class TestDerivedCommandRegistry:
 
 class TestLoadFaq:
     def test_missing_file_returns_empty_list(self):
-        with mock.patch("commands.FAQ_FILE", "/nonexistent/faq.yaml"):
+        with mock.patch("services.commands.registry.FAQ_FILE", "/nonexistent/faq.yaml"):
             result = load_faq()
         assert result == []
 
@@ -1618,7 +1624,7 @@ class TestLoadFaq:
             f.write(yaml_content)
             path = f.name
         try:
-            with mock.patch("commands.FAQ_FILE", path):
+            with mock.patch("services.commands.registry.FAQ_FILE", path):
                 result = load_faq()
         finally:
             os.unlink(path)
@@ -1641,7 +1647,7 @@ class TestLoadFaq:
             f.write(yaml_content)
             path = f.name
         try:
-            with mock.patch("commands.FAQ_FILE", path):
+            with mock.patch("services.commands.registry.FAQ_FILE", path):
                 result = load_faq()
         finally:
             os.unlink(path)
@@ -1660,7 +1666,7 @@ class TestLoadFaq:
             f.write(yaml_content)
             path = f.name
         try:
-            with mock.patch("commands.FAQ_FILE", path):
+            with mock.patch("services.commands.registry.FAQ_FILE", path):
                 result = load_faq()
         finally:
             os.unlink(path)
@@ -1675,7 +1681,7 @@ class TestLoadFaq:
                 f.write("- question: Base?\n  answer: Base answer.\n")
             with open(local_path, "w") as f:
                 f.write("- question: Local?\n  answer: Local answer.\n")
-            with mock.patch("commands.FAQ_FILE", base_path):
+            with mock.patch("services.commands.registry.FAQ_FILE", base_path):
                 result = load_faq()
         assert [item["question"] for item in result] == ["Base?", "Local?"]
 
@@ -1693,7 +1699,7 @@ class TestLoadFaq:
             f.write(yaml_content)
             path = f.name
         try:
-            with mock.patch("commands.FAQ_FILE", path):
+            with mock.patch("services.commands.registry.FAQ_FILE", path):
                 result = load_faq({"workspace_enabled": False})
         finally:
             os.unlink(path)
@@ -1714,7 +1720,7 @@ class TestLoadFaq:
             f.write(yaml_content)
             path = f.name
         try:
-            with mock.patch("commands.FAQ_FILE", path):
+            with mock.patch("services.commands.registry.FAQ_FILE", path):
                 result = load_faq({"workspace_enabled": True})
         finally:
             os.unlink(path)
@@ -2028,7 +2034,7 @@ class TestThemeRegistry:
             f.write(yaml_content)
             path = f.name
         try:
-            with mock.patch("commands.FAQ_FILE", path):
+            with mock.patch("services.commands.registry.FAQ_FILE", path):
                 result = load_faq()
         finally:
             os.unlink(path)
@@ -2041,7 +2047,7 @@ class TestThemeRegistry:
             f.write(yaml_content)
             path = f.name
         try:
-            with mock.patch("commands.FAQ_FILE", path):
+            with mock.patch("services.commands.registry.FAQ_FILE", path):
                 result = load_faq()
         finally:
             os.unlink(path)
@@ -2061,7 +2067,7 @@ class TestThemeRegistry:
             f.write("")
             path = f.name
         try:
-            with mock.patch("commands.FAQ_FILE", path):
+            with mock.patch("services.commands.registry.FAQ_FILE", path):
                 result = load_faq()
         finally:
             os.unlink(path)
@@ -2073,7 +2079,7 @@ class TestThemeRegistry:
             f.write(yaml_content)
             path = f.name
         try:
-            with mock.patch("commands.FAQ_FILE", path):
+            with mock.patch("services.commands.registry.FAQ_FILE", path):
                 result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
         finally:
             os.unlink(path)
@@ -2086,7 +2092,7 @@ class TestThemeRegistry:
             f.write("")
             path = f.name
         try:
-            with mock.patch("commands.FAQ_FILE", path):
+            with mock.patch("services.commands.registry.FAQ_FILE", path):
                 result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
         finally:
             os.unlink(path)
@@ -2098,7 +2104,7 @@ class TestThemeRegistry:
             f.write("")
             path = f.name
         try:
-            with mock.patch("commands.FAQ_FILE", path), mock.patch(
+            with mock.patch("services.commands.registry.FAQ_FILE", path), mock.patch(
                 "config.PROJECT_README",
                 "https://example.invalid/config-readme",
             ):
@@ -2113,7 +2119,7 @@ class TestThemeRegistry:
             f.write("")
             path = f.name
         try:
-            with mock.patch("commands.FAQ_FILE", path):
+            with mock.patch("services.commands.registry.FAQ_FILE", path):
                 result = load_all_faq(
                     "darklab_shell",
                     "https://example.invalid/README.md",
@@ -2130,7 +2136,7 @@ class TestThemeRegistry:
             f.write("")
             path = f.name
         try:
-            with mock.patch("commands.FAQ_FILE", path):
+            with mock.patch("services.commands.registry.FAQ_FILE", path):
                 result = load_all_faq(
                     "darklab_shell",
                     "https://example.invalid/README.md",
@@ -2146,7 +2152,7 @@ class TestThemeRegistry:
             f.write("")
             path = f.name
         try:
-            with mock.patch("commands.FAQ_FILE", path):
+            with mock.patch("services.commands.registry.FAQ_FILE", path):
                 result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
         finally:
             os.unlink(path)
@@ -2170,7 +2176,7 @@ class TestThemeRegistry:
             f.write("")
             path = f.name
         try:
-            with mock.patch("commands.FAQ_FILE", path):
+            with mock.patch("services.commands.registry.FAQ_FILE", path):
                 result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
         finally:
             os.unlink(path)
@@ -2200,7 +2206,7 @@ def _command_validation_helpers():
     global _COMMAND_VALIDATION_HELPERS
     if _COMMAND_VALIDATION_HELPERS is None:
         registry = commands.load_commands_registry()
-        with mock.patch("commands.load_commands_registry", return_value=registry):
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
             _COMMAND_VALIDATION_HELPERS = {
                 "allow_grouping": commands.load_allow_grouping_flags(),
                 "workspace_flags": commands._workspace_flag_specs_by_root(),
@@ -2212,16 +2218,16 @@ def _command_validation_helpers():
 @contextmanager
 def _patched_command_validation_helpers():
     helpers = _command_validation_helpers()
-    with mock.patch("commands.load_allow_grouping_flags", return_value=helpers["allow_grouping"]), \
-         mock.patch("commands._workspace_flag_specs_by_root", return_value=helpers["workspace_flags"]), \
-         mock.patch("commands._runtime_adaptations_by_root", return_value=helpers["runtime_adaptations"]):
+    with mock.patch("services.commands.registry.load_allow_grouping_flags", return_value=helpers["allow_grouping"]), \
+         mock.patch("services.commands.registry._workspace_flag_specs_by_root", return_value=helpers["workspace_flags"]), \
+         mock.patch("services.commands.registry._runtime_adaptations_by_root", return_value=helpers["runtime_adaptations"]):
         yield
 
 
 def _check(cmd, allow=None, deny=None):
     a = allow if allow is not None else ["curl", "nmap", "ls"]
     d = deny if deny is not None else []
-    with mock.patch("commands.load_command_policy", return_value=(a, d)), \
+    with mock.patch("services.commands.registry.load_command_policy", return_value=(a, d)), \
          _patched_command_validation_helpers():
         return is_command_allowed(cmd)
 
@@ -3447,14 +3453,14 @@ class TestWelcomeLoading:
         return f.name
 
     def test_missing_file_returns_empty_list(self):
-        with mock.patch("commands.WELCOME_FILE", "/nonexistent/welcome.yaml"):
+        with mock.patch("services.commands.registry.WELCOME_FILE", "/nonexistent/welcome.yaml"):
             result = load_welcome()
         assert result == []
 
     def test_valid_entry_with_cmd_and_out(self):
         path = self._write("- cmd: ping google.com\n  out: \"64 bytes\"\n")
         try:
-            with mock.patch("commands.WELCOME_FILE", path):
+            with mock.patch("services.commands.registry.WELCOME_FILE", path):
                 result = load_welcome()
         finally:
             os.unlink(path)
@@ -3467,7 +3473,7 @@ class TestWelcomeLoading:
     def test_entry_with_group_and_featured_metadata(self):
         path = self._write("- cmd: dig darklab.sh A\n  out: \"answer\"\n  group: DNS\n  featured: true\n")
         try:
-            with mock.patch("commands.WELCOME_FILE", path):
+            with mock.patch("services.commands.registry.WELCOME_FILE", path):
                 result = load_welcome()
         finally:
             os.unlink(path)
@@ -3477,7 +3483,7 @@ class TestWelcomeLoading:
     def test_entry_without_out_gets_empty_string(self):
         path = self._write("- cmd: ping google.com\n")
         try:
-            with mock.patch("commands.WELCOME_FILE", path):
+            with mock.patch("services.commands.registry.WELCOME_FILE", path):
                 result = load_welcome()
         finally:
             os.unlink(path)
@@ -3486,7 +3492,7 @@ class TestWelcomeLoading:
     def test_entry_missing_cmd_filtered_out(self):
         path = self._write("- out: \"some output\"\n- cmd: nmap\n  out: \"scan\"\n")
         try:
-            with mock.patch("commands.WELCOME_FILE", path):
+            with mock.patch("services.commands.registry.WELCOME_FILE", path):
                 result = load_welcome()
         finally:
             os.unlink(path)
@@ -3497,7 +3503,7 @@ class TestWelcomeLoading:
         # rstrip (not strip) preserves leading indentation in output blocks
         path = self._write("- cmd: ping\n  out: \"  indented output   \"\n")
         try:
-            with mock.patch("commands.WELCOME_FILE", path):
+            with mock.patch("services.commands.registry.WELCOME_FILE", path):
                 result = load_welcome()
         finally:
             os.unlink(path)
@@ -3506,7 +3512,7 @@ class TestWelcomeLoading:
     def test_non_list_yaml_returns_empty(self):
         path = self._write("key: value\n")
         try:
-            with mock.patch("commands.WELCOME_FILE", path):
+            with mock.patch("services.commands.registry.WELCOME_FILE", path):
                 result = load_welcome()
         finally:
             os.unlink(path)
@@ -3520,7 +3526,7 @@ class TestWelcomeLoading:
                 f.write("- cmd: ping\n  out: base\n")
             with open(local_path, "w") as f:
                 f.write("- cmd: curl\n  out: local\n")
-            with mock.patch("commands.WELCOME_FILE", base_path):
+            with mock.patch("services.commands.registry.WELCOME_FILE", base_path):
                 result = load_welcome()
         assert [item["cmd"] for item in result] == ["ping", "curl"]
 
@@ -3534,7 +3540,7 @@ class TestTourLoading:
         return path
 
     def test_missing_file_returns_empty_tour(self):
-        with mock.patch("commands.TOUR_FILE", "/nonexistent/tour.yaml"):
+        with mock.patch("services.commands.registry.TOUR_FILE", "/nonexistent/tour.yaml"):
             result = load_tour()
         assert result == {"version": 0, "chapters": []}
 
@@ -3552,7 +3558,7 @@ class TestTourLoading:
             """,
         )
 
-        with mock.patch("commands.TOUR_FILE", str(path)):
+        with mock.patch("services.commands.registry.TOUR_FILE", str(path)):
             result = load_tour({"tour_enabled": True})
 
         assert result == {
@@ -3580,7 +3586,7 @@ class TestTourLoading:
             """,
         )
 
-        with mock.patch("commands.TOUR_FILE", str(path)):
+        with mock.patch("services.commands.registry.TOUR_FILE", str(path)):
             result = load_tour({"tour_enabled": False})
 
         assert result == {"version": 1, "chapters": []}
@@ -3595,7 +3601,7 @@ class TestTourLoading:
                 summary: Welcome.
             """,
         )
-        with mock.patch("commands.TOUR_FILE", str(missing)):
+        with mock.patch("services.commands.registry.TOUR_FILE", str(missing)):
             with pytest.raises(ValueError, match="version"):
                 load_tour()
 
@@ -3606,7 +3612,7 @@ class TestTourLoading:
             chapters: []
             """,
         )
-        with mock.patch("commands.TOUR_FILE", str(invalid)):
+        with mock.patch("services.commands.registry.TOUR_FILE", str(invalid)):
             with pytest.raises(ValueError, match="version"):
                 load_tour()
 
@@ -3623,7 +3629,7 @@ class TestTourLoading:
             """,
         )
 
-        with mock.patch("commands.TOUR_FILE", str(path)):
+        with mock.patch("services.commands.registry.TOUR_FILE", str(path)):
             with pytest.raises(ValueError, match="unknown requires key"):
                 load_tour()
 
@@ -3647,7 +3653,7 @@ class TestTourLoading:
             """,
         )
 
-        with mock.patch("commands.TOUR_FILE", str(path)):
+        with mock.patch("services.commands.registry.TOUR_FILE", str(path)):
             disabled = load_tour({
                 "tour_enabled": True,
                 "workspace_enabled": False,
@@ -3678,7 +3684,7 @@ class TestTourLoading:
             """,
         )
 
-        with mock.patch("commands.TOUR_FILE", str(path)):
+        with mock.patch("services.commands.registry.TOUR_FILE", str(path)):
             desktop = load_tour({"tour_enabled": True, "interactive_pty_enabled": True})
             mobile = load_tour({"tour_enabled": True, "interactive_pty_enabled": True}, mobile=True)
 
@@ -3697,7 +3703,7 @@ class TestTourLoading:
             """,
         )
 
-        with mock.patch("commands.TOUR_FILE", str(path)):
+        with mock.patch("services.commands.registry.TOUR_FILE", str(path)):
             assert load_tour()["chapters"][0]["id"] == "first"
             path.write_text(textwrap.dedent(
                 """
@@ -3718,7 +3724,7 @@ class TestTourLoading:
 
 class TestWelcomeAssetLoading:
     def test_missing_ascii_file_returns_empty_string(self):
-        with mock.patch("commands.ASCII_FILE", "/nonexistent/ascii.txt"):
+        with mock.patch("services.commands.registry.ASCII_FILE", "/nonexistent/ascii.txt"):
             assert load_ascii_art() == ""
 
     def test_ascii_art_trims_only_trailing_whitespace(self):
@@ -3726,13 +3732,13 @@ class TestWelcomeAssetLoading:
             f.write("  banner  \n\n")
             path = f.name
         try:
-            with mock.patch("commands.ASCII_FILE", path):
+            with mock.patch("services.commands.registry.ASCII_FILE", path):
                 assert load_ascii_art() == "  banner"
         finally:
             os.unlink(path)
 
     def test_missing_mobile_ascii_file_returns_empty_string(self):
-        with mock.patch("commands.ASCII_MOBILE_FILE", "/nonexistent/ascii_mobile.txt"):
+        with mock.patch("services.commands.registry.ASCII_MOBILE_FILE", "/nonexistent/ascii_mobile.txt"):
             assert load_ascii_mobile_art() == ""
 
     def test_mobile_ascii_art_trims_only_trailing_whitespace(self):
@@ -3740,7 +3746,7 @@ class TestWelcomeAssetLoading:
             f.write("  mobile banner  \n\n")
             path = f.name
         try:
-            with mock.patch("commands.ASCII_MOBILE_FILE", path):
+            with mock.patch("services.commands.registry.ASCII_MOBILE_FILE", path):
                 assert load_ascii_mobile_art() == "  mobile banner"
         finally:
             os.unlink(path)
@@ -3753,7 +3759,7 @@ class TestWelcomeAssetLoading:
                 f.write("base art")
             with open(local_path, "w") as f:
                 f.write("local art")
-            with mock.patch("commands.ASCII_FILE", base_path):
+            with mock.patch("services.commands.registry.ASCII_FILE", base_path):
                 assert load_ascii_art() == "local art"
 
     def test_mobile_ascii_art_local_overlay_replaces_base(self):
@@ -3764,7 +3770,7 @@ class TestWelcomeAssetLoading:
                 f.write("base mobile art")
             with open(local_path, "w") as f:
                 f.write("local mobile art")
-            with mock.patch("commands.ASCII_MOBILE_FILE", base_path):
+            with mock.patch("services.commands.registry.ASCII_MOBILE_FILE", base_path):
                 assert load_ascii_mobile_art() == "local mobile art"
 
     def test_local_hints_overlay_appends_entries(self):
@@ -3775,7 +3781,7 @@ class TestWelcomeAssetLoading:
                 f.write("Use the history panel.\n")
             with open(local_path, "w") as f:
                 f.write("Press Enter to run.\n")
-            with mock.patch("commands.APP_HINTS_FILE", base_path):
+            with mock.patch("services.commands.registry.APP_HINTS_FILE", base_path):
                 assert load_welcome_hints() == ["Use the history panel.", "Press Enter to run."]
 
     def test_mobile_hints_overlay_appends_entries(self):
@@ -3786,7 +3792,7 @@ class TestWelcomeAssetLoading:
                 f.write("Tap the prompt.\n")
             with open(local_path, "w") as f:
                 f.write("Use the mobile menu.\n")
-            with mock.patch("commands.APP_HINTS_MOBILE_FILE", base_path):
+            with mock.patch("services.commands.registry.APP_HINTS_MOBILE_FILE", base_path):
                 assert load_mobile_welcome_hints() == ["Tap the prompt.", "Use the mobile menu."]
 
 
@@ -4156,7 +4162,7 @@ class TestRunOutputCapture:
         ]
 
     def test_missing_hints_file_returns_empty_list(self):
-        with mock.patch("commands.APP_HINTS_FILE", "/nonexistent/app_hints.txt"):
+        with mock.patch("services.commands.registry.APP_HINTS_FILE", "/nonexistent/app_hints.txt"):
             assert load_welcome_hints() == []
 
     def test_hints_loader_ignores_blank_lines_and_comments(self):
@@ -4164,7 +4170,7 @@ class TestRunOutputCapture:
             f.write("# comment\n\nUse the history panel.\n  \n# another\nPress Enter to run.\n")
             path = f.name
         try:
-            with mock.patch("commands.APP_HINTS_FILE", path):
+            with mock.patch("services.commands.registry.APP_HINTS_FILE", path):
                 assert load_welcome_hints() == ["Use the history panel.", "Press Enter to run."]
         finally:
             os.unlink(path)
@@ -4181,7 +4187,7 @@ class TestRunOutputCapture:
             )
             path = f.name
         try:
-            with mock.patch("commands.APP_HINTS_FILE", path):
+            with mock.patch("services.commands.registry.APP_HINTS_FILE", path):
                 assert load_welcome_hints({"workspace_enabled": False}) == [
                     "Use the history panel.",
                     "Press Enter to run.",
@@ -4206,7 +4212,7 @@ class TestRunOutputCapture:
             )
             path = f.name
         try:
-            with mock.patch("commands.APP_HINTS_FILE", path):
+            with mock.patch("services.commands.registry.APP_HINTS_FILE", path):
                 assert load_welcome_hints({"interactive_pty_enabled": False}) == [
                     "Use the history panel.",
                     "Press Enter to run.",
@@ -4222,7 +4228,7 @@ class TestRunOutputCapture:
 
 class TestMobileWelcomeHintLoading:
     def test_missing_mobile_hints_file_returns_empty_list(self):
-        with mock.patch("commands.APP_HINTS_MOBILE_FILE", "/nonexistent/app_hints_mobile.txt"):
+        with mock.patch("services.commands.registry.APP_HINTS_MOBILE_FILE", "/nonexistent/app_hints_mobile.txt"):
             assert load_mobile_welcome_hints() == []
 
     def test_mobile_hints_loader_ignores_blank_lines_and_comments(self):
@@ -4230,7 +4236,7 @@ class TestMobileWelcomeHintLoading:
             f.write("# comment\n\nTap the prompt.\n  \n# another\nUse the mobile menu.\n")
             path = f.name
         try:
-            with mock.patch("commands.APP_HINTS_MOBILE_FILE", path):
+            with mock.patch("services.commands.registry.APP_HINTS_MOBILE_FILE", path):
                 assert load_mobile_welcome_hints() == ["Tap the prompt.", "Use the mobile menu."]
         finally:
             os.unlink(path)
@@ -4246,7 +4252,7 @@ class TestMobileWelcomeHintLoading:
             )
             path = f.name
         try:
-            with mock.patch("commands.APP_HINTS_MOBILE_FILE", path):
+            with mock.patch("services.commands.registry.APP_HINTS_MOBILE_FILE", path):
                 assert load_mobile_welcome_hints({"workspace_enabled": False}) == [
                     "Tap the prompt.",
                     "Use the mobile menu.",
@@ -4292,8 +4298,11 @@ class TestAutocompleteContextLoading:
             },
         ]
 
-        with mock.patch("commands.load_autocomplete_context_from_commands_registry", return_value=registry_context):
-            with mock.patch("commands.load_all_workflows", return_value=workflows):
+        with mock.patch(
+            "services.commands.registry.load_autocomplete_context_from_commands_registry",
+            return_value=registry_context,
+        ):
+            with mock.patch("services.commands.registry.load_all_workflows", return_value=workflows):
                 result = load_container_smoke_test_commands()
 
         assert result == [
@@ -4331,8 +4340,11 @@ class TestAutocompleteContextLoading:
             },
         }
 
-        with mock.patch("commands.load_autocomplete_context_from_commands_registry", return_value=registry_context):
-            with mock.patch("commands.load_all_workflows", return_value=[]):
+        with mock.patch(
+            "services.commands.registry.load_autocomplete_context_from_commands_registry",
+            return_value=registry_context,
+        ):
+            with mock.patch("services.commands.registry.load_all_workflows", return_value=[]):
                 result = load_container_smoke_test_commands()
 
         assert result == [
@@ -4354,9 +4366,9 @@ class TestAutocompleteContextLoading:
         assert whois_positions == [2, 5]
 
     def test_container_smoke_test_commands_render_workflow_defaults(self):
-        with mock.patch("commands.load_autocomplete_context_from_commands_registry", return_value={}):
+        with mock.patch("services.commands.registry.load_autocomplete_context_from_commands_registry", return_value={}):
             with mock.patch(
-                "commands.load_all_workflows",
+                "services.commands.registry.load_all_workflows",
                 return_value=[
                     {
                         "title": "DNS",
@@ -4406,10 +4418,10 @@ class TestAutocompleteContextLoading:
         }
 
         with mock.patch(
-            "commands.load_autocomplete_context_from_commands_registry",
+            "services.commands.registry.load_autocomplete_context_from_commands_registry",
             return_value=registry_context,
         ) as load_context:
-            with mock.patch("commands.load_all_workflows", return_value=[]):
+            with mock.patch("services.commands.registry.load_all_workflows", return_value=[]):
                 result = load_container_smoke_test_commands()
 
         load_context.assert_called_once_with({"workspace_enabled": False})
@@ -4444,7 +4456,7 @@ class TestAutocompleteContextLoading:
         }
 
         with mock.patch(
-            "commands.load_autocomplete_context_from_commands_registry",
+            "services.commands.registry.load_autocomplete_context_from_commands_registry",
             return_value=registry_context,
         ) as load_context:
             result = load_container_smoke_test_interactive_commands()
@@ -4553,7 +4565,7 @@ class TestWorkflowInputLoading:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "workflows.yaml"
             path.write_text(payload)
-            with mock.patch("commands.WORKFLOWS_FILE", str(path)):
+            with mock.patch("services.commands.registry.WORKFLOWS_FILE", str(path)):
                 result = load_workflows()
 
         assert result == [
@@ -4594,7 +4606,7 @@ class TestWorkflowInputLoading:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "workflows.yaml"
             path.write_text(payload)
-            with mock.patch("commands.WORKFLOWS_FILE", str(path)):
+            with mock.patch("services.commands.registry.WORKFLOWS_FILE", str(path)):
                 result = load_workflows()
 
         assert result == [
@@ -4730,14 +4742,14 @@ class TestRewriteIdempotent:
 
 class TestExpiryNote:
     def test_returns_empty_when_retention_zero(self):
-        with mock.patch("permalinks.CFG", {"permalink_retention_days": 0}):
+        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 0}):
             result = _expiry_note("2024-01-01T00:00:00+00:00")
         assert result == ""
 
     def test_returns_expiry_text_when_not_expired(self):
         # Created 5 days ago, retention 30 days → ~25 days remaining
         created = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
-        with mock.patch("permalinks.CFG", {"permalink_retention_days": 30}):
+        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 30}):
             result = _expiry_note(created)
         assert "expires in" in result
         assert "days" in result
@@ -4745,25 +4757,25 @@ class TestExpiryNote:
     def test_returns_expires_today_when_less_than_24h(self):
         # Created just under retention_days ago so < 24 h remains
         created = (datetime.now(timezone.utc) - timedelta(days=6, hours=23)).isoformat()
-        with mock.patch("permalinks.CFG", {"permalink_retention_days": 7}):
+        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 7}):
             result = _expiry_note(created)
         assert "expires today" in result
 
     def test_returns_empty_when_already_expired(self):
         # Created longer ago than retention
         created = (datetime.now(timezone.utc) - timedelta(days=40)).isoformat()
-        with mock.patch("permalinks.CFG", {"permalink_retention_days": 30}):
+        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 30}):
             result = _expiry_note(created)
         assert result == ""
 
     def test_returns_empty_on_invalid_date(self):
-        with mock.patch("permalinks.CFG", {"permalink_retention_days": 30}):
+        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 30}):
             result = _expiry_note("not-a-date")
         assert result == ""
 
     def test_includes_expiry_date(self):
         created = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-        with mock.patch("permalinks.CFG", {"permalink_retention_days": 30}):
+        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 30}):
             result = _expiry_note(created)
         # Should include a YYYY-MM-DD formatted date
         import re
@@ -4774,15 +4786,15 @@ class TestExpiryNote:
 
 class TestPromptEchoText:
     def test_uses_configured_prompt_identity(self):
-        with mock.patch.dict("permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
+        with mock.patch.dict("services.history.permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             assert _prompt_echo_text("ls -la") == "ops@darklab:~ $ ls -la"
 
     def test_falls_back_to_default_identity_when_parts_are_missing(self):
-        with mock.patch.dict("permalinks.CFG", {"prompt_username": "", "prompt_domain": ""}):
+        with mock.patch.dict("services.history.permalinks.CFG", {"prompt_username": "", "prompt_domain": ""}):
             assert _prompt_echo_text("ls -la") == "anon@darklab.sh:~ $ ls -la"
 
     def test_strips_trailing_space_when_label_empty(self):
-        with mock.patch.dict("permalinks.CFG", {"prompt_username": "anon", "prompt_domain": "darklab.sh"}):
+        with mock.patch.dict("services.history.permalinks.CFG", {"prompt_username": "anon", "prompt_domain": "darklab.sh"}):
             assert _prompt_echo_text("") == "anon@darklab.sh:~ $"
 
 
@@ -4793,7 +4805,7 @@ class TestNormalizePermalinkLinesPromptEcho:
     same prompt identity as the live shell."""
 
     def test_unstructured_content_uses_configured_prefix(self):
-        with mock.patch.dict("permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
+        with mock.patch.dict("services.history.permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             lines = _normalize_permalink_lines(["hello", "world"], label="echo hello")
         assert lines[0]["cls"] == "prompt-echo"
         assert lines[0]["text"] == "ops@darklab:~ $ echo hello"
@@ -4803,7 +4815,7 @@ class TestNormalizePermalinkLinesPromptEcho:
             {"text": "hello", "cls": "", "tsC": "", "tsE": ""},
             {"text": "[process exited with code 0 in 0.1s]", "cls": "exit-ok"},
         ]
-        with mock.patch.dict("permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
+        with mock.patch.dict("services.history.permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             lines = _normalize_permalink_lines(content, label="echo hello")
         assert lines[0]["cls"] == "prompt-echo"
         assert lines[0]["text"] == "ops@darklab:~ $ echo hello"
@@ -4813,7 +4825,7 @@ class TestNormalizePermalinkLinesPromptEcho:
             {"text": "anon@darklab:~$ echo hello", "cls": "prompt-echo"},
             {"text": "hello", "cls": ""},
         ]
-        with mock.patch.dict("permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
+        with mock.patch.dict("services.history.permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             lines = _normalize_permalink_lines(content, label="echo hello")
         # Existing echo survives; normalizer does not prepend a second one.
         echo_lines = [entry for entry in lines if entry["cls"] == "prompt-echo"]
@@ -4825,31 +4837,31 @@ class TestNormalizePermalinkLinesPromptEcho:
 
 class TestPermalinkErrorPage:
     def test_returns_404_status(self):
-        with mock.patch("permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
+        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
             with shell_app.app.app_context():
                 resp = _permalink_error_page("snapshot")
         assert resp.status_code == 404
 
     def test_includes_noun_in_body(self):
-        with mock.patch("permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
+        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
             with shell_app.app.app_context():
                 resp = _permalink_error_page("run")
         assert b"run" in resp.data
 
     def test_includes_app_name(self):
-        with mock.patch("permalinks.CFG", {"permalink_retention_days": 0, "app_name": "my-shell"}):
+        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 0, "app_name": "my-shell"}):
             with shell_app.app.app_context():
                 resp = _permalink_error_page("snapshot")
         assert b"my-shell" in resp.data
 
     def test_mentions_retention_when_configured(self):
-        with mock.patch("permalinks.CFG", {"permalink_retention_days": 30, "app_name": "testshell"}):
+        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 30, "app_name": "testshell"}):
             with shell_app.app.app_context():
                 resp = _permalink_error_page("snapshot")
         assert b"30 days" in resp.data or b"1 month" in resp.data
 
     def test_no_retention_mention_when_unlimited(self):
-        with mock.patch("permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
+        with mock.patch("services.history.permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
             with shell_app.app.app_context():
                 resp = _permalink_error_page("snapshot")
         # Unlimited mode should not mention an automatic deletion period
@@ -4864,8 +4876,8 @@ class TestDatabaseInit:
         return os.path.join(tmp, "test.db")
 
     def _create_tables(self, db_path):
-        with mock.patch("database.DB_PATH", db_path):
-            with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+        with mock.patch("core.database.DB_PATH", db_path):
+            with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
                 database.db_init()
 
     def test_creates_runs_and_snapshots_tables(self):
@@ -4995,8 +5007,8 @@ class TestDatabaseInit:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
             self._create_tables(db_path)
-            with mock.patch("database.DB_PATH", db_path):
-                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             indexes = {row[1] for row in conn.execute("PRAGMA index_list('runs')").fetchall()}
@@ -5053,8 +5065,8 @@ class TestDatabaseInit:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
             self._create_tables(db_path)
-            with mock.patch("database.DB_PATH", db_path):
-                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
                     database.db_init()  # second call
 
     def test_retention_prunes_old_runs(self):
@@ -5070,8 +5082,8 @@ class TestDatabaseInit:
             conn.commit()
             conn.close()
             # Re-init with 30-day retention — old run should be pruned
-            with mock.patch("database.DB_PATH", db_path):
-                with mock.patch("database.CFG", {"permalink_retention_days": 30}):
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 30}):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             count = conn.execute(
@@ -5091,8 +5103,8 @@ class TestDatabaseInit:
             )
             conn.commit()
             conn.close()
-            with mock.patch("database.DB_PATH", db_path):
-                with mock.patch("database.CFG", {"permalink_retention_days": 30}):
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 30}):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             count = conn.execute(
@@ -5122,8 +5134,8 @@ class TestDatabaseInit:
             )
             conn.commit()
             conn.close()
-            with mock.patch("database.DB_PATH", db_path):
-                with mock.patch("database.CFG", {"permalink_retention_days": 30}):
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 30}):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             label_count = conn.execute(
@@ -5148,8 +5160,8 @@ class TestDatabaseInit:
             conn.commit()
             conn.close()
             # Re-init with retention=0 — nothing should be pruned
-            with mock.patch("database.DB_PATH", db_path):
-                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             count = conn.execute(
@@ -5169,8 +5181,8 @@ class TestDatabaseInit:
             )
             conn.commit()
             conn.close()
-            with mock.patch("database.DB_PATH", db_path):
-                with mock.patch("database.CFG", {"permalink_retention_days": 30}):
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 30}):
                     database.db_init()
             conn = sqlite3.connect(db_path)
             count = conn.execute(
@@ -5199,8 +5211,8 @@ class TestDatabaseInit:
             conn.commit()
             conn.close()
 
-            with mock.patch("database.DB_PATH", db_path):
-                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
                     database.db_init()
 
             conn = sqlite3.connect(db_path)
@@ -5234,8 +5246,8 @@ class TestSessionVariables:
     def test_set_list_unset_and_expand_variables(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "vars.db")
-            with mock.patch("database.DB_PATH", db_path):
-                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
                     database.db_init()
                 session_variables.set_session_variable("sess-vars", "HOST", "ip.darklab.sh")
                 session_variables.set_session_variable("sess-vars", "PORT", "443")
@@ -5260,8 +5272,8 @@ class TestSessionVariables:
     def test_rejects_invalid_names_and_undefined_references(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "vars.db")
-            with mock.patch("database.DB_PATH", db_path):
-                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
                     database.db_init()
                 with pytest.raises(session_variables.InvalidSessionVariableName):
                     session_variables.set_session_variable("sess-vars", "host", "ip.darklab.sh")
@@ -5275,8 +5287,8 @@ class TestBuiltinStatus:
     def test_includes_session_summary_counts(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "status.db")
-            with mock.patch("database.DB_PATH", db_path):
-                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
                     database.db_init()
 
             conn = sqlite3.connect(db_path)
@@ -5303,9 +5315,9 @@ class TestBuiltinStatus:
             conn.commit()
             conn.close()
 
-            with mock.patch("database.DB_PATH", db_path):
-                with mock.patch("builtin_commands.active_runs_for_session", return_value=[{"id": "job-1"}]):
-                    with mock.patch("builtin_commands.redis_client", None):
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("services.commands.builtins.active_runs_for_session", return_value=[{"id": "job-1"}]):
+                    with mock.patch("services.commands.builtins.redis_client", None):
                         lines = builtin_commands._run_builtin_status("tok_statusdemo")
 
         text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", line["text"]) for line in lines)
@@ -5325,8 +5337,8 @@ class TestBuiltinStats:
     def test_reports_session_activity_and_command_breakdown(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "stats.db")
-            with mock.patch("database.DB_PATH", db_path):
-                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
                     database.db_init()
 
             conn = sqlite3.connect(db_path)
@@ -5411,8 +5423,8 @@ class TestBuiltinStats:
             conn.commit()
             conn.close()
 
-            with mock.patch("database.DB_PATH", db_path):
-                with mock.patch("builtin_commands.active_runs_for_session", return_value=[{"id": "job-1"}]):
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("services.commands.builtins.active_runs_for_session", return_value=[{"id": "job-1"}]):
                     lines = builtin_commands._run_builtin_stats("tok_statsdemo")
 
         text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", line["text"]) for line in lines)
@@ -5437,8 +5449,8 @@ class TestBuiltinStats:
     def test_top_commands_empty_state_ignores_builtin_only_sessions(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "stats-builtin-only.db")
-            with mock.patch("database.DB_PATH", db_path):
-                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
                     database.db_init()
 
             conn = sqlite3.connect(db_path)
@@ -5456,7 +5468,7 @@ class TestBuiltinStats:
             conn.commit()
             conn.close()
 
-            with mock.patch("database.DB_PATH", db_path):
+            with mock.patch("core.database.DB_PATH", db_path):
                 lines = builtin_commands._run_builtin_stats("tok_builtinonly")
 
         text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", line["text"]) for line in lines)

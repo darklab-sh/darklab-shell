@@ -5,8 +5,8 @@ import json
 import sqlite3
 
 import app as shell_app
-from database import DB_PATH
-import workspace
+from core.database import DB_PATH
+import services.workspace.files as workspace
 
 
 def get_client():

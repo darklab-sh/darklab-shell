@@ -15,7 +15,7 @@ import subprocess  # nosec B404
 import sys
 from typing import Callable, Sequence, TypedDict, cast
 
-from commands import (
+from services.commands.registry import (
     command_catalog_entry,
     command_root,
     load_ascii_art,
@@ -28,10 +28,10 @@ from commands import (
     split_command_argv,
 )
 from config import APP_VERSION, CFG, PROJECT_README
-from database import db_connect
-from helpers import is_failed_exit_code
-from process import active_runs_for_session, redis_client
-from project_workspace import (
+from core.database import db_connect
+from core.helpers import is_failed_exit_code
+from core.process import active_runs_for_session, redis_client
+from services.projects.workspace import (
     ProjectWorkspaceError,
     clear_active_project,
     create_project,
@@ -47,7 +47,7 @@ from project_workspace import (
     unlink_project_entity,
     update_project,
 )
-from session_variables import (
+from services.session.variables import (
     InvalidSessionVariableName,
     InvalidSessionVariableValue,
     list_session_variables,
@@ -55,7 +55,7 @@ from session_variables import (
     set_session_variable,
     unset_session_variable,
 )
-from workspace import (
+from services.workspace.files import (
     InvalidWorkspacePath,
     WorkspaceBinaryFile,
     WorkspaceDisabled,
@@ -72,7 +72,7 @@ from workspace import (
     workspace_usage,
     workspace_path_has_glob,
 )
-from wordlists import filter_wordlists, find_wordlist, load_wordlist_catalog
+from services.commands.wordlists import filter_wordlists, find_wordlist, load_wordlist_catalog
 
 
 _STARTED_AT = datetime.now(timezone.utc)

@@ -12,10 +12,10 @@ from pathlib import Path
 
 from flask import Blueprint, abort, current_app, jsonify, render_template, request, send_file
 
-from commands import command_root, load_command_policy
+from services.commands.registry import command_root, load_command_policy
 from config import APP_VERSION, CFG, get_theme_entry
-from database import DB_PATH, db_connect
-from helpers import (
+from core.database import DB_PATH, db_connect
+from core.helpers import (
     FONT_FILES,
     GRACEFUL_TERMINATION_EXIT_CODE,
     current_theme_name,
@@ -23,8 +23,8 @@ from helpers import (
     get_log_session_id,
     ip_is_in_cidrs,
 )
-from process import fallback_pid_snapshot, redis_client
-from run_broker import (
+from core.process import fallback_pid_snapshot, redis_client
+from services.runs.broker import (
     broker_available,
     broker_mode,
     broker_unavailable_reason,
@@ -523,7 +523,7 @@ def vendor_fonts(filename):
 @assets_bp.route("/favicon.ico")
 def favicon():
     return send_file(
-        os.path.join(os.path.dirname(os.path.dirname(__file__)), "favicon.ico"),
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "favicon.ico"),
         mimetype="image/x-icon",
     )
 

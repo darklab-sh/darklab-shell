@@ -9,7 +9,7 @@
  *
  * Usage:
  *   import { fromScript } from './helpers/extract.js'
- *   const { escapeHtml } = fromScript('app/static/js/utils.js', 'escapeHtml')
+ *   const { escapeHtml } = fromScript('app/static/js/core/utils.js', 'escapeHtml')
  *
  *   // For functions that use localStorage, access the store via _storage:
  *   const { _getStarred, _saveStarred, _storage } =
@@ -23,13 +23,13 @@ import { fileURLToPath } from 'url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../../../')
-const STATE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/state.js'), 'utf8')
-const UI_HELPERS_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_helpers.js'), 'utf8')
-const UI_PRESSABLE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_pressable.js'), 'utf8')
-const UI_DISCLOSURE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_disclosure.js'), 'utf8')
-const UI_DISMISSIBLE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_dismissible.js'), 'utf8')
-const UI_OUTSIDE_CLICK_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_outside_click.js'), 'utf8')
-const UI_FOCUS_TRAP_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_focus_trap.js'), 'utf8')
+const STATE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/core/state.js'), 'utf8')
+const UI_HELPERS_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_helpers.js'), 'utf8')
+const UI_PRESSABLE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_pressable.js'), 'utf8')
+const UI_DISCLOSURE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_disclosure.js'), 'utf8')
+const UI_DISMISSIBLE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_dismissible.js'), 'utf8')
+const UI_OUTSIDE_CLICK_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_outside_click.js'), 'utf8')
+const UI_FOCUS_TRAP_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_focus_trap.js'), 'utf8')
 
 /** Minimal but complete in-memory Storage implementation. */
 export class MemoryStorage {

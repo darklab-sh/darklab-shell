@@ -22,17 +22,17 @@ from pathlib import PurePosixPath
 from urllib.parse import urlparse
 
 import config as _config
-import run_comparison
-from database import (
+import services.runs.comparison as run_comparison
+from core.database import (
     db_connect,
     validate_project_entity_type,
     validate_project_link_source,
 )
-from output_signals import strip_ansi_codes
-from permalinks import _font_face_css, _format_duration, _permalink_context
-from redaction import apply_redaction_rules, redact_line_entries
-from run_output_store import load_full_output_entries
-from workspace import (
+from core.output_signals import strip_ansi_codes
+from services.history.permalinks import _font_face_css, _format_duration, _permalink_context
+from core.redaction import apply_redaction_rules, redact_line_entries
+from services.runs.output_store import load_full_output_entries
+from services.workspace.files import (
     WorkspaceDisabled,
     WorkspaceError,
     open_workspace_file_for_download,

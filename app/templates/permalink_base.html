@@ -6,17 +6,17 @@
 <meta name="color-scheme" content="{{ current_theme.color_scheme }}">
 <title>{{ page_title }}</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
-<link rel="stylesheet" href="/static/css/fonts.css">
+<link rel="stylesheet" href="/static/css/core/fonts.css">
 <link rel="stylesheet" href="/static/css/styles.css">
 <link rel="stylesheet" href="/static/css/terminal_export.css">
 {% include "theme_vars_style.html" %}
 {% include "theme_vars_script.html" %}
 <script src="/vendor/ansi_up.js"></script>
 <script src="/vendor/jspdf.umd.min.js"></script>
-<script src="/static/js/utils.js"></script>
+<script src="/static/js/core/utils.js"></script>
 <script src="/static/js/export_html.js"></script>
 <script src="/static/js/export_pdf.js"></script>
-<script src="/static/js/ui_outside_click.js"></script>
+<script src="/static/js/ui/ui_outside_click.js"></script>
 {% block extra_head %}{% endblock %}
 </head>
 <body class="permalink-page" data-theme="{{ current_theme.name }}">

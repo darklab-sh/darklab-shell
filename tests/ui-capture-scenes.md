@@ -23,7 +23,7 @@ of truth for scene intent.
   override the output directory.
 
 Capture tests are gated behind `RUN_CAPTURE=1` through the dedicated configs in
-`config/playwright.capture.{desktop,mobile}.config.js`, so the pack never runs
+`.tooling/playwright.capture.{desktop,mobile}.config.js`, so the pack never runs
 as part of `npm run test:e2e`.
 
 ## Output layout

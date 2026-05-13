@@ -9,8 +9,8 @@ Usage in app.py:
 
 from flask_limiter import Limiter
 
-from helpers import get_client_ip
-from process import REDIS_URL, redis_client
+from core.helpers import get_client_ip
+from core.process import REDIS_URL, redis_client
 
 limiter = Limiter(
     key_func=get_client_ip,

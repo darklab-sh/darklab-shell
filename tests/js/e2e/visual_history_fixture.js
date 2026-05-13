@@ -2,7 +2,7 @@ import {
   VISUAL_HISTORY_FIXTURE_NAME,
   VISUAL_HISTORY_MIN_ROOTS,
   VISUAL_HISTORY_MIN_RUNS,
-} from '../../../config/playwright.visual.contracts.js'
+} from '../../../.tooling/playwright.visual.contracts.js'
 
 const COMMAND_TEMPLATES = [
   ['nslookup -type=A darklab.sh', 0],

@@ -145,7 +145,7 @@ if [ "$ARM_BEFORE_RECORDING" = "1" ]; then
   DEMO_DISABLE_FRAME_CAPTURE=1 \
   DEMO_OBS_ARMING_FILE="$ARMING_FILE" \
   RUN_DEMO=1 npx playwright test \
-    --config config/playwright.demo.config.js &
+    --config .tooling/playwright.demo.config.js &
   playwright_pid=$!
 
   echo "Waiting for Chromium setup window ..."
@@ -219,7 +219,7 @@ DEMO_SESSION_TOKEN="$DEMO_SESSION_TOKEN" \
 DEMO_HEADED=1 \
 DEMO_DISABLE_FRAME_CAPTURE=1 \
 RUN_DEMO=1 npx playwright test \
-  --config config/playwright.demo.config.js
+  --config .tooling/playwright.demo.config.js
 playwright_status=$?
 set -e
 

@@ -9,8 +9,8 @@ from flask import Blueprint, jsonify, request, send_file
 
 from config import CFG
 from extensions import limiter
-from helpers import get_client_ip, get_log_session_id, get_session_id
-from project_workspace import (
+from core.helpers import get_client_ip, get_log_session_id, get_session_id
+from services.projects.workspace import (
     EvidencePackageTooLarge,
     ProjectWorkspaceError,
     ProjectWorkspaceNotFound,
@@ -48,7 +48,7 @@ from project_workspace import (
     update_project,
     update_project_target,
 )
-from workspace import (
+from services.workspace.files import (
     InvalidWorkspacePath,
     WorkspaceBinaryFile,
     WorkspaceDisabled,

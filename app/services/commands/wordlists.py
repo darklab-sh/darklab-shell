@@ -5,7 +5,7 @@ from typing import Iterable
 
 import yaml
 
-APP_DIR = Path(__file__).resolve().parent
+APP_DIR = Path(__file__).resolve().parents[2]
 WORDLIST_CATALOG_FILE = APP_DIR / "conf" / "wordlists.yaml"
 DEFAULT_WORDLIST_ROOT = Path("/usr/share/wordlists/seclists")
 

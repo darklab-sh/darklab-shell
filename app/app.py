@@ -25,7 +25,7 @@ from config import (  # noqa: F401 — re-exported for test compatibility
     get_theme_entry,
     theme_runtime_css_vars,
 )
-from logging_setup import configure_logging
+from core.logging_setup import configure_logging
 configure_logging(CFG)
 
 log = logging.getLogger("shell")
@@ -55,7 +55,7 @@ _warn_workspace_root_config_drift(CFG)
 
 # Import blueprints and shared helpers after logging is configured.
 from extensions import limiter  # noqa: E402
-from helpers import get_client_ip, get_session_id  # noqa: E402, F401 — get_session_id re-exported
+from core.helpers import get_client_ip, get_session_id  # noqa: E402, F401 — get_session_id re-exported
 from blueprints.assets import assets_bp  # noqa: E402
 from blueprints.content import content_bp  # noqa: E402
 from blueprints.run import run_bp, SUDO_BIN, KILL_BIN  # noqa: E402, F401 — re-exported
@@ -63,7 +63,7 @@ from blueprints.history import history_bp  # noqa: E402
 from blueprints.session import session_bp  # noqa: E402
 from blueprints.workspace import workspace_bp  # noqa: E402
 from blueprints.projects import projects_bp  # noqa: E402
-from workspace import cleanup_inactive_workspaces  # noqa: E402
+from services.workspace.files import cleanup_inactive_workspaces  # noqa: E402
 
 app = Flask(__name__, template_folder="templates")
 app.config["RATELIMIT_ENABLED"] = CFG.get("rate_limit_enabled", True)

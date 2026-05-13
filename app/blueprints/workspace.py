@@ -8,9 +8,9 @@ from typing import Any
 
 from flask import Blueprint, Response, jsonify, request, send_file
 
-from database import db_connect
-from helpers import get_client_ip, get_log_session_id, get_session_id
-from workspace import (
+from core.database import db_connect
+from core.helpers import get_client_ip, get_log_session_id, get_session_id
+from services.workspace.files import (
     InvalidWorkspacePath,
     WorkspaceDisabled,
     WorkspaceBinaryFile,

@@ -282,7 +282,7 @@ The concrete event inventory and the operator-facing description of the `text` a
 
 **A single `state.js` module owns shared browser state, with legacy globals rewired to it via `Object.defineProperty` accessors.**
 
-The browser scripts share a single state layer in `app/static/js/state.js`. That module loads immediately after `session.js` and installs `Object.defineProperty` accessors on `globalThis`, so the legacy global-style code can keep reading and writing plain names while the actual storage lives in one central object. DOM-centric helpers were split into `app/static/js/ui_helpers.js`, which keeps the state boundary smaller without forcing an ES-module migration.
+The browser scripts share a single state layer in `app/static/js/core/state.js`. That module loads immediately after `session.js` and installs `Object.defineProperty` accessors on `globalThis`, so the legacy global-style code can keep reading and writing plain names while the actual storage lives in one central object. DOM-centric helpers were split into `app/static/js/ui/ui_helpers.js`, which keeps the state boundary smaller without forcing an ES-module migration.
 
 That choice keeps the codebase free of a larger ES-module migration while still making the shared state explicit. It also keeps the unit-test harness simple: the jsdom loader can seed `state.tabs` and `state.activeTabId` before evaluating the browser scripts, then prepend `ui_helpers.js` before DOM-bound modules so the extracted scripts see the same helper globals as production without rewriting the production call sites.
 
@@ -296,7 +296,7 @@ That choice keeps the codebase free of a larger ES-module migration while still 
 - `ExportHtmlUtils` owns the shared browser export semantics and acts as the baseline for permalink/share live pages plus saved HTML
 - `ExportPdfUtils` remains a separate renderer because jsPDF cannot reproduce browser layout exactly, but it consumes the same prepared header/meta/line model so PDF visual drift is bounded to renderer limitations rather than duplicated business logic
 
-**Server/page-model follow-through:** permalink/share pages now bootstrap one normalized `page_model` from `app/permalinks.py`, and both the Jinja template layer and `permalink.js` consume that same shape. That keeps the live permalink/share page and the saved export surfaces aligned without reintroducing duplicated page-bootstrap variables.
+**Server/page-model follow-through:** permalink/share pages now bootstrap one normalized `page_model` from `app/services/history/permalinks.py`, and both the Jinja template layer and `permalink.js` consume that same shape. That keeps the live permalink/share page and the saved export surfaces aligned without reintroducing duplicated page-bootstrap variables.
 
 ### Client-Side PDF Export (jsPDF)
 
@@ -373,7 +373,7 @@ The shell had accumulated bespoke button styles on individual surfaces (rail sec
 
 **Disclosure glyphs encode a fixed mapping between glyph and behavior: `▸`/`▾` for expand/collapse in place, `>` for drill-in navigation, static `▾` for dropdown triggers, no glyph for plain toggles. The glyph follows the actual behavior, not the visual hierarchy of the surface.**
 
-Early mobile surfaces used `>` on rows that opened a sub-sheet and on rows that expanded in place, because both "felt like going deeper." Users read the glyph as a consistent signal and got surprised when the two behaved differently. Pinning the glyph to the behavior — and naming the one meta-rule explicitly — kept the FAQ, rail section headers, mobile recents filter, and the save menu predictable as surfaces were added. `bindDisclosure` in `app/static/js/ui_disclosure.js` owns the expand/collapse variant so new disclosure sites pick up `aria-expanded` correctly by default. The full mapping is in [ARCHITECTURE.md § Disclosure Affordance Rules](ARCHITECTURE.md#disclosure-affordance-rules).
+Early mobile surfaces used `>` on rows that opened a sub-sheet and on rows that expanded in place, because both "felt like going deeper." Users read the glyph as a consistent signal and got surprised when the two behaved differently. Pinning the glyph to the behavior — and naming the one meta-rule explicitly — kept the FAQ, rail section headers, mobile recents filter, and the save menu predictable as surfaces were added. `bindDisclosure` in `app/static/js/ui/ui_disclosure.js` owns the expand/collapse variant so new disclosure sites pick up `aria-expanded` correctly by default. The full mapping is in [ARCHITECTURE.md § Disclosure Affordance Rules](ARCHITECTURE.md#disclosure-affordance-rules).
 
 ### Semantic Color Contract
 
@@ -385,7 +385,7 @@ The rules, the binary-not-graded principle, the `running`-is-yellow distinction,
 
 **Every destructive or mode-switching confirmation routes through one imperative primitive, `showConfirm()`, with role-based action ids, default focus on cancel, `bindFocusTrap` on the card, and stacked actions at narrow widths.**
 
-Confirmations were originally per-surface: the kill flow, history clear, history delete, the share-redaction toggle, and session-token migrations each hand-rolled their own markup, Escape handler, mobile-sheet binding, and focus management. Small inconsistencies (Enter activating confirm instead of cancel, Tab falling through to the rail behind the backdrop, the action row overflowing on narrow viewports) had to be fixed separately each time a new confirm shipped. `showConfirm()` in `app/static/js/ui_confirm.js` centralizes the contract so every confirmation inherits the same dismissal ordering, focus trap, and stacking behavior, and new destructive actions only choose copy, tone, and the role of each button. Full semantics are in [ARCHITECTURE.md § Confirmation Dialog Contract](ARCHITECTURE.md#confirmation-dialog-contract).
+Confirmations were originally per-surface: the kill flow, history clear, history delete, the share-redaction toggle, and session-token migrations each hand-rolled their own markup, Escape handler, mobile-sheet binding, and focus management. Small inconsistencies (Enter activating confirm instead of cancel, Tab falling through to the rail behind the backdrop, the action row overflowing on narrow viewports) had to be fixed separately each time a new confirm shipped. `showConfirm()` in `app/static/js/ui/ui_confirm.js` centralizes the contract so every confirmation inherits the same dismissal ordering, focus trap, and stacking behavior, and new destructive actions only choose copy, tone, and the role of each button. Full semantics are in [ARCHITECTURE.md § Confirmation Dialog Contract](ARCHITECTURE.md#confirmation-dialog-contract).
 
 ---
 

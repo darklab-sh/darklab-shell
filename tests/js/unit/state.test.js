@@ -3,7 +3,7 @@ import { fromScript } from './helpers/extract.js'
 describe('composer state store', () => {
   function loadStateHelpers() {
     return fromScript(
-      'app/static/js/state.js',
+      'app/static/js/core/state.js',
       'getComposerState',
       'setComposerState',
       'resetComposerState',

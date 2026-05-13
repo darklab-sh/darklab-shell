@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterator, cast
 
 from config import CFG, SCANNER_PREFIX
-from process import (
+from core.process import (
     active_run_owned_by,
     active_run_register,
     active_run_remove,

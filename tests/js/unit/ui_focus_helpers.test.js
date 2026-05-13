@@ -8,8 +8,8 @@ import { fileURLToPath } from 'url'
 // IIFE into window per test so there is no cross-test global leakage.
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
-const STATE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/state.js'), 'utf8')
-const UI_HELPERS_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_helpers.js'), 'utf8')
+const STATE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/core/state.js'), 'utf8')
+const UI_HELPERS_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_helpers.js'), 'utf8')
 
 function loadHelpers() {
   delete window.focusElement

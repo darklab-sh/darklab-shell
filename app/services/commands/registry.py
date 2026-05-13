@@ -18,7 +18,7 @@ import yaml
 from urllib.parse import urlparse
 
 import config as app_config
-from workspace import (
+from services.workspace.files import (
     ensure_session_workspace,
     InvalidWorkspacePath,
     WorkspaceDisabled,
@@ -29,10 +29,10 @@ from workspace import (
     resolve_workspace_path,
 )
 
-_HERE = os.path.dirname(__file__)
+_HERE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _CONF = os.path.join(_HERE, "conf")
 COMMANDS_REGISTRY_FILE = os.path.join(_CONF, "commands.yaml")
-BUILTIN_AUTOCOMPLETE_FILE = os.path.join(_HERE, "builtin_autocomplete.yaml")
+BUILTIN_AUTOCOMPLETE_FILE = os.path.join(os.path.dirname(__file__), "builtin_autocomplete.yaml")
 FAQ_FILE              = os.path.join(_CONF, "faq.yaml")
 WORKFLOWS_FILE        = os.path.join(_CONF, "workflows.yaml")
 WELCOME_FILE          = os.path.join(_CONF, "welcome.yaml")

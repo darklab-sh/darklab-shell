@@ -73,7 +73,7 @@ while (($#)); do
 done
 
 if ((has_config == 0)); then
-  playwright_args=(--config config/playwright.parallel.config.js "${playwright_args[@]}")
+  playwright_args=(--config .tooling/playwright.parallel.config.js "${playwright_args[@]}")
 fi
 
 if ((webserver_logs)); then

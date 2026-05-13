@@ -18,7 +18,7 @@ from contextlib import contextmanager
 import fcntl
 
 from config import CFG, resolve_data_dir
-from run_output_store import delete_artifact_file, ensure_run_output_dir, load_full_output_entries
+from services.runs.output_store import delete_artifact_file, ensure_run_output_dir, load_full_output_entries
 
 log = logging.getLogger("shell")
 

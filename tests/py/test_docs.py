@@ -121,7 +121,7 @@ def _run_pytest_collect() -> tuple[int, dict[str, list[str]]]:
 def _run_vitest_list() -> tuple[int, dict[str, list[str]]]:
     """Return (total_count, {filename: ordered_unique_test_names}).
 
-    Runs `npx vitest list --config config/vitest.config.js`. Each line is
+    Runs `npx vitest list --config .tooling/vitest.config.js`. Each line is
     "tests/js/unit/<file>.test.js > describe > ... > test name". The last
     ` > ` separated segment is the test name. ``total`` is the raw listed
     count (one entry per `it(...)` call), which matches the documented
@@ -129,7 +129,7 @@ def _run_vitest_list() -> tuple[int, dict[str, list[str]]]:
     be compared against the single-row appendix convention.
     """
     result = subprocess.run(
-        ["npx", "vitest", "--config", "config/vitest.config.js", "list"],
+        ["npx", "vitest", "--config", ".tooling/vitest.config.js", "list"],
         capture_output=True,
         text=True,
         cwd=str(_REPO_ROOT),
@@ -172,7 +172,7 @@ def _run_playwright_list_for_config(config_path: str) -> tuple[int, dict[str, li
 
 def _run_playwright_parallel_list() -> tuple[int, dict[str, list[str]]]:
     """Return the normal Playwright suite listing used for documented totals."""
-    return _run_playwright_list_for_config("config/playwright.parallel.config.js")
+    return _run_playwright_list_for_config(".tooling/playwright.parallel.config.js")
 
 
 def _run_playwright_appendix_list() -> tuple[int, dict[str, list[str]]]:
@@ -182,11 +182,11 @@ def _run_playwright_appendix_list() -> tuple[int, dict[str, list[str]]]:
     screenshot-capture configs that do not run in normal test passes.
     """
     configs = (
-        "config/playwright.parallel.config.js",
-        "config/playwright.demo.config.js",
-        "config/playwright.demo.mobile.config.js",
-        "config/playwright.capture.desktop.config.js",
-        "config/playwright.capture.mobile.config.js",
+        ".tooling/playwright.parallel.config.js",
+        ".tooling/playwright.demo.config.js",
+        ".tooling/playwright.demo.mobile.config.js",
+        ".tooling/playwright.capture.desktop.config.js",
+        ".tooling/playwright.capture.mobile.config.js",
     )
     combined_total = 0
     combined_by_file: dict[str, list[str]] = {}

@@ -389,6 +389,21 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │       └── Default.md          # Default GitLab merge request template used by contributors
 ├── .markdownlint-cli2.jsonc    # markdownlint-cli2 config — Markdown lint rules used by npm run lint:md
 ├── .shellcheckrc               # shellcheck config — suppresses false positives (e.g. CDPATH= idiom)
+├── .tooling/                   # Developer/test/lint tool configuration; app runtime config lives under app/conf/
+│   ├── eslint.config.js        # ESLint config — indentation, quotes, and semicolon rules for JS tooling/test files
+│   ├── hadolint.yaml           # hadolint config — ignores intentional Dockerfile patterns
+│   ├── playwright.capture.desktop.config.js # Playwright config for the desktop UI screenshot capture pipeline
+│   ├── playwright.capture.mobile.config.js  # Playwright config for the mobile UI screenshot capture pipeline
+│   ├── playwright.config.js    # Playwright single-project config for VS Code and focused local debugging
+│   ├── playwright.demo.config.js     # Playwright config for recording the desktop demo video
+│   ├── playwright.demo.mobile.config.js # Playwright config for recording the mobile demo video
+│   ├── playwright.parallel.config.js # Playwright parallel CLI config with isolated per-project Flask/state environments
+│   ├── playwright.shared.js    # Shared Playwright server-builder helpers used by both configs
+│   ├── playwright.visual.contracts.js # Shared desktop/mobile visual contract values for demo and capture Playwright flows
+│   ├── pytest.ini              # pytest config — keeps collection scoped away from bind-mounted data and dependency directories
+│   ├── stylelint.config.mjs    # stylelint config — CSS syntax and safety lint rules
+│   ├── vitest.config.js        # Vitest unit test config (jsdom environment)
+│   └── yamllint.yml            # yamllint config — relaxed line length, no document-start requirement
 ├── ARCHITECTURE.md            # Current system structure, diagrams, runtime layers, persistence, and app internals
 ├── CHANGELOG.md               # Release-by-release change log organised by version (Added / Changed / Fixed / Removed)
 ├── CONFIGURATION.md           # Operator config reference for app/conf, .env, Compose overlays, storage, and production tuning
@@ -411,16 +426,12 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── run.py              # /runs broker starts/streams, /run/client history persistence, /kill, and run-output capture helpers
 │   │   ├── session.py          # /session/token/*, /session/preferences, /session/variables, /session/workflows*, /session/recent-domains, /session/migrate, /session/starred*
 │   │   └── workspace.py        # /workspace/files* app-managed session file routes
-│   ├── builtin_autocomplete.yaml # App-owned built-in command autocomplete grammar (not operator config)
-│   ├── builtin_commands.py     # App-owned built-in shell helpers handled before external process spawn
-│   ├── commands.py             # Command loading, validation (is_command_allowed), and registry-driven rewrites
 │   ├── conf/                   # Operator-configurable files — edit these to customize the deployment
 │   │   ├── app_hints.txt           # Rotating footer hints for the welcome animation (optional)
 │   │   ├── app_hints_mobile.txt    # Mobile rotating footer hints for the welcome animation (optional)
 │   │   ├── ascii.txt               # Decorative ASCII banner shown during the welcome animation (optional)
 │   │   ├── ascii_mobile.txt        # Mobile ASCII banner shown during the mobile welcome animation (optional)
 │   │   ├── commands.yaml           # Structured command registry for catalog grouping, autocomplete hints, runtime adaptations, and smoke-test examples
-│   │   ├── config.local.yaml       # Optional untracked deployment overrides loaded after config.yaml; sibling *.local.* overlays are also supported
 │   │   ├── config.yaml             # Application configuration (see CONFIGURATION.md)
 │   │   ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)
 │   │   ├── theme_dark.yaml.example # Generated dark-theme reference template — regenerate with scripts/generate_theme_examples.py
@@ -431,48 +442,85 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── wordlists.yaml          # Curated SecLists catalog categories used by the wordlist command and autocomplete
 │   │   └── workflows.yaml          # Guided workflows panel definitions (multi-step diagnostic command sequences)
 │   ├── config.py               # load_config(), CFG defaults, SCANNER_PREFIX detection, theme registry
-│   ├── database.py             # SQLite connection, schema init, retention pruning
+│   ├── core/
+│   │   ├── __init__.py         # Core helper package marker
+│   │   ├── database.py         # SQLite connection, schema init, retention pruning
+│   │   ├── helpers.py          # Trusted-proxy IP resolver, session-ID extraction, and shared request helpers
+│   │   ├── logging_setup.py    # Structured logging formatters and logger configuration
+│   │   ├── output_signals.py   # Server-side findings/warnings/errors/summaries classifier
+│   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and in-process fallback
+│   │   └── redaction.py        # Snapshot-share redaction helpers and built-in rule application
 │   ├── extensions.py           # Flask-Limiter singleton (init_app deferred to app.py)
-│   ├── favicon.ico             # Site favicon
-│   ├── helpers.py              # Trusted-proxy IP resolver and session-ID extractor (used by all blueprints)
-│   ├── logging_setup.py        # structured logging formatters and logger configuration
-│   ├── output_signals.py       # Server-side findings/warnings/errors/summaries classifier
-│   ├── permalinks.py           # Flask context/render helpers for /history/<id> and /share/<id>
-│   ├── process.py              # Redis setup, pid_register/pid_pop, in-process fallback
-│   ├── project_workspace.py    # Session-scoped project/case folder helpers and relationship validation
-│   ├── pty_service.py          # Interactive PTY process/service helpers for allowlisted screen tools
-│   ├── redaction.py            # Snapshot-share redaction helpers and built-in rule application
 │   ├── requirements.txt        # Python runtime dependencies
-│   ├── run_broker.py           # Brokered run event storage, replay, and SSE stream helpers
-│   ├── run_comparison.py       # Shared run comparison helpers for history and project compare APIs
-│   ├── run_output_store.py     # Preview/full-output capture and artifact persistence helpers
-│   ├── session_variables.py    # Per-session command-variable storage and expansion helpers
+│   ├── services/
+│   │   ├── __init__.py         # Service package marker
+│   │   ├── commands/
+│   │   │   ├── __init__.py     # Command service package marker
+│   │   │   ├── builtin_autocomplete.yaml # App-owned built-in command autocomplete grammar
+│   │   │   ├── builtins.py     # App-owned built-in shell helpers handled before external process spawn
+│   │   │   ├── registry.py     # Command loading, validation, autocomplete derivation, and registry-driven rewrites
+│   │   │   └── wordlists.py    # SecLists catalog loader and filtering helpers for wordlist command/autocomplete
+│   │   ├── history/
+│   │   │   ├── __init__.py     # History service package marker
+│   │   │   └── permalinks.py   # Flask context/render helpers for /history/<id> and /share/<id>
+│   │   ├── projects/
+│   │   │   ├── __init__.py     # Project service package marker
+│   │   │   └── workspace.py    # Session-scoped project helpers, targets, findings, artifacts, packages, labels, notes, and links
+│   │   ├── pty/
+│   │   │   ├── __init__.py     # PTY service package marker
+│   │   │   └── service.py      # Interactive PTY process/service helpers for allowlisted screen tools
+│   │   ├── runs/
+│   │   │   ├── __init__.py     # Run service package marker
+│   │   │   ├── broker.py       # Brokered run event storage, replay, and SSE stream helpers
+│   │   │   ├── comparison.py   # Shared run comparison helpers for history and project compare APIs
+│   │   │   └── output_store.py # Preview/full-output capture and artifact persistence helpers
+│   │   ├── session/
+│   │   │   ├── __init__.py     # Session service package marker
+│   │   │   └── variables.py    # Per-session command-variable storage and expansion helpers
+│   │   ├── workflows/
+│   │   │   ├── __init__.py     # Workflow service package marker
+│   │   │   └── user_workflows.py # Per-session user workflow storage, validation, and serialization helpers
+│   │   └── workspace/
+│   │       ├── __init__.py     # Workspace service package marker
+│   │       └── files.py        # App-mediated per-session workspace path, quota, and cleanup helpers
 │   ├── static/
 │   │   ├── css/
-│   │   │   ├── base.css        # Theme tokens, reset, base layout, header, input, and dropdown foundations
-│   │   │   ├── components.css  # Tabs, search UI, permalink/history surfaces, toast, and menu components
+│   │   │   ├── core/
+│   │   │   │   ├── base.css    # Theme tokens, reset, base layout, header, input, and dropdown foundations
+│   │   │   │   └── fonts.css   # @font-face declarations for vendored local fonts
 │   │   │   ├── diag.css        # Diagnostics-page-specific layout and responsive chrome
 │   │   │   ├── features/       # Feature-owned styles split out of shared shell/component stylesheets
 │   │   │   │   ├── projects.css # Projects modal, mobile project workspace, entity editors, compare picker, and package wizard
 │   │   │   │   ├── run-comparison.css # Run Comparison modal, split-view, controls, transcript diff, and mobile compare layout
 │   │   │   │   └── workflows.css # Workflows modal, workflow cards, editor, and rendered step controls
-│   │   │   ├── fonts.css       # @font-face declarations for vendored local fonts
 │   │   │   ├── mobile-chrome.css # Mobile sheet handles, drag affordances, and pull-to-refresh suppression hooks
 │   │   │   ├── mobile.css      # Mobile composer, mobile shell layout, sheets, and viewport overrides
+│   │   │   ├── primitives/
+│   │   │   │   └── components.css # Tabs, search UI, permalink/history surfaces, toast, and shared menu components
 │   │   │   ├── shell-chrome.css # Desktop shell: left rail, tabbar row, and bottom HUD bar (mobile falls through to mobile.css)
 │   │   │   ├── shell.css       # Terminal shell frame, panels, history row, utility buttons, and modals
 │   │   │   ├── styles.css      # Compatibility entrypoint that imports the modular CSS files in order
 │   │   │   ├── terminal_export.css # Shared export/permalink/diag header chrome
 │   │   │   └── welcome.css     # Welcome animation, operator notice, and onboarding-specific UI
+│   │   ├── favicon.ico         # Site favicon
 │   │   ├── fonts/              # Vendored local font files used by the app's vendor routes and permalink/export fallbacks
 │   │   └── js/
 │   │       ├── app.js          # Shared UI helpers, preferences, FAQ/Command Registry surfaces, and mobile-layout glue
-│   │       ├── app_preferences_core.js # Pure app preference coercion/snapshot helpers shared by app.js and unit harnesses
 │   │       ├── autocomplete.js # Command autocomplete dropdown
-│   │       ├── autocomplete_core.js # Pure autocomplete matching/ranking helpers shared by autocomplete.js and unit harnesses
-│   │       ├── config.js       # APP_CONFIG bootstrap reader
 │   │       ├── controller.js   # Initialization and event wiring (loads after app.js)
-│   │       ├── dom.js          # Shared DOM element references
+│   │       ├── core/
+│   │       │   ├── app_preferences_core.js # Pure app preference coercion/snapshot helpers shared by app.js and unit harnesses
+│   │       │   ├── autocomplete_core.js # Pure autocomplete matching/ranking helpers shared by autocomplete.js and unit harnesses
+│   │       │   ├── config.js   # APP_CONFIG bootstrap reader
+│   │       │   ├── dom.js      # Shared DOM element references
+│   │       │   ├── history_core.js # Pure history filter/label/format helpers shared by history.js and unit harnesses
+│   │       │   ├── output_core.js # Pure output prompt/signal helpers shared by output.js and unit harnesses
+│   │       │   ├── runner_core.js # Pure runner duration and synthetic pipe helpers shared by runner.js and unit harnesses
+│   │       │   ├── search_core.js # Pure search labels/counts/summary helpers shared by search.js and unit harnesses
+│   │       │   ├── session_core.js # Pure session identity helpers shared by session.js and unit harnesses
+│   │       │   ├── state.js    # Shared app-state store/accessors
+│   │       │   ├── utils.js    # escapeHtml, escapeRegex, renderMotd, showToast
+│   │       │   └── workspace_core.js # Pure workspace path/format helpers shared by workspace.js and unit harnesses
 │   │       ├── export_html.js  # Shared export HTML builder / embedded-font helper
 │   │       ├── export_pdf.js   # Shared PDF export module — used by the desktop tab bar and permalink page
 │   │       ├── features/
@@ -494,33 +542,27 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   └── workflows/
 │   │       │       └── workflows.js # Workflows modal, editor, terminal command, and runtime autocomplete support
 │   │       ├── history.js      # Command history chips and drawer (with starring)
-│   │       ├── history_core.js # Pure history filter/label/format helpers shared by history.js and unit harnesses
 │   │       ├── mobile_chrome.js # Mobile shell chrome — recents sheet, viewport mode, pull-to-refresh suppression
-│   │       ├── mobile_sheet.js # Shared bottom-sheet helper — drag/tap/keyboard close for every mobile sheet
 │   │       ├── output.js       # ANSI rendering and line management
-│   │       ├── output_core.js  # Pure output prompt/signal helpers shared by output.js and unit harnesses
 │   │       ├── permalink.js    # Permalink page controller — loaded only on /history/<id> and /share/<id>
 │   │       ├── pty.js          # Browser-side interactive PTY controller backed by xterm.js
 │   │       ├── runner.js       # Command execution, SSE stream, kill, stall detection
-│   │       ├── runner_core.js  # Pure runner duration and synthetic pipe helpers shared by runner.js and unit harnesses
 │   │       ├── search.js       # In-output search (with case-sensitive and regex modes)
-│   │       ├── search_core.js  # Pure search labels/counts/summary helpers shared by search.js and unit harnesses
 │   │       ├── session.js      # Session UUID + apiFetch wrapper (loads after session_core.js)
-│   │       ├── session_core.js # Pure session identity helpers shared by session.js and unit harnesses
 │   │       ├── shell_chrome.js # Desktop rail (Recent, Workflows, nav) and bottom HUD controller (loads last)
-│   │       ├── state.js        # Shared app-state store/accessors
 │   │       ├── status_monitor.js  # Status Monitor modal/sheet controller
 │   │       ├── tabs.js         # Tab lifecycle management
 │   │       ├── tour_modal.js   # Desktop visual onboarding tour carousel
-│   │       ├── ui_confirm.js   # showConfirm primitive — shared confirmation-dialog surface (promise-based, Enter-to-cancel default, stacks actions on narrow viewports)
-│   │       ├── ui_disclosure.js # bindDisclosure helper — aria-expanded + panel class lifecycle for expandable/collapsible controls, composed atop bindPressable
-│   │       ├── ui_dismissible.js # bindDismissible helper — modal/sheet/panel dismissal contract with backdrop-click, close buttons, and shared closeTopmostDismissible Escape dispatcher
-│   │       ├── ui_entity_metadata.js # Shared labels/notes client helpers for history, projects, packages, and Files metadata surfaces
-│   │       ├── ui_focus_trap.js # bindFocusTrap helper — keeps Tab / Shift+Tab cycling inside confirm modals so focus cannot escape to rail/tabs/HUD behind the backdrop
-│   │       ├── ui_helpers.js   # DOM-facing helpers and visibility setters
-│   │       ├── ui_outside_click.js # bindOutsideClickClose helper — ambient outside-click dismissal with trigger exemption, scope override, and selector-based exemptions
-│   │       ├── ui_pressable.js # bindPressable helper — unified pointer/click/keyboard activation contract for buttons and role="button" surfaces
-│   │       ├── utils.js        # escapeHtml, escapeRegex, renderMotd, showToast
+│   │       ├── ui/
+│   │       │   ├── mobile_sheet.js # Shared bottom-sheet helper — drag/tap/keyboard close for every mobile sheet
+│   │       │   ├── ui_confirm.js # showConfirm primitive — shared confirmation-dialog surface
+│   │       │   ├── ui_disclosure.js # bindDisclosure helper — aria-expanded + panel lifecycle
+│   │       │   ├── ui_dismissible.js # bindDismissible helper — modal/sheet/panel dismissal contract
+│   │       │   ├── ui_entity_metadata.js # Shared labels/notes client helpers for history, projects, packages, and Files
+│   │       │   ├── ui_focus_trap.js # bindFocusTrap helper for modal keyboard focus
+│   │       │   ├── ui_helpers.js # DOM-facing helpers and visibility setters
+│   │       │   ├── ui_outside_click.js # Ambient outside-click dismissal helper
+│   │       │   └── ui_pressable.js # Unified pointer/click/keyboard activation contract
 │   │       ├── vendor/         # Committed browser builds — generated by scripts/build_vendor.mjs
 │   │       │                   #   from npm packages in package.json; regenerate with npm run vendor:sync
 │   │       │   ├── ansi_up.js          # ANSI-to-HTML (ansi_up v6, ESM-only — wrapped as IIFE browser global)
@@ -529,35 +571,16 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   ├── xterm.css           # xterm stylesheet for interactive PTY tabs
 │   │       │   └── xterm.js            # xterm browser terminal for interactive PTY tabs
 │   │       ├── welcome.js      # Welcome startup animation (ASCII, status lines, samples, hints)
-│   │       ├── workspace.js    # Session Files panel — list/create/edit/delete/download helpers
-│   │       └── workspace_core.js # Pure workspace path/format helpers shared by workspace.js and unit harnesses
-│   ├── templates/
-│   │   ├── diag.html           # Operator diagnostics page (IP-gated, uses active theme)
-│   │   ├── index.html          # Frontend HTML shell rendered by Flask
-│   │   ├── permalink.html      # Live permalink page template
-│   │   ├── permalink_base.html # Shared shell for permalink pages
-│   │   ├── permalink_error.html # Missing/expired permalink template
-│   │   ├── theme_vars_script.html # Injected JS theme metadata/bootstrap block
-│   │   └── theme_vars_style.html # Injected CSS variable block for the active theme
-│   ├── user_workflows.py       # Per-session user workflow storage, validation, and serialization helpers
-│   ├── wordlists.py            # SecLists catalog loader and filtering helpers for wordlist command/autocomplete
-│   └── workspace.py            # App-mediated per-session workspace path, quota, and cleanup helpers
+│   │       └── workspace.js    # Session Files panel — list/create/edit/delete/download helpers
+│   └── templates/
+│       ├── diag.html           # Operator diagnostics page (IP-gated, uses active theme)
+│       ├── index.html          # Frontend HTML shell rendered by Flask
+│       ├── permalink.html      # Live permalink page template
+│       ├── permalink_base.html # Shared shell for permalink pages
+│       ├── permalink_error.html # Missing/expired permalink template
+│       ├── theme_vars_script.html # Injected JS theme metadata/bootstrap block
+│       └── theme_vars_style.html # Injected CSS variable block for the active theme
 ├── assets/                     # README media assets (demo videos)
-├── config/
-│   ├── eslint.config.js        # ESLint config — indentation, quotes, and semicolon rules for JS config/test files
-│   ├── hadolint.yaml           # hadolint config — ignores intentional Dockerfile patterns
-│   ├── playwright.capture.desktop.config.js # Playwright config for the desktop UI screenshot capture pipeline
-│   ├── playwright.capture.mobile.config.js  # Playwright config for the mobile UI screenshot capture pipeline
-│   ├── playwright.config.js    # Playwright single-project config for VS Code and focused local debugging
-│   ├── playwright.demo.config.js     # Playwright config for recording the desktop demo video
-│   ├── playwright.demo.mobile.config.js # Playwright config for recording the mobile demo video
-│   ├── playwright.parallel.config.js # Playwright parallel CLI config with isolated per-project Flask/state environments
-│   ├── playwright.shared.js    # Shared Playwright server-builder helpers used by both configs
-│   ├── playwright.visual.contracts.js # Shared desktop/mobile visual contract values for demo and capture Playwright flows
-│   ├── pytest.ini              # pytest config — keeps collection scoped away from bind-mounted data and dependency directories
-│   ├── stylelint.config.mjs    # stylelint config — CSS syntax and safety lint rules
-│   ├── vitest.config.js        # Vitest unit test config (jsdom environment)
-│   └── yamllint.yml            # yamllint config — relaxed line length, no document-start requirement
 ├── data/                       # Writable volume — SQLite database (auto-created)
 │   └── history.db              #   stores run history and tab snapshots
 ├── docker-compose.yml

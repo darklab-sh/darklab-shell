@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
 const UI_FOCUS_TRAP_SRC = readFileSync(
-  resolve(REPO_ROOT, 'app/static/js/ui_focus_trap.js'),
+  resolve(REPO_ROOT, 'app/static/js/ui/ui_focus_trap.js'),
   'utf8',
 )
 

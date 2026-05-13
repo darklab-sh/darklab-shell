@@ -475,9 +475,9 @@ export async function loadAppFns({
 
   const fns = fromDomScripts(
     [
-      'app/static/js/output_core.js',
+      'app/static/js/core/output_core.js',
       'app/static/js/output.js',
-      'app/static/js/app_preferences_core.js',
+      'app/static/js/core/app_preferences_core.js',
       'app/static/js/app.js',
       'app/static/js/features/theme/theme.js',
       'app/static/js/features/terminal/local_commands.js',

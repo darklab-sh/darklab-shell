@@ -23,7 +23,7 @@ from typing import TypedDict, cast
 
 from flask import Blueprint, Response, jsonify, request
 
-from commands import (
+from services.commands.registry import (
     AMASS_DEFAULT_WORKSPACE_DIR,
     CommandValidationResult,
     command_project_target_inputs,
@@ -38,15 +38,15 @@ from commands import (
     validate_command,
 )
 from config import CFG, SCANNER_PREFIX
-from database import db_connect
+from core.database import db_connect
 from extensions import limiter
-from builtin_commands import (
+from services.commands.builtins import (
     execute_builtin_command,
     resolve_builtin_command,
     resolves_exact_special_builtin_command,
 )
-from helpers import get_client_ip, get_log_session_id, get_session_id
-from process import (
+from core.helpers import get_client_ip, get_log_session_id, get_session_id
+from core.process import (
     active_run_claim_owner,
     active_run_register,
     active_run_remove,
@@ -56,7 +56,7 @@ from process import (
     pid_pop_for_session,
     pid_register,
 )
-from run_broker import (
+from services.runs.broker import (
     broker_available,
     broker_mode,
     broker_unavailable_reason,
@@ -64,17 +64,17 @@ from run_broker import (
     publish_run_event,
     stream_run_events,
 )
-from run_output_store import RunOutputCapture, load_full_output_entries
-from output_signals import OutputSignalClassifier
-from project_workspace import (
+from services.runs.output_store import RunOutputCapture, load_full_output_entries
+from core.output_signals import OutputSignalClassifier
+from services.projects.workspace import (
     link_run_to_active_project,
     record_project_target_discoveries,
     record_run_file_artifacts,
     record_run_findings,
 )
-from session_variables import SessionVariableError, expand_session_variables
-from workspace import InvalidWorkspacePath, resolve_workspace_path, session_workspace_dir, WorkspaceDisabled
-from pty_service import (
+from services.session.variables import SessionVariableError, expand_session_variables
+from services.workspace.files import InvalidWorkspacePath, resolve_workspace_path, session_workspace_dir, WorkspaceDisabled
+from services.pty.service import (
     PtyDependencyError,
     notify_pty_killed_event,
     pty_broker_available,
@@ -114,7 +114,7 @@ def _validate_command_for_run(
     # Several route tests monkeypatch this module's legacy is_command_allowed
     # symbol to keep subprocess behavior focused. Honor that seam while the
     # runtime path uses the richer validator for workspace rewrites.
-    if getattr(is_command_allowed, "__module__", "") != "commands":
+    if getattr(is_command_allowed, "__module__", "") != "services.commands.registry":
         allowed, reason = is_command_allowed(command)
         return CommandValidationResult(
             allowed,

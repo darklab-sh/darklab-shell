@@ -12,7 +12,7 @@ import time
 from typing import Any, cast
 
 from config import CFG
-from process import redis_client
+from core.process import redis_client
 
 log = logging.getLogger("shell")
 

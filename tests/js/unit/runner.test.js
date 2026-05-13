@@ -1,6 +1,6 @@
 import { fromScript, fromDomScript, fromDomScripts, MemoryStorage } from './helpers/extract.js'
 
-const { DarklabRunnerCore } = fromScript('app/static/js/runner_core.js', 'DarklabRunnerCore')
+const { DarklabRunnerCore } = fromScript('app/static/js/core/runner_core.js', 'DarklabRunnerCore')
 const {
   formatElapsed: _formatElapsed,
   isSyntheticGrepCommand: _isSyntheticGrepCommand,
@@ -742,7 +742,7 @@ function loadRunnerFns({
   const showToast = showToastOverride || vi.fn()
 
   const fns = fromDomScripts(
-    ['app/static/js/runner_core.js', 'app/static/js/runner.js'],
+    ['app/static/js/core/runner_core.js', 'app/static/js/runner.js'],
     {
       document,
       Map,

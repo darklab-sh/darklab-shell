@@ -6,7 +6,7 @@ import {
   CAPTURE_SESSION_TOKEN,
   DESKTOP_VISUAL_CONTRACT,
   MOBILE_VISUAL_CONTRACT,
-} from '../../../config/playwright.visual.contracts.js'
+} from '../../../.tooling/playwright.visual.contracts.js'
 
 function contractFor(mode) {
   if (mode === 'desktop') return DESKTOP_VISUAL_CONTRACT

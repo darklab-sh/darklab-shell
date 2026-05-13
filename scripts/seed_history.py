@@ -66,9 +66,9 @@ VISUAL_HISTORY_FIXTURES = {
 
 
 def _resolve_db_path() -> str:
-    """Mirror app/database.py's DB_PATH resolution without importing it.
+    """Mirror app/core/database.py's DB_PATH resolution without importing it.
 
-    Importing app.database runs db_init() at module load, which itself opens
+    Importing core.database runs db_init() at module load, which itself opens
     the DB and writes (DROP/CREATE TRIGGER, possibly FTS rebuild). We want
     this script to be a pure data-only writer.
     """
@@ -100,7 +100,7 @@ def db_connect():
 def _load_autocomplete_example_commands() -> list[str]:
     """Return surfaced example commands from the command registry context."""
     sys.path.insert(0, str(ROOT / "app"))
-    commands_mod = importlib.import_module("commands")
+    commands_mod = importlib.import_module("services.commands.registry")
     seen = set()
     commands = []
     for spec in commands_mod.load_autocomplete_context_from_commands_registry().values():
@@ -421,6 +421,16 @@ def _require_schema() -> None:
         )
 
 
+def _seed_int(value: object, fallback: int) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        return int(value)
+    return fallback
+
+
 # ── CLI ─────────────────────────────────────────────────────────────────────
 
 
@@ -460,9 +470,9 @@ def main() -> int:
         "star": 4,
         "seed": None,
     })
-    count = args.count if args.count is not None else defaults["count"]
-    days = args.days if args.days is not None else defaults["days"]
-    star = args.star if args.star is not None else defaults["star"]
+    count = _seed_int(args.count, _seed_int(defaults.get("count"), 70))
+    days = _seed_int(args.days, _seed_int(defaults.get("days"), 7))
+    star = _seed_int(args.star, _seed_int(defaults.get("star"), 4))
     seed = args.seed if args.seed is not None else defaults["seed"]
 
     if count <= 0:

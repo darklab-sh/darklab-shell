@@ -3,7 +3,7 @@ import { MemoryStorage, fromDomScripts } from './helpers/extract.js'
 
 const _noopFetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ commands: [] }) })
 const HISTORY_SCRIPT_PATHS = [
-  'app/static/js/history_core.js',
+  'app/static/js/core/history_core.js',
   'app/static/js/features/run-comparison/history_compare_core.js',
   'app/static/js/features/run-comparison/history_compare_overlay.js',
   'app/static/js/history.js',
@@ -12,7 +12,7 @@ const HISTORY_SCRIPT_PATHS = [
   'app/static/js/features/run-comparison/history_compare_renderer.js',
   'app/static/js/features/run-comparison/history_compare_launcher.js',
 ]
-const HISTORY_WITH_UTILS_SCRIPT_PATHS = ['app/static/js/utils.js', ...HISTORY_SCRIPT_PATHS]
+const HISTORY_WITH_UTILS_SCRIPT_PATHS = ['app/static/js/core/utils.js', ...HISTORY_SCRIPT_PATHS]
 
 /**
  * Load star functions with an injectable apiFetch mock. Each call returns a

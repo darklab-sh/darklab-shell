@@ -10,12 +10,12 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, jsonify, request
 
-from database import db_connect
-from commands import load_tour
-from helpers import get_client_ip, get_log_session_id, get_session_id, is_valid_anonymous_session_id
-from project_workspace import migrate_project_workspace_session
-from session_variables import list_session_variables
-from user_workflows import (
+from core.database import db_connect
+from services.commands.registry import load_tour
+from core.helpers import get_client_ip, get_log_session_id, get_session_id, is_valid_anonymous_session_id
+from services.projects.workspace import migrate_project_workspace_session
+from services.session.variables import list_session_variables
+from services.workflows.user_workflows import (
     UserWorkflowError,
     create_user_workflow,
     delete_user_workflow,
@@ -23,7 +23,7 @@ from user_workflows import (
     list_user_workflows,
     update_user_workflow,
 )
-from workspace import InvalidWorkspacePath, migrate_session_workspace, workspace_usage
+from services.workspace.files import InvalidWorkspacePath, migrate_session_workspace, workspace_usage
 
 log = logging.getLogger("shell")
 

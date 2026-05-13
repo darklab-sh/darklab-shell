@@ -2,7 +2,7 @@ import { readFileSync } from 'fs'
 import { resolve } from 'path'
 import { fromDomScript } from './helpers/extract.js'
 
-const CONFIG_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/config.js'), 'utf8')
+const CONFIG_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/core/config.js'), 'utf8')
 
 describe('frontend config bootstrap', () => {
   it('reads APP_CONFIG from the server-rendered bootstrap JSON', () => {
@@ -34,7 +34,7 @@ describe('frontend config bootstrap', () => {
         : null,
     }
     const window = {}
-    const { APP_CONFIG } = fromDomScript('app/static/js/config.js', { document, window }, 'APP_CONFIG')
+    const { APP_CONFIG } = fromDomScript('app/static/js/core/config.js', { document, window }, 'APP_CONFIG')
 
     expect(APP_CONFIG).toMatchObject({
       app_name: expect.any(String),
@@ -65,7 +65,7 @@ describe('frontend config bootstrap', () => {
     const bootstrap = { app_name: 'harness', recent_commands_limit: 3 }
     const document = { getElementById: () => null }
     const window = { APP_CONFIG: bootstrap }
-    const { APP_CONFIG } = fromDomScript('app/static/js/config.js', { document, window }, 'APP_CONFIG')
+    const { APP_CONFIG } = fromDomScript('app/static/js/core/config.js', { document, window }, 'APP_CONFIG')
 
     expect(APP_CONFIG).toBe(bootstrap)
   })

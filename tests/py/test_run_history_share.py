@@ -22,11 +22,11 @@ import pytest
 
 import app as shell_app
 import blueprints.run as run_routes
-import database as shell_db
-import workspace as shell_workspace
+import core.database as shell_db
+import services.workspace.files as shell_workspace
 from config import PROJECT_README
-from database import db_connect
-from run_output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
+from core.database import db_connect
+from services.runs.output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
 
 # These tests lean toward end-to-end backend behavior and intentionally exercise
 # the real SQLite/artifact flow rather than heavy mocking.
@@ -1721,7 +1721,7 @@ class TestRunStreaming:
     def test_builtin_commands_streams_grouped_catalog_and_persists_history(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.load_commands_registry", return_value={
+        with mock.patch("services.commands.builtins.load_commands_registry", return_value={
             "commands": [
                 {
                     "root": "ping",
@@ -1803,7 +1803,7 @@ class TestRunStreaming:
     def test_builtin_commands_lists_built_in_and_external_catalogs(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.load_commands_registry", return_value={
+        with mock.patch("services.commands.builtins.load_commands_registry", return_value={
             "commands": [
                 {
                     "root": "ping",
@@ -1851,7 +1851,7 @@ class TestRunStreaming:
     def test_builtin_commands_supports_external_only_filter(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.load_commands_registry", return_value={
+        with mock.patch("services.commands.builtins.load_commands_registry", return_value={
             "commands": [
                 {
                     "root": "ping",
@@ -1897,7 +1897,7 @@ class TestRunStreaming:
             ],
             "all_items": None,
         }
-        with mock.patch("builtin_commands.load_wordlist_catalog", return_value=catalog):
+        with mock.patch("services.commands.builtins.load_wordlist_catalog", return_value=catalog):
             listed = _post_run(
                 client,
                 json={"command": "wordlist list dns"},
@@ -1920,7 +1920,7 @@ class TestRunStreaming:
 
     def test_builtin_wordlist_reports_missing_catalog(self):
         client = get_client()
-        with mock.patch("builtin_commands.load_wordlist_catalog", return_value={
+        with mock.patch("services.commands.builtins.load_wordlist_catalog", return_value={
             "root": "/usr/share/wordlists/seclists",
             "categories": [],
             "items": [],
@@ -2173,7 +2173,7 @@ class TestRunStreaming:
     def test_builtin_banner_renders_ascii_art(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.load_ascii_art", return_value="line one\nline two"):
+        with mock.patch("services.commands.builtins.load_ascii_art", return_value="line one\nline two"):
             resp = _post_run(client, json={"command": "banner"})
             body = resp.get_data(as_text=True)
 
@@ -2185,7 +2185,7 @@ class TestRunStreaming:
     def test_builtin_which_and_type_describe_commands(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.resolve_runtime_command", return_value="/usr/bin/curl"):
+        with mock.patch("services.commands.builtins.resolve_runtime_command", return_value="/usr/bin/curl"):
             which_resp = _post_run(client, json={"command": "which curl"})
             which_body = which_resp.get_data(as_text=True)
             type_resp = _post_run(client, json={"command": "type history"})
@@ -2335,7 +2335,7 @@ class TestRunStreaming:
     def test_builtin_faq_renders_builtin_and_configured_entries(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.load_all_faq", return_value=[
+        with mock.patch("services.commands.builtins.load_all_faq", return_value=[
             {"question": "Built-in question?", "answer": "Built-in answer."},
             {"question": "What is this?", "answer": "A browser-based shell."},
             {"question": "How do I stop a command?", "answer": "Use Kill."},
@@ -2355,7 +2355,7 @@ class TestRunStreaming:
     def test_builtin_retention_reports_preview_and_full_output_policy(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.CFG", {
+        with mock.patch("services.commands.builtins.CFG", {
             **shell_app.CFG,
             "permalink_retention_days": 365,
             "persist_full_run_output": True,
@@ -2376,7 +2376,7 @@ class TestRunStreaming:
     def test_builtin_fortune_returns_configured_line(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.random.choice", return_value="Trust the output, not the hunch."):
+        with mock.patch("services.commands.builtins.random.choice", return_value="Trust the output, not the hunch."):
             resp = _post_run(client, json={"command": "fortune"})
             body = resp.get_data(as_text=True)
 
@@ -2548,7 +2548,7 @@ class TestRunStreaming:
     def test_builtin_jobs_aliases_runs_metadata(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.active_runs_for_session", return_value=[
+        with mock.patch("services.commands.builtins.active_runs_for_session", return_value=[
             {
                 "run_id": "run-abcdef123456",
                 "pid": 4242,
@@ -2580,7 +2580,7 @@ class TestRunStreaming:
     def test_builtin_jobs_alias_reports_when_no_active_runs_exist(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.active_runs_for_session", return_value=[]):
+        with mock.patch("services.commands.builtins.active_runs_for_session", return_value=[]):
             resp = _post_run(client, json={"command": "jobs"}, headers={"X-Session-ID": "sess-jobs"})
             body = resp.get_data(as_text=True)
 
@@ -2590,7 +2590,7 @@ class TestRunStreaming:
     def test_builtin_runs_lists_active_run_metadata(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.active_runs_for_session", return_value=[
+        with mock.patch("services.commands.builtins.active_runs_for_session", return_value=[
             {
                 "run_id": "run-abcdef123456",
                 "pid": 4242,
@@ -2648,7 +2648,7 @@ class TestRunStreaming:
     def test_builtin_runs_reports_when_no_active_runs_exist(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.active_runs_for_session", return_value=[]):
+        with mock.patch("services.commands.builtins.active_runs_for_session", return_value=[]):
             resp = _post_run(client, json={"command": "runs"}, headers={"X-Session-ID": "sess-runs"})
             body = resp.get_data(as_text=True)
 
@@ -2659,9 +2659,9 @@ class TestRunStreaming:
         client = get_client()
 
         fake_proc = mock.Mock(returncode=0, stdout="NAME\ncurl - transfer a URL\n", stderr="")
-        with mock.patch("builtin_commands.runtime_missing_command_name", side_effect=[None, None]), \
-             mock.patch("builtin_commands.resolve_runtime_command", return_value="/usr/bin/man"), \
-             mock.patch("builtin_commands.subprocess.run", return_value=fake_proc):
+        with mock.patch("services.commands.builtins.runtime_missing_command_name", side_effect=[None, None]), \
+             mock.patch("services.commands.builtins.resolve_runtime_command", return_value="/usr/bin/man"), \
+             mock.patch("services.commands.builtins.subprocess.run", return_value=fake_proc):
             resp = _post_run(client, json={"command": "man curl"})
             body = resp.get_data(as_text=True)
 
@@ -2674,10 +2674,10 @@ class TestRunStreaming:
         client = get_client()
         man_text = "\n".join(f"line {index}" for index in range(1, 6)) + "\n"
         fake_proc = mock.Mock(returncode=0, stdout=man_text, stderr="")
-        with mock.patch("builtin_commands.runtime_missing_command_name", side_effect=[None, None]), \
-             mock.patch("builtin_commands.resolve_runtime_command", return_value="/usr/bin/man"), \
-             mock.patch("builtin_commands.subprocess.run", return_value=fake_proc), \
-             mock.patch("builtin_commands.CFG", {**shell_app.CFG, "max_output_lines": 2}):
+        with mock.patch("services.commands.builtins.runtime_missing_command_name", side_effect=[None, None]), \
+             mock.patch("services.commands.builtins.resolve_runtime_command", return_value="/usr/bin/man"), \
+             mock.patch("services.commands.builtins.subprocess.run", return_value=fake_proc), \
+             mock.patch("services.commands.builtins.CFG", {**shell_app.CFG, "max_output_lines": 2}):
             resp = _post_run(client, json={"command": "man curl"})
             body = resp.get_data(as_text=True)
 
@@ -2689,7 +2689,7 @@ class TestRunStreaming:
     def test_builtin_man_reports_when_helper_binary_is_unavailable(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.runtime_missing_command_name", return_value="man"):
+        with mock.patch("services.commands.builtins.runtime_missing_command_name", return_value="man"):
             resp = _post_run(client, json={"command": "man curl"})
             body = resp.get_data(as_text=True)
 
@@ -2700,9 +2700,9 @@ class TestRunStreaming:
     def test_builtin_man_reports_when_allowlisted_topic_is_missing(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.runtime_missing_command_name", side_effect=[None, "curl"]), \
-             mock.patch("builtin_commands.resolve_runtime_command", return_value="/usr/bin/man"), \
-             mock.patch("builtin_commands.subprocess.run") as run_cmd:
+        with mock.patch("services.commands.builtins.runtime_missing_command_name", side_effect=[None, "curl"]), \
+             mock.patch("services.commands.builtins.resolve_runtime_command", return_value="/usr/bin/man"), \
+             mock.patch("services.commands.builtins.subprocess.run") as run_cmd:
             resp = _post_run(client, json={"command": "man curl"})
             body = resp.get_data(as_text=True)
 
@@ -2786,7 +2786,7 @@ class TestRunStreaming:
                 )
             conn.commit()
 
-        with mock.patch.dict("builtin_commands.CFG", {"recent_commands_limit": 3}):
+        with mock.patch.dict("services.commands.builtins.CFG", {"recent_commands_limit": 3}):
             resp = _post_run(
                 client,
                 json={"command": "history"},
@@ -2805,7 +2805,7 @@ class TestRunStreaming:
     def test_builtin_pwd_returns_synthetic_path(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.CFG", {**shell_app.CFG, "workspace_enabled": False}):
+        with mock.patch("services.commands.builtins.CFG", {**shell_app.CFG, "workspace_enabled": False}):
             resp = _post_run(client, json={"command": "pwd"})
         body = resp.get_data(as_text=True)
 
@@ -2816,7 +2816,7 @@ class TestRunStreaming:
     def test_builtin_pwd_returns_workspace_root_when_workspace_enabled(self):
         client = get_client()
 
-        with mock.patch("builtin_commands.CFG", {**shell_app.CFG, "workspace_enabled": True}):
+        with mock.patch("services.commands.builtins.CFG", {**shell_app.CFG, "workspace_enabled": True}):
             resp = _post_run(client, json={"command": "pwd"})
         body = resp.get_data(as_text=True)
 
@@ -2973,7 +2973,7 @@ class TestRunStreaming:
             ],
             "pipe_helpers": [],
         }
-        from workspace import session_workspace_name, write_workspace_text_file
+        from services.workspace.files import session_workspace_name, write_workspace_text_file
         write_workspace_text_file(session_id, "targets.txt", "ip.darklab.sh\n", cfg)
         workspace_dir = tmp_path / session_workspace_name(session_id)
         project_resp = client.post(
@@ -2990,7 +2990,7 @@ class TestRunStreaming:
 
         with mock.patch("config.CFG", {**shell_app.CFG, **cfg}), \
              mock.patch("blueprints.run.CFG", {**shell_app.CFG, **cfg}), \
-             mock.patch("commands.load_commands_registry", return_value=registry), \
+             mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
              mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \
              mock.patch("blueprints.run.pid_register"), \
@@ -3057,7 +3057,7 @@ class TestRunStreaming:
             "workspace_max_files": 10,
             "workspace_inactivity_ttl_hours": 1,
         }
-        from workspace import session_workspace_name
+        from services.workspace.files import session_workspace_name
         workspace_dir = tmp_path / session_workspace_name(session_id)
         resume_path = workspace_dir / "tools" / "katana" / "resume-abcd.cfg"
         fake_proc = _FakeProc(lines=[f"Creating resume file: {resume_path}\n", ""])
@@ -3083,7 +3083,7 @@ class TestRunStreaming:
 
         with mock.patch("config.CFG", {**shell_app.CFG, **cfg}), \
              mock.patch("blueprints.run.CFG", {**shell_app.CFG, **cfg}), \
-             mock.patch("commands.load_commands_registry", return_value=registry), \
+             mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
              mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \
              mock.patch("blueprints.run.pid_register"), \

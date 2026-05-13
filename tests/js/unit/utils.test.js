@@ -13,7 +13,7 @@ const {
   downloadBlobAsAttachment,
   shareUrl,
 } = fromScript(
-  'app/static/js/utils.js',
+  'app/static/js/core/utils.js',
   'escapeHtml',
   'escapeRegex',
   'normalizeRedactionRules',

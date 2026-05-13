@@ -70,7 +70,7 @@ function loadTabsFns({
   }
 
   const fns = fromDomScripts(
-    ['app/static/js/utils.js', 'app/static/js/tabs.js'],
+    ['app/static/js/core/utils.js', 'app/static/js/tabs.js'],
     {
       document,
       cmdInput,
@@ -180,7 +180,7 @@ function loadTabsAndOutputFns({
   }
 
   const fns = fromDomScripts(
-    ['app/static/js/utils.js', 'app/static/js/output_core.js', 'app/static/js/output.js', 'app/static/js/tabs.js'],
+    ['app/static/js/core/utils.js', 'app/static/js/core/output_core.js', 'app/static/js/output.js', 'app/static/js/tabs.js'],
     {
       document,
       AnsiUp: class {

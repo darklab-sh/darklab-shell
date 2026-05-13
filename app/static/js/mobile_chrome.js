@@ -1135,7 +1135,7 @@
   }, { passive: true });
 
   // Drag/tap/keyboard close behavior is provided by the shared bindMobileSheet
-  // helper (see app/static/js/mobile_sheet.js) so the recents sheet matches
+  // helper (see app/static/js/ui/mobile_sheet.js) so the recents sheet matches
   // every other mobile bottom sheet.
   if (typeof global.bindMobileSheet === 'function') {
     global.bindMobileSheet(recentsSheet, { onClose: closeRecentsSheet });

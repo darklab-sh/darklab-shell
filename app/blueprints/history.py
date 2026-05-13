@@ -14,21 +14,21 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 import config as _config
-import run_comparison
-from database import db_connect, delete_run_artifacts, delete_snapshot_metadata
-from helpers import (
+import services.runs.comparison as run_comparison
+from core.database import db_connect, delete_run_artifacts, delete_snapshot_metadata
+from core.helpers import (
     GRACEFUL_TERMINATION_EXIT_CODE,
     get_client_ip,
     get_log_session_id,
     get_session_id,
     is_failed_exit_code,
 )
-from output_signals import command_root as output_command_root
-from permalinks import _format_duration, _permalink_error_page, _permalink_page
-from process import active_runs_for_session
-from project_workspace import ProjectWorkspaceError, compare_project_runs
-from redaction import redact_line_entries
-from run_output_store import load_full_output_entries
+from core.output_signals import command_root as output_command_root
+from services.history.permalinks import _format_duration, _permalink_error_page, _permalink_page
+from core.process import active_runs_for_session
+from services.projects.workspace import ProjectWorkspaceError, compare_project_runs
+from core.redaction import redact_line_entries
+from services.runs.output_store import load_full_output_entries
 
 APP_VERSION = _config.APP_VERSION
 CFG = _config.CFG
@@ -285,7 +285,7 @@ def _session_history_stats(conn, session_id: str) -> dict[str, Any]:
 
 def _command_category_map() -> dict[str, str]:
     try:
-        from commands import load_commands_registry
+        from services.commands.registry import load_commands_registry
 
         registry = load_commands_registry()
     except Exception:  # noqa: BLE001
@@ -307,7 +307,7 @@ def _app_builtin_command_roots() -> frozenset[str]:
     # treemap. Filter them out at the source so all Status Monitor widgets see
     # the same recon-only view.
     try:
-        from builtin_commands import get_builtin_command_roots
+        from services.commands.builtins import get_builtin_command_roots
     except Exception:  # noqa: BLE001
         return frozenset()
     return frozenset(get_builtin_command_roots())

@@ -8,7 +8,7 @@ import re
 from flask import Blueprint, Response, jsonify, render_template, request
 
 import config as _config
-from commands import (
+from services.commands.registry import (
     command_catalog_from_registry,
     command_catalog_entry,
     interactive_pty_specs_from_registry,
@@ -23,10 +23,10 @@ from commands import (
     load_welcome,
     load_welcome_hints,
 )
-from builtin_commands import get_current_shortcuts, get_builtin_command_roots, get_special_command_keys
-from helpers import get_client_ip, get_log_session_id, get_session_id, ip_is_in_cidrs, resolve_theme
-from user_workflows import list_user_workflows
-from wordlists import wordlist_autocomplete_items
+from services.commands.builtins import get_current_shortcuts, get_builtin_command_roots, get_special_command_keys
+from core.helpers import get_client_ip, get_log_session_id, get_session_id, ip_is_in_cidrs, resolve_theme
+from services.workflows.user_workflows import list_user_workflows
+from services.commands.wordlists import wordlist_autocomplete_items
 
 log = logging.getLogger("shell")
 

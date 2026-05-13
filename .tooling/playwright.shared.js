@@ -4,7 +4,7 @@ import { dirname, resolve } from 'path'
 const configDir = dirname(fileURLToPath(import.meta.url))
 const rootDir = resolve(configDir, '..')
 // Export as __dirname so consumers (playwright.parallel.config.js) can use it
-// for path resolution — points to the repo root, not this config/ directory.
+// for path resolution — points to the repo root, not this .tooling/ directory.
 export const __dirname = rootDir
 export const testDir = resolve(rootDir, 'tests/js/e2e')
 const showWebServerLogs = !!process.env.PW_WEBSERVER_LOGS

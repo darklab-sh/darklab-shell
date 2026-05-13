@@ -31,12 +31,12 @@ from urllib.error import HTTPError
 
 import pytest
 import yaml
-from commands import (
+from services.commands.registry import (
     load_container_smoke_test_commands,
     load_container_smoke_test_interactive_commands,
     split_command_argv,
 )
-from output_signals import strip_ansi_codes
+from core.output_signals import strip_ansi_codes
 
 
 ROOT = Path(__file__).resolve().parents[2]

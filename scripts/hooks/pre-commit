@@ -49,7 +49,7 @@ js_files=$(find "$REPO_ROOT" -name '*.js' -not -path "$REPO_ROOT/.git/*" -not -p
 if [ -n "$js_files" ]; then
     # shellcheck disable=SC2086  # word-splitting intentional to pass list of files
     run_check "eslint" npx --prefix "$REPO_ROOT" eslint \
-        --config "$REPO_ROOT/config/eslint.config.js" \
+        --config "$REPO_ROOT/.tooling/eslint.config.js" \
         $js_files
 fi
 
@@ -67,14 +67,14 @@ fi
 
 # hadolint — Dockerfile linting
 if [ -f "$REPO_ROOT/Dockerfile" ]; then
-    run_check "hadolint" hadolint --config "$REPO_ROOT/config/hadolint.yaml" "$REPO_ROOT/Dockerfile"
+    run_check "hadolint" hadolint --config "$REPO_ROOT/.tooling/hadolint.yaml" "$REPO_ROOT/Dockerfile"
 fi
 
 # yamllint — YAML syntax and style
 yaml_files=$(find "$REPO_ROOT" \( -name '*.yml' -o -name '*.yaml' \) -not -path "$REPO_ROOT/.git/*" -not -path "$REPO_ROOT/node_modules/*" -type f -print)
 if [ -n "$yaml_files" ]; then
     # shellcheck disable=SC2086  # word-splitting intentional to pass list of files
-    run_check "yamllint" "$PYTHON" -m yamllint -c "$REPO_ROOT/config/yamllint.yml" $yaml_files
+    run_check "yamllint" "$PYTHON" -m yamllint -c "$REPO_ROOT/.tooling/yamllint.yml" $yaml_files
 fi
 
 # jsonlint — JSON syntax and style

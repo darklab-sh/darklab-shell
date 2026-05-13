@@ -136,7 +136,7 @@ function setupMobileSheetDragClose() {
 function setupDismissibleOverlays() {
   // Each overlay/modal surface is registered with bindDismissible so
   // backdrop click + explicit close button + Escape are owned by one
-  // helper (app/static/js/ui_dismissible.js). The Escape cascade
+  // helper (app/static/js/ui/ui_dismissible.js). The Escape cascade
   // dispatcher (closeTopmostDismissible) enforces modal > sheet > panel
   // priority declaratively instead of the hand-rolled if-chain this
   // setup replaces.
