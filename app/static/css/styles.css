@@ -4,4 +4,7 @@
 @import url('/static/css/welcome.css');
 @import url('/static/css/shell-chrome.css');
 @import url('/static/css/mobile.css');
+@import url('/static/css/features/projects.css');
+@import url('/static/css/features/run-comparison.css');
+@import url('/static/css/features/workflows.css');
 @import url('/static/css/mobile-chrome.css');

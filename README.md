@@ -452,6 +452,10 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── base.css        # Theme tokens, reset, base layout, header, input, and dropdown foundations
 │   │   │   ├── components.css  # Tabs, search UI, permalink/history surfaces, toast, and menu components
 │   │   │   ├── diag.css        # Diagnostics-page-specific layout and responsive chrome
+│   │   │   ├── features/       # Feature-owned styles split out of shared shell/component stylesheets
+│   │   │   │   ├── projects.css # Projects modal, mobile project workspace, entity editors, compare picker, and package wizard
+│   │   │   │   ├── run-comparison.css # Run Comparison modal, split-view, controls, transcript diff, and mobile compare layout
+│   │   │   │   └── workflows.css # Workflows modal, workflow cards, editor, and rendered step controls
 │   │   │   ├── fonts.css       # @font-face declarations for vendored local fonts
 │   │   │   ├── mobile-chrome.css # Mobile sheet handles, drag affordances, and pull-to-refresh suppression hooks
 │   │   │   ├── mobile.css      # Mobile composer, mobile shell layout, sheets, and viewport overrides
@@ -462,7 +466,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── welcome.css     # Welcome animation, operator notice, and onboarding-specific UI
 │   │   ├── fonts/              # Vendored local font files used by the app's vendor routes and permalink/export fallbacks
 │   │   └── js/
-│   │       ├── app.js          # Shared UI helpers, overlays, and mobile-layout glue
+│   │       ├── app.js          # Shared UI helpers, preferences, FAQ/Command Registry surfaces, and mobile-layout glue
 │   │       ├── app_preferences_core.js # Pure app preference coercion/snapshot helpers shared by app.js and unit harnesses
 │   │       ├── autocomplete.js # Command autocomplete dropdown
 │   │       ├── autocomplete_core.js # Pure autocomplete matching/ranking helpers shared by autocomplete.js and unit harnesses
@@ -471,6 +475,24 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── dom.js          # Shared DOM element references
 │   │       ├── export_html.js  # Shared export HTML builder / embedded-font helper
 │   │       ├── export_pdf.js   # Shared PDF export module — used by the desktop tab bar and permalink page
+│   │       ├── features/
+│   │       │   ├── autocomplete/
+│   │       │   │   └── runtime_context.js # Runtime autocomplete contexts for built-ins, workspace paths, variables, and command lookup
+│   │       │   ├── run-comparison/
+│   │       │       ├── history_compare_controls.js # Run Comparison view/context controls and actions menu
+│   │       │       ├── history_compare_core.js # Pure Run Comparison formatting, preference, and anchor-map helpers
+│   │       │       ├── history_compare_launcher.js # Run Comparison candidate picker and manual run-search flow
+│   │       │       ├── history_compare_navigation.js # Run Comparison row targeting, minimap, and previous/next-change controls
+│   │       │       ├── history_compare_overlay.js # Run Comparison modal shell, close handling, and initial focus lifecycle
+│   │       │       └── history_compare_renderer.js # Run Comparison transcript hunk renderer, object diff sections, restore actions, and compare fetch flow
+│   │       │   ├── terminal/
+│   │       │   │   └── local_commands.js # Terminal-native theme/config command handlers and shared local-command helpers
+│   │       │   ├── theme/
+│   │       │   │   └── theme.js # Theme registry lookup, preview card rendering, and theme selection lifecycle
+│   │       │   ├── tour/
+│   │       │   │   └── tour_cli.js # Terminal-guided onboarding tour command
+│   │       │   └── workflows/
+│   │       │       └── workflows.js # Workflows modal, editor, terminal command, and runtime autocomplete support
 │   │       ├── history.js      # Command history chips and drawer (with starring)
 │   │       ├── history_core.js # Pure history filter/label/format helpers shared by history.js and unit harnesses
 │   │       ├── mobile_chrome.js # Mobile shell chrome — recents sheet, viewport mode, pull-to-refresh suppression

@@ -79,7 +79,16 @@ function mountHistoryHarness() {
   })
 
   const fns = fromDomScripts(
-    ['app/static/js/history_core.js', 'app/static/js/history.js'],
+    [
+      'app/static/js/history_core.js',
+      'app/static/js/features/run-comparison/history_compare_core.js',
+      'app/static/js/features/run-comparison/history_compare_overlay.js',
+      'app/static/js/history.js',
+      'app/static/js/features/run-comparison/history_compare_controls.js',
+      'app/static/js/features/run-comparison/history_compare_navigation.js',
+      'app/static/js/features/run-comparison/history_compare_renderer.js',
+      'app/static/js/features/run-comparison/history_compare_launcher.js',
+    ],
     {
       document,
       window,

@@ -1,0 +1,879 @@
+/* Run Comparison modal, controls, and transcript diff view. */
+
+
+
+.history-compare-overlay {
+  z-index: 360;
+}
+
+
+
+.history-compare-modal {
+  width: min(980px, 94vw);
+  max-height: min(860px, 90vh);
+}
+
+
+
+.history-compare-header {
+  gap: 12px;
+}
+
+
+
+.history-compare-heading {
+  min-width: 0;
+}
+
+
+
+.history-compare-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
+}
+
+
+
+.history-compare-controls .app-select,
+.history-compare-view-select,
+.history-compare-context-select {
+  width: 156px;
+}
+
+
+
+.history-compare-reset-view.btn-icon-only {
+  flex: 0 0 28px;
+  min-height: 28px;
+  min-width: 28px;
+}
+
+
+
+.history-compare-reset-icon {
+  font-family: var(--font-display);
+  font-size: 17px;
+  line-height: 1;
+}
+
+
+
+.history-compare-title {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  color: var(--green);
+}
+
+
+
+.history-compare-subtitle {
+  margin-top: 2px;
+  max-width: min(680px, 72vw);
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+
+.history-compare-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 18px 20px 22px;
+}
+
+
+
+.history-compare-run-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+
+
+.history-compare-run-card,
+.history-compare-section,
+.history-compare-lines {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--theme-chrome-row-bg);
+  padding: 12px;
+}
+
+
+
+.history-compare-run-eyebrow,
+.history-compare-section-title,
+.history-compare-metric-label {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+
+
+.history-compare-run-command {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+
+
+.history-compare-run-meta,
+.history-compare-candidate-meta,
+.history-compare-empty,
+.history-compare-truncation {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+
+
+.history-compare-primary {
+  margin-top: 10px;
+}
+
+
+
+.history-compare-search {
+  margin-top: 8px;
+  width: 100%;
+}
+
+
+
+.history-compare-candidate-list {
+  display: flex;
+  flex-direction: column;
+  margin: 10px -12px -12px;
+}
+
+
+
+.history-compare-candidate-group {
+  border-bottom: 1px solid var(--border);
+}
+
+
+
+.history-compare-candidate-day {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 10px 16px 5px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+
+
+.history-compare-candidate-day:hover,
+.history-compare-candidate-day:focus-visible {
+  background: var(--theme-chrome-row-hover-bg);
+  outline: none;
+}
+
+
+
+.history-compare-candidate-day-icon {
+  color: var(--muted);
+  width: 10px;
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+
+
+.history-compare-candidate-day[aria-expanded="true"] .history-compare-candidate-day-icon {
+  transform: translateY(-2px) rotate(90deg);
+}
+
+
+
+.history-compare-candidate-day-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+
+.history-compare-candidate-day-count {
+  color: var(--muted);
+}
+
+
+
+.history-compare-candidate {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  text-align: left;
+}
+
+
+
+.history-compare-candidate-group-rows .history-compare-candidate:last-child {
+  border-bottom: 0;
+}
+
+
+
+.history-compare-candidate-command {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+
+.history-compare-load-more {
+  align-self: center;
+  margin: 10px 0 12px;
+}
+
+
+
+.history-compare-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+
+
+.history-compare-metric {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 10px;
+}
+
+
+
+.history-compare-metric.is-changed {
+  border-color: color-mix(in srgb, var(--amber) 46%, var(--border));
+}
+
+
+
+.history-compare-metric-value {
+  margin-top: 4px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+
+
+.history-compare-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+
+
+.history-compare-toolbar .history-compare-controls {
+  flex: 1 1 auto;
+}
+
+
+
+.history-compare-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+
+
+.history-compare-counts-note {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+
+
+.history-compare-actions-menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+
+
+.history-compare-actions-menu {
+  right: auto;
+  left: 0;
+  min-width: 150px;
+  z-index: 520;
+}
+
+
+
+.history-compare-actions-menu-wrap.open .history-compare-actions-menu {
+  display: block;
+}
+
+
+
+.history-compare-actions-menu .dropdown-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  white-space: nowrap;
+}
+
+
+
+.history-compare-lines summary {
+  cursor: pointer;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+
+
+.history-compare-line-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 10px;
+}
+
+
+
+.history-compare-line {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+
+
+.history-compare-line:is(button) {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+
+
+.history-compare-object-row.is-anchorable:hover,
+.history-compare-object-row.is-anchorable:focus-visible {
+  background: var(--theme-button-ghost-hover-bg);
+  outline: 1px solid var(--green-dim);
+  outline-offset: 2px;
+}
+
+
+
+.history-compare-line code {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+
+
+.history-compare-split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) 10px;
+  gap: 10px;
+  min-height: 320px;
+}
+
+
+
+.history-compare-split.is-unified,
+.history-compare-split.is-changes-only {
+  grid-template-columns: minmax(0, 1fr) 10px;
+}
+
+
+
+.history-compare-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-height: min(52vh, 520px);
+  overflow: auto;
+  overscroll-behavior: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+
+
+.history-compare-split.is-unified .history-compare-pane,
+.history-compare-split.is-changes-only .history-compare-pane {
+  max-height: min(58vh, 580px);
+}
+
+
+
+.history-compare-split.is-unified .history-compare-pane,
+.history-compare-split.is-changes-only .history-compare-pane {
+  grid-column: 1;
+}
+
+
+
+.history-compare-split.is-unified .history-compare-minimap,
+.history-compare-split.is-changes-only .history-compare-minimap {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+
+
+.history-compare-pane-title {
+  position: sticky;
+  top: -1px;
+  z-index: 1;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--theme-chrome-row-bg);
+  box-shadow: 0 -1px 0 0 var(--theme-chrome-row-bg);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  padding: 9px 10px;
+  text-transform: uppercase;
+}
+
+
+
+.history-compare-row {
+  display: grid;
+  grid-template-columns: 18px 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  flex: 0 0 auto;
+  min-height: 26px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 64%, transparent);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  padding: 5px 8px;
+}
+
+
+
+.history-compare-line-mark {
+  min-width: 0;
+  text-align: center;
+}
+
+
+
+.history-compare-line-anchor-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 16px;
+}
+
+
+
+.history-compare-finding-marker.btn {
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  min-height: 14px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: color-mix(in srgb, currentColor 22%, var(--surface));
+  box-shadow: inset 0 0 0 3px var(--surface);
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+
+
+
+.history-compare-finding-marker.btn::before {
+  content: "";
+  display: block;
+  width: 4px;
+  height: 4px;
+  margin: auto;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+
+
+.history-compare-finding-marker.is-high {
+  color: var(--red);
+}
+
+
+
+.history-compare-finding-marker.is-medium {
+  color: var(--amber);
+}
+
+
+
+.history-compare-finding-marker.is-info {
+  color: var(--muted);
+}
+
+
+
+.history-compare-minimap {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-self: stretch;
+  min-height: 320px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  padding: 2px;
+  overflow: hidden;
+}
+
+
+
+.history-compare-minimap-segment {
+  min-height: 2px;
+  flex: 1 1 2px;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+}
+
+
+
+.history-compare-minimap-segment.is-changed {
+  background: var(--amber);
+}
+
+
+
+.history-compare-minimap-segment.is-added {
+  background: var(--green);
+}
+
+
+
+.history-compare-minimap-segment.is-removed {
+  background: var(--red);
+}
+
+
+
+.history-compare-minimap-segment.is-equal {
+  background: color-mix(in srgb, var(--muted) 34%, transparent);
+}
+
+
+
+.history-compare-row code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+
+
+.history-compare-row.is-insert {
+  background: color-mix(in srgb, var(--green) 7%, transparent);
+}
+
+
+
+.history-compare-row.is-delete {
+  background: color-mix(in srgb, var(--red) 7%, transparent);
+}
+
+
+
+.history-compare-row.is-replace {
+  background: color-mix(in srgb, var(--amber) 5%, transparent);
+}
+
+
+
+.history-compare-row-spacer {
+  color: transparent;
+  user-select: none;
+}
+
+
+
+.history-compare-row-fold,
+.history-compare-row-omitted {
+  color: var(--muted);
+}
+
+
+
+.history-compare-row-omitted {
+  display: block;
+}
+
+
+
+.history-compare-fold {
+  grid-column: 3;
+  justify-self: start;
+  border-color: color-mix(in srgb, var(--green-dim) 44%, var(--border));
+  background: color-mix(in srgb, var(--green-dim) 8%, transparent);
+}
+
+
+
+.history-compare-line-text-wrap {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+
+
+.history-compare-line-expander {
+  align-self: start;
+  min-height: 18px;
+  padding: 1px 7px;
+  font-size: 10px;
+}
+
+
+
+.history-compare-object-content {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+
+
+.history-compare-object-meta {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+
+
+.history-compare-line-delta {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--amber) 48%, transparent);
+  color: color-mix(in srgb, var(--text) 88%, var(--amber));
+  padding: 0 1px;
+}
+
+
+
+.history-compare-line-added {
+  color: var(--green);
+}
+
+
+
+.history-compare-line-removed {
+  color: var(--red);
+}
+
+
+
+.history-compare-line-pulse {
+  animation: history-compare-line-pulse 800ms ease-out;
+}
+
+
+
+@keyframes history-compare-line-pulse {
+  0% {
+    box-shadow: inset 0 0 0 1px var(--green-dim);
+    background: color-mix(in srgb, var(--green-dim) 18%, transparent);
+  }
+
+  100% {
+    box-shadow: inset 0 0 0 1px transparent;
+  }
+}
+
+
+
+.history-compare-truncation {
+  border: 1px solid color-mix(in srgb, var(--amber) 36%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--amber) 6%, transparent);
+  padding: 9px 10px;
+}
+
+@media (max-width: 600px) {
+  body.mobile-terminal-mode .history-compare-modal {
+    min-height: 68svh;
+    max-height: 88svh;
+  }
+
+  body.mobile-terminal-mode .history-compare-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 14px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body.mobile-terminal-mode .history-compare-run-grid,
+  body.mobile-terminal-mode .history-compare-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  body.mobile-terminal-mode .history-compare-split {
+    flex: 0 0 auto;
+    grid-template-columns: 1fr;
+    min-height: min(42svh, 440px);
+  }
+
+  body.mobile-terminal-mode .history-compare-split.is-unified,
+  body.mobile-terminal-mode .history-compare-split.is-changes-only {
+    display: block;
+    grid-template-columns: none;
+    min-height: 0;
+    height: auto;
+    overflow: visible;
+  }
+
+  body.mobile-terminal-mode .history-compare-minimap {
+    display: none;
+  }
+
+  body.mobile-terminal-mode .history-compare-pane {
+    min-height: min(38svh, 400px);
+    max-height: none;
+    overflow: visible;
+    isolation: isolate;
+    /* Explicit positioned stacking context below the toolbar's z-index 40 so
+       iOS Safari's compositor can't promote the sticky pane-title's layer
+       above the toolbar's open dropdown menu. */
+    position: relative;
+    z-index: 0;
+  }
+
+  body.mobile-terminal-mode .history-compare-split.is-unified .history-compare-pane,
+  body.mobile-terminal-mode .history-compare-split.is-changes-only .history-compare-pane {
+    display: block;
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
+  }
+
+  body.mobile-terminal-mode .history-compare-split.is-unified .history-compare-pane + .history-compare-pane,
+  body.mobile-terminal-mode .history-compare-split.is-changes-only .history-compare-pane + .history-compare-pane {
+    margin-top: 10px;
+  }
+
+  body.mobile-terminal-mode .history-compare-pane-title {
+    position: sticky;
+    top: -14px;
+    z-index: 5;
+    background: var(--theme-chrome-row-bg);
+    box-shadow:
+      0 -2px 0 var(--theme-chrome-row-bg),
+      0 1px 0 var(--border);
+    /* Keeps the sticky title's compositor layer inside the pane's stacking
+       context so it can't out-paint the toolbar's open dropdown menu. iOS
+       Safari otherwise promotes pinned sticky+z-index layers to body level
+       where z-index 5 ends up competing with the toolbar's z-index 40. */
+    will-change: transform;
+  }
+
+  body.mobile-terminal-mode .history-compare-toolbar {
+    position: relative;
+    z-index: 40;
+    overflow: visible;
+    isolation: isolate;
+  }
+
+  body.mobile-terminal-mode .history-compare-toolbar .history-compare-controls {
+    flex: 0 0 100%;
+    width: 100%;
+  }
+
+  body.mobile-terminal-mode .history-compare-actions-menu-wrap,
+  body.mobile-terminal-mode .history-compare-nav {
+    order: 2;
+  }
+
+  body.mobile-terminal-mode .history-compare-nav {
+    margin-left: auto;
+    justify-content: flex-end;
+  }
+
+  body.mobile-terminal-mode .history-compare-controls .app-select,
+  body.mobile-terminal-mode .history-compare-actions-menu-wrap {
+    z-index: 50;
+  }
+
+  body.mobile-terminal-mode .history-compare-controls .app-select.open,
+  body.mobile-terminal-mode .history-compare-actions-menu-wrap.open {
+    z-index: 80;
+  }
+
+  body.mobile-terminal-mode .history-compare-controls .app-select-menu,
+  body.mobile-terminal-mode .history-compare-actions-menu {
+    z-index: 900;
+  }
+
+  body.mobile-terminal-mode .history-compare-subtitle {
+    max-width: 74vw;
+  }
+}

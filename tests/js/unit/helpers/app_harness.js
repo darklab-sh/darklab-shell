@@ -479,6 +479,11 @@ export async function loadAppFns({
       'app/static/js/output.js',
       'app/static/js/app_preferences_core.js',
       'app/static/js/app.js',
+      'app/static/js/features/theme/theme.js',
+      'app/static/js/features/terminal/local_commands.js',
+      'app/static/js/features/autocomplete/runtime_context.js',
+      'app/static/js/features/tour/tour_cli.js',
+      'app/static/js/features/workflows/workflows.js',
       'app/static/js/controller.js',
     ],
     {
