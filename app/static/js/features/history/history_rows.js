@@ -147,7 +147,7 @@ function _createHistoryEntry(run, isStarred, options = {}) {
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.dataset.action = 'select-run';
-    checkbox.dataset.historySelectRunId = String(run.id || '');
+    checkbox.dataset.historySelectItemId = `run:${String(run.id || '')}`;
     checkbox.checked = selected;
     checkbox.disabled = !selectable;
     checkbox.setAttribute('aria-label', `Select run: ${run.command || run.id || 'run'}`);
@@ -239,12 +239,30 @@ function _createHistoryEntry(run, isStarred, options = {}) {
   return entry;
 }
 
-function _createSnapshotHistoryEntry(snapshot) {
+function _createSnapshotHistoryEntry(snapshot, options = {}) {
   const entry = document.createElement('div');
-  entry.className = 'history-entry history-entry-snapshot chrome-row chrome-row-clickable';
+  const selectMode = !!options.selectMode;
+  const selectable = options.selectable !== false;
+  const selected = !!options.selected;
+  entry.className = 'history-entry history-entry-snapshot chrome-row chrome-row-clickable'
+    + (selectMode ? ' history-entry-selecting' : '');
 
   const header = document.createElement('div');
   header.className = 'history-entry-header';
+
+  if (selectMode) {
+    const selectLabel = document.createElement('label');
+    selectLabel.className = 'history-entry-select-row' + (selectable ? '' : ' history-entry-select-disabled');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.dataset.action = 'select-run';
+    checkbox.dataset.historySelectItemId = `snapshot:${String(snapshot.id || '')}`;
+    checkbox.checked = selected;
+    checkbox.disabled = !selectable;
+    checkbox.setAttribute('aria-label', `Select snapshot: ${snapshot.label || snapshot.id || 'snapshot'}`);
+    selectLabel.appendChild(checkbox);
+    header.appendChild(selectLabel);
+  }
 
   const title = document.createElement('div');
   title.className = 'history-entry-cmd';

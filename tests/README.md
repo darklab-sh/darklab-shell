@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,656
+- behavior tests: 2,658
 - docs/inventory meta-tests: 32
-- `pytest`: 1329 (1297 behavior + 32 meta)
-- `vitest`: 1113
+- `pytest`: 1330 (1298 behavior + 32 meta)
+- `vitest`: 1114
 - `playwright`: 249
-- total: 2,691
+- total: 2,693
 
 This document is organized in two parts:
 
@@ -1187,6 +1187,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestShareRoute.test_post_rejects_non_object_json` | Checks that post rejects non object JSON. |
 | `TestShareRoute.test_get_nonexistent_share_returns_404` | Checks that get nonexistent share returns 404. |
 | `TestShareRoute.test_delete_share_removes_snapshot_for_current_session` | Checks that deleting a snapshot share removes it for the owning session and leaves the permalink unavailable afterward. |
+| `TestShareRoute.test_bulk_delete_shares_reports_partial_results_and_removes_metadata` | Checks that bulk snapshot deletion reports partial results and removes metadata for deleted snapshots. |
 | `TestShareRoute.test_get_share_json_returns_content` | Checks that get share JSON returns content. |
 | `TestShareRoute.test_get_share_html_returns_page` | Checks that get share HTML returns page. |
 | `TestShareRoute.test_get_share_html_honors_theme_name_cookie` | Checks that get share HTML honors theme name cookie. |
@@ -1916,6 +1917,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `includes run subtype filters in the request URL` | Verifies that the history drawer sends built-in and external run subtype filters to `/history`. |
 | `renders run metadata badges and opens the metadata editor from the run menu` | Verifies that run history rows render label and note badges and delegate Edit to the metadata editor. |
 | `renders snapshot rows with open and copy-link actions` | Verifies that snapshot-only history responses render the `SNAPSHOT` row treatment and expose the snapshot action set. |
+| `selects snapshot rows and bulk deletes them through the snapshot endpoint` | Verifies that History select mode can select saved snapshots and delete them through the snapshot bulk endpoint. |
 | `shows a date in history metadata when the run is not from today` | Verifies that older history entries include a date token in their metadata row. |
 | `omits the date in history metadata for runs from the current day` | Verifies that same-day history entries keep the compact time-only metadata row. |
 | `_historyRelativeTime buckets recent diffs as just now / m / h / d and falls back to a short date` | Verifies the relative-time helper used by the mobile recents sheet returns stable bucket strings and a short date for older runs. |

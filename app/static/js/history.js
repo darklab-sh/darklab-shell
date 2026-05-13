@@ -22,7 +22,7 @@ let _historyProjectOptionsLoading = null;
 let _historySelection = {
   selectMode: false,
   selected: new Map(),
-  visibleRuns: [],
+  visibleItems: [],
   bulkInFlight: false,
 };
 let _historyRootSuggestions = [];
@@ -418,13 +418,32 @@ function _renderHistoryActiveFilters() {
   });
 }
 
+function _historyItemType(item) {
+  return String(item?.type || 'run');
+}
+
+function _historyIsSelectableItem(item) {
+  if (!item || !item.id) return false;
+  const type = _historyItemType(item);
+  if (type === 'snapshot') return true;
+  if (type !== 'run') return false;
+  return !!item.finished || item.exit_code !== null && typeof item.exit_code !== 'undefined';
+}
+
 function _historyIsSelectableRun(run) {
-  if (!run || String(run.type || 'run') !== 'run') return false;
-  return !!run.finished || run.exit_code !== null && typeof run.exit_code !== 'undefined';
+  return _historyItemType(run) === 'run' && _historyIsSelectableItem(run);
+}
+
+function _historySelectionKey(item) {
+  return `${_historyItemType(item)}:${String(item?.id || '')}`;
 }
 
 function _historySelectedRuns() {
-  return Array.from(_historySelection.selected.values());
+  return Array.from(_historySelection.selected.values()).filter(item => _historyItemType(item) === 'run');
+}
+
+function _historySelectedSnapshots() {
+  return Array.from(_historySelection.selected.values()).filter(item => _historyItemType(item) === 'snapshot');
 }
 
 function _historyCssEscape(value) {
@@ -443,7 +462,7 @@ function _historyResetSelectionOnClose() {
   _historySelection.selectMode = false;
   _historySelection.selected.clear();
   _historySelection.bulkInFlight = false;
-  _historySelection.visibleRuns = [];
+  _historySelection.visibleItems = [];
   _closeHistoryActionMenus();
   _closeHistoryBulkActionMenu();
   _renderHistoryBulkToolbar();
@@ -458,23 +477,26 @@ function _historySetSelectMode(enabled, { render = true } = {}) {
   }
 }
 
-function _historyToggleRunSelection(run, checked = null) {
-  if (!_historyIsSelectableRun(run) || _historySelection.bulkInFlight) return;
-  const runId = String(run.id || '');
-  if (!runId) return;
-  const shouldSelect = checked === null ? !_historySelection.selected.has(runId) : !!checked;
-  if (shouldSelect) _historySelection.selected.set(runId, run);
-  else _historySelection.selected.delete(runId);
+function _historyToggleItemSelection(item, checked = null) {
+  if (!_historyIsSelectableItem(item) || _historySelection.bulkInFlight) return;
+  const itemKey = _historySelectionKey(item);
+  const shouldSelect = checked === null ? !_historySelection.selected.has(itemKey) : !!checked;
+  if (shouldSelect) _historySelection.selected.set(itemKey, item);
+  else _historySelection.selected.delete(itemKey);
   _renderHistoryBulkToolbar();
-  const checkbox = historyList?.querySelector?.(`[data-history-select-run-id="${_historyCssEscape(runId)}"]`);
-  if (checkbox) checkbox.checked = _historySelection.selected.has(runId);
+  const checkbox = historyList?.querySelector?.(`[data-history-select-item-id="${_historyCssEscape(itemKey)}"]`);
+  if (checkbox) checkbox.checked = _historySelection.selected.has(itemKey);
 }
 
-function _historySelectAllVisibleRuns() {
+function _historyToggleRunSelection(run, checked = null) {
+  _historyToggleItemSelection(run, checked);
+}
+
+function _historySelectAllVisibleItems() {
   if (_historySelection.bulkInFlight) return;
-  _historySelection.visibleRuns.forEach((run) => {
-    if (_historyIsSelectableRun(run) && run.id) {
-      _historySelection.selected.set(String(run.id), run);
+  _historySelection.visibleItems.forEach((item) => {
+    if (_historyIsSelectableItem(item) && item.id) {
+      _historySelection.selected.set(_historySelectionKey(item), item);
     }
   });
   refreshHistoryPanel();
@@ -497,7 +519,9 @@ function _historyBulkCountsFromResponse(data) {
 }
 
 function _historyBulkToast(message, counts = {}) {
-  const hasPartial = Number(counts.rejected || 0) > 0 || Number(counts.not_linked || 0) > 0;
+  const hasPartial = Number(counts.rejected || 0) > 0
+    || Number(counts.not_found || 0) > 0
+    || Number(counts.not_linked || 0) > 0;
   if (hasPartial) showToast(message, 'success', { label: 'dismiss', onClick: () => {} });
   else showToast(message);
 }
@@ -550,6 +574,10 @@ function _historyBulkResultText(action, projectName, counts = {}) {
 
 function _historySelectedRunIds() {
   return _historySelectedRuns().map(run => String(run.id || '')).filter(Boolean);
+}
+
+function _historySelectedSnapshotIds() {
+  return _historySelectedSnapshots().map(snapshot => String(snapshot.id || '')).filter(Boolean);
 }
 
 async function _historyRefreshAfterBulk() {
@@ -674,14 +702,52 @@ async function _historyBulkChooseProject(action) {
   await _historyBulkPostProject(project, action);
 }
 
-async function _historyBulkDeleteSelectedRuns() {
+function _historyBulkDeleteLabel(runCount, snapshotCount) {
+  if (runCount && snapshotCount) return `${runCount + snapshotCount} selected history items`;
+  if (snapshotCount) return `${snapshotCount} selected ${snapshotCount === 1 ? 'snapshot' : 'snapshots'}`;
+  return `${runCount} selected ${runCount === 1 ? 'run' : 'runs'}`;
+}
+
+function _historyBulkDeletedNoun(runCount, snapshotCount, deletedCount) {
+  if (runCount && !snapshotCount) return deletedCount === 1 ? 'run' : 'runs';
+  if (snapshotCount && !runCount) return deletedCount === 1 ? 'snapshot' : 'snapshots';
+  return deletedCount === 1 ? 'item' : 'items';
+}
+
+function _historyMergeBulkDeleteResponses(responses) {
+  return responses.reduce((acc, data) => {
+    const counts = _historyBulkCountsFromResponse(data);
+    ['deleted', 'not_found', 'rejected'].forEach((key) => {
+      acc.counts[key] = Number(acc.counts[key] || 0) + Number(counts[key] || 0);
+    });
+    if (Array.isArray(data?.results)) acc.results.push(...data.results);
+    return acc;
+  }, { counts: { deleted: 0, not_found: 0, rejected: 0 }, results: [] });
+}
+
+async function _historyPostBulkDelete(url, payload) {
+  const resp = await apiFetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+
+async function _historyBulkDeleteSelectedItems() {
   const runIds = _historySelectedRunIds();
-  if (!runIds.length) return;
-  const count = runIds.length;
+  const snapshotIds = _historySelectedSnapshotIds();
+  if (!runIds.length && !snapshotIds.length) return;
+  const label = _historyBulkDeleteLabel(runIds.length, snapshotIds.length);
   const choice = await showConfirm({
     body: {
-      text: `Delete ${count} selected ${count === 1 ? 'run' : 'runs'}?`,
-      note: 'This removes the selected run history and cannot be undone.',
+      text: `Delete ${label}?`,
+      note: runIds.length && snapshotIds.length
+        ? 'This removes the selected run history and snapshots and cannot be undone.'
+        : snapshotIds.length
+          ? 'This removes the selected snapshots and cannot be undone.'
+          : 'This removes the selected run history and cannot be undone.',
     },
     tone: 'warning',
     actions: [
@@ -692,21 +758,22 @@ async function _historyBulkDeleteSelectedRuns() {
   if (choice !== 'delete') return;
   _historySetBulkBusy(true);
   try {
-    const resp = await apiFetch('/history/bulk-delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ run_ids: runIds }),
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
+    const requests = [];
+    if (runIds.length) requests.push(_historyPostBulkDelete('/history/bulk-delete', { run_ids: runIds }));
+    if (snapshotIds.length) requests.push(_historyPostBulkDelete('/share/bulk-delete', { snapshot_ids: snapshotIds }));
+    const data = _historyMergeBulkDeleteResponses(await Promise.all(requests));
     const counts = _historyBulkCountsFromResponse(data);
     _historySelection.selected.clear();
     const reasonSummary = _historyBulkReasonSummary(data.results);
-    const message = [_historyBulkResultText('delete', '', counts), reasonSummary].filter(Boolean).join(' - ');
+    const deleted = Number(counts.deleted || 0);
+    const rejected = Number(counts.rejected || 0) + Number(counts.not_found || 0);
+    const pieces = [`Deleted ${deleted} ${_historyBulkDeletedNoun(runIds.length, snapshotIds.length, deleted)}`];
+    if (rejected) pieces.push(`${rejected} skipped`);
+    const message = [pieces.join(' - '), reasonSummary].filter(Boolean).join(' - ');
     _historyBulkToast(message, counts);
     await _historyRefreshAfterBulk();
   } catch (_) {
-    showToast('Failed to delete selected runs', 'error');
+    showToast('Failed to delete selected history items', 'error');
   } finally {
     _historySetBulkBusy(false);
   }
@@ -725,6 +792,8 @@ function _historyBuildBulkActionMenu(disabled) {
   const menu = document.createElement('div');
   menu.className = 'history-bulk-actions-menu save-menu dropdown-surface';
   const activeProject = typeof getActiveProjectContext === 'function' ? getActiveProjectContext() : null;
+  const selectedTypes = new Set(Array.from(_historySelection.selected.values()).map(_historyItemType));
+  const hasOnlyRuns = selectedTypes.size === 1 && selectedTypes.has('run');
   [
     ['bulk-add-active-project', 'add to active project'],
     ['bulk-add-project', 'add to project'],
@@ -736,9 +805,14 @@ function _historyBuildBulkActionMenu(disabled) {
     item.className = 'dropdown-item dropdown-item-compact';
     item.dataset.action = action;
     item.textContent = label;
-    item.disabled = disabled || (action === 'bulk-add-active-project' && !(activeProject && activeProject.id));
+    const projectActionDisabled = action !== 'bulk-delete' && !hasOnlyRuns;
+    item.disabled = disabled
+      || projectActionDisabled
+      || (action === 'bulk-add-active-project' && !(activeProject && activeProject.id));
     if (action === 'bulk-add-active-project' && !(activeProject && activeProject.id)) {
       item.title = 'Select an active project first.';
+    } else if (projectActionDisabled) {
+      item.title = 'Project actions apply to selected runs.';
     }
     menu.appendChild(item);
   });
@@ -749,7 +823,7 @@ function _historyBuildBulkActionMenu(disabled) {
 function _renderHistoryBulkToolbar() {
   if (typeof historyBulkToolbar === 'undefined' || !historyBulkToolbar) return;
   historyBulkToolbar.replaceChildren();
-  const visibleSelectable = _historySelection.visibleRuns.filter(_historyIsSelectableRun);
+  const visibleSelectable = _historySelection.visibleItems.filter(_historyIsSelectableItem);
   const shouldShow = _historySelection.selectMode || visibleSelectable.length > 0;
   historyBulkToolbar.classList.toggle('u-hidden', !shouldShow);
   if (!shouldShow) return;
@@ -774,15 +848,15 @@ function _renderHistoryBulkToolbar() {
   historyBulkToolbar.appendChild(count);
 
   const allSelected = visibleSelectable.length > 0
-    && visibleSelectable.every(run => _historySelection.selected.has(String(run.id || '')));
-  const someSelected = visibleSelectable.some(run => _historySelection.selected.has(String(run.id || '')));
+    && visibleSelectable.every(item => _historySelection.selected.has(_historySelectionKey(item)));
+  const someSelected = visibleSelectable.some(item => _historySelection.selected.has(_historySelectionKey(item)));
   const selectAll = document.createElement('button');
   selectAll.className = 'history-action-btn btn btn-secondary btn-compact';
   selectAll.type = 'button';
   selectAll.textContent = allSelected && someSelected ? 'Selected all' : 'Select all';
   selectAll.disabled = !_historySelection.selectMode || !visibleSelectable.length || _historySelection.bulkInFlight;
   selectAll.setAttribute('aria-pressed', allSelected && someSelected ? 'true' : someSelected ? 'mixed' : 'false');
-  selectAll.addEventListener('click', () => _historySelectAllVisibleRuns());
+  selectAll.addEventListener('click', () => _historySelectAllVisibleItems());
   historyBulkToolbar.appendChild(selectAll);
 
   const clear = document.createElement('button');
@@ -833,7 +907,7 @@ function _renderHistoryBulkToolbar() {
     refocusComposer: false,
     onActivate: () => {
       _closeHistoryBulkActionMenu();
-      _historyBulkDeleteSelectedRuns();
+      _historyBulkDeleteSelectedItems();
     },
   });
 }
@@ -1111,7 +1185,7 @@ function refreshHistoryPanel() {
     _historyPaging.hasPrev = !!data.has_prev;
     _historyPaging.hasNext = !!data.has_next;
     const visibleItems = _applyHistoryClientFilters(Array.isArray(data.items) ? data.items : data.runs);
-    _historySelection.visibleRuns = visibleItems.filter(item => item && String(item.type || 'run') === 'run');
+    _historySelection.visibleItems = visibleItems.filter(_historyIsSelectableItem);
     _renderHistoryBulkToolbar();
     _renderHistoryRootSuggestions(_historyFilters.type === 'snapshots' ? [] : (Array.isArray(data.roots) ? data.roots : data.runs));
     if (!visibleItems.length) {
@@ -1132,12 +1206,33 @@ function refreshHistoryPanel() {
     const starred = _getStarred();
     visibleItems.forEach(item => {
       if (item.type === 'snapshot') {
-        const entry = _createSnapshotHistoryEntry(item);
+        const selectable = _historyIsSelectableItem(item);
+        const selected = _historySelection.selected.has(_historySelectionKey(item));
+        const entry = _createSnapshotHistoryEntry(item, {
+          selectMode: _historySelection.selectMode,
+          selectable,
+          selected,
+        });
         entry.addEventListener('click', e => {
           if (e.target.closest('[data-action]')) return;
+          const renderedForSelection = entry.classList.contains('history-entry-selecting')
+            || !!entry.querySelector('[data-action="select-run"]');
+          if (_historySelection.selectMode || renderedForSelection) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            _historyToggleItemSelection(item);
+            return;
+          }
           openSnapshotLink(item);
           hideHistoryPanel();
         });
+        const selectionBox = entry.querySelector('[data-action="select-run"]');
+        if (selectionBox) {
+          selectionBox.addEventListener('change', e => {
+            e.stopPropagation();
+            _historyToggleItemSelection(item, e.target.checked);
+          });
+        }
 
         bindPressable(entry.querySelector('[data-action="open"]'), {
           onActivate: () => {
@@ -1169,7 +1264,7 @@ function refreshHistoryPanel() {
       const run = item;
       const isStarred = starred.has(run.command);
       const selectable = _historyIsSelectableRun(run);
-      const selected = _historySelection.selected.has(String(run.id || ''));
+      const selected = _historySelection.selected.has(_historySelectionKey(run));
       const entry = _createHistoryEntry(run, isStarred, {
         selectMode: _historySelection.selectMode,
         selectable,

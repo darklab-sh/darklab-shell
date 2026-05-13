@@ -1504,42 +1504,50 @@ def delete_run(run_id):
     return jsonify({"ok": True})
 
 
-def _normalize_bulk_run_ids_payload(data):
+def _normalize_bulk_ids_payload(data, key):
     if not isinstance(data, dict):
         return None, (jsonify({"error": "Request body must be a JSON object"}), 400)
-    raw_ids = data.get("run_ids")
+    raw_ids = data.get(key)
     if not isinstance(raw_ids, list):
-        return None, (jsonify({"error": "run_ids must be a list"}), 400)
+        return None, (jsonify({"error": f"{key} must be a list"}), 400)
     if len(raw_ids) > MAX_BULK_RUN_ACTION_ITEMS:
         return None, (jsonify({"error": "too_many", "limit": MAX_BULK_RUN_ACTION_ITEMS}), 400)
-    run_ids = []
+    ids = []
     seen = set()
     for raw_id in raw_ids:
-        run_id = str(raw_id or "").strip()
-        if not run_id or run_id in seen:
+        item_id = str(raw_id or "").strip()
+        if not item_id or item_id in seen:
             continue
-        seen.add(run_id)
-        run_ids.append(run_id)
-    if not run_ids:
-        return None, (jsonify({"error": "run_ids is required"}), 400)
-    return run_ids, None
+        seen.add(item_id)
+        ids.append(item_id)
+    if not ids:
+        return None, (jsonify({"error": f"{key} is required"}), 400)
+    return ids, None
 
 
-def _bulk_delete_result(counts, run_id, status, *, reason=None):
+def _normalize_bulk_run_ids_payload(data):
+    return _normalize_bulk_ids_payload(data, "run_ids")
+
+
+def _normalize_bulk_snapshot_ids_payload(data):
+    return _normalize_bulk_ids_payload(data, "snapshot_ids")
+
+
+def _bulk_delete_result(counts, item_id, status, *, key="run_id", reason=None):
     counts[status] = counts.get(status, 0) + 1
-    item = {"run_id": run_id, "status": status}
+    item = {key: item_id, "status": status}
     if reason:
         item["reason"] = reason
     return item
 
 
-def _bulk_delete_failures(results):
+def _bulk_delete_failures(results, *, key="run_id"):
     failures = []
     for item in results:
         if item.get("status") not in {"not_found", "rejected"}:
             continue
         failure = {
-            "run_id": item.get("run_id") or "",
+            key: item.get(key) or "",
             "status": item.get("status") or "",
         }
         if item.get("reason"):
@@ -1663,6 +1671,48 @@ def save_share():
         "label": label, "redacted": apply_redaction,
     })
     return jsonify({"id": share_id, "url": f"/share/{share_id}"})
+
+
+@history_bp.route("/share/bulk-delete", methods=["POST"])
+def bulk_delete_shares():
+    """Delete selected snapshots for this session."""
+    session_id = get_session_id()
+    snapshot_ids, error_response = _normalize_bulk_snapshot_ids_payload(request.get_json(silent=True) or {})
+    if error_response is not None:
+        return error_response
+    counts = {"deleted": 0, "not_found": 0, "rejected": 0}
+    results = []
+    deletable_ids = []
+    assert snapshot_ids is not None
+    with db_connect() as conn:
+        placeholders = ",".join("?" for _ in snapshot_ids)
+        rows = conn.execute(
+            f"SELECT id FROM snapshots WHERE session_id = ? AND id IN ({placeholders})",  # nosec B608
+            [session_id, *snapshot_ids],
+        ).fetchall()
+        owned_ids = {str(row["id"]) for row in rows}
+        for snapshot_id in snapshot_ids:
+            if snapshot_id not in owned_ids:
+                results.append(_bulk_delete_result(counts, snapshot_id, "not_found", key="snapshot_id"))
+                continue
+            deletable_ids.append(snapshot_id)
+            results.append(_bulk_delete_result(counts, snapshot_id, "deleted", key="snapshot_id"))
+        if deletable_ids:
+            delete_snapshot_metadata(conn, deletable_ids)
+            delete_placeholders = ",".join("?" for _ in deletable_ids)
+            conn.execute(
+                f"DELETE FROM snapshots WHERE session_id = ? AND id IN ({delete_placeholders})",  # nosec B608
+                [session_id, *deletable_ids],
+            )
+        conn.commit()
+    log.info("SHARES_BULK_DELETED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "count": counts["deleted"],
+        "counts": counts,
+        "failures": _bulk_delete_failures(results, key="snapshot_id"),
+    })
+    return jsonify({"ok": True, "counts": counts, "results": results})
 
 
 @history_bp.route("/share/<share_id>")

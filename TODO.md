@@ -17,9 +17,6 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 
 ## Open TODOs
 
-- **History multi-select bulk action follow-ups**
-  - Consider snapshot bulk delete later if real use shows saved snapshots need the same workflow.
-
 - **Encrypted secrets vault**
   - **Scope**
     - Per-session-token encrypted store for tool API tokens and bearer values that must not appear in transcripts, history, snapshots, or logs.

@@ -6884,6 +6884,70 @@ class TestShareRoute:
         assert label_count == 0
         assert note_count == 0
 
+    def test_bulk_delete_shares_reports_partial_results_and_removes_metadata(self):
+        client = get_client()
+        session_id = "bulk-delete-share-session"
+        other_session_id = "bulk-delete-share-other"
+
+        create_resp = client.post(
+            "/share",
+            json={"label": "delete-me", "content": ["line"]},
+            headers={"X-Session-ID": session_id},
+        )
+        share_id = json.loads(create_resp.data)["id"]
+        other_resp = client.post(
+            "/share",
+            json={"label": "keep-me", "content": ["line"]},
+            headers={"X-Session-ID": other_session_id},
+        )
+        other_share_id = json.loads(other_resp.data)["id"]
+        label_resp = client.post(
+            f"/entities/snapshot/{share_id}/labels",
+            json={"label": "handoff"},
+            headers={"X-Session-ID": session_id},
+        )
+        note_resp = client.put(
+            f"/entities/snapshot/{share_id}/note",
+            json={"body": "Snapshot context"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert label_resp.status_code == 201
+        assert note_resp.status_code == 200
+
+        resp = client.post(
+            "/share/bulk-delete",
+            json={"snapshot_ids": [share_id, other_share_id, "missing-share"]},
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["counts"] == {"deleted": 1, "not_found": 2, "rejected": 0}
+        assert data["results"] == [
+            {"snapshot_id": share_id, "status": "deleted"},
+            {"snapshot_id": other_share_id, "status": "not_found"},
+            {"snapshot_id": "missing-share", "status": "not_found"},
+        ]
+        with sqlite3.connect(DB_PATH) as conn:
+            remaining_ids = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT id FROM snapshots WHERE id IN (?, ?)",
+                    (share_id, other_share_id),
+                ).fetchall()
+            }
+            label_count = conn.execute(
+                "SELECT COUNT(*) FROM entity_labels WHERE entity_type='snapshot' AND entity_id=?",
+                (share_id,),
+            ).fetchone()[0]
+            note_count = conn.execute(
+                "SELECT COUNT(*) FROM entity_notes WHERE entity_type='snapshot' AND entity_id=?",
+                (share_id,),
+            ).fetchone()[0]
+        assert remaining_ids == {other_share_id}
+        assert label_count == 0
+        assert note_count == 0
+
     def test_get_share_json_returns_content(self):
         client = get_client()
         # Create a snapshot first

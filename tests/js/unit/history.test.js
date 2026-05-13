@@ -2385,6 +2385,69 @@ describe('history panel actions', () => {
     )
   })
 
+  it('selects snapshot rows and bulk deletes them through the snapshot endpoint', async () => {
+    const showConfirm = vi.fn(() => Promise.resolve('delete'))
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            roots: [],
+            items: [
+              {
+                id: 'snap-1',
+                type: 'snapshot',
+                label: 'nmap baseline snapshot',
+                created: '2026-01-01T00:00:00Z',
+              },
+            ],
+            runs: [],
+          }),
+        })
+      }
+      if (url === '/share/bulk-delete' && options.method === 'POST') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            counts: { deleted: 1, not_found: 0, rejected: 0 },
+            results: [{ snapshot_id: 'snap-1', status: 'deleted' }],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      apiFetchImpl: apiFetch,
+      showConfirmImpl: showConfirm,
+    })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+    const toggle = document.querySelector('.history-bulk-toggle input')
+    toggle.checked = true
+    toggle.dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise((resolve) => setImmediate(resolve))
+    document.querySelector('#history-list .history-entry')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    document.querySelector('[data-action="bulk-delete"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.objectContaining({
+        text: 'Delete 1 selected snapshot?',
+      }),
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/share/bulk-delete', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ snapshot_ids: ['snap-1'] }),
+    }))
+    expect(document.getElementById('permalink-toast').textContent).toContain('Deleted 1 snapshot')
+  })
+
   it('shows a date in history metadata when the run is not from today', async () => {
     const RealDate = Date
     class MockDate extends RealDate {
