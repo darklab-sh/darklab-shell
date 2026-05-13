@@ -544,6 +544,7 @@ describe('history panel actions', () => {
       <input id="history-starred-toggle" type="checkbox" />
       <button id="history-clear-filters"></button>
       <div id="history-active-filters" class="u-hidden"></div>
+      <div id="history-bulk-toolbar" class="u-hidden"></div>
       <div id="history-list"></div>
       <div id="history-pagination" class="u-hidden">
         <div id="history-pagination-summary"></div>
@@ -651,6 +652,7 @@ describe('history panel actions', () => {
     const historyStarredToggle = document.getElementById('history-starred-toggle')
     const historyClearFiltersBtn = document.getElementById('history-clear-filters')
     const historyActiveFilters = document.getElementById('history-active-filters')
+    const historyBulkToolbar = document.getElementById('history-bulk-toolbar')
     const historyPagination = document.getElementById('history-pagination')
     const historyPaginationSummary = document.getElementById('history-pagination-summary')
     const historyPaginationControls = document.getElementById('history-pagination-controls')
@@ -684,6 +686,7 @@ describe('history panel actions', () => {
           historyStarredToggle,
           historyClearFiltersBtn,
           historyActiveFilters,
+          historyBulkToolbar,
           historyPagination,
           historyPaginationSummary,
           historyPaginationControls,
@@ -733,6 +736,7 @@ describe('history panel actions', () => {
         _setHistoryFilter,
         _historySetPage,
         _historyRelativeTime,
+        _historyResetSelectionOnClose,
         _restoreBothHistoryCompareRuns,
         _highlightRestoredHistoryLine,
         resetHistoryMobileFilters,
@@ -1034,6 +1038,148 @@ describe('history panel actions', () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(document.getElementById('history-run-overlay').classList.contains('open')).toBe(true)
+  })
+
+  it('renders select mode checkboxes and toggles row selection without opening run details', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            roots: ['nmap'],
+            items: [
+              {
+                id: 'run-1',
+                type: 'run',
+                command: 'nmap darklab.sh',
+                started: '2026-01-01T00:00:00Z',
+                exit_code: 0,
+              },
+              {
+                id: 'run-running',
+                type: 'run',
+                command: 'ping darklab.sh',
+                started: '2026-01-01T00:00:05Z',
+                exit_code: null,
+              },
+            ],
+            runs: [],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(document.querySelectorAll('[data-action="select-run"]')).toHaveLength(0)
+    const toggle = document.querySelector('.history-bulk-toggle input')
+    expect(toggle).not.toBeNull()
+    toggle.checked = true
+    toggle.dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const rows = [...document.querySelectorAll('#history-list .history-entry')]
+    const checkboxes = [...document.querySelectorAll('[data-action="select-run"]')]
+    expect(checkboxes).toHaveLength(2)
+    expect(checkboxes[0].disabled).toBe(false)
+    expect(checkboxes[1].disabled).toBe(true)
+
+    rows[0].dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(checkboxes[0].checked).toBe(true)
+    expect(document.querySelector('.history-bulk-count').textContent).toBe('1 selected')
+    expect(document.getElementById('history-run-overlay')).toBeNull()
+  })
+
+  it('selects all visible completed runs, reports mixed state, and clears selection', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            roots: ['dig'],
+            items: [
+              {
+                id: 'run-1',
+                type: 'run',
+                command: 'dig darklab.sh A',
+                started: '2026-01-01T00:00:00Z',
+                exit_code: 0,
+              },
+              {
+                id: 'run-2',
+                type: 'run',
+                command: 'dig darklab.sh MX',
+                started: '2026-01-01T00:00:01Z',
+                exit_code: 1,
+              },
+              {
+                id: 'run-running',
+                type: 'run',
+                command: 'dig darklab.sh TXT',
+                started: '2026-01-01T00:00:02Z',
+                exit_code: null,
+              },
+            ],
+            runs: [],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+    const toggle = document.querySelector('.history-bulk-toggle input')
+    toggle.checked = true
+    toggle.dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise((resolve) => setImmediate(resolve))
+
+    document.querySelector('#history-list .history-entry')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    const selectAll = [...document.querySelectorAll('#history-bulk-toolbar button')]
+      .find(btn => btn.textContent === 'Select all')
+    expect(selectAll.getAttribute('aria-pressed')).toBe('mixed')
+
+    selectAll.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(document.querySelector('.history-bulk-count').textContent).toBe('2 selected')
+    expect([...document.querySelectorAll('[data-action="select-run"]')].map(input => input.checked))
+      .toEqual([true, true, false])
+
+    document.querySelector('#history-bulk-toolbar button:nth-of-type(2)')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(document.querySelector('.history-bulk-count').textContent).toBe('0 selected')
+    expect([...document.querySelectorAll('[data-action="select-run"]')].map(input => input.checked))
+      .toEqual([false, false, false])
+  })
+
+  it('resets select mode and selection before the next history drawer open', async () => {
+    const { refreshHistoryPanel, _historyResetSelectionOnClose } = loadHistoryPanel()
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+    const toggle = document.querySelector('.history-bulk-toggle input')
+    toggle.checked = true
+    toggle.dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise((resolve) => setImmediate(resolve))
+
+    document.querySelector('#history-list .history-entry')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(document.querySelector('.history-bulk-count').textContent).toBe('1 selected')
+
+    _historyResetSelectionOnClose()
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(document.querySelector('.history-bulk-toggle input').checked).toBe(false)
+    expect(document.querySelector('.history-bulk-count').textContent).toBe('0 selected')
+    expect(document.querySelectorAll('[data-action="select-run"]')).toHaveLength(0)
   })
 
   it('copies the run id and links runs to active or selected projects from the history menu', async () => {

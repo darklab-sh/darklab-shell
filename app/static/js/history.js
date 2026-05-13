@@ -427,6 +427,13 @@ function _historySelectedRuns() {
   return Array.from(_historySelection.selected.values());
 }
 
+function _historyCssEscape(value) {
+  if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') {
+    return CSS.escape(String(value));
+  }
+  return String(value).replace(/["\\]/g, '\\$&');
+}
+
 function _historyClearSelection({ render = true } = {}) {
   _historySelection.selected.clear();
   if (render) _renderHistoryBulkToolbar();
@@ -459,7 +466,7 @@ function _historyToggleRunSelection(run, checked = null) {
   if (shouldSelect) _historySelection.selected.set(runId, run);
   else _historySelection.selected.delete(runId);
   _renderHistoryBulkToolbar();
-  const checkbox = historyList?.querySelector?.(`[data-history-select-run-id="${CSS.escape(runId)}"]`);
+  const checkbox = historyList?.querySelector?.(`[data-history-select-run-id="${_historyCssEscape(runId)}"]`);
   if (checkbox) checkbox.checked = _historySelection.selected.has(runId);
 }
 
