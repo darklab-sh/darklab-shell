@@ -1069,6 +1069,17 @@ describe('autocomplete helpers', () => {
             expects_value: [],
             arg_hints: { __positional__: [{ value: '<target>', hintOnly: true, value_type: 'target', description: 'Hostname, IP, or CIDR' }] },
           },
+          nuclei: {
+            flags: [{ value: '-l', description: 'File with targets' }],
+            expects_value: ['-l'],
+            workspace_file_flags: ['-l'],
+            arg_hints: { '-l': [{ value: '<target-file>', hintOnly: true, value_type: 'target', description: 'Session file containing one URL or host per line' }] },
+          },
+          dnsx: {
+            flags: [{ value: '-l', description: 'Read hostnames from a session file' }],
+            expects_value: ['-l'],
+            arg_hints: { '-l': [{ value: '<host-file>', hintOnly: true, value_type: 'host', description: 'Session file containing one hostname per line' }] },
+          },
         },
         acFiltered: [],
         acIndex: -1,
@@ -1084,6 +1095,8 @@ describe('autocomplete helpers', () => {
     rememberRecentDomainsFromCommand('dig MX beta.example.org +short')
     rememberRecentDomainsFromCommand('dig @8.8.8.8 gamma.example.net')
     rememberRecentDomainsFromCommand('curl https://not-a-domain-slot.example')
+    rememberRecentDomainsFromCommand('nuclei -l subs.txt -o nuclei-findings.txt')
+    rememberRecentDomainsFromCommand('dnsx -l hosts.txt -resp')
     for (let i = 0; i < 10; i += 1) {
       rememberRecentDomainsFromCommand(`subfinder -d d${i}.example.com`)
     }

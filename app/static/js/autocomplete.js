@@ -461,9 +461,51 @@ function _countCompletedPositionalArgs(ctx, spec) {
 }
 
 function _positionalHintSlotsForRecentDomains(spec) {
-  const perTypeSlots = RECENT_DOMAIN_VALUE_TYPES.map(type => _positionalHintSlotsForValueType(spec, type));
+  const perTypeSlots = RECENT_DOMAIN_VALUE_TYPES.map(type => (
+    _positionalHintSlotsForValueType(spec, type).map((slot, index) => (
+      slot && _recentDomainPositionalSlotCapturable(spec, index)
+    ))
+  ));
   const maxLength = perTypeSlots.reduce((max, slots) => Math.max(max, slots.length), 0);
   return Array.from({ length: maxLength }, (_, index) => perTypeSlots.some(slots => !!slots[index]));
+}
+
+function _hintLooksLikeFileInput(hint) {
+  if (!hint || typeof hint !== 'object') return false;
+  const text = [
+    hint.value,
+    hint.label,
+    hint.placeholder,
+    hint.description,
+  ].map(value => String(value || '').trim().toLowerCase()).filter(Boolean).join(' ');
+  if (!text) return false;
+  return /(^|[\s_-])(file|files|wordlist|path|paths)([\s_-]|$)/.test(text)
+    || /\bone [\w/-]+ per line\b/.test(text)
+    || /<[^>]*(?:file|list|path|wordlist)[^>]*>/.test(text);
+}
+
+function _recentDomainHintsCapturable(hints) {
+  const list = Array.isArray(hints) ? hints : [];
+  return list.some(hint => RECENT_DOMAIN_VALUE_TYPES.some(type => _itemValueTypeIs(hint, type)))
+    && !list.some(_hintLooksLikeFileInput);
+}
+
+function _recentDomainTriggerCapturable(spec, trigger) {
+  const key = String(trigger || '');
+  if (!key) return false;
+  const workspaceFlags = new Set((Array.isArray(spec && spec.workspace_file_flags) ? spec.workspace_file_flags : [])
+    .map(flag => String(flag || ''))
+    .filter(Boolean));
+  if (workspaceFlags.has(key)) return false;
+  const hints = spec && spec.arg_hints && Object.prototype.hasOwnProperty.call(spec.arg_hints, key)
+    ? spec.arg_hints[key]
+    : [];
+  return _recentDomainHintsCapturable(hints);
+}
+
+function _recentDomainPositionalSlotCapturable(spec, slotIndex) {
+  const hints = _positionalHintsForSlot(spec, slotIndex);
+  return _recentDomainHintsCapturable(hints);
 }
 
 function _argHintTriggersForRecentDomains(spec) {
@@ -472,7 +514,7 @@ function _argHintTriggersForRecentDomains(spec) {
   RECENT_DOMAIN_VALUE_TYPES.forEach((type) => {
     _argHintTriggersForValueType(spec, type).forEach((trigger) => {
       const key = String(trigger || '');
-      if (!key || seen.has(key)) return;
+      if (!key || seen.has(key) || !_recentDomainTriggerCapturable(spec, key)) return;
       seen.add(key);
       triggers.push(trigger);
     });
