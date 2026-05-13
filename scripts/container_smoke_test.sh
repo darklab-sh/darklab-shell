@@ -4,10 +4,12 @@
 #
 # Run this after upgrading the base image, apt packages, or any pinned
 # tool version in the Dockerfile (Go binaries, pip packages, gems).
-# It builds a fresh image with docker compose, starts the container, and
-# runs every user-facing command in the shared smoke corpus through /runs
-# (commands.yaml examples plus workflow steps), checking each one against the expected output recorded in
+# It reuses the stable smoke-test cache image when present, starts the
+# container, and runs every user-facing command in the shared smoke corpus
+# through /runs (commands.yaml examples plus workflow steps), checking each one against the expected output recorded in
 # tests/py/fixtures/container_smoke_test-expectations.json.
+# Pass --build to force a fresh cache-image build after Dockerfile or
+# dependency changes.
 #
 # A failure means a command is missing, broken, or producing unexpected
 # output in the new image — review the diff before merging the upgrade.
@@ -19,6 +21,7 @@
 #
 # Usage:
 #   scripts/container_smoke_test.sh
+#   scripts/container_smoke_test.sh --build
 #   scripts/container_smoke_test.sh --cmd "nuclei -u https://ip.darklab.sh -t network/"
 #   scripts/container_smoke_test.sh --cmd "host ip.darklab.sh" --cmd "dig +short MX ip.darklab.sh"
 #   scripts/container_smoke_test.sh -k nuclei
@@ -36,6 +39,7 @@ mkdir -p "$ROOT_DIR/test-results"
 
 SELECTED_COMMANDS=""
 PYTEST_ARGS=""
+FORCE_BUILD=0
 
 append_pytest_arg() {
     if [ -z "$PYTEST_ARGS" ]; then
@@ -55,6 +59,10 @@ append_selected_command() {
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --build)
+            FORCE_BUILD=1
+            shift
+            ;;
         --cmd|--command)
             if [ "$#" -lt 2 ]; then
                 echo "missing value for $1" >&2
@@ -84,6 +92,7 @@ fi
 if [ -n "$SELECTED_COMMANDS" ]; then
     exec env \
         RUN_CONTAINER_SMOKE_TEST=1 \
+        RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD="$FORCE_BUILD" \
         RUN_CONTAINER_SMOKE_TEST_COMMANDS="$SELECTED_COMMANDS" \
         python3 -m pytest \
         "$ROOT_DIR/tests/py/test_container_smoke_test.py" \
@@ -92,7 +101,10 @@ if [ -n "$SELECTED_COMMANDS" ]; then
         "$@"
 fi
 
-exec env RUN_CONTAINER_SMOKE_TEST=1 python3 -m pytest \
+exec env \
+    RUN_CONTAINER_SMOKE_TEST=1 \
+    RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD="$FORCE_BUILD" \
+    python3 -m pytest \
     "$ROOT_DIR/tests/py/test_container_smoke_test.py" \
     --junitxml="$ROOT_DIR/test-results/container_smoke_test.xml" \
     -v -s \

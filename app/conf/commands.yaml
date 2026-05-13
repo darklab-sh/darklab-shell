@@ -727,10 +727,6 @@ commands:
           description: Show s_client help and usage
         - value: openssl ciphers -help
           description: Show ciphers help and usage
-      flags:
-        - value: -help
-          description: Show top-level help and usage
-          closes: true
       subcommands:
         s_client:
           description: Connect to a TLS service for diagnostics

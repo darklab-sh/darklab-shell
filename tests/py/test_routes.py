@@ -4415,6 +4415,21 @@ class TestRunRoute:
         assert body == "data: one\n\n"
         touch.assert_called_once_with("run-1", "client-1", "tab-1")
 
+    def test_brokered_run_stream_allows_registered_run_that_exited_before_persistence(self):
+        client = get_client()
+        with mock.patch("blueprints.run.active_run_belongs_to_session", return_value=True), \
+             mock.patch("blueprints.run.active_runs_for_session") as active_runs, \
+             mock.patch("blueprints.run.stream_run_events", return_value=iter(["data: fast-exit\n\n"])):
+            resp = client.get(
+                "/runs/run-fast/stream",
+                headers={"X-Session-ID": "session-1"},
+            )
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert body == "data: fast-exit\n\n"
+        active_runs.assert_not_called()
+
     def test_brokered_run_stream_rejects_runs_outside_session(self):
         client = get_client()
         with mock.patch("blueprints.run.active_runs_for_session", return_value=[]), \

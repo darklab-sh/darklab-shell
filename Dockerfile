@@ -1,19 +1,19 @@
-FROM python:3.14.4-slim
+FROM python:3.14.5-slim
 
 ARG TARGETARCH
-ARG GO_VERSION=1.26.2
-ARG GO_LINUX_AMD64_SHA256=990e6b4bbba816dc3ee129eaeaf4b42f17c2800b88a2166c265ac1a200262282
-ARG GO_LINUX_ARM64_SHA256=c958a1fe1b361391db163a485e21f5f228142d6f8b584f6bef89b26f66dc5b23
+ARG GO_VERSION=1.26.3
+ARG GO_LINUX_AMD64_SHA256=2b2cfc7148493da5e73981bffbf3353af381d5f93e789c82c79aff64962eb556
+ARG GO_LINUX_ARM64_SHA256=9d89a3ea57d141c2b22d70083f2c8459ba3890f2d9e818e7e933b75614936565
 ARG GO_BUILD_PARALLELISM=2
-ARG OPENSSL_VERSION=3.5.6
-ARG OPENSSL_SHA256=deae7c80cba99c4b4f940ecadb3c3338b13cb77418409238e57d7f31f2a3b736
-ARG SSLSCAN_VERSION=2.2.0
+ARG OPENSSL_VERSION=3.6.2
+ARG OPENSSL_SHA256=aaf51a1fe064384f811daeaeb4ec4dce7340ec8bd893027eee676af31e83a04f
+ARG SSLSCAN_VERSION=2.2.2
 ARG NUCLEI_VERSION=v3.8.0
-ARG SUBFINDER_VERSION=v2.13.0
+ARG SUBFINDER_VERSION=v2.14.0
 ARG PD_HTTPX_VERSION=v1.9.0
 ARG DNSX_VERSION=v1.2.3
-ARG NAABU_VERSION=v2.6.0
-ARG KATANA_VERSION=v1.6.0
+ARG NAABU_VERSION=v2.6.1
+ARG KATANA_VERSION=v1.6.1
 ARG AMASS_VERSION=v5.1.1
 ARG ASSETFINDER_VERSION=v0.1.1
 ARG GOBUSTER_VERSION=v3.8.2
@@ -60,7 +60,7 @@ ENV PATH=/usr/local/go/bin:${PATH}
 ENV GOMAXPROCS=${GO_BUILD_PARALLELISM}
 ENV GOFLAGS=-p=${GO_BUILD_PARALLELISM}
 
-# Install OpenSSL 3.5 LTS from source for current TLS tooling.
+# Install OpenSSL from source for current TLS tooling.
 WORKDIR /tmp
 RUN wget -O openssl.tar.gz "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" && \
     printf "%s  openssl.tar.gz\n" "${OPENSSL_SHA256}" > openssl.tar.gz.sha256 && \
@@ -68,7 +68,8 @@ RUN wget -O openssl.tar.gz "https://github.com/openssl/openssl/releases/download
     tar xzf openssl.tar.gz && \
     rm openssl.tar.gz openssl.tar.gz.sha256
 WORKDIR /tmp/openssl-${OPENSSL_VERSION}
-RUN ./config --prefix=/usr/local --openssldir=/usr/local/ssl --libdir=lib shared zlib && \
+RUN multiarch="$(gcc -print-multiarch)" && \
+    ./config --prefix=/usr/local --openssldir=/usr/local/ssl --libdir="lib/${multiarch}" shared zlib && \
     make -j"$(nproc)" && \
     make install_sw && \
     ldconfig

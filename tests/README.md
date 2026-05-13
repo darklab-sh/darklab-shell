@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,644
+- behavior tests: 2,646
 - docs/inventory meta-tests: 32
-- `pytest`: 1324 (1292 behavior + 32 meta)
+- `pytest`: 1326 (1294 behavior + 32 meta)
 - `vitest`: 1105
 - `playwright`: 247
-- total: 2,676
+- total: 2,678
 
 This document is organized in two parts:
 
@@ -257,10 +257,11 @@ Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py
 
 ### Container Smoke Test
 
-`scripts/container_smoke_test.sh` builds a fresh container image, runs every user-facing command from the shared smoke corpus through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. The shared corpus includes both `app/conf/commands.yaml` examples and workflow step commands, so the smoke suite covers the commands the shell suggests directly plus the guided playbooks exposed through the workflows UI. It also enables Files in the smoke container and runs the workspace-required command examples from `app/conf/commands.yaml` against `tests/py/fixtures/container_smoke_test-workspace-expectations.json`, covering session-file reads, writes, managed Amass database directories, and generated output files. Interactive PTY examples marked with `interactive: true` run through `/pty/runs` against `tests/py/fixtures/container_smoke_test-interactive-expectations.json`, so the smoke pass can catch missing PTY-only tools and broken trigger-flag wiring separately from regular `/runs` commands. The fixture removes stale `darklab_shell-test-*` Compose containers/networks/volumes before startup and after teardown so interrupted local runs do not leave Redis or shell containers behind. It catches drift between those surfaced commands and actual tool behavior — renamed flags, changed output, missing tools, or broken workspace path rewriting. Not part of the default fast loop; run after Dockerfile, packaged-tool, base-image, command-registry example changes, workspace file-flag changes, interactive PTY example changes, or workflow command changes.
+`scripts/container_smoke_test.sh` reuses the stable `darklab_shell-test:cache` image when it exists, runs every user-facing command from the shared smoke corpus through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. Pass `--build` to force a cache-image rebuild after Dockerfile, base-image, or packaged-tool changes. The shared corpus includes both `app/conf/commands.yaml` examples and workflow step commands, so the smoke suite covers the commands the shell suggests directly plus the guided playbooks exposed through the workflows UI. It also enables Files in the smoke container and runs the workspace-required command examples from `app/conf/commands.yaml` against `tests/py/fixtures/container_smoke_test-workspace-expectations.json`, covering session-file reads, writes, managed Amass database directories, and generated output files. Interactive PTY examples marked with `interactive: true` run through `/pty/runs` against `tests/py/fixtures/container_smoke_test-interactive-expectations.json`, so the smoke pass can catch missing PTY-only tools and broken trigger-flag wiring separately from regular `/runs` commands. The fixture removes stale `darklab_shell-test-*` Compose containers/networks/volumes before startup and after teardown so interrupted local runs do not leave Redis or shell containers behind. It catches drift between those surfaced commands and actual tool behavior — renamed flags, changed output, missing tools, or broken workspace path rewriting. Not part of the default fast loop; run after Dockerfile, packaged-tool, base-image, command-registry example changes, workspace file-flag changes, interactive PTY example changes, or workflow command changes.
 
 ```bash
 ./scripts/container_smoke_test.sh                           # full run
+./scripts/container_smoke_test.sh --build                   # force cache-image rebuild, then run
 ./scripts/container_smoke_test.sh -k nmap                   # filter by pattern
 ./scripts/container_smoke_test.sh --cmd "nmap -h"           # single command
 ```
@@ -660,6 +661,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `test_compose_projects_from_container_names_filters_smoke_projects` | Verifies that stale-container cleanup extracts only smoke-test Compose project names from Docker container names. |
 | `test_post_run_kills_early_when_stop_text_is_seen` | Checks that post run kills early when stop text is seen. |
 | `test_needs_nuclei_template_warmup` | Checks that the smoke suite warms nuclei templates only when scan-style nuclei commands are in the selected corpus. |
+| `test_force_smoke_image_build_reads_wrapper_env` | Verifies that the smoke fixture only forces a cache-image rebuild when the wrapper sets `RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD=1`. |
 | `test_container_smoke_test_startup` | Checks that container smoke test startup. |
 | `test_container_smoke_test_expectations_cover_all_user_facing_commands` | Checks that the smoke-test expectation fixture covers every command in the shared user-facing smoke corpus. |
 | `test_container_smoke_test_interactive_expectations_cover_all_pty_examples` | Checks that the interactive smoke-test expectation fixture covers every PTY-gated command example. |
@@ -1116,6 +1118,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunRoute.test_brokered_run_events_returns_session_scoped_backfill` | Verifies that brokered event backfill returns session-authorized events with event IDs. |
 | `TestRunRoute.test_brokered_run_events_rejects_runs_outside_session` | Verifies that brokered event backfill rejects run IDs outside the current session before reading broker events. |
 | `TestRunRoute.test_brokered_run_stream_replays_events_for_session_run` | Verifies that brokered stream replay emits stored events and refreshes owner liveness. |
+| `TestRunRoute.test_brokered_run_stream_allows_registered_run_that_exited_before_persistence` | Verifies that brokered stream replay can attach to a registered same-session run that exited before completed-run persistence finished. |
 | `TestRunRoute.test_brokered_run_stream_rejects_runs_outside_session` | Verifies that brokered stream replay rejects run IDs outside the current session before opening a broker stream. |
 | `TestRunRoute.test_brokered_run_owner_takeover_route_is_retired` | Verifies that the previous active-run takeover route is no longer exposed. |
 | `TestRunRoute.test_kill_allows_same_session_attached_client_and_publishes_killer` | Verifies that `/kill` accepts a same-session attached client and publishes killed-event metadata. |

@@ -556,6 +556,25 @@ def active_run_owned_by(run_id: str, owner_client_id: str = "", owner_tab_id: st
     return True
 
 
+def active_run_belongs_to_session(run_id: str, session_id: str) -> bool:
+    """Return whether active-run metadata links a run to this session.
+
+    Unlike active_runs_for_session(), this intentionally does not verify that
+    the child PID is still alive. The stream endpoint uses it during the small
+    window where a very fast process has exited but the worker has not finished
+    publishing replayable output and saving the completed run yet.
+    """
+    if not run_id or not session_id:
+        return False
+
+    if redis_client:
+        payload = _load_active_run_payload(redis_client.get(f"procmeta:{run_id}"))
+    else:
+        with _pid_lock:
+            payload = dict(_active_run_meta.get(run_id) or {})
+    return bool(payload and str(payload.get("session_id", "")) == session_id)
+
+
 def active_run_remove(run_id: str) -> None:
     """Remove active-run metadata after completion or explicit kill."""
     if redis_client:

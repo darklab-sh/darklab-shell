@@ -44,6 +44,7 @@ from services.commands.builtins import (
 )
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from core.process import (
+    active_run_belongs_to_session,
     active_run_claim_owner,
     active_run_register,
     active_run_remove,
@@ -1266,6 +1267,13 @@ def _run_session_visibility(run_id: str, session_id: str) -> _RunSessionVisibili
             "active_match": False,
             "db_match": False,
             "active_count": 0,
+        }
+    if active_run_belongs_to_session(run_id, session_id):
+        return {
+            "allowed": True,
+            "active_match": True,
+            "db_match": False,
+            "active_count": 1,
         }
     active_ids = {str(item.get("run_id", "")) for item in active_runs_for_session(session_id)}
     active_match = run_id in active_ids

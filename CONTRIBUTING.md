@@ -176,8 +176,8 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **1324 pytest + 1105 Vitest + 247 Playwright = 2,676 tests**.
-That total includes 2,644 behavior tests plus 32 docs/inventory meta-tests.
+Current totals: **1326 pytest + 1105 Vitest + 247 Playwright = 2,678 tests**.
+That total includes 2,646 behavior tests plus 32 docs/inventory meta-tests.
 
 Playwright notes:
 
@@ -313,10 +313,11 @@ When choosing the test layer:
 - use `Vitest` for browser-module logic that can be covered in jsdom
 - use `Playwright` for real browser behavior such as focus, mobile layout, drag/drop, scrolling, and end-to-end flows
 
-After a Dockerfile, packaged-tool, or workspace file-flag change, run the container smoke test before merging. It builds the container, runs every command from the shared smoke corpus (`app/conf/commands.yaml` examples plus workflow steps), compares output against the stored expectations, and verifies selected workspace read/write flags through the Files API:
+After a Dockerfile, packaged-tool, or workspace file-flag change, run the container smoke test before merging. It reuses the stable smoke cache image by default, runs every command from the shared smoke corpus (`app/conf/commands.yaml` examples plus workflow steps), compares output against the stored expectations, and verifies selected workspace read/write flags through the Files API. Add `--build` when Dockerfile, base-image, or packaged-tool changes need a fresh cache-image build:
 
 ```bash
 ./scripts/container_smoke_test.sh
+./scripts/container_smoke_test.sh --build
 ```
 
 If a tool's output has intentionally changed, run the capture script first. It runs the same commands in a browser and writes the raw output to `/tmp` as a reference — it does **not** automatically update `tests/py/fixtures/container_smoke_test-expectations.json`, so use the output to make those edits manually:

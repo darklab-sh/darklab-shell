@@ -76,6 +76,10 @@ def _require_docker() -> None:
         pytest.skip("docker CLI is required for the container smoke test")
 
 
+def _force_smoke_image_build() -> bool:
+    return os.environ.get("RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD") == "1"
+
+
 def _run(cmd: list[str], *, timeout: int, check: bool = True, **kwargs):
     proc = subprocess.run(
         cmd,
@@ -410,6 +414,17 @@ def test_post_run_kills_early_when_stop_text_is_seen(monkeypatch: pytest.MonkeyP
 )
 def test_needs_nuclei_template_warmup(cases: list[dict[str, object]], expected: bool) -> None:
     assert _needs_nuclei_template_warmup(cases) is expected
+
+
+def test_force_smoke_image_build_reads_wrapper_env(monkeypatch):
+    monkeypatch.delenv("RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD", raising=False)
+    assert _force_smoke_image_build() is False
+
+    monkeypatch.setenv("RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD", "0")
+    assert _force_smoke_image_build() is False
+
+    monkeypatch.setenv("RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD", "1")
+    assert _force_smoke_image_build() is True
 
 
 def _load_expectations() -> dict[str, dict[str, object]]:
@@ -1051,10 +1066,12 @@ def container_smoke_test():
 
         try:
             try:
-                if _docker_image_exists(image_tag):
+                force_build = _force_smoke_image_build()
+                if _docker_image_exists(image_tag) and not force_build:
                     print(f"[container-smoke-test] using cached image: {image_tag}", flush=True)
                 else:
-                    print(f"[container-smoke-test] building image: {image_tag}", flush=True)
+                    reason = "forced rebuild" if force_build else "cache image missing"
+                    print(f"[container-smoke-test] building image: {image_tag} ({reason})", flush=True)
                     _run_streaming(
                         [
                             "docker",
