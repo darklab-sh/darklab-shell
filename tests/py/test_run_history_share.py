@@ -2730,7 +2730,7 @@ class TestRunStreaming:
         assert resp.status_code == 200
         assert "Built-in command:\\n" not in body
         assert "Built-in commands:\\n" in body
-        assert "history    List recent commands from this session.\\n" in body
+        assert "history    List command history from this session.\\n" in body
 
     def test_builtin_man_for_shortcuts_topic_returns_web_shell_help(self):
         client = get_client()
@@ -2743,7 +2743,7 @@ class TestRunStreaming:
         assert "shortcuts  Show current keyboard shortcuts.\\n" in body
         assert '"type": "exit"' in body
 
-    def test_builtin_history_lists_recent_session_commands(self):
+    def test_builtin_history_lists_session_commands(self):
         client = get_client()
         with db_connect() as conn:
             conn.execute(
@@ -2762,12 +2762,12 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "Recent commands:\\n" in body
+        assert "Command history:\\n" in body
         assert "1  ping darklab.sh\\n" in body
         assert "2  dig darklab.sh A\\n" in body
         assert '"type": "exit"' in body
 
-    def test_builtin_history_honors_recent_commands_limit(self):
+    def test_builtin_history_ignores_recent_commands_limit(self):
         client = get_client()
         with db_connect() as conn:
             for index in range(1, 6):
@@ -2795,11 +2795,11 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "1  cmd 3\\n" in body
-        assert "2  cmd 4\\n" in body
-        assert "3  cmd 5\\n" in body
-        assert "cmd 1\\n" not in body
-        assert "cmd 2\\n" not in body
+        assert "1  cmd 1\\n" in body
+        assert "2  cmd 2\\n" in body
+        assert "3  cmd 3\\n" in body
+        assert "4  cmd 4\\n" in body
+        assert "5  cmd 5\\n" in body
         assert '"type": "exit"' in body
 
     def test_builtin_pwd_returns_synthetic_path(self):

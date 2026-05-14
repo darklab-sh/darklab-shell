@@ -5211,6 +5211,9 @@ class TestDatabaseInit:
             conn.execute(
                 "INSERT INTO runs (id, command, started) VALUES ('legacy-run', 'ping', datetime('now'))"
             )
+            conn.execute(
+                "INSERT INTO runs (id, command, started) VALUES ('legacy-builtin', 'history', datetime('now'))"
+            )
             conn.commit()
             conn.close()
 
@@ -5228,10 +5231,15 @@ class TestDatabaseInit:
             session_id = conn.execute(
                 "SELECT session_id FROM runs WHERE id='legacy-run'"
             ).fetchone()[0]
+            run_kinds = dict(conn.execute(
+                "SELECT id, run_kind FROM runs WHERE id IN ('legacy-run', 'legacy-builtin')"
+            ).fetchall())
             conn.close()
 
         assert "session_id" in columns
+        assert "run_kind" in columns
         assert session_id == ""
+        assert run_kinds == {"legacy-run": "external", "legacy-builtin": "builtin"}
         assert "projects" in tables
         assert "project_links" in tables
 

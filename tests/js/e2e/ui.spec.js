@@ -2,7 +2,15 @@ import { test, expect } from '@playwright/test'
 import { spawnSync } from 'child_process'
 import { existsSync, readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
-import { ensurePromptReady, runCommand, waitForHistoryRuns } from './helpers.js'
+import {
+  ensurePromptReady,
+  runCommand,
+  waitForHistoryRuns,
+  browserSessionId,
+  seedExternalHistoryRuns,
+} from './helpers.js'
+
+const PROJECT_LINK_RUN_COMMAND = 'dig projects.playwright.example +short'
 
 async function confirmWorkspaceAction(page, actionId, { timeout = 15_000 } = {}) {
   const host = page.locator('#confirm-host')
@@ -108,9 +116,9 @@ byte_size = len(content.encode("utf-8"))
 conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
 try:
     conn.execute(
-        "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
         "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
-        "VALUES (?, ?, ?, datetime('now'), datetime('now'), 0, ?, 0, 2, 1, 0)",
+        "VALUES (?, ?, 'external', ?, datetime('now'), datetime('now'), 0, ?, 0, 2, 1, 0)",
         (
             run_id,
             session_id,
@@ -514,21 +522,24 @@ test.describe('project workspace modal', () => {
     return projectId
   }
 
-  async function linkHostnameRunToOpenProject(page) {
+  async function linkExternalRunToOpenProject(page, testInfo) {
     await page.locator('.project-workspace-close').click()
     await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
-    await runCommand(page, 'hostname')
-    await waitForHistoryRuns(page, 1)
+    const sessionId = await browserSessionId(page)
+    const [seededRun] = seedExternalHistoryRuns(testInfo, {
+      sessionId,
+      commands: [PROJECT_LINK_RUN_COMMAND],
+    })
     await openProjectsModal(page)
     await page.locator('[data-project-tab="runs"]').click()
     await page.locator('[data-project-action="link-last-run"]').click()
     await expect(page.locator('#permalink-toast')).toContainText('Last run linked to this project.')
-    const runRow = page.locator('.project-explorer-item').filter({ hasText: 'hostname' }).first()
+    const runRow = page.locator('.project-explorer-item').filter({ hasText: seededRun.command }).first()
     await expect(runRow).toBeVisible()
-    return runRow
+    return { runRow, command: seededRun.command }
   }
 
-  test('creates an active project, manages targets, and edits linked run metadata', async ({ page }) => {
+  test('creates an active project, manages targets, and edits linked run metadata', async ({ page }, testInfo) => {
     test.setTimeout(60_000)
     await openProjectsModal(page)
 
@@ -585,7 +596,7 @@ test.describe('project workspace modal', () => {
       timeout: 15_000,
     })
 
-    const runRow = await linkHostnameRunToOpenProject(page)
+    const { runRow, command: linkedRunCommand } = await linkExternalRunToOpenProject(page, testInfo)
     await runRow.locator('[data-project-action="edit-run-metadata"]').click()
     await expect(page.locator('#project-entity-editor-overlay')).toHaveClass(/\bopen\b/)
     await expect(page.locator('#project-entity-editor-title')).toHaveText('EDIT RUN')
@@ -634,17 +645,17 @@ test.describe('project workspace modal', () => {
     expect(persisted.labels).toEqual(expect.arrayContaining(['e2e', 'client']))
     expect(persisted.targets).toEqual([])
     expect(persisted.runs.some((run) => (
-      run.command === 'hostname'
+      run.command === linkedRunCommand
       && (run.labels || []).some((label) => label.label === 'reviewed')
       && run.note?.body === 'Run triaged from Playwright'
     ))).toBe(true)
   })
 
-  test('creates, edits, downloads, and deletes a project evidence package', async ({ page }) => {
+  test('creates, edits, downloads, and deletes a project evidence package', async ({ page }, testInfo) => {
     test.setTimeout(60_000)
     await openProjectsModal(page)
     const projectId = await createActiveProject(page, `Playwright Package ${Date.now()}`)
-    await linkHostnameRunToOpenProject(page)
+    await linkExternalRunToOpenProject(page, testInfo)
 
     await page.locator('[data-project-tab="packages"]').click()
     await page.locator('[data-project-action="package-wizard-open"]').click()

@@ -158,7 +158,7 @@ _DOCUMENTED_BUILTIN_COMMANDS = [
     {"name": "grep <search> <file>", "description": "Filter a session file.", "root": "grep"},
     {"name": "head [-n N] <file>", "description": "Show the first lines of a session file.", "root": "head"},
     {"name": "help", "description": "Show guidance for README, FAQ, shortcuts, and command discovery.", "root": "help"},
-    {"name": "history", "description": "List recent commands from this session.", "root": "history"},
+    {"name": "history", "description": "List command history from this session.", "root": "history"},
     {"name": "hostname", "description": "Show the configured shell instance name.", "root": "hostname"},
     {"name": "id", "description": "Show the shell identity.", "root": "id"},
     {"name": "ip a", "description": "Show a minimal shell network interface view.", "exact": "ip a"},

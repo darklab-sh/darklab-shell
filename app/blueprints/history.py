@@ -29,6 +29,7 @@ from core.process import active_runs_for_session
 from services.projects.contracts import BULK_AUDIT_FAILURE_LIMIT, MAX_BULK_RUN_ACTION_ITEMS, MAX_ENTITY_ID_LEN
 from services.projects.workspace import ProjectWorkspaceError, compare_project_runs
 from core.redaction import redact_line_entries
+from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, builtin_command_roots_for_storage
 from services.runs.output_store import load_full_output_entries
 
 APP_VERSION = _config.APP_VERSION
@@ -147,6 +148,26 @@ def _history_table_exists(conn, table_name):
     return bool(row)
 
 
+def _history_column_exists(conn, table_name, column_name):
+    try:
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()  # nosec B608
+    except sqlite3.OperationalError:
+        return False
+    return any(str(row["name"] if isinstance(row, sqlite3.Row) else row[1]) == column_name for row in rows)
+
+
+def _history_run_kind_sql(column):
+    builtin_roots = sorted(builtin_command_roots_for_storage())
+    if not builtin_roots:
+        return f"'{RUN_KIND_EXTERNAL}'"
+    roots = ", ".join("'" + root.replace("'", "''") + "'" for root in builtin_roots)
+    return (
+        "CASE WHEN "
+        f"{_history_run_root_sql(column)} IN ({roots}) "
+        f"THEN '{RUN_KIND_BUILTIN}' ELSE '{RUN_KIND_EXTERNAL}' END"
+    )
+
+
 def _history_match_clause(query, scope, force_like=False):
     if not query:
         return "", [], None
@@ -178,30 +199,24 @@ def _history_base_clause(
     *,
     starred_only=False,
     run_kind="all",
+    has_run_kind_column=True,
     force_like=False,
 ):
     sql = " FROM runs r WHERE r.session_id = ?"
     params: list[Any] = [session_id]
-    if run_kind in {"builtin", "external"}:
-        builtin_roots = sorted(_app_builtin_command_roots())
-        if builtin_roots:
-            placeholders = ",".join("?" for _ in builtin_roots)
-            root_sql = _history_run_root_sql("r.command")
-            if run_kind == "builtin":
-                sql += f" AND {root_sql} IN ({placeholders})"  # nosec B608
-            else:
-                sql += f" AND {root_sql} NOT IN ({placeholders})"  # nosec B608
-            params.extend(builtin_roots)
-        elif run_kind == "builtin":
-            sql += " AND 1 = 0"
+    if run_kind in {RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL}:
+        run_kind_expr = "r.run_kind" if has_run_kind_column else _history_run_kind_sql("r.command")
+        sql += f" AND {run_kind_expr} = ?"  # nosec B608
+        params.append(run_kind)
     if project_id:
         sql += (
             " AND EXISTS (SELECT 1 FROM project_links pl "
             "JOIN projects p ON p.id = pl.project_id "
             "WHERE p.session_id = ? AND p.id = ? "
-            "AND pl.entity_type = 'run' AND pl.entity_id = r.id)"
+            "AND pl.entity_type = 'run' AND pl.entity_id = r.id) "
+            f"AND {'r.run_kind' if has_run_kind_column else _history_run_kind_sql('r.command')} = ?"  # nosec B608
         )
-        params.extend([session_id, project_id])
+        params.extend([session_id, project_id, RUN_KIND_EXTERNAL])
     if starred_only:
         sql += (
             " AND EXISTS (SELECT 1 FROM starred_commands sc "
@@ -349,19 +364,14 @@ def _history_insights(conn, session_id: str, *, days: int | None = None) -> dict
     cutoff = datetime.combine(fetch_start_date, datetime.min.time()).isoformat()
     rows = conn.execute(
         """
-        SELECT id, command, started, finished, exit_code, output_line_count
+        SELECT id, run_kind, command, started, finished, exit_code, output_line_count
           FROM runs
          WHERE session_id = ? AND started >= ?
          ORDER BY started ASC, id ASC
         """,
         (session_id, cutoff),
     ).fetchall()
-    builtin_roots = _app_builtin_command_roots()
-    if builtin_roots:
-        rows = [
-            row for row in rows
-            if _history_run_root(str(row["command"] or "")) not in builtin_roots
-        ]
+    rows = [row for row in rows if str(row["run_kind"] or RUN_KIND_EXTERNAL) == RUN_KIND_EXTERNAL]
     categories = _command_category_map()
     activity: dict[str, dict[str, Any]] = {
         (start_date + timedelta(days=offset)).isoformat(): {
@@ -612,11 +622,13 @@ def _project_links_by_run(conn, session_id, run_ids):
         "p.name AS project_name, p.slug AS project_slug, p.status AS project_status "
         "FROM project_links l "
         "JOIN projects p ON p.id = l.project_id "
+        "JOIN runs r ON r.id = l.entity_id "
         "WHERE p.session_id = ? "
         "AND l.entity_type = 'run' "
+        "AND r.session_id = ? AND r.run_kind = ? "
         f"AND l.entity_id IN ({placeholders}) "  # nosec B608
         "ORDER BY p.name COLLATE NOCASE ASC, l.created ASC",
-        [session_id, *ids],
+        [session_id, session_id, RUN_KIND_EXTERNAL, *ids],
     ).fetchall()
     grouped = {run_id: [] for run_id in ids}
     for row in rows:
@@ -862,6 +874,7 @@ def get_history():
         fts_q = None
         run_sql = ""
         run_params: list[Any] = []
+        has_run_kind_column = _history_column_exists(conn, "runs", "run_kind")
         snapshots_available = _history_table_exists(conn, "snapshots")
         if type_filter in {"all", "runs", "runs_builtin", "runs_external"}:
             run_sql, run_params, fts_q = _history_base_clause(
@@ -874,6 +887,7 @@ def get_history():
                 project_id,
                 starred_only=starred_only,
                 run_kind=run_kind,
+                has_run_kind_column=has_run_kind_column,
                 force_like=force_like,
             )
             roots_rows = conn.execute(
@@ -919,13 +933,16 @@ def get_history():
         offset = (current_page - 1) * page_size
 
         run_select = (
-            "SELECT 'run' AS type, r.id, r.command, r.started, r.finished, r.exit_code, "
+            "SELECT 'run' AS type, r.id, "
+            + ("r.run_kind" if has_run_kind_column else _history_run_kind_sql("r.command"))
+            + " AS run_kind, r.command, r.started, r.finished, r.exit_code, "
             "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated, "
             "r.command AS label, r.started AS created, r.started AS sort_created"
             + run_sql
         ) if run_sql else ""
         snap_select = (
-            "SELECT 'snapshot' AS type, s.id, NULL AS command, NULL AS started, NULL AS finished, NULL AS exit_code, "
+            "SELECT 'snapshot' AS type, s.id, NULL AS run_kind, NULL AS command, NULL AS started, "
+            "NULL AS finished, NULL AS exit_code, "
             "NULL AS preview_truncated, NULL AS output_line_count, NULL AS full_output_available, "
             "NULL AS full_output_truncated, s.label AS label, s.created AS created, s.created AS sort_created"
             + snap_sql

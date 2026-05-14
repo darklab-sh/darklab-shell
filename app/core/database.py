@@ -19,6 +19,7 @@ import fcntl
 
 from config import CFG, resolve_data_dir
 from services.runs.output_store import delete_artifact_file, ensure_run_output_dir, load_full_output_entries
+from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, builtin_command_roots_for_storage
 
 log = logging.getLogger("shell")
 
@@ -85,6 +86,7 @@ def _create_schema(conn):
         CREATE TABLE IF NOT EXISTS runs (
             id         TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
+            run_kind   TEXT NOT NULL DEFAULT 'external',
             command    TEXT NOT NULL,
             started    TEXT NOT NULL,
             finished   TEXT,
@@ -314,6 +316,10 @@ def _create_indexes(conn):
         "CREATE INDEX IF NOT EXISTS idx_runs_session_command_started "
         "ON runs (session_id, command, started DESC)"
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_runs_session_kind_started "
+        "ON runs (session_id, run_kind, started DESC)"
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_run_output_artifacts_created ON run_output_artifacts (created)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_session ON snapshots (session_id)")
     conn.execute(
@@ -484,6 +490,7 @@ def _migrate_schema(conn):
     except sqlite3.OperationalError:
         pass  # Column already exists
     for stmt in (
+        "ALTER TABLE runs ADD COLUMN run_kind TEXT NOT NULL DEFAULT 'external'",
         "ALTER TABLE runs ADD COLUMN output_preview TEXT",
         "ALTER TABLE runs ADD COLUMN preview_truncated INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE runs ADD COLUMN output_line_count INTEGER NOT NULL DEFAULT 0",
@@ -494,6 +501,26 @@ def _migrate_schema(conn):
             conn.execute(stmt)
         except sqlite3.OperationalError:
             pass
+
+    try:
+        conn.execute(
+            "UPDATE runs SET run_kind = ? "
+            "WHERE run_kind IS NULL OR trim(run_kind) = '' OR run_kind NOT IN (?, ?)",
+            (RUN_KIND_EXTERNAL, RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL),
+        )
+        builtin_roots = sorted(builtin_command_roots_for_storage())
+        if builtin_roots:
+            placeholders = ",".join("?" for _ in builtin_roots)
+            conn.execute(
+                "UPDATE runs SET run_kind = ? "
+                "WHERE lower(CASE "
+                "WHEN instr(trim(command), ' ') > 0 THEN substr(trim(command), 1, instr(trim(command), ' ') - 1) "
+                "ELSE trim(command) END) "
+                f"IN ({placeholders})",  # nosec B608
+                [RUN_KIND_BUILTIN, *builtin_roots],
+            )
+    except sqlite3.OperationalError:
+        pass
 
     try:
         conn.execute("""

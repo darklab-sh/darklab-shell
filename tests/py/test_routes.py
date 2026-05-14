@@ -30,7 +30,8 @@ import blueprints.projects as project_routes
 import config
 import services.runs.comparison as run_comparison
 from services.commands.builtins import execute_builtin_command
-from core.database import DB_PATH
+from core.database import DB_PATH, db_connect
+from services.projects.workspace import record_run_findings
 from services.workspace.files import resolve_workspace_path
 
 
@@ -182,13 +183,13 @@ class TestProjectRoutes:
         assert resp.status_code == 201
         return json.loads(resp.data)["project"]
 
-    def _seed_run(self, session_id, command="nmap darklab.sh", *, run_id=None):
+    def _seed_run(self, session_id, command="nmap darklab.sh", *, run_id=None, run_kind="external"):
         run_id = run_id or "run-" + uuid.uuid4().hex
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
-                "VALUES (?, ?, ?, datetime('now'), ?, 0)",
-                (run_id, session_id, command, "[]"),
+                "INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, ?, ?, datetime('now'), ?, 0)",
+                (run_id, session_id, run_kind, command, "[]"),
             )
             conn.commit()
         return run_id
@@ -222,6 +223,40 @@ class TestProjectRoutes:
         if baseline_label is not None:
             params["baseline_label"] = baseline_label
         return f"/history/compare?{urlencode(params)}"
+
+    def test_builtin_runs_do_not_record_findings_even_with_legacy_project_link(self):
+        client = get_client()
+        session_id = self._session_id("builtin-findings")
+        project = self._create_project(client, session_id)
+        run_id = self._seed_run(session_id, "history", run_kind="builtin")
+        target = json.loads(client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "host", "value": "darklab.sh"},
+            headers={"X-Session-ID": session_id},
+        ).data)["target"]
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                "VALUES (?, ?, 'run', ?, 'manual', datetime('now'))",
+                ("plink_" + uuid.uuid4().hex, project["id"], run_id),
+            )
+            recorded = record_run_findings(
+                conn,
+                session_id,
+                run_id,
+                [{"text": "darklab.sh exposed service", "signals": ["findings"]}],
+            )
+            finding_count = conn.execute(
+                "SELECT COUNT(*) FROM findings WHERE session_id = ? AND run_id = ?",
+                (session_id, run_id),
+            ).fetchone()[0]
+            conn.execute("DELETE FROM project_links WHERE entity_id = ?", (run_id,))
+            conn.execute("DELETE FROM project_targets WHERE id = ?", (target["id"],))
+            conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+            conn.execute("DELETE FROM projects WHERE id = ?", (project["id"],))
+            conn.commit()
+        assert recorded == []
+        assert finding_count == 0
 
     def test_project_write_routes_are_rate_limited(self):
         for view in (
@@ -1660,7 +1695,15 @@ class TestProjectRoutes:
         first_run_id = self._seed_run(session_id, "nmap darklab.sh")
         second_run_id = self._seed_run(session_id, "dig darklab.sh")
         other_run_id = self._seed_run(other_session, "whois darklab.sh")
+        builtin_run_id = "run-" + uuid.uuid4().hex
         missing_run_id = "run-" + uuid.uuid4().hex
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, run_kind, command, started) "
+                "VALUES (?, ?, 'builtin', ?, datetime('now'))",
+                (builtin_run_id, session_id, "history"),
+            )
+            conn.commit()
 
         legacy_resp = client.post(
             f"/projects/{project['id']}/links",
@@ -1677,7 +1720,7 @@ class TestProjectRoutes:
             f"/projects/{project['id']}/links",
             json={
                 "entity_type": "run",
-                "entity_ids": [first_run_id, second_run_id, other_run_id, missing_run_id],
+                "entity_ids": [first_run_id, second_run_id, builtin_run_id, other_run_id, missing_run_id],
             },
             headers={"X-Session-ID": session_id},
         )
@@ -1689,11 +1732,12 @@ class TestProjectRoutes:
             "removed": 0,
             "not_linked": 0,
             "not_found": 2,
-            "rejected": 0,
+            "rejected": 1,
         }
         assert bulk_data["results"] == [
             {"run_id": first_run_id, "status": "already_linked"},
             {"run_id": second_run_id, "status": "added"},
+            {"run_id": builtin_run_id, "status": "rejected", "reason": "builtin"},
             {"run_id": other_run_id, "status": "not_found"},
             {"run_id": missing_run_id, "status": "not_found"},
         ]
@@ -2144,6 +2188,7 @@ class TestProjectRoutes:
         other_session = self._session_id("project-other")
         project = self._create_project(client, session_id)
         other_run_id = "run-" + uuid.uuid4().hex
+        builtin_run_id = "run-" + uuid.uuid4().hex
 
         def project_link_post(payload):
             return client.post(
@@ -2158,12 +2203,18 @@ class TestProjectRoutes:
                 (other_run_id, other_session, "dig darklab.sh"),
             )
             conn.execute(
+                "INSERT INTO runs (id, session_id, run_kind, command, started) "
+                "VALUES (?, ?, 'builtin', ?, datetime('now'))",
+                (builtin_run_id, session_id, "project list"),
+            )
+            conn.execute(
                 "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, datetime('now'), ?)",
                 (f"{session_id}-snapshot", session_id, "snapshot", "[]"),
             )
             conn.commit()
 
         cross_session = project_link_post({"entity_type": "run", "entity_id": other_run_id})
+        builtin_link = project_link_post({"entity_type": "run", "entity_id": builtin_run_id})
         unsupported = project_link_post({"entity_type": "note", "entity_id": "note_1"})
         run_scoped = project_link_post({"entity_type": "run_file_artifact", "entity_id": "rfa_1"})
         snapshot_link = project_link_post({"entity_type": "snapshot", "entity_id": f"{session_id}-snapshot"})
@@ -2171,6 +2222,8 @@ class TestProjectRoutes:
 
         assert cross_session.status_code == 404
         assert "not found" in json.loads(cross_session.data)["error"]
+        assert builtin_link.status_code == 400
+        assert "external runs" in json.loads(builtin_link.data)["error"]
         assert unsupported.status_code == 400
         assert "Unsupported project entity type" in json.loads(unsupported.data)["error"]
         assert run_scoped.status_code == 400
@@ -4662,6 +4715,7 @@ class TestRunRoute:
                 ).data
             )
             assert history["runs"][0]["command"] == "theme list"
+            assert history["runs"][0]["run_kind"] == "builtin"
             assert history["total_count"] == 1
 
             run_id = history["runs"][0]["id"]
@@ -5095,20 +5149,20 @@ class TestHistoryRoute:
                      (now - timedelta(days=2, seconds=-30)).isoformat(), 0, "[]", 12),
                 )
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+                    "output, output_line_count) VALUES (?, ?, 'builtin', ?, ?, ?, ?, ?, ?)",
                     (run_ids[1], session, "pwd", day_one,
                      (now - timedelta(days=1, seconds=-1)).isoformat(), 0, "[]", 1),
                 )
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+                    "output, output_line_count) VALUES (?, ?, 'builtin', ?, ?, ?, ?, ?, ?)",
                     (run_ids[2], session, "whoami", day_one,
                      (now - timedelta(days=1, seconds=-1)).isoformat(), 0, "[]", 1),
                 )
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+                    "output, output_line_count) VALUES (?, ?, 'builtin', ?, ?, ?, ?, ?, ?)",
                     (run_ids[3], session, "help", day_one,
                      (now - timedelta(days=1, seconds=-1)).isoformat(), 0, "[]", 5),
                 )
@@ -5460,11 +5514,29 @@ class TestHistoryRoute:
         try:
             conn = sqlite3.connect(DB_PATH)
             conn.executemany(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 [
-                    (run_ids[0], session, "project list", "2026-01-01T00:00:01", "2026-01-01T00:00:02", 0, "[]"),
-                    (run_ids[1], session, "nmap darklab.sh", "2026-01-01T00:00:03", "2026-01-01T00:00:04", 0, "[]"),
+                    (
+                        run_ids[0],
+                        session,
+                        "builtin",
+                        "project list",
+                        "2026-01-01T00:00:01",
+                        "2026-01-01T00:00:02",
+                        0,
+                        "[]",
+                    ),
+                    (
+                        run_ids[1],
+                        session,
+                        "external",
+                        "nmap darklab.sh",
+                        "2026-01-01T00:00:03",
+                        "2026-01-01T00:00:04",
+                        0,
+                        "[]",
+                    ),
                 ],
             )
             conn.commit()
@@ -5480,8 +5552,10 @@ class TestHistoryRoute:
             ).data)
 
             assert [item["id"] for item in builtins["items"]] == [run_ids[0]]
+            assert builtins["items"][0]["run_kind"] == "builtin"
             assert builtins["total_count"] == 1
             assert [item["id"] for item in external["items"]] == [run_ids[1]]
+            assert external["items"][0]["run_kind"] == "external"
             assert external["total_count"] == 1
         finally:
             conn = sqlite3.connect(DB_PATH)

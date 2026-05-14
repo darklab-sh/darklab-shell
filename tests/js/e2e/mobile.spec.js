@@ -4,6 +4,8 @@ import {
   ensurePromptReady,
   setComposerValueForTest,
   waitForHistoryRuns,
+  browserSessionId,
+  seedExternalHistoryRuns,
 } from './helpers.js'
 
 const MOBILE = { width: 375, height: 812 }
@@ -705,10 +707,13 @@ test.beforeEach(async ({ page }) => {
     expect(box.height).toBeGreaterThan(viewport.height * 0.5)
   })
 
-  test('mobile Projects creates, links, drills by count chip, and opens row actions', async ({ page }) => {
+  test('mobile Projects creates, links, drills by count chip, and opens row actions', async ({ page }, testInfo) => {
     test.setTimeout(60_000)
-    await runCommandMobile(page, 'hostname')
-    await waitForHistoryRuns(page, 1)
+    await ensurePromptReady(page)
+    const [seededRun] = seedExternalHistoryRuns(testInfo, {
+      sessionId: await browserSessionId(page),
+      commands: ['dig mobile-project.playwright.example +short'],
+    })
 
     await openMobileProjects(page)
     const projectName = `Mobile Project ${Date.now()}`
@@ -721,7 +726,7 @@ test.beforeEach(async ({ page }) => {
     await page.locator('[data-project-mobile-detail-tab="runs"]').click()
     await page.locator('#project-mobile-detail-body [data-project-action="link-last-run"]').first().click()
     await expect(page.locator('#permalink-toast')).toContainText('Last run linked to this project.')
-    await expect(page.locator('#project-mobile-detail-body .project-mobile-run-row')).toContainText('hostname')
+    await expect(page.locator('#project-mobile-detail-body .project-mobile-run-row')).toContainText(seededRun.command)
 
     await page.locator('[data-project-mobile-action="back-to-list"]').click()
     await expect(page.locator('#project-mobile-list-view')).toBeVisible()
@@ -732,7 +737,7 @@ test.beforeEach(async ({ page }) => {
 
     await expect(page.locator('#project-mobile-detail-view')).toBeVisible()
     await expect(page.locator('[data-project-mobile-detail-tab="runs"]')).toHaveClass(/\bis-active\b/)
-    await expect(page.locator('#project-mobile-detail-body .project-mobile-run-row')).toContainText('hostname')
+    await expect(page.locator('#project-mobile-detail-body .project-mobile-run-row')).toContainText(seededRun.command)
 
     await page.locator('#project-mobile-detail-body .project-mobile-run-row .project-mobile-row-menu-trigger').click()
     const actionSheet = page.locator('#project-mobile-action-sheet-overlay')
@@ -764,11 +769,16 @@ test.beforeEach(async ({ page }) => {
     await expect(wizardFooter).toBeVisible()
   })
 
-  test('mobile Projects can launch run comparison from the runs tab', async ({ page }) => {
+  test('mobile Projects can launch run comparison from the runs tab', async ({ page }, testInfo) => {
     test.setTimeout(60_000)
-    await runCommandMobile(page, 'hostname')
-    await runCommandMobile(page, 'date')
-    const runs = await waitForHistoryRuns(page, 2)
+    await ensurePromptReady(page)
+    const runs = seedExternalHistoryRuns(testInfo, {
+      sessionId: await browserSessionId(page),
+      commands: [
+        'nmap -sT -p 80 mobile-compare.playwright.example',
+        'nmap -sT -p 443 mobile-compare.playwright.example',
+      ],
+    })
 
     await openMobileProjects(page)
     const projectName = `Mobile Compare ${Date.now()}`

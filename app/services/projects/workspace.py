@@ -78,6 +78,7 @@ from services.projects.preferences import (
     save_session_preferences as _save_session_preferences,
 )
 from core.redaction import apply_redaction_rules, redact_line_entries
+from services.runs.kinds import RUN_KIND_EXTERNAL, is_project_linkable_run_kind, normalize_run_kind
 from services.runs.output_store import load_full_output_entries
 from services.workspace.files import (
     WorkspaceDisabled,
@@ -2145,11 +2146,12 @@ def get_project_summary(session_id, project_id):
         _attach_project_notes(conn, session_id, [project])
         _attach_project_labels(conn, session_id, [project])
         link_rows = conn.execute(
-            "SELECT id, project_id, entity_type, entity_id, source, created "
-            "FROM project_links WHERE project_id = ? "
-            "AND entity_type = 'run' "
-            "ORDER BY created DESC",
-            (project_id,),
+            "SELECT l.id, l.project_id, l.entity_type, l.entity_id, l.source, l.created "
+            "FROM project_links l JOIN runs r ON r.id = l.entity_id "
+            "WHERE l.project_id = ? AND l.entity_type = 'run' "
+            "AND r.session_id = ? AND r.run_kind = ? "
+            "ORDER BY l.created DESC",
+            (project_id, session_id, RUN_KIND_EXTERNAL),
         ).fetchall()
         target_rows = conn.execute(
             f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec B608
@@ -2168,8 +2170,9 @@ def get_project_summary(session_id, project_id):
                 "l.created, l.source AS link_source "
                 "FROM project_links l JOIN runs r ON r.id = l.entity_id "
                 "WHERE l.project_id = ? AND l.entity_type = 'run' AND r.session_id = ? "
+                "AND r.run_kind = ? "
                 "ORDER BY r.started DESC, l.created DESC",
-                (project_id, session_id),
+                (project_id, session_id, RUN_KIND_EXTERNAL),
             ).fetchall()
             artifact_rows = conn.execute(
                 "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
@@ -3399,10 +3402,13 @@ def link_run_to_active_project(conn, session_id, run_id):
         _clear_active_project_preference(conn, session_id)
         return None
     run = conn.execute(
-        "SELECT 1 FROM runs WHERE session_id = ? AND id = ?",
+        "SELECT command, run_kind FROM runs WHERE session_id = ? AND id = ?",
         (session_id, run_id),
     ).fetchone()
     if not run:
+        return None
+    run_kind = normalize_run_kind(run["run_kind"], command=str(run["command"] or ""))
+    if not is_project_linkable_run_kind(run_kind):
         return None
     created = _now()
     for _ in range(10):
@@ -3451,10 +3457,13 @@ def _insert_project_link(conn, project_id, entity_type, entity_id, source):
 def record_run_file_artifacts(conn, session_id, run_id, artifacts):
     run_id = _trim_text(run_id, MAX_ENTITY_ID_LEN)
     run = conn.execute(
-        "SELECT 1 FROM runs WHERE session_id = ? AND id = ?",
+        "SELECT command, run_kind FROM runs WHERE session_id = ? AND id = ?",
         (session_id, run_id),
     ).fetchone()
     if not run:
+        return []
+    run_kind = normalize_run_kind(run["run_kind"], command=str(run["command"] or ""))
+    if not is_project_linkable_run_kind(run_kind):
         return []
 
     created = _now()
@@ -3804,10 +3813,13 @@ def _insert_finding_target_relationships(conn, session_id, run_id, finding_id, t
 def record_run_findings(conn, session_id, run_id, entries):
     run_id = _trim_text(run_id, MAX_ENTITY_ID_LEN)
     run = conn.execute(
-        "SELECT 1 FROM runs WHERE session_id = ? AND id = ?",
+        "SELECT command, run_kind FROM runs WHERE session_id = ? AND id = ?",
         (session_id, run_id),
     ).fetchone()
     if not run:
+        return []
+    run_kind = normalize_run_kind(run["run_kind"], command=str(run["command"] or ""))
+    if not is_project_linkable_run_kind(run_kind):
         return []
 
     target_rows = conn.execute(
@@ -4167,6 +4179,16 @@ def _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
     return row is not None
 
 
+def _run_is_project_linkable(conn, session_id, run_id):
+    row = conn.execute(
+        "SELECT command, run_kind FROM runs WHERE session_id = ? AND id = ?",
+        (session_id, run_id),
+    ).fetchone()
+    if not row:
+        return False
+    return is_project_linkable_run_kind(normalize_run_kind(row["run_kind"], command=str(row["command"] or "")))
+
+
 def list_project_links(session_id, project_id):
     with db_connect() as conn:
         project = conn.execute(
@@ -4176,11 +4198,12 @@ def list_project_links(session_id, project_id):
         if not project:
             return None
         rows = conn.execute(
-            "SELECT id, project_id, entity_type, entity_id, source, created "
-            "FROM project_links WHERE project_id = ? "
-            "AND entity_type = 'run' "
-            "ORDER BY created DESC",
-            (project_id,),
+            "SELECT l.id, l.project_id, l.entity_type, l.entity_id, l.source, l.created "
+            "FROM project_links l JOIN runs r ON r.id = l.entity_id "
+            "WHERE l.project_id = ? AND l.entity_type = 'run' "
+            "AND r.session_id = ? AND r.run_kind = ? "
+            "ORDER BY l.created DESC",
+            (project_id, session_id, RUN_KIND_EXTERNAL),
         ).fetchall()
     return [_row_to_link(row) for row in rows]
 
@@ -4197,6 +4220,8 @@ def link_project_entity(session_id, project_id, data):
             return None
         if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
             raise ProjectWorkspaceNotFound(f"{entity_type} not found for this session")
+        if entity_type == "run" and not _run_is_project_linkable(conn, session_id, entity_id):
+            raise ProjectWorkspaceError("project links only support external runs")
         row = conn.execute(
             "SELECT id, project_id, entity_type, entity_id, source, created "
             "FROM project_links WHERE project_id = ? AND entity_type = ? AND entity_id = ?",
@@ -4245,11 +4270,18 @@ def _project_bulk_result(statuses, run_id, status, *, reason=None):
 def _bulk_project_run_maps(conn, session_id, run_ids):
     placeholders = ",".join("?" for _ in run_ids)
     owned_rows = conn.execute(
-        f"SELECT id FROM runs WHERE session_id = ? AND id IN ({placeholders})",  # nosec B608
+        f"SELECT id, command, run_kind FROM runs WHERE session_id = ? AND id IN ({placeholders})",  # nosec B608
         [session_id, *run_ids],
     ).fetchall()
+    owned = {str(row["id"]) for row in owned_rows}
+    linkable = {
+        str(row["id"])
+        for row in owned_rows
+        if is_project_linkable_run_kind(normalize_run_kind(row["run_kind"], command=str(row["command"] or "")))
+    }
     return {
-        "owned": {str(row["id"]) for row in owned_rows},
+        "owned": owned,
+        "linkable": linkable,
     }
 
 
@@ -4293,6 +4325,9 @@ def link_project_entities(session_id, project_id, data):
         for entity_id in entity_ids:
             if entity_id not in run_maps["owned"]:
                 results.append(_project_bulk_result(counts, entity_id, "not_found"))
+                continue
+            if entity_id not in run_maps["linkable"]:
+                results.append(_project_bulk_result(counts, entity_id, "rejected", reason="builtin"))
                 continue
             if entity_id in linked_by_id:
                 results.append(_project_bulk_result(counts, entity_id, "already_linked"))

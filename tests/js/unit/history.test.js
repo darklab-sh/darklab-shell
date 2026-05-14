@@ -1008,6 +1008,38 @@ describe('history panel actions', () => {
       'add-project',
       'copy-run-id',
     ])
+
+    const builtinApiFetch = vi.fn((url) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        const item = {
+          id: 'run-1',
+          type: 'run',
+          run_kind: 'builtin',
+          command: 'history',
+          label: 'history',
+          started: '2026-01-01T00:00:00Z',
+          created: '2026-01-01T00:00:00Z',
+          exit_code: 0,
+        }
+        return Promise.resolve({
+          json: () => Promise.resolve({ roots: ['history'], items: [item], runs: [item] }),
+        })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
+    const { refreshHistoryPanel: refreshBuiltinHistoryPanel } = loadHistoryPanel({ apiFetchImpl: builtinApiFetch })
+    refreshBuiltinHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const builtinEntry = document.querySelector('#history-list .history-entry')
+    const builtinMenuActions = [...builtinEntry.querySelectorAll('.history-action-menu [data-action]')]
+      .map(el => el.dataset.action)
+    expect(builtinMenuActions).toEqual([
+      'edit-metadata',
+      'permalink',
+      'compare',
+      'copy-run-id',
+    ])
   })
 
   it('uses copy and restore as mobile history row primaries and moves the rest into the menu', async () => {

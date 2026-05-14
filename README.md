@@ -493,6 +493,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── __init__.py     # Run service package marker
 │   │   │   ├── broker.py       # Brokered run event storage, replay, and SSE stream helpers
 │   │   │   ├── comparison.py   # Shared run comparison helpers for history and project compare APIs
+│   │   │   ├── kinds.py        # Saved-run kind helpers for built-in vs external command behavior
 │   │   │   ├── output_store.py # Preview/full-output capture and artifact persistence helpers
 │   │   │   ├── streaming.py    # Low-level subprocess stdout readiness, nonblocking read, and cleanup helpers
 │   │   │   └── workspace_artifacts.py # Run-scoped workspace artifact detection and size helpers

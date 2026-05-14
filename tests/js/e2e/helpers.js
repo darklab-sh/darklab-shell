@@ -2,9 +2,116 @@
  * Shared helpers for Playwright e2e tests.
  */
 
+import { spawnSync } from 'child_process'
+import { existsSync, readFileSync, readdirSync } from 'fs'
+import { join } from 'path'
+
 // Use the RFC 2544 benchmarking range so the test suite never accidentally
 // collides with a real routable address when synthesizing client IPs.
 const TEST_IP_SEED = (Date.now() ^ process.pid) >>> 0
+
+let fixturePython = ''
+
+function e2eDataDirForProject(testInfo) {
+  const logDir = process.env.PW_E2E_SERVER_LOG_DIR || ''
+  if (!logDir) throw new Error('PW_E2E_SERVER_LOG_DIR is not set')
+  const slot = testInfo.project.name.match(/w\d+$/)?.[0]
+  if (!slot) throw new Error(`Cannot determine e2e server slot from ${testInfo.project.name}`)
+  const logName = readdirSync(logDir).find((name) => name.startsWith(`${slot}-`) && name.endsWith('.log'))
+  if (!logName) throw new Error(`Cannot find e2e server log for ${slot}`)
+  const log = readFileSync(join(logDir, logName), 'utf8')
+  const dataDir = log.match(/^\[e2e-server\] data_dir=(.+)$/m)?.[1]
+  if (!dataDir) throw new Error(`Cannot find data_dir in ${logName}`)
+  return dataDir
+}
+
+function pythonForE2EFixture() {
+  if (fixturePython) return fixturePython
+  const candidates = [
+    process.env.PYTHON,
+    '.venv/bin/python3',
+    'python3',
+    'python',
+  ].filter(Boolean)
+  for (const candidate of candidates) {
+    if (candidate.includes('/') && !existsSync(candidate)) continue
+    const probe = spawnSync(candidate, ['-c', 'import sqlite3'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    })
+    if (probe.status === 0) {
+      fixturePython = candidate
+      return candidate
+    }
+  }
+  throw new Error('Failed to find a Python executable with sqlite3 for the e2e run fixture')
+}
+
+export async function browserSessionId(page) {
+  return page.evaluate(() => (
+    typeof SESSION_ID === 'string' && SESSION_ID
+      ? SESSION_ID
+      : localStorage.getItem('session_id')
+  ))
+}
+
+export function seedExternalHistoryRuns(testInfo, { sessionId, commands }) {
+  const dataDir = e2eDataDirForProject(testInfo)
+  const script = String.raw`
+import json
+from pathlib import Path
+import sqlite3
+import sys
+import uuid
+
+data_dir, session_id, commands_json = sys.argv[1:4]
+commands = json.loads(commands_json)
+created = []
+
+def preview(command, lines):
+    return json.dumps([
+        {"text": "$ " + command, "cls": "prompt-echo", "line_index": 0},
+        *[
+            {"text": text, "cls": "", "line_index": index + 1}
+            for index, text in enumerate(lines)
+        ],
+        {"text": "[process exited with code 0]", "cls": "exit-ok", "line_index": len(lines) + 1},
+    ])
+
+conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
+try:
+    for index, command in enumerate(commands):
+        run_id = "run_ext_e2e_" + uuid.uuid4().hex[:16]
+        lines = [
+            "external fixture output",
+            "command: " + command,
+        ]
+        time_modifier = f"-{index} seconds"
+        conn.execute(
+            "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
+            "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
+            "VALUES (?, ?, 'external', ?, datetime('now', ?), datetime('now', ?), 0, ?, 0, ?, 0, 0)",
+            (run_id, session_id, command, time_modifier, time_modifier, preview(command, lines), len(lines) + 2),
+        )
+        created.append({"id": run_id, "command": command})
+    conn.commit()
+finally:
+    conn.close()
+print(json.dumps(created))
+`
+  const result = spawnSync(
+    pythonForE2EFixture(),
+    ['-c', script, dataDir, sessionId, JSON.stringify(commands)],
+    {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    },
+  )
+  if (result.status !== 0) {
+    throw new Error(`Failed to seed external history runs: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`)
+  }
+  return JSON.parse(result.stdout)
+}
 
 /**
  * Return a per-test-run deterministic test-network address for specs that

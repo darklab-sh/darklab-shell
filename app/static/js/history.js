@@ -548,6 +548,7 @@ function _historyBulkReasonSummary(results = []) {
     running: 'still running',
     not_owned: 'not available in this session',
     policy_blocked: 'blocked by policy',
+    builtin: 'built-in command',
   };
   return Array.from(reasons.entries()).map(([reason, count]) => {
     const label = labels[reason] || 'skipped';
@@ -869,6 +870,9 @@ function _historyBuildBulkActionMenu(disabled) {
   const activeProject = typeof getActiveProjectContext === 'function' ? getActiveProjectContext() : null;
   const selectedTypes = new Set(Array.from(_historySelection.selected.values()).map(_historyItemType));
   const hasOnlyRuns = selectedTypes.size === 1 && selectedTypes.has('run');
+  const selectedRuns = _historySelectedRuns();
+  const hasOnlyProjectLinkableRuns = hasOnlyRuns
+    && selectedRuns.every(run => String(run?.run_kind || 'external') !== 'builtin');
   [
     ['bulk-add-active-project', 'add to active project'],
     ['bulk-add-project', 'add to project'],
@@ -880,14 +884,14 @@ function _historyBuildBulkActionMenu(disabled) {
     item.className = 'dropdown-item dropdown-item-compact';
     item.dataset.action = action;
     item.textContent = label;
-    const projectActionDisabled = action !== 'bulk-delete' && !hasOnlyRuns;
+    const projectActionDisabled = action !== 'bulk-delete' && !hasOnlyProjectLinkableRuns;
     item.disabled = disabled
       || projectActionDisabled
       || (action === 'bulk-add-active-project' && !(activeProject && activeProject.id));
     if (action === 'bulk-add-active-project' && !(activeProject && activeProject.id)) {
       item.title = 'Select an active project first.';
     } else if (projectActionDisabled) {
-      item.title = 'Project actions apply to selected runs.';
+      item.title = 'Project actions apply to selected external runs.';
     }
     menu.appendChild(item);
   });

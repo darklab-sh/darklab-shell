@@ -63,6 +63,7 @@ from services.runs.broker import (
     stream_run_events,
 )
 from services.runs.output_store import RunOutputCapture, load_full_output_entries
+from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, run_kind_for_cmd_type
 from services.runs.streaming import (
     cleanup_proc_stream as _cleanup_proc_stream,
     make_nonblocking_stream_reader as _make_nonblocking_stream_reader,
@@ -262,6 +263,7 @@ def _save_completed_run(
     *,
     workspace_artifacts=None,
     link_active_project=True,
+    run_kind=RUN_KIND_EXTERNAL,
 ):
     # Persist preview text and artifact metadata together so history/permalink
     # readers never observe half-written run state.
@@ -288,13 +290,14 @@ def _save_completed_run(
             conn.execute(
                 "INSERT INTO runs "
                 "("
-                "id, session_id, command, started, finished, exit_code, output, output_preview, "
+                "id, session_id, run_kind, command, started, finished, exit_code, output, output_preview, "
                 "preview_truncated, output_line_count, full_output_available, full_output_truncated, "
                 "output_search_text"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     run_id,
                     session_id,
+                    run_kind,
                     command,
                     run_started,
                     finished_iso,
@@ -432,6 +435,7 @@ def _finalize_completed_run(
         finished.isoformat(), exit_code, capture,
         workspace_artifacts=workspace_artifacts,
         link_active_project=cmd_type == "real",
+        run_kind=run_kind_for_cmd_type(cmd_type),
     )
     return {"elapsed": elapsed, "active_project_link": active_project_link}
 
@@ -462,6 +466,7 @@ def _persist_completed_pty_run(
         finished_iso,
         exit_code,
         capture,
+        run_kind=RUN_KIND_EXTERNAL,
     )
     return {
         "preview_truncated": capture.preview_truncated,
@@ -533,13 +538,14 @@ def save_client_side_run():
         conn.execute(
             "INSERT INTO runs "
             "("
-            "id, session_id, command, started, finished, exit_code, output, output_preview, "
+            "id, session_id, run_kind, command, started, finished, exit_code, output, output_preview, "
             "preview_truncated, output_line_count, full_output_available, full_output_truncated, "
             "output_search_text"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run_id,
                 session_id,
+                RUN_KIND_BUILTIN,
                 command,
                 started.isoformat(),
                 finished.isoformat(),
@@ -1084,6 +1090,7 @@ def _brokered_synthetic_run(original_command, session_id, client_ip, events, exi
             run_id, session_id, original_command, run_started,
             finished.isoformat(), exit_code, capture,
             link_active_project=cmd_type == "real",
+            run_kind=run_kind_for_cmd_type(cmd_type),
         )
     except Exception as exc:
         log.error("RUN_BROKER_SYNTHETIC_ERROR", exc_info=True, extra={

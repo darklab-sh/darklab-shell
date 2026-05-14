@@ -212,7 +212,7 @@ commands:
     autocomplete:
       arguments: []
   - root: history
-    description: "built-in: list recent commands from this session"
+    description: "built-in: list command history from this session"
     autocomplete:
       arguments: []
   - root: hostname

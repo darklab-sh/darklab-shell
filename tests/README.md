@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,668
+- behavior tests: 2,669
 - docs/inventory meta-tests: 32
-- `pytest`: 1333 (1301 behavior + 32 meta)
+- `pytest`: 1334 (1302 behavior + 32 meta)
 - `vitest`: 1118
 - `playwright`: 249
-- total: 2,700
+- total: 2,701
 
 This document is organized in two parts:
 
@@ -945,6 +945,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestHealthRoute.test_status_degraded_when_db_fails` | Checks that status degraded when database fails. |
 | `TestHealthRoute.test_status_ok_when_redis_pings_successfully` | Checks that status ok when Redis pings successfully. |
 | `TestHealthRoute.test_status_degraded_when_redis_ping_fails` | Checks that status degraded when Redis ping fails. |
+| `TestProjectRoutes.test_builtin_runs_do_not_record_findings_even_with_legacy_project_link` | Verifies built-in runs stay out of persisted findings even if old data links them to a project. |
 | `TestProjectRoutes.test_project_write_routes_are_rate_limited` | Verifies project workspace write routes are wrapped by the shared limiter. |
 | `TestProjectRoutes.test_create_list_get_update_archive_and_delete_project` | Verifies the current-session project CRUD and archive filtering route flow. |
 | `TestProjectRoutes.test_delete_project_reassigns_finding_primary_target_when_other_targets_remain` | Verifies project deletion repairs a finding's primary target when another live target relationship remains. |
@@ -957,14 +958,14 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestProjectRoutes.test_project_and_history_compare_match_artifacts_by_content_hash` | Verifies project and history run comparisons both treat same-content artifacts as unchanged even when workspace paths differ. |
 | `TestProjectRoutes.test_project_scoped_compare_lines_requires_linked_project_runs` | Verifies project-scoped compare-line expansion requires project-owned linked runs. |
 | `TestProjectRoutes.test_links_run_and_unlinks_without_duplicate_rows` | Verifies project run link creation is idempotent and links can be removed. |
-| `TestProjectRoutes.test_bulk_project_links_report_mixed_results_and_keep_legacy_response` | Verifies bulk project links report per-run add/remove results while legacy single-link callers keep their response shape. |
+| `TestProjectRoutes.test_bulk_project_links_report_mixed_results_and_keep_legacy_response` | Verifies bulk project links report per-run add/remove/reject results while legacy single-link callers keep their response shape. |
 | `TestProjectRoutes.test_bulk_project_links_reject_too_many_entity_ids` | Verifies bulk project link requests reject payloads over the server-side run limit. |
 | `TestProjectRoutes.test_bulk_project_links_report_policy_blocked_when_project_link_limit_is_reached` | Verifies bulk project links report `policy_blocked` when the project link limit is reached mid-batch. |
 | `TestProjectRoutes.test_redacted_evidence_package_redacts_manifest_and_transcripts` | Verifies redacted evidence packages redact manifests, static pages, and run transcripts while excluding raw artifacts. |
 | `TestProjectRoutes.test_project_workspace_write_quotas_return_conflict` | Verifies project workspace quotas return conflict responses without blocking idempotent writes. |
 | `TestProjectRoutes.test_evidence_package_download_enforces_size_limit` | Verifies evidence package downloads refuse archives that exceed the configured size cap. |
 | `TestProjectRoutes.test_project_artifacts_are_explicitly_disabled_when_files_are_disabled` | Verifies project artifact summaries, preview/download routes, and package manifests report Files-disabled artifacts explicitly while allowing transcript-only packages. |
-| `TestProjectRoutes.test_rejects_cross_session_or_unsupported_project_links` | Verifies project links reject cross-session source records and unsupported entity types. |
+| `TestProjectRoutes.test_rejects_cross_session_or_unsupported_project_links` | Verifies project links reject cross-session source records, built-in runs, and unsupported entity types. |
 | `TestClientLogRoute.test_accepts_client_error_payload` | Checks that the client log route accepts browser error reports without colliding with reserved logging fields. |
 | `TestStatusRoute.test_returns_200_even_when_db_fails` | `/status` is HUD polling and must never return 503; a DB failure degrades fields, not the response code. |
 | `TestStatusRoute.test_response_contains_expected_keys` | Response includes `uptime`, `db`, `redis`, `server_time`. |
@@ -1330,8 +1331,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunStreaming.test_builtin_man_rejects_topics_outside_allowlist` | Checks that built-in man rejects topics outside allowlist. |
 | `TestRunStreaming.test_builtin_man_for_built_in_topic_returns_shell_help` | Checks that `man history` and similar built-in topics return shell built-in help output. |
 | `TestRunStreaming.test_builtin_man_for_shortcuts_topic_returns_web_shell_help` | Checks that built-in man for shortcuts topic returns web shell help. |
-| `TestRunStreaming.test_builtin_history_lists_recent_session_commands` | Checks that built-in history lists recent session commands. |
-| `TestRunStreaming.test_builtin_history_honors_recent_commands_limit` | Verifies that the built-in `history` command uses the configured recent-command limit instead of a separate hard cap. |
+| `TestRunStreaming.test_builtin_history_lists_session_commands` | Checks that built-in history lists session commands. |
+| `TestRunStreaming.test_builtin_history_ignores_recent_commands_limit` | Verifies that the built-in `history` command prints full session history instead of using the recent-command cache limit. |
 | `TestRunStreaming.test_builtin_pwd_returns_synthetic_path` | Checks that built-in pwd returns synthetic path. |
 | `TestRunStreaming.test_builtin_pwd_returns_workspace_root_when_workspace_enabled` | Verifies that built-in `pwd` reports `/` when workspace storage owns the terminal path model. |
 | `TestRunStreaming.test_builtin_uname_a_returns_web_shell_environment` | Checks that built-in uname a returns web shell environment. |

@@ -790,6 +790,7 @@ erDiagram
   RUNS {
     TEXT id PK
     TEXT session_id
+    TEXT run_kind
     TEXT command
     TEXT started
     TEXT finished
@@ -986,7 +987,7 @@ erDiagram
   PROJECT_TARGETS ||--o{ FINDING_TARGETS : "matched by"
 ```
 
-- `runs` — one row per completed command. Stores run metadata plus a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews store structured `{text, cls, tsC, tsE}` entries so run permalinks can preserve prompt echo and timestamp metadata. The preview is capped by both `max_output_lines` and `output_preview_max_mb`, which protects SQLite from huge single-line outputs while full artifacts retain the larger text when enabled. Also stores `output_search_text` (plain text extracted from the full artifact when available, otherwise the preview) for FTS indexing. Persists across restarts. Pruned by `permalink_retention_days`.
+- `runs` — one row per completed command. Stores run metadata, including `run_kind` (`builtin` or `external`) so history filters, project links, and finding capture can use a durable classification instead of re-reading the command text. It also stores a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews store structured `{text, cls, tsC, tsE}` entries so run permalinks can preserve prompt echo and timestamp metadata. The preview is capped by both `max_output_lines` and `output_preview_max_mb`, which protects SQLite from huge single-line outputs while full artifacts retain the larger text when enabled. Also stores `output_search_text` (plain text extracted from the full artifact when available, otherwise the preview) for FTS indexing. Persists across restarts. Pruned by `permalink_retention_days`.
 - `runs_fts` — FTS5 virtual table (content table backed by `runs`, `content_rowid=rowid`) indexing the `command` and `output_search_text` columns. Uses the trigram tokenizer when available (SQLite ≥ 3.38), falling back to unicode61. Kept in sync with `runs` via INSERT/DELETE triggers. Enables history drawer full-text search across both command text and stored run output.
 - `run_output_artifacts` — metadata rows pointing at compressed full-output artifacts under `<data_dir>/run-output/`. This keeps the `runs` table lean while still allowing the canonical `/history/<id>` permalink to serve full output when it exists.
 - `snapshots` — one row per tab permalink (`/share/<id>`). Contains `{text, cls, tsC, tsE}` objects with raw ANSI codes and timestamp data for accurate HTML export reproduction, and now feeds the `SNAPSHOT` rows in the shared history surfaces.
@@ -1004,7 +1005,7 @@ erDiagram
 - `entity_labels` — short user-controlled labels/bookmarks for supported entities, including projects, runs, snapshots, workspace files, run file artifacts, findings, targets, and packages.
 - `entity_notes` — one private note attached to each supported entity per session, including project notes. Notes are intentionally singular so entity metadata remains an editable note surface instead of a comment thread.
 - `evidence_packages` — draft package manifests scoped to a project and session. The first pass records package name/description, redaction mode, artifact-inclusion preference, and a JSON manifest over the currently linked project data, then exports that manifest plus any still-available selected workspace artifacts as a downloadable archive. Package-level labels/notes are stored through the generic entity metadata tables.
-- Supporting indexes are part of the schema even though the ER diagram stays table-focused. `idx_runs_session_command_started` backs the Recent menu and prompt-history distinct-command query shape `(session_id, command, started DESC)`, while `idx_runs_session_started`, `idx_snapshots_session_created`, `idx_user_workflows_session_updated_created`, and `idx_recent_domains_session_last_used` keep session-scoped startup, history, workflow, share, and autocomplete reads bounded on large history databases. Project workspace indexes cover session project lists, project contents, reverse entity lookup, run file artifacts, targets, findings, labels, notes, and evidence packages before UI routes depend on those query shapes.
+- Supporting indexes are part of the schema even though the ER diagram stays table-focused. `idx_runs_session_command_started` backs the Recent menu and prompt-history distinct-command query shape `(session_id, command, started DESC)`, `idx_runs_session_kind_started` backs built-in/external history filtering, while `idx_runs_session_started`, `idx_snapshots_session_created`, `idx_user_workflows_session_updated_created`, and `idx_recent_domains_session_last_used` keep session-scoped startup, history, workflow, share, and autocomplete reads bounded on large history databases. Project workspace indexes cover session project lists, project contents, reverse entity lookup, run file artifacts, targets, findings, labels, notes, and evidence packages before UI routes depend on those query shapes.
 - Redis-backed active-run metadata plus browser `sessionStorage` form a second persistence layer for reload continuity:
   - `/history/active` covers in-flight runs owned by the server/session
   - browser `sessionStorage` covers non-running tabs, transcript previews, status, draft input, and active-tab selection
@@ -1233,12 +1234,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,668
+- behavior tests: 2,669
 - docs/inventory meta-tests: 32
-- `pytest`: 1333 (1301 behavior + 32 meta)
+- `pytest`: 1334 (1302 behavior + 32 meta)
 - `vitest`: 1118
 - `playwright`: 249
-- total: 2,700
+- total: 2,701
 
 ### Testing Architecture
 

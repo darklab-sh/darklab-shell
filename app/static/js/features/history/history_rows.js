@@ -90,14 +90,15 @@ function _createHistoryActionMenu(run, { includeDelete = false } = {}) {
   const menu = document.createElement('div');
   menu.className = 'history-action-menu save-menu dropdown-surface';
   const projectLinks = Array.isArray(run?.project_links) ? run.project_links : [];
+  const isProjectLinkableRun = String(run?.run_kind || 'external') !== 'builtin';
   const items = [
     ['edit-metadata', 'edit'],
     ['permalink', 'permalink'],
     ['compare', 'compare'],
   ];
-  if (projectLinks.length) {
+  if (isProjectLinkableRun && projectLinks.length) {
     items.push(['remove-project', 'remove from project']);
-  } else {
+  } else if (isProjectLinkableRun) {
     items.push(['add-active-project', 'add to active project']);
     items.push(['add-project', 'add to project']);
   }

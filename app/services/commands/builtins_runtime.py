@@ -55,6 +55,17 @@ def _recent_runs(session_id: str, limit: int | None = None):
         ).fetchall()
 
 
+def _session_history_runs(session_id: str):
+    # The built-in `history` command should behave like a terminal history view:
+    # session-scoped, chronological, and unclipped by the recent-command cache.
+    with db_connect() as conn:
+        return conn.execute(
+            "SELECT id, command, started, finished, exit_code FROM runs "
+            "WHERE session_id = ? ORDER BY started ASC, id ASC",
+            (session_id,),
+        ).fetchall()
+
+
 def _session_run_count(session_id: str) -> int:
     with db_connect() as conn:
         row = conn.execute("SELECT COUNT(*) AS count FROM runs WHERE session_id = ?", (session_id,)).fetchone()
@@ -117,12 +128,12 @@ def _format_clock(value: str | None) -> str:
 
 
 def run_builtin_history(session_id: str) -> list[dict[str, str]]:
-    rows = list(reversed(_recent_runs(session_id)))
+    rows = _session_history_runs(session_id)
     if not rows:
         return [{"type": "output", "text": "No history for this session yet."}]
 
     width = len(str(len(rows)))
-    lines = [_output_line("Recent commands:", "builtin-section")]
+    lines = [_output_line("Command history:", "builtin-section")]
     for index, row in enumerate(rows, start=1):
         lines.append(_output_line(f"{index:>{width}}  {str(row['command']).strip()}", "builtin-history-row"))
     return lines

@@ -11,6 +11,8 @@ import {
   createShareSnapshot,
   clickHistoryRunMenuAction,
   ensurePromptReady,
+  browserSessionId,
+  seedExternalHistoryRuns,
 } from './helpers.js'
 
 // Use fake shell commands — they bypass the allowlist and complete instantly.
@@ -95,15 +97,15 @@ right_lines = common_lines + ["8080/tcp open http-proxy new-build", long_line]
 conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
 try:
     conn.execute(
-        "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
         "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
-        "VALUES (?, ?, ?, datetime('now'), datetime('now'), 0, ?, 0, ?, 0, 0)",
+        "VALUES (?, ?, 'external', ?, datetime('now'), datetime('now'), 0, ?, 0, ?, 0, 0)",
         (left_id, session_id, command, preview(left_lines), len(left_lines) + 2),
     )
     conn.execute(
-        "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+        "INSERT INTO runs (id, session_id, run_kind, command, started, finished, exit_code, "
         "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
-        "VALUES (?, ?, ?, datetime('now', '-1 minute'), datetime('now', '-1 minute'), 0, ?, 0, ?, 0, 0)",
+        "VALUES (?, ?, 'external', ?, datetime('now', '-1 minute'), datetime('now', '-1 minute'), 0, ?, 0, ?, 0, 0)",
         (right_id, session_id, command, preview(right_lines), len(right_lines) + 2),
     )
     conn.commit()
@@ -508,14 +510,17 @@ test.describe('history drawer', () => {
     await expect(page.locator('#history-panel')).not.toHaveClass(/open/)
   })
 
-  test('history bulk select can add remove and delete visible runs', async ({ page }) => {
+  test('history bulk select can add remove and delete visible runs', async ({ page }, testInfo) => {
     test.setTimeout(60_000)
-    await runCommand(page, CMD_A)
-    await waitForHistoryRuns(page, 1)
-    await runCommand(page, CMD_B)
+    const bulkCommands = [
+      'dig bulk-a.playwright.example +short',
+      'nmap -sT -p 80 bulk-b.playwright.example',
+    ]
+    const sessionId = await browserSessionId(page)
+    seedExternalHistoryRuns(testInfo, { sessionId, commands: bulkCommands })
     const runs = await waitForHistoryRuns(page, 2)
     const selectedRunIds = runs
-      .filter(run => [CMD_A, CMD_B].includes(run.command))
+      .filter(run => bulkCommands.includes(run.command))
       .map(run => String(run.id))
       .sort()
     expect(selectedRunIds).toHaveLength(2)
@@ -525,7 +530,7 @@ test.describe('history drawer', () => {
     const bulkToolbar = page.locator('#history-bulk-toolbar')
     await bulkToolbar.locator('.history-bulk-toggle input').check()
     await expect(page.locator('#history-list [data-action="select-run"]')).toHaveCount(2)
-    await selectVisibleHistoryRuns(page, [CMD_A, CMD_B])
+    await selectVisibleHistoryRuns(page, bulkCommands)
     await expect(bulkToolbar.locator('.history-bulk-count')).toHaveText('2 selected')
 
     await bulkToolbar.locator('[data-action="history-bulk-menu"]').click()
@@ -535,7 +540,7 @@ test.describe('history drawer', () => {
 
     await ensureHistoryBulkSelectMode(page)
     await expect(bulkToolbar.locator('.history-bulk-count')).toHaveText('0 selected')
-    await selectVisibleHistoryRuns(page, [CMD_A, CMD_B])
+    await selectVisibleHistoryRuns(page, bulkCommands)
     await expect(bulkToolbar.locator('.history-bulk-count')).toHaveText('2 selected')
     await bulkToolbar.locator('[data-action="history-bulk-menu"]').click()
     await activateHistoryBulkMenuItem(page, 'bulk-remove-project')
@@ -547,7 +552,7 @@ test.describe('history drawer', () => {
     await expect.poll(() => projectRunLinkIds(page, project.id)).toEqual([])
 
     await ensureHistoryBulkSelectMode(page)
-    await selectVisibleHistoryRuns(page, [CMD_A, CMD_B])
+    await selectVisibleHistoryRuns(page, bulkCommands)
     await expect(bulkToolbar.locator('.history-bulk-count')).toHaveText('2 selected')
     await bulkToolbar.locator('[data-action="history-bulk-menu"]').click()
     await activateHistoryBulkMenuItem(page, 'bulk-delete')
@@ -557,8 +562,8 @@ test.describe('history drawer', () => {
     await expect.poll(async () => (await page.evaluate(async () => {
       const resp = await apiFetch('/history?page_size=20&type=runs')
       const data = await resp.json()
-      return (data.runs || []).filter(run => ['hostname', 'date'].includes(run.command)).length
-    }))).toBe(0)
+      return data.runs || []
+    })).filter(run => bulkCommands.includes(run.command)).length).toBe(0)
   })
 
   test('run comparison split view works from history and project entry points', async ({ page }, testInfo) => {
