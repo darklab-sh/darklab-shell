@@ -1688,19 +1688,19 @@ class TestProjectRoutes:
             "already_linked": 1,
             "removed": 0,
             "not_linked": 0,
-            "not_found": 1,
-            "rejected": 1,
+            "not_found": 2,
+            "rejected": 0,
         }
         assert bulk_data["results"] == [
             {"run_id": first_run_id, "status": "already_linked"},
             {"run_id": second_run_id, "status": "added"},
-            {"run_id": other_run_id, "status": "rejected", "reason": "not_owned"},
+            {"run_id": other_run_id, "status": "not_found"},
             {"run_id": missing_run_id, "status": "not_found"},
         ]
 
         unlink_resp = client.delete(
             f"/projects/{project['id']}/links",
-            json={"entity_type": "run", "entity_ids": [first_run_id, second_run_id, missing_run_id]},
+            json={"entity_type": "run", "entity_ids": [first_run_id, second_run_id, other_run_id, missing_run_id]},
             headers={"X-Session-ID": session_id},
         )
         assert unlink_resp.status_code == 200
@@ -1710,7 +1710,7 @@ class TestProjectRoutes:
             "already_linked": 0,
             "removed": 2,
             "not_linked": 0,
-            "not_found": 1,
+            "not_found": 2,
             "rejected": 0,
         }
 
@@ -1728,6 +1728,46 @@ class TestProjectRoutes:
         )
         assert resp.status_code == 400
         assert json.loads(resp.data) == {"error": "too_many", "limit": 100}
+
+    def test_bulk_project_links_report_policy_blocked_when_project_link_limit_is_reached(self):
+        client = get_client()
+        session_id = self._session_id("project-bulk-policy")
+        with mock.patch.dict(shell_app.CFG, {"max_project_links_per_project": 2}, clear=False):
+            project = self._create_project(client, session_id)
+            first_run_id = self._seed_run(session_id, "nmap darklab.sh")
+            second_run_id = self._seed_run(session_id, "dig darklab.sh")
+            third_run_id = self._seed_run(session_id, "whois darklab.sh")
+
+            legacy_resp = client.post(
+                f"/projects/{project['id']}/links",
+                json={"entity_type": "run", "entity_id": first_run_id},
+                headers={"X-Session-ID": session_id},
+            )
+            assert legacy_resp.status_code == 201
+
+            bulk_resp = client.post(
+                f"/projects/{project['id']}/links",
+                json={
+                    "entity_type": "run",
+                    "entity_ids": [second_run_id, third_run_id],
+                },
+                headers={"X-Session-ID": session_id},
+            )
+
+        assert bulk_resp.status_code == 200
+        bulk_data = json.loads(bulk_resp.data)
+        assert bulk_data["counts"] == {
+            "added": 1,
+            "already_linked": 0,
+            "removed": 0,
+            "not_linked": 0,
+            "not_found": 0,
+            "rejected": 1,
+        }
+        assert bulk_data["results"] == [
+            {"run_id": second_run_id, "status": "added"},
+            {"run_id": third_run_id, "status": "rejected", "reason": "policy_blocked"},
+        ]
 
     def test_redacted_evidence_package_redacts_manifest_and_transcripts(self):
         client = get_client()
@@ -5118,13 +5158,19 @@ class TestHistoryRoute:
         client = get_client()
         session_id = "bulk-delete-session"
         owned_run_id = "run-" + uuid.uuid4().hex
+        incomplete_run_id = "run-" + uuid.uuid4().hex
         running_run_id = "run-" + uuid.uuid4().hex
         other_run_id = "run-" + uuid.uuid4().hex
         missing_run_id = "run-" + uuid.uuid4().hex
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
+                "VALUES (?, ?, ?, datetime('now'), datetime('now'), 0)",
                 (owned_run_id, session_id, "nmap darklab.sh"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+                (incomplete_run_id, session_id, "curl darklab.sh"),
             )
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
@@ -5139,14 +5185,15 @@ class TestHistoryRoute:
         with mock.patch.object(history_routes, "active_runs_for_session", return_value=[{"run_id": running_run_id}]):
             resp = client.post(
                 "/history/bulk-delete",
-                json={"run_ids": [owned_run_id, running_run_id, other_run_id, missing_run_id]},
+                json={"run_ids": [owned_run_id, incomplete_run_id, running_run_id, other_run_id, missing_run_id]},
                 headers={"X-Session-ID": session_id},
             )
         assert resp.status_code == 200
         data = json.loads(resp.data)
-        assert data["counts"] == {"deleted": 1, "not_found": 2, "rejected": 1}
+        assert data["counts"] == {"deleted": 1, "not_found": 2, "rejected": 2}
         assert data["results"] == [
             {"run_id": owned_run_id, "status": "deleted"},
+            {"run_id": incomplete_run_id, "status": "rejected", "reason": "incomplete"},
             {"run_id": running_run_id, "status": "rejected", "reason": "running"},
             {"run_id": other_run_id, "status": "not_found"},
             {"run_id": missing_run_id, "status": "not_found"},
@@ -5155,11 +5202,40 @@ class TestHistoryRoute:
             remaining_ids = {
                 row[0]
                 for row in conn.execute(
-                    "SELECT id FROM runs WHERE id IN (?, ?, ?)",
-                    (owned_run_id, running_run_id, other_run_id),
+                    "SELECT id FROM runs WHERE id IN (?, ?, ?, ?)",
+                    (owned_run_id, incomplete_run_id, running_run_id, other_run_id),
                 ).fetchall()
             }
-        assert remaining_ids == {running_run_id, other_run_id}
+        assert remaining_ids == {incomplete_run_id, running_run_id, other_run_id}
+
+    def test_bulk_delete_history_rejects_malformed_ids(self):
+        client = get_client()
+        session_id = "bulk-delete-malformed"
+        overlong_id = "r" * 513
+
+        non_string_resp = client.post(
+            "/history/bulk-delete",
+            json={"run_ids": ["run-ok", 123]},
+            headers={"X-Session-ID": session_id},
+        )
+        assert non_string_resp.status_code == 400
+        assert json.loads(non_string_resp.data) == {"error": "run_ids entries must be strings"}
+
+        overlong_resp = client.post(
+            "/history/bulk-delete",
+            json={"run_ids": [overlong_id]},
+            headers={"X-Session-ID": session_id},
+        )
+        assert overlong_resp.status_code == 400
+        assert json.loads(overlong_resp.data) == {"error": "run_ids entries are too long", "limit": 512}
+
+        too_many_resp = client.post(
+            "/history/bulk-delete",
+            json={"run_ids": [f"run-{index}" for index in range(101)]},
+            headers={"X-Session-ID": session_id},
+        )
+        assert too_many_resp.status_code == 400
+        assert json.loads(too_many_resp.data) == {"error": "too_many", "limit": 100}
 
     def test_get_run_nonexistent_returns_404(self):
         client = get_client()
@@ -6947,6 +7023,35 @@ class TestShareRoute:
         assert remaining_ids == {other_share_id}
         assert label_count == 0
         assert note_count == 0
+
+    def test_bulk_delete_shares_rejects_malformed_ids(self):
+        client = get_client()
+        session_id = "bulk-delete-share-malformed"
+        overlong_id = "s" * 513
+
+        non_string_resp = client.post(
+            "/share/bulk-delete",
+            json={"snapshot_ids": ["snap-ok", {"bad": "id"}]},
+            headers={"X-Session-ID": session_id},
+        )
+        assert non_string_resp.status_code == 400
+        assert json.loads(non_string_resp.data) == {"error": "snapshot_ids entries must be strings"}
+
+        overlong_resp = client.post(
+            "/share/bulk-delete",
+            json={"snapshot_ids": [overlong_id]},
+            headers={"X-Session-ID": session_id},
+        )
+        assert overlong_resp.status_code == 400
+        assert json.loads(overlong_resp.data) == {"error": "snapshot_ids entries are too long", "limit": 512}
+
+        too_many_resp = client.post(
+            "/share/bulk-delete",
+            json={"snapshot_ids": [f"snap-{index}" for index in range(101)]},
+            headers={"X-Session-ID": session_id},
+        )
+        assert too_many_resp.status_code == 400
+        assert json.loads(too_many_resp.data) == {"error": "too_many", "limit": 100}
 
     def test_get_share_json_returns_content(self):
         client = get_client()

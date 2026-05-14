@@ -1131,13 +1131,18 @@ describe('history panel actions', () => {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
     const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+    const historyFetchCount = () => apiFetch.mock.calls
+      .filter(([url]) => typeof url === 'string' && (url === '/history' || url.startsWith('/history?')))
+      .length
 
     refreshHistoryPanel()
     await new Promise((resolve) => setImmediate(resolve))
+    expect(historyFetchCount()).toBe(1)
     const toggle = document.querySelector('.history-bulk-toggle input')
     toggle.checked = true
     toggle.dispatchEvent(new Event('change', { bubbles: true }))
     await new Promise((resolve) => setImmediate(resolve))
+    expect(historyFetchCount()).toBe(1)
 
     document.querySelector('#history-list .history-entry')
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -1147,9 +1152,23 @@ describe('history panel actions', () => {
 
     selectAll.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await new Promise((resolve) => setImmediate(resolve))
+    expect(historyFetchCount()).toBe(1)
     expect(document.querySelector('.history-bulk-count').textContent).toBe('2 selected')
     expect([...document.querySelectorAll('[data-action="select-run"]')].map(input => input.checked))
       .toEqual([true, true, false])
+
+    document.querySelector('#history-bulk-toolbar button')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(document.querySelector('.history-bulk-count').textContent).toBe('0 selected')
+    expect([...document.querySelectorAll('[data-action="select-run"]')].map(input => input.checked))
+      .toEqual([false, false, false])
+
+    document.querySelector('#history-bulk-toolbar button')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(document.querySelector('.history-bulk-count').textContent).toBe('2 selected')
+    expect(document.querySelector('#history-bulk-toolbar button').textContent).toBe('Deselect all')
 
     document.querySelector('#history-bulk-toolbar button:nth-of-type(2)')
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -1157,6 +1176,58 @@ describe('history panel actions', () => {
     expect(document.querySelector('.history-bulk-count').textContent).toBe('0 selected')
     expect([...document.querySelectorAll('[data-action="select-run"]')].map(input => input.checked))
       .toEqual([false, false, false])
+    expect(historyFetchCount()).toBe(1)
+  })
+
+  it('disables project bulk actions without an active project or with mixed selected item types', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            roots: ['dig'],
+            items: [
+              {
+                id: 'run-1',
+                type: 'run',
+                command: 'dig darklab.sh A',
+                started: '2026-01-01T00:00:00Z',
+                exit_code: 0,
+              },
+              {
+                id: 'snap-1',
+                type: 'snapshot',
+                label: 'saved output',
+                created: '2026-01-01T00:00:01Z',
+              },
+            ],
+            runs: [],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+    const toggle = document.querySelector('.history-bulk-toggle input')
+    toggle.checked = true
+    toggle.dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise((resolve) => setImmediate(resolve))
+    document.querySelector('#history-list .history-entry')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(document.querySelector('[data-action="bulk-add-active-project"]').disabled).toBe(true)
+    expect(document.querySelector('[data-action="bulk-add-active-project"]').title)
+      .toBe('Select an active project first.')
+
+    document.querySelectorAll('#history-list .history-entry')[1]
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(document.querySelector('[data-action="bulk-add-project"]').disabled).toBe(true)
+    expect(document.querySelector('[data-action="bulk-remove-project"]').disabled).toBe(true)
+    expect(document.querySelector('[data-action="bulk-delete"]').disabled).toBe(false)
   })
 
   it('resets select mode and selection before the next history drawer open', async () => {
@@ -1334,6 +1405,69 @@ describe('history panel actions', () => {
       method: 'POST',
       body: JSON.stringify({ entity_type: 'run', entity_ids: ['run-1'], source: 'manual' }),
     }))
+  })
+
+  it('shows a fallback toast when history refresh fails after a successful bulk action', async () => {
+    let historyFetches = 0
+    const showConfirm = vi.fn(() => Promise.resolve('delete'))
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        historyFetches += 1
+        if (historyFetches > 1) return Promise.reject(new Error('refresh failed'))
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            roots: ['ping'],
+            items: [{
+              id: 'run-1',
+              type: 'run',
+              command: 'ping darklab.sh',
+              started: '2026-01-01T00:00:00Z',
+              exit_code: 0,
+            }],
+            runs: [],
+          }),
+        })
+      }
+      if (url === '/history/bulk-delete' && options.method === 'POST') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            counts: { deleted: 1, not_found: 0, rejected: 0 },
+            results: [{ run_id: 'run-1', status: 'deleted' }],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      apiFetchImpl: apiFetch,
+      showConfirmImpl: showConfirm,
+    })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+    const toggle = document.querySelector('.history-bulk-toggle input')
+    toggle.checked = true
+    toggle.dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise((resolve) => setImmediate(resolve))
+    document.querySelector('#history-list .history-entry')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(document.querySelector('.history-bulk-count').textContent).toBe('1 selected')
+    expect(document.querySelector('[data-action="bulk-delete"]').disabled).toBe(false)
+    document.querySelector('[data-action="bulk-delete"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    for (let index = 0; index < 20; index += 1) {
+      await new Promise((resolve) => setImmediate(resolve))
+      if (document.getElementById('permalink-toast').textContent) break
+    }
+
+    expect(apiFetch).toHaveBeenCalledWith('/history/bulk-delete', expect.objectContaining({
+      method: 'POST',
+    }))
+    expect(document.getElementById('permalink-toast').textContent)
+      .toBe('Bulk action finished, but history could not refresh. Refresh to see the latest state.')
   })
 
   it('bulk remove unlinks selected runs from every linked project without a picker', async () => {

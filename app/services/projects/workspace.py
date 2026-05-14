@@ -4248,13 +4248,8 @@ def _bulk_project_run_maps(conn, session_id, run_ids):
         f"SELECT id FROM runs WHERE session_id = ? AND id IN ({placeholders})",  # nosec B608
         [session_id, *run_ids],
     ).fetchall()
-    any_rows = conn.execute(
-        f"SELECT id FROM runs WHERE id IN ({placeholders})",  # nosec B608
-        run_ids,
-    ).fetchall()
     return {
         "owned": {str(row["id"]) for row in owned_rows},
-        "any": {str(row["id"]) for row in any_rows},
     }
 
 
@@ -4270,6 +4265,7 @@ def link_project_entities(session_id, project_id, data):
     }
     results = []
     with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         project = conn.execute(
             "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
             (session_id, project_id),
@@ -4295,14 +4291,11 @@ def link_project_entities(session_id, project_id, data):
         new_link_budget = max(0, limit - current_count)
         links = []
         for entity_id in entity_ids:
-            if entity_id in linked_by_id:
-                results.append(_project_bulk_result(counts, entity_id, "already_linked"))
-                continue
-            if entity_id not in run_maps["any"]:
+            if entity_id not in run_maps["owned"]:
                 results.append(_project_bulk_result(counts, entity_id, "not_found"))
                 continue
-            if entity_id not in run_maps["owned"]:
-                results.append(_project_bulk_result(counts, entity_id, "rejected", reason="not_owned"))
+            if entity_id in linked_by_id:
+                results.append(_project_bulk_result(counts, entity_id, "already_linked"))
                 continue
             if new_link_budget <= 0:
                 results.append(_project_bulk_result(counts, entity_id, "rejected", reason="policy_blocked"))
@@ -4361,11 +4354,8 @@ def unlink_project_entities(session_id, project_id, data):
         linked_ids = {str(row["entity_id"]) for row in link_rows}
         removable_ids = []
         for entity_id in entity_ids:
-            if entity_id not in run_maps["any"]:
-                results.append(_project_bulk_result(counts, entity_id, "not_found"))
-                continue
             if entity_id not in run_maps["owned"]:
-                results.append(_project_bulk_result(counts, entity_id, "rejected", reason="not_owned"))
+                results.append(_project_bulk_result(counts, entity_id, "not_found"))
                 continue
             if entity_id not in linked_ids:
                 results.append(_project_bulk_result(counts, entity_id, "not_linked"))

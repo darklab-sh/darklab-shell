@@ -26,7 +26,7 @@ from core.helpers import (
 from core.output_signals import command_root as output_command_root
 from services.history.permalinks import _format_duration, _permalink_error_page, _permalink_page
 from core.process import active_runs_for_session
-from services.projects.contracts import BULK_AUDIT_FAILURE_LIMIT, MAX_BULK_RUN_ACTION_ITEMS
+from services.projects.contracts import BULK_AUDIT_FAILURE_LIMIT, MAX_BULK_RUN_ACTION_ITEMS, MAX_ENTITY_ID_LEN
 from services.projects.workspace import ProjectWorkspaceError, compare_project_runs
 from core.redaction import redact_line_entries
 from services.runs.output_store import load_full_output_entries
@@ -1515,7 +1515,11 @@ def _normalize_bulk_ids_payload(data, key):
     ids = []
     seen = set()
     for raw_id in raw_ids:
-        item_id = str(raw_id or "").strip()
+        if not isinstance(raw_id, str):
+            return None, (jsonify({"error": f"{key} entries must be strings"}), 400)
+        item_id = raw_id.strip()
+        if len(item_id) > MAX_ENTITY_ID_LEN:
+            return None, (jsonify({"error": f"{key} entries are too long", "limit": MAX_ENTITY_ID_LEN}), 400)
         if not item_id or item_id in seen:
             continue
         seen.add(item_id)
@@ -1577,16 +1581,20 @@ def bulk_delete_history():
     with db_connect() as conn:
         placeholders = ",".join("?" for _ in run_ids)
         rows = conn.execute(
-            f"SELECT id FROM runs WHERE session_id = ? AND id IN ({placeholders})",  # nosec B608
+            f"SELECT id, finished, exit_code FROM runs WHERE session_id = ? AND id IN ({placeholders})",  # nosec B608
             [session_id, *run_ids],
         ).fetchall()
-        owned_ids = {str(row["id"]) for row in rows}
+        owned_by_id = {str(row["id"]): row for row in rows}
         for run_id in run_ids:
             if run_id in active_ids:
                 results.append(_bulk_delete_result(counts, run_id, "rejected", reason="running"))
                 continue
-            if run_id not in owned_ids:
+            row = owned_by_id.get(run_id)
+            if row is None:
                 results.append(_bulk_delete_result(counts, run_id, "not_found"))
+                continue
+            if row["finished"] is None and row["exit_code"] is None:
+                results.append(_bulk_delete_result(counts, run_id, "rejected", reason="incomplete"))
                 continue
             deletable_ids.append(run_id)
             results.append(_bulk_delete_result(counts, run_id, "deleted"))

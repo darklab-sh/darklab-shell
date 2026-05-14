@@ -25,6 +25,7 @@ let _historySelection = {
   visibleItems: [],
   bulkInFlight: false,
 };
+let _historyLatestPanelData = null;
 let _historyRootSuggestions = [];
 let _historyRootFiltered = [];
 let _historyRootIndex = -1;
@@ -432,7 +433,7 @@ function _historyIsSelectableItem(item) {
   const type = _historyItemType(item);
   if (type === 'snapshot') return true;
   if (type !== 'run') return false;
-  return !!item.finished || item.exit_code !== null && typeof item.exit_code !== 'undefined';
+  return !!item.finished || item.exit_code != null;
 }
 
 function _historyIsSelectableRun(run) {
@@ -476,10 +477,7 @@ function _historyResetSelectionOnClose() {
 function _historySetSelectMode(enabled, { render = true } = {}) {
   _historySelection.selectMode = !!enabled;
   if (!_historySelection.selectMode) _historySelection.selected.clear();
-  if (render) {
-    _renderHistoryBulkToolbar();
-    refreshHistoryPanel();
-  }
+  if (render) _historyRenderCurrentPanel();
 }
 
 function _historyToggleItemSelection(item, checked = null) {
@@ -499,12 +497,18 @@ function _historyToggleRunSelection(run, checked = null) {
 
 function _historySelectAllVisibleItems() {
   if (_historySelection.bulkInFlight) return;
-  _historySelection.visibleItems.forEach((item) => {
-    if (_historyIsSelectableItem(item) && item.id) {
+  const visibleSelectable = _historySelection.visibleItems.filter(_historyIsSelectableItem);
+  const allSelected = visibleSelectable.length > 0
+    && visibleSelectable.every(item => _historySelection.selected.has(_historySelectionKey(item)));
+  visibleSelectable.forEach((item) => {
+    if (!item.id) return;
+    if (allSelected) {
+      _historySelection.selected.delete(_historySelectionKey(item));
+    } else {
       _historySelection.selected.set(_historySelectionKey(item), item);
     }
   });
-  refreshHistoryPanel();
+  _historyRenderCurrentPanel();
 }
 
 function _historySetBulkBusy(busy) {
@@ -931,7 +935,7 @@ function _renderHistoryBulkToolbar() {
   const selectAll = document.createElement('button');
   selectAll.className = 'history-action-btn btn btn-secondary btn-compact';
   selectAll.type = 'button';
-  selectAll.textContent = allSelected && someSelected ? 'Selected all' : 'Select all';
+  selectAll.textContent = allSelected && someSelected ? 'Deselect all' : 'Select all';
   selectAll.disabled = !_historySelection.selectMode || !visibleSelectable.length || _historySelection.bulkInFlight;
   selectAll.setAttribute('aria-pressed', allSelected && someSelected ? 'true' : someSelected ? 'mixed' : 'false');
   selectAll.addEventListener('click', () => _historySelectAllVisibleItems());
@@ -944,7 +948,7 @@ function _renderHistoryBulkToolbar() {
   clear.disabled = selectedCount === 0 || _historySelection.bulkInFlight;
   clear.addEventListener('click', () => {
     _historyClearSelection({ render: false });
-    refreshHistoryPanel();
+    _historyRenderCurrentPanel();
   });
   actionRow.appendChild(clear);
 
@@ -1257,41 +1261,35 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 window.openHistoryWithFilters = openHistoryWithFilters;
 window.resetHistorySelectionOnClose = _historyResetSelectionOnClose;
 
-function refreshHistoryPanel() {
-  // The panel is populated on demand so we always fetch the latest persisted
-  // history instead of assuming the in-memory tab state is authoritative.
-  _ensureHistoryProjectFilterOptions().catch(() => {});
-  _syncHistoryFilterControls();
-  _renderHistoryActiveFilters();
-  return apiFetch(_buildHistoryRequestUrl()).then(r => r.json()).then(data => {
-    historyList.replaceChildren();
-    _historyPaging.page = Math.max(1, Number(data.page) || _historyPaging.page || 1);
-    _historyPaging.pageSize = Math.max(1, Number(data.page_size) || _historyPaging.pageSize || 1);
-    _historyPaging.totalCount = Math.max(0, Number(data.total_count ?? data.items?.length ?? data.runs?.length ?? 0) || 0);
-    _historyPaging.pageCount = Math.max(0, Number(data.page_count) || 0);
-    _historyPaging.hasPrev = !!data.has_prev;
-    _historyPaging.hasNext = !!data.has_next;
-    const visibleItems = _applyHistoryClientFilters(Array.isArray(data.items) ? data.items : data.runs);
-    _historySelection.visibleItems = visibleItems.filter(_historyIsSelectableItem);
-    _renderHistoryBulkToolbar();
-    _renderHistoryRootSuggestions(_historyFilters.type === 'snapshots' ? [] : (Array.isArray(data.roots) ? data.roots : data.runs));
-    if (!visibleItems.length) {
-      _historyRenderPagination(0);
-      _renderHistoryEmptyState();
-      if (typeof emitUiEvent === 'function') {
-        emitUiEvent('app:history-panel-refreshed', {
-          items: [],
-          runs: [],
-          roots: Array.isArray(data.roots) ? data.roots.slice() : [],
-          paging: { ..._historyPaging },
-          filters: { ..._historyFilters },
-        });
-      }
-      return;
+function _historyRenderPanelData(data) {
+  historyList.replaceChildren();
+  _historyPaging.page = Math.max(1, Number(data.page) || _historyPaging.page || 1);
+  _historyPaging.pageSize = Math.max(1, Number(data.page_size) || _historyPaging.pageSize || 1);
+  _historyPaging.totalCount = Math.max(0, Number(data.total_count ?? data.items?.length ?? data.runs?.length ?? 0) || 0);
+  _historyPaging.pageCount = Math.max(0, Number(data.page_count) || 0);
+  _historyPaging.hasPrev = !!data.has_prev;
+  _historyPaging.hasNext = !!data.has_next;
+  const visibleItems = _applyHistoryClientFilters(Array.isArray(data.items) ? data.items : data.runs);
+  _historySelection.visibleItems = visibleItems.filter(_historyIsSelectableItem);
+  _renderHistoryBulkToolbar();
+  _renderHistoryRootSuggestions(_historyFilters.type === 'snapshots' ? [] : (Array.isArray(data.roots) ? data.roots : data.runs));
+  if (!visibleItems.length) {
+    _historyRenderPagination(0);
+    _renderHistoryEmptyState();
+    if (typeof emitUiEvent === 'function') {
+      emitUiEvent('app:history-panel-refreshed', {
+        items: [],
+        runs: [],
+        roots: Array.isArray(data.roots) ? data.roots.slice() : [],
+        paging: { ..._historyPaging },
+        filters: { ..._historyFilters },
+      });
     }
+    return;
+  }
 
-    const starred = _getStarred();
-    visibleItems.forEach(item => {
+  const starred = _getStarred();
+  visibleItems.forEach(item => {
       if (item.type === 'snapshot') {
         const selectable = _historyIsSelectableItem(item);
         const selected = _historySelection.selected.has(_historySelectionKey(item));
@@ -1306,7 +1304,7 @@ function refreshHistoryPanel() {
             || !!entry.querySelector('[data-action="select-run"]');
           if (_historySelection.selectMode || renderedForSelection) {
             e.preventDefault();
-            e.stopImmediatePropagation();
+            e.stopPropagation();
             _historyToggleItemSelection(item);
             return;
           }
@@ -1367,7 +1365,7 @@ function refreshHistoryPanel() {
           || !!entry.querySelector('[data-action="select-run"]');
         if (_historySelection.selectMode || renderedForSelection) {
           e.preventDefault();
-          e.stopImmediatePropagation();
+          e.stopPropagation();
           _historyToggleRunSelection(run);
           return;
         }
@@ -1519,6 +1517,26 @@ function refreshHistoryPanel() {
         filters: { ..._historyFilters },
       });
     }
+}
+
+function _historyRenderCurrentPanel() {
+  if (!_historyLatestPanelData) {
+    _renderHistoryBulkToolbar();
+    return refreshHistoryPanel();
+  }
+  _historyRenderPanelData(_historyLatestPanelData);
+  return Promise.resolve();
+}
+
+function refreshHistoryPanel() {
+  // The panel is populated on demand so we always fetch the latest persisted
+  // history instead of assuming the in-memory tab state is authoritative.
+  _ensureHistoryProjectFilterOptions().catch(() => {});
+  _syncHistoryFilterControls();
+  _renderHistoryActiveFilters();
+  return apiFetch(_buildHistoryRequestUrl()).then(r => r.json()).then(data => {
+    _historyLatestPanelData = data;
+    _historyRenderPanelData(data);
   });
 }
 
