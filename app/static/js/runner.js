@@ -2633,7 +2633,8 @@ function submitCommand(rawCmd) {
   }
 
   if (_isClientSideSecretSetCommand(cmd)) {
-    void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => {
+    const safeCommand = _historySafeCommand(cmd);
+    void _runClientSideCommandWithOptionalPipe(safeCommand, activeTabId, (baseCommand) => {
       if (typeof handleSecretCommand === 'function') {
         return handleSecretCommand(baseCommand, activeTabId);
       }

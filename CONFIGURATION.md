@@ -206,9 +206,9 @@ commands:
           description: Service/version detection
 ```
 
-`requires_secrets` names encrypted session secrets that should be passed to the subprocess environment for that command root. Required missing secrets block launch before the process starts. Optional missing secrets log a warning and let the command run without that env var. Secret values are never rendered into command text.
+`requires_secrets` names encrypted session secrets that should be passed to the subprocess environment for that command root. Required missing secrets or a missing session identity block launch before the process starts. Optional missing secrets log a warning and let the command run without that env var. Secret values are never rendered into command text. Interactive PTY commands can't declare `requires_secrets`; the registry rejects that combination because the PTY path doesn't inject secret env vars.
 
-Users manage matching values from **Options → Secrets** or with `secret set NAME` in the terminal. The browser prompt collects the value; the terminal command line contains only the secret name. Stored values are replace-only: list routes and the Options panel return names, consumer env bindings, and update times, never the saved value.
+Users manage matching values from **Options → Secrets** or with `secret set NAME` in the terminal. The browser prompt collects the value; the terminal command line contains only the secret name. Stored values are replace-only: list routes and the Options panel return names, consumer env bindings, and update times, never the saved value. A consumer env name can belong to only one secret in the current session, so a command that asks for `SHODAN_API_KEY` can't receive an arbitrary matching row.
 
 Inside each command's `autocomplete` block, a root can define:
 

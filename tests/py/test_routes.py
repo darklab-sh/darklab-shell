@@ -247,6 +247,58 @@ class TestSecretsRoutes:
             for patcher in reversed(patchers):
                 patcher.stop()
 
+    def test_session_secrets_require_valid_session_id(self, monkeypatch, tmp_path):
+        client, patchers = self._secret_client(monkeypatch, tmp_path)
+        try:
+            listed = client.get("/session/secrets")
+            assert listed.status_code == 401
+            assert listed.get_json()["error"] == "session_required"
+
+            with mock.patch.dict(shell_app.app.config, {"ALLOW_LEGACY_TEST_SESSION_IDS": False}):
+                created = client.post(
+                    "/session/secrets",
+                    headers={"X-Session-ID": "../bad"},
+                    json={"name": "SHODAN_API_KEY", "value": "secret"},
+                )
+            assert created.status_code == 401
+            assert created.get_json()["error"] == "session_required"
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_session_secrets_reject_duplicate_consumer_env_binding(self, monkeypatch, tmp_path):
+        client, patchers = self._secret_client(monkeypatch, tmp_path)
+        try:
+            headers = {"X-Session-ID": "secrets-consumer-env-session"}
+            first = client.post(
+                "/session/secrets",
+                headers=headers,
+                json={
+                    "name": "shodan_primary",
+                    "value": "primary-secret",
+                    "consumer_envs": ["SHODAN_API_KEY"],
+                },
+            )
+            assert first.status_code == 201
+
+            duplicate = client.post(
+                "/session/secrets",
+                headers=headers,
+                json={
+                    "name": "shodan_backup",
+                    "value": "backup-secret",
+                    "consumer_envs": ["SHODAN_API_KEY"],
+                },
+            )
+            assert duplicate.status_code == 409
+            payload = duplicate.get_json()
+            assert payload["error"] == "consumer_env_conflict"
+            assert payload["env"] == "SHODAN_API_KEY"
+            assert payload["existing_name"] == "SHODAN_PRIMARY"
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
 
 # ── /projects ────────────────────────────────────────────────────────────────
 

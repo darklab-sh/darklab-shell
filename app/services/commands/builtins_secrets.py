@@ -31,7 +31,8 @@ def _secret_consumer_map() -> dict[str, list[str]]:
         for item in command.get("requires_secrets") or []:
             env = str(item.get("env") or "").strip().upper()
             if env:
-                consumers[env].append(root)
+                requirement = "optional" if bool(item.get("optional", False)) else "required"
+                consumers[env].append(f"{root} ({requirement})")
     return {env: sorted(set(roots)) for env, roots in consumers.items()}
 
 
@@ -67,7 +68,7 @@ def run_builtin_secret(command: str, session_id: str) -> list[dict[str, str]]:
             return [output_line(f"secret: {exc}")]
         return [
             output_line(f"Ready to store {name}.", "builtin-success"),
-            output_line("Open the Options → Secrets panel to enter or replace the value.", "builtin-note"),
+            output_line("Open the Options > Secrets panel to enter or replace the value.", "builtin-note"),
         ]
 
     if subcommand in {"unset", "delete", "rm"}:

@@ -131,12 +131,22 @@ test.describe('UI interaction contract — modal focus trap', () => {
       await openOverlay(page, modal.open, modal.overlay)
       await expect(page.locator(modal.overlay)).toHaveClass(/\bopen\b/)
 
-      // Content for FAQ and workflows loads async from /faq and /workflows
-      // — wait for the card to have at least two focusable descendants
-      // before running the boundary test so the test is independent of
-      // network timing. Visibility filter mirrors ui_focus_trap.js so the
-      // test and the trap agree on which element is "last": hidden
-      // attribute, [hidden] ancestor, and display:none (via client-rect).
+      // Options refreshes the secrets list as it opens and temporarily
+      // disables the controls at the bottom of the card. Wait for that async
+      // state to settle before marking the focus boundaries; otherwise the
+      // "last" element can change between the marker pass and the Tab press.
+      if (modal.name === 'options') {
+        await expect(page.locator('#options-secrets-refresh-btn')).toBeEnabled()
+        await expect(page.locator('#options-secret-new-btn')).toBeEnabled()
+      }
+
+      // Content for FAQ and workflows loads async from /faq and /workflows,
+      // and options has the async secrets refresh above. Wait for the card to
+      // have at least two focusable descendants before running the boundary
+      // test so the test is independent of network timing. Visibility filter
+      // mirrors ui_focus_trap.js so the test and the trap agree on which
+      // element is "last": hidden attribute, [hidden] ancestor, and
+      // display:none.
       await expect
         .poll(async () => {
           return page.evaluate((selector) => {

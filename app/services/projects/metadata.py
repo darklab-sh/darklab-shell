@@ -331,13 +331,13 @@ def add_entity_label(session_id, entity_type, entity_id, data):
             "SELECT id, session_id, entity_type, entity_id, label, source, created "
             "FROM entity_labels WHERE session_id = ? AND entity_type = ? "
             "AND entity_id = ? AND label = ?",
-            (session_id, entity_type, entity_id, label),
+            [session_id, entity_type, entity_id, label],
         ).fetchone()
         if row:
             return _row_to_label(row)
         session_count = conn.execute(
             "SELECT COUNT(*) AS count FROM entity_labels WHERE session_id = ?",
-            (session_id,),
+            [session_id],
         ).fetchone()
         if _quota_exceeded(
             int(session_count["count"] or 0) if session_count else 0,
@@ -348,7 +348,7 @@ def add_entity_label(session_id, entity_type, entity_id, data):
         entity_count = conn.execute(
             "SELECT COUNT(*) AS count FROM entity_labels "
             "WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
-            (session_id, entity_type, entity_id),
+            [session_id, entity_type, entity_id],
         ).fetchone()
         if _quota_exceeded(
             int(entity_count["count"] or 0) if entity_count else 0,
@@ -368,7 +368,7 @@ def add_entity_label(session_id, entity_type, entity_id, data):
                 "SELECT id, session_id, entity_type, entity_id, label, source, created "
                 "FROM entity_labels WHERE session_id = ? AND entity_type = ? "
                 "AND entity_id = ? AND label = ?",
-                (session_id, entity_type, entity_id, label),
+                [session_id, entity_type, entity_id, label],
             ).fetchone()
             if row:
                 conn.commit()
@@ -420,7 +420,7 @@ def upsert_entity_note(session_id, entity_type, entity_id, data):
         existing = conn.execute(
             "SELECT id, session_id, entity_type, entity_id, body, created, updated "
             "FROM entity_notes WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
-            (session_id, entity_type, entity_id),
+            [session_id, entity_type, entity_id],
         ).fetchone()
         if existing:
             conn.execute(
@@ -430,13 +430,13 @@ def upsert_entity_note(session_id, entity_type, entity_id, data):
             row = conn.execute(
                 "SELECT id, session_id, entity_type, entity_id, body, created, updated "
                 "FROM entity_notes WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
-                (session_id, entity_type, entity_id),
+                [session_id, entity_type, entity_id],
             ).fetchone()
             conn.commit()
             return _row_to_entity_note(row)
         session_count = conn.execute(
             "SELECT COUNT(*) AS count FROM entity_notes WHERE session_id = ?",
-            (session_id,),
+            [session_id],
         ).fetchone()
         if _quota_exceeded(
             int(session_count["count"] or 0) if session_count else 0,
@@ -463,7 +463,7 @@ def upsert_entity_note(session_id, entity_type, entity_id, data):
             row = conn.execute(
                 "SELECT id, session_id, entity_type, entity_id, body, created, updated "
                 "FROM entity_notes WHERE id = ? AND session_id = ?",
-                (note_id, session_id),
+                [note_id, session_id],
             ).fetchone()
             if row:
                 conn.commit()

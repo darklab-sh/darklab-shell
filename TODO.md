@@ -125,31 +125,45 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Confirm the encrypted secrets vault plan is landed; this plan is gated on it.
   - Audit `app/services/commands/registry.py` runtime env-build path for the secret injection hook.
   - Audit `app/core/output_signals.py` for the cleanest place to extract IP/domain/hash/CVE entities. Decide between extending existing event types or adding `entity_ip`, `entity_domain`, `entity_hash`, `entity_cve` events.
+  - Confirm where canonical entity helpers live before implementation starts. If the Session Entity Atlas has landed, import the canonicalizer from `app/services/atlas/materializer.py`; if intel ships first, create `app/services/intel/canonical.py` and have the Atlas reuse or re-export it later.
   - Verify the Dockerfile install pipeline can absorb new vendor CLIs (`shodan`, `vt-cli`, `greynoise`) under the scanner-user PATH.
   - Confirm `app/core/redaction.py` extension points support flagging response bodies as raw-only.
+  - Add config keys for provider cache TTLs and rate-limit buckets in `app/conf/config.yaml` before wiring the providers, so vendor limits can be tuned without code changes.
 - **Phase 1 - Provider abstraction**
   - New `app/services/intel/` service:
     - `base.py` — `Provider` ABC with `lookup_ip`, `lookup_domain`, `lookup_hash`, `lookup_cve`, `rate_limit`, `cache_ttl`.
-    - `rate_limiter.py` — Redis token-bucket keyed by `(session_token, provider)`.
-    - `cache.py` — Redis-backed `(provider, entity_type, entity_value)` cache with provider-tunable TTL; cache miss falls through to provider; results are normalized before caching so cache hits cannot leak raw response shapes.
-    - `audit.py` — emits `INTEL_LOOKUP` with `(session, run_id?, provider, entity_type, cache_hit, http_status)`. Never logs response bodies, API keys, or full entity lists.
+    - `canonical.py` — canonical entity keys if the Atlas canonicalizer is not available yet: lowercase IPv4/IPv6, IDN-normalized lowercase domains, lowercase algorithm-tagged hashes, and uppercase `CVE-YYYY-NNNNN`.
+    - `schema.py` — per-entity normalized response schemas:
+      - `ip`: `{providers: {shodan: {ports[], banners[], cves[], last_update}, greynoise: {classification, name, last_seen}}, summary: {has_intel, providers_with_data, cache_status}}`.
+      - `domain`: `{providers: {virustotal: {reputation, last_analysis_stats, recent_urls[], whois}}, summary: ...}`.
+      - `hash`: `{providers: {virustotal: {verdict, last_analysis_stats, type_description, tags[], names[]}}, summary: ...}`.
+    - `rate_limiter.py` — Redis token-bucket keyed by `(session_token, provider)`. Defaults: Shodan bucket 5/refill 1 per second; VirusTotal Public bucket 4/refill 1 every 15 seconds; GreyNoise Community bucket 50/refill 1 every 12,096 seconds. Keep the source-limit note beside each default in code, and allow all buckets/refills to be overridden from config. Include an optional stricter GreyNoise unauthenticated profile of 10/day.
+    - `cache.py` — Redis-backed `(provider, entity_type, canonical_entity_value)` cache. Results are normalized before caching so cache hits cannot leak raw response shapes. Default TTLs: Shodan IP 24h, Shodan host search 6h, VirusTotal domain 6h, VirusTotal file 24h, GreyNoise IP 1h; all overridable through `intel_cache_ttl_<provider>_<scope>` config keys.
+    - `audit.py` — emits one `INTEL_LOOKUP` per provider call, including cache hits, with `(session, run_id?, provider, entity_type, cache_hit, http_status)`. Never logs response bodies, API keys, or full entity lists. Future sidecar enrichment can batch audit rows if lookup volume becomes noisy.
   - Provider modules `shodan.py`, `virustotal.py`, `greynoise.py`. Each reads its key from the vault at call time, never caches keys beyond the rate-limit window, and returns a provider-normalized payload.
+  - VirusTotal HTTP 429 handling stores a quota-exhausted provider state. If the provider exposes a reset time, negative-cache until the next UTC quota window; otherwise cache for several hours so repeated probes do not hammer the provider. Raw 429 bodies stay out of transcripts.
 - **Phase 2 - CLI wrapper pass**
   - Install `shodan`, `vt-cli`, `greynoise` CLIs in the Dockerfile under the scanner-user PATH.
   - Register `commands.yaml` entries with allowed subcommands, allowed flags, and `requires_secrets`:
-    - `shodan` → `SHODAN_API_KEY`.
-    - `vt` → `VT_API_KEY`.
-    - `greynoise` → `GREYNOISE_API_KEY`.
+    - `shodan` → `SHODAN_API_KEY`. Allow `host`, `search`, `count`, `myip`. Deny `init` so keys never persist outside the vault, and deny `download`, `parse`, `convert`, `domain`, `data` in v1.
+    - `vt` → `VT_API_KEY`. Allow `ip`, `domain`, `file`, `url`. Deny `search` in v1 because broad search can burn quota quickly or require higher-tier access; deny `download`, `monitor`, `analyze`.
+    - `greynoise` → `GREYNOISE_API_KEY`. Allow `ip`, `quick`. Deny `setup` so keys never persist outside the vault, and deny `query` until paid Enterprise plumbing is justified.
   - Verify deny-prefix coverage so these CLIs cannot reach loopback or escape the allowlist.
+  - CLI wrapper runs go through `/runs` like every other command and land in normal history. Their raw response bodies are visible in the transcript, while share/permalink/export redaction drops those bodies.
   - Add smoke-test fixtures for each CLI to the container smoke test corpus.
 - **Phase 3 - App-native `intel` built-in**
   - New `app/services/commands/builtins_intel.py`:
-    - `intel ip <ip>` fans out to Shodan + GreyNoise; uniform card shows ports/banners/CVEs and classification/confidence.
+    - `intel ip <ip>` fans out to Shodan + GreyNoise; uniform card shows ports/banners/CVEs and classification/confidence. Private, loopback, and otherwise non-public IPs are refused by default with `IP <addr> is in a private/loopback range; intel providers cannot meaningfully classify it. Use --include-private if you really want to query.`
     - `intel domain <domain>` uses VirusTotal; uniform card shows reputation, recent URLs, WHOIS summary.
-    - `intel hash <sha256|sha1|md5>` uses VirusTotal; uniform card shows verdict, scan engines, tags.
+    - `intel hash <sha256|sha1|md5>` uses VirusTotal; uniform card shows verdict, scan engines, tags. Autodetect by hex length (`32` → MD5, `40` → SHA1, `64` → SHA256), validate hex, and reject anything else with `Hash must be hex MD5/SHA1/SHA256`. No algorithm flag in v1.
     - `intel cve <id>` is deferred to the future provider list.
+  - Missing-key behavior:
+    - If every provider needed for a subcommand is missing, block pre-launch with a clear message that includes both `secret set NAME` shell hints and an `(Options → Secrets)` link that opens the Options modal at the Secrets section with the env name pre-filled.
+    - If some providers are configured and others are missing, render configured provider panes normally and render placeholders for the missing panes, for example `GreyNoise: not configured — secret set GREYNOISE_API_KEY`.
+  - Quota-exhaustion behavior renders an inline provider pane error such as `VirusTotal quota exhausted for today — refresh after midnight UTC, or upgrade to Premium`, using the negative-cache state from Phase 1 so repeat runs do not keep calling the provider.
   - Built-in output routes through the standard run-broker so it gets history persistence, autocomplete, and pipe support like any external command.
   - Browser-side card module: `app/static/js/features/intel/intel_card.js` with a provider-uniform layout shared across `intel` subcommands and any future enrichment surfaces.
+  - Document the normalized response schemas and provider-pane behavior in `docs/external-command-integrations.md`.
 - **Phase 4 - Entity-aware classifier hooks**
   - Extend `app/core/output_signals.py` to extract:
     - IPv4 and IPv6 (with configurable public-context filter that drops loopback/RFC1918 by default).
@@ -160,31 +174,9 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - These events are the foundation that the Session Entity Atlas plan and the Findings inbox consume.
 - **Phase 5 - Sharing, redaction, audit, and tests**
   - `app/core/redaction.py` marks intel response bodies as raw-only. Snapshot permalinks of `intel` runs render a "Intel data omitted from share" placeholder where the card would normally appear. Saved HTML/PDF exports follow the same rule.
-  - Backend coverage: provider mocks for each call path, rate-limit token-bucket behavior, cache hit/miss with TTL expiry, audit log shape, secrets-gate pre-launch error, normalized response schema parity across providers, entity extraction false-positive guardrails (loopback IPs, malformed CVE IDs, mid-string false matches).
-  - Frontend coverage: intel card render parity across providers, missing-secret pre-launch error UX, cache-hit chip rendering, share-export omits intel sections.
+  - Backend coverage: provider mocks for each call path, default and config-overridden rate-limit token-bucket behavior, cache key canonicalization, cache hit/miss with TTL expiry, per-provider TTL defaults, VirusTotal quota negative-cache behavior, audit log shape, partial missing-key behavior, all-missing secrets-gate pre-launch error, normalized response schema parity across providers, `intel hash` autodetect/reject paths, private-IP refusal plus `--include-private`, and entity extraction false-positive guardrails (loopback IPs, malformed CVE IDs, mid-string false matches).
+  - Frontend coverage: intel card render parity across providers, missing-secret pre-launch error UX with Options → Secrets link, partial provider placeholder rendering, quota-exhausted pane rendering, cache-hit chip rendering, share-export omits intel sections.
   - Playwright: desktop and mobile flows for `intel ip`, `intel domain`, `intel hash` with mocked provider responses; one share-redaction flow proving intel content is omitted.
-- **Open Decisions** (recommended answers below; review before implementation starts)
-  - **Per-provider cache TTL defaults.** Question: how long does each provider's normalized response live in Redis? **Recommend:** Shodan IP 24h, Shodan host search 6h, VirusTotal domain 6h, VirusTotal file 24h, GreyNoise IP 1h. All overridable via `intel_cache_ttl_<provider>_<scope>` keys in `app/conf/config.yaml`.
-  - **Rate-limiter bucket sizing.** Question: what bucket size + refill matches each provider's documented limits? **Recommend:** Shodan 1 req/sec (bucket 5, refill 1/sec); VirusTotal Public 4/min (bucket 4, refill 1 per 15s); GreyNoise Community conservative default of 50/week (bucket 50, refill 1 every 12,096s) with an optional stricter unauthenticated profile of 10/day. All provider buckets are config-overridable, and the source row is documented in code so future tweaks are auditable.
-  - **Cache key canonicalization.** Question: are cache keys normalized the same way Atlas entities are? **Recommend:** **yes** — reuse the canonical-form rules the Atlas Phase 1 spec defines (lowercase IPv4/IPv6, IDN-normalized lowercase domain, lowercase algorithm-tagged hash, uppercase `CVE-YYYY-NNNNN`). Import the canonicalizer from `app/services/atlas/materializer.py` rather than duplicating.
-  - **Pre-Atlas canonicalization location.** Question: if the intel plan ships before the Atlas, where do the canonicalization helpers live? **Recommend:** put them in `app/services/intel/canonical.py` and re-export from the Atlas materializer when it lands. Avoids a circular dependency or a copy.
-  - **Private/loopback IPs in `intel ip`.** Question: does `intel ip 192.168.1.1` work? **Recommend:** **no** by default. Refuse with `IP <addr> is in a private/loopback range; intel providers cannot meaningfully classify it. Use --include-private if you really want to query.` Aligns with the classifier-extraction public-context filter.
-  - **Normalized response schema.** Question: what shape does each provider return after normalization? **Recommend:** define a per-entity-type JSON schema in `app/services/intel/schema.py`:
-    - `ip`: `{providers: {shodan: {ports[], banners[], cves[], last_update}, greynoise: {classification, name, last_seen}}, summary: {has_intel, providers_with_data, cache_status}}`.
-    - `domain`: `{providers: {virustotal: {reputation, last_analysis_stats, recent_urls[], whois}}, summary: ...}`.
-    - `hash`: `{providers: {virustotal: {verdict, last_analysis_stats, type_description, tags[], names[]}}, summary: ...}`.
-    - The card module renders `summary` always, plus the matching provider panes. Document the schema in `docs/external-command-integrations.md`.
-  - **CLI wrapper allowed-subcommand whitelist.** Question: which subcommands are allowed for each vendor CLI? **Recommend:**
-    - `shodan`: `host`, `search`, `count`, `myip`. **Deny** `init` (would persist keys outside the vault), `download`, `parse`, `convert`, `domain`, `data`.
-    - `vt`: `ip`, `domain`, `file`, `url`. **Deny** `search` in v1 because search-style queries can burn quota quickly or require higher-tier access; also deny `download`, `monitor`, `analyze`.
-    - `greynoise`: `ip`, `quick`. **Deny** `setup` (key persistence), `query` until paid Enterprise plumbing is justified.
-    - Document each in `commands.yaml` with explicit allowed flags. Reject any unlisted subcommand pre-launch.
-  - **VirusTotal quota exhaustion behavior.** Question: what does `intel domain example.com` do when the 500/day VT quota is gone? **Recommend:** surface a clear error inline in the card (`VirusTotal quota exhausted for today — refresh after midnight UTC, or upgrade to Premium`) and store a negative-cache until the next UTC quota window when the provider response exposes a reset time. If no reset hint is available, cache for several hours rather than one hour so repeated probes do not hammer the provider. Keep raw HTTP-429 response out of transcripts.
-  - **`intel hash` algorithm autodetect.** Question: how does the built-in determine which hash algorithm was passed? **Recommend:** autodetect by hex length (`32` → md5, `40` → sha1, `64` → sha256) **and** validate the input is hex; reject anything else with `Hash must be hex MD5/SHA1/SHA256`. No algorithm flag in v1.
-  - **Partial-render when some keys are missing.** Question: if Shodan key is configured but GreyNoise is not, what does `intel ip` render? **Recommend:** render the Shodan pane normally and a "GreyNoise: not configured — `secret set GREYNOISE_API_KEY`" placeholder in the GreyNoise pane. The pre-launch error block-launch rule (from the secrets vault plan) only fires when **all** required providers are missing.
-  - **Provider key discovery flow.** Question: when the user first runs `intel ip ...` with no keys, what's the UX? **Recommend:** the pre-launch error message includes both the `secret set NAME` shell hint **and** an `(Options → Secrets)` link — the link opens the Options modal at the Secrets section with the env name pre-filled.
-  - **Audit log granularity for sidecar/auto-enrich paths.** Question: does future sidecar enrichment emit one `INTEL_LOOKUP` per entity per run, or batched? **Recommend:** v1 emits one row per provider call (cache hit or miss). If volume becomes a problem when sidecar enrichment ships, batch in that phase, not retroactively.
-  - **CLI wrapper history persistence.** Question: do `shodan`/`vt`/`greynoise` runs land in normal history? **Recommend:** **yes** — they go through `/runs` like every other command. The response body is shown raw in the transcript; the redaction baseline marks intel response bodies raw-only so the share/permalink path drops them.
 
 - **Future**
   - Tier A (no-key) early-value pass: `crt.sh`, BGPView, Team Cymru, anonymous NVD, Mnemonic PassiveDNS, HIBP Pwned Passwords. Ship before the vault if scheduling requires it, since none of these consume secrets.

@@ -797,9 +797,10 @@ def get_theme_entry(name, fallback="dark"):
 # Scanner user wrapping — prepend sudo to run commands as the unprivileged
 # scanner user with the shared appuser group. The explicit run group keeps
 # validated workspace files readable/writable without making them world-accessible.
-# appuser (Gunicorn) is granted NOPASSWD sudo rights to that runas pair in
-# /etc/sudoers. Falls back to running directly if sudo/scanner aren't available
-# (local dev).
+# appuser (Gunicorn) is granted NOPASSWD sudo rights with SETENV to that runas
+# pair in /etc/sudoers. SETENV is needed so the app can preserve only declared
+# encrypted-secret env vars through sudo without putting values in argv. Falls
+# back to running directly if sudo/scanner aren't available (local dev).
 SCANNER_PREFIX = []
 try:
     pwd.getpwnam("scanner")

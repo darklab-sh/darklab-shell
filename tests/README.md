@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,686
+- behavior tests: 2,698
 - docs/inventory meta-tests: 32
-- `pytest`: 1346 (1314 behavior + 32 meta)
-- `vitest`: 1123
+- `pytest`: 1357 (1325 behavior + 32 meta)
+- `vitest`: 1124
 - `playwright`: 249
-- total: 2,718
+- total: 2,730
 
 This document is organized in two parts:
 
@@ -415,6 +415,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDerivedCommandRegistry.test_commands_registry_loader_normalizes_policy_and_autocomplete` | Verifies that the `commands.yaml` loader normalizes policy entries and autocomplete metadata, including pipe-helper entries. |
 | `TestDerivedCommandRegistry.test_command_catalog_derives_reference_data_from_registry` | Verifies that the command catalog helper derives descriptions, examples, flags, workspace file handling, runtime notes, and subcommand-scoped details from the command registry. |
 | `TestDerivedCommandRegistry.test_commands_registry_local_overlay_appends_policy_and_context` | Verifies that `commands.local.yaml` appends policy entries, adds new roots, overrides categories, and merges autocomplete hints without replacing the base registry. |
+| `TestDerivedCommandRegistry.test_commands_registry_rejects_interactive_pty_with_required_secrets` | Verifies that registry loading rejects interactive PTY commands that also declare required secret env injection. |
+| `TestDerivedCommandRegistry.test_secret_show_consumers_marks_required_and_optional` | Verifies that `secret show-consumers` labels command consumers as required or optional. |
 | `TestDerivedCommandRegistry.test_real_registry_amass_uses_subcommand_scoped_autocomplete` | Verifies that Amass autocomplete exposes root subcommands and keeps subcommand-specific flags and examples scoped to the matching subcommand. |
 | `TestDerivedCommandRegistry.test_real_registry_openssl_uses_subcommand_scoped_autocomplete` | Verifies that OpenSSL autocomplete exposes allowlisted subcommands and keeps `s_client` and `ciphers` flags scoped to the matching subcommand. |
 | `TestDerivedCommandRegistry.test_real_registry_gobuster_uses_subcommand_scoped_autocomplete` | Verifies that Gobuster autocomplete exposes mode subcommands and keeps mode-specific flags scoped to the matching subcommand. |
@@ -658,6 +660,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSecretsVault.test_env_master_key_wins_over_key_file_and_logs_warning` | Verifies `SECRETS_MASTER_KEY` wins over an existing key file and logs the ignored-file warning. |
 | `TestSecretsVault.test_database_init_creates_secrets_table_and_index_idempotently` | Verifies repeated database initialization creates the secrets table and session/update-time index safely. |
 | `TestSecretsVault.test_storage_normalizes_names_and_migrates_without_decrypting` | Verifies secret storage normalizes names, dedupes consumer envs, and moves session rows without decrypting values. |
+| `TestSecretsVault.test_storage_migration_keeps_source_secret_when_destination_name_collides` | Verifies session secret migration keeps the source row when a destination secret with the same name already exists. |
+| `TestSecretsVault.test_storage_legacy_duplicate_consumer_env_uses_most_recent_update` | Verifies legacy duplicate consumer-env rows resolve to the most recently updated secret. |
+| `TestSecretsVault.test_storage_rejects_duplicate_consumer_env_bindings` | Verifies a session cannot bind the same consumer env name to two different encrypted secrets. |
 
 #### `test_container_smoke_test.py`
 
@@ -954,6 +959,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestHealthRoute.test_status_degraded_when_redis_ping_fails` | Checks that status degraded when Redis ping fails. |
 | `TestSecretsRoutes.test_session_secrets_crud_never_returns_value` | Verifies session secret create, list, rotate, and delete routes return metadata only and never echo stored values. |
 | `TestSecretsRoutes.test_session_secrets_reject_invalid_name` | Verifies session secret routes reject invalid secret names with the expected error shape. |
+| `TestSecretsRoutes.test_session_secrets_require_valid_session_id` | Verifies session secret routes reject missing or invalid session headers instead of using a shared empty namespace. |
+| `TestSecretsRoutes.test_session_secrets_reject_duplicate_consumer_env_binding` | Verifies the routes return a conflict when another secret already owns the requested consumer env binding. |
 | `TestProjectRoutes.test_builtin_runs_do_not_record_findings_even_with_legacy_project_link` | Verifies built-in runs stay out of persisted findings even if old data links them to a project. |
 | `TestProjectRoutes.test_project_write_routes_are_rate_limited` | Verifies project workspace write routes are wrapped by the shared limiter. |
 | `TestProjectRoutes.test_create_list_get_update_archive_and_delete_project` | Verifies the current-session project CRUD and archive filtering route flow. |
@@ -1342,6 +1349,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunStreaming.test_builtin_man_for_shortcuts_topic_returns_web_shell_help` | Checks that built-in man for shortcuts topic returns web shell help. |
 | `TestRunStreaming.test_builtin_history_lists_session_commands` | Checks that built-in history lists session commands. |
 | `TestRunStreaming.test_builtin_history_ignores_recent_commands_limit` | Verifies that the built-in `history` command prints full session history instead of using the recent-command cache limit. |
+| `TestRunStreaming.test_secret_set_with_accidental_value_persists_sanitized_command` | Verifies backend history stores only `secret set NAME` if a value is accidentally typed on the command line. |
 | `TestRunStreaming.test_builtin_pwd_returns_synthetic_path` | Checks that built-in pwd returns synthetic path. |
 | `TestRunStreaming.test_builtin_pwd_returns_workspace_root_when_workspace_enabled` | Verifies that built-in `pwd` reports `/` when workspace storage owns the terminal path model. |
 | `TestRunStreaming.test_builtin_uname_a_returns_web_shell_environment` | Checks that built-in uname a returns web shell environment. |
@@ -1355,6 +1363,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunStreaming.test_run_rewrites_workspace_file_flags_and_emits_notices` | Verifies that `/runs` executes workspace-aware file flags with rewritten session paths, emits friendly workspace read/write notices, and preserves the original command in history. |
 | `TestRunStreaming.test_run_injects_projectdiscovery_workspace_state_and_surfaces_paths` | Verifies that ProjectDiscovery tools receive session-scoped runtime state and display generated workspace paths as user-facing paths. |
 | `TestRunStreaming.test_run_injects_required_secrets_through_process_environment` | Verifies registry-required secrets are decrypted into the subprocess environment without appearing in command text or streamed output. |
+| `TestRunStreaming.test_run_preserves_secret_environment_through_scanner_sudo_prefix` | Verifies scanner-user sudo launches preserve only declared secret env names while keeping secret values out of argv and output. |
+| `TestRunStreaming.test_run_resolves_required_secrets_before_runtime_command_rewrites` | Verifies secret declarations are resolved from the original registry command root even when validation rewrites the runtime command. |
+| `TestRunStreaming.test_run_requires_valid_session_before_secret_injection` | Verifies commands that require encrypted secrets fail before spawn when no valid session is available. |
 | `TestRunStreaming.test_run_blocks_when_required_secret_is_missing` | Verifies a command with a missing required registry secret is rejected before subprocess spawn. |
 | `TestRunStreaming.test_run_allows_missing_optional_secret_and_logs_warning` | Verifies optional registry secrets warn when missing but do not block command launch. |
 | `TestRunStreaming.test_session_variables_expand_before_validation_and_preserve_typed_history` | Verifies that `/runs` expands session variables before launch, emits the expanded-command notice, and keeps typed command history. |
@@ -2173,6 +2184,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `persists terminal-native built-ins to server-backed history` | Verifies that terminal-native built-ins post their rendered output to `/run/client` so recents and history survive reload. |
 | `routes workflow commands to the client-side workflow handler` | Verifies that `workflow` terminal commands are handled by the client workflow runtime. |
 | `routes tour commands to the client-side tour handler` | Verifies that `tour` terminal commands are handled by the client tour renderer instead of going to the backend run path. |
+| `scrubs accidental secret set values before history, echo, and client persistence` | Verifies that accidental `secret set NAME VALUE` input is reduced to `secret set NAME` before recall history, transcript echo, and client-run persistence. |
 | `routes exit and quit commands to tab close without persisting a run` | Verifies that `exit` and `quit` close the active tab directly without adding history entries or posting client-side run artifacts. |
 | `clears stale failed tab and HUD state after a successful client-side built-in` | Verifies that successful client-side built-ins reset stale failed tab indicators, tab exit codes, and HUD state. |
 | `setStatus shows RUNNING only while running and IDLE otherwise` | Verifies that setStatus shows RUNNING only while running and IDLE otherwise. |

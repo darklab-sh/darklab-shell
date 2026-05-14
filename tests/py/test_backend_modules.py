@@ -674,15 +674,6 @@ class TestDerivedCommandRegistry:
                     optional: true
                   - env: ""
                   - env: bad-name
-                interactive:
-                  mode: pty
-                  trigger_flag: --live
-                  default_rows: 33
-                  default_cols: 132
-                  max_runtime_seconds: 321
-                  allow_input: false
-                  requires_args: true
-                  transcript_mode: scrollback_findings
                 autocomplete:
                   flags:
                     - value: -c
@@ -715,6 +706,21 @@ class TestDerivedCommandRegistry:
                   examples:
                     - value: ping -c 4 darklab.sh
                       description: Send four probes
+              - root: mtr
+                category: Network
+                policy:
+                  allow:
+                    - mtr
+                  deny: []
+                interactive:
+                  mode: pty
+                  trigger_flag: --live
+                  default_rows: 33
+                  default_cols: 132
+                  max_runtime_seconds: 321
+                  allow_input: false
+                  requires_args: true
+                  transcript_mode: scrollback_findings
             pipe_helpers:
               - root: grep
                 autocomplete:
@@ -764,7 +770,9 @@ class TestDerivedCommandRegistry:
             {"env": "SHODAN_API_KEY", "optional": False},
             {"env": "VT_API_KEY", "optional": True},
         ]
-        assert ping["interactive"] == {
+        mtr = registry["commands"][1]
+        assert mtr["root"] == "mtr"
+        assert mtr["interactive"] == {
             "mode": "pty",
             "trigger_flag": "--live",
             "default_rows": 33,
@@ -776,7 +784,7 @@ class TestDerivedCommandRegistry:
             "input_safety": "no_input",
         }
         assert interactive_pty_specs_from_registry(registry) == [{
-            "root": "ping",
+            "root": "mtr",
             "trigger_flag": "--live",
             "default_rows": 33,
             "default_cols": 132,
@@ -976,6 +984,54 @@ class TestDerivedCommandRegistry:
         grep = registry["pipe_helpers"][0]
         assert grep["autocomplete"]["pipe_command"] is True
         assert grep["autocomplete"]["flags"][0]["value"] == "-i"
+
+    def test_commands_registry_rejects_interactive_pty_with_required_secrets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: shodan
+                category: External Intel
+                policy:
+                  allow:
+                    - shodan
+                  deny: []
+                requires_secrets:
+                  - env: SHODAN_API_KEY
+                interactive:
+                  mode: pty
+                  trigger_flag: --interactive
+                  allow_input: false
+            """))
+            with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
+                with pytest.raises(ValueError, match="cannot combine interactive PTY mode with requires_secrets"):
+                    load_commands_registry()
+
+    def test_secret_show_consumers_marks_required_and_optional(self):
+        registry = {
+            "commands": [
+                {
+                    "root": "shodan",
+                    "requires_secrets": [{"env": "SHODAN_API_KEY", "optional": False}],
+                },
+                {
+                    "root": "nuclei",
+                    "requires_secrets": [{"env": "NUCLEI_TOKEN", "optional": True}],
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("services.commands.builtins_secrets.load_commands_registry", return_value=registry):
+            lines, exit_code = builtin_commands.execute_builtin_command("secret show-consumers", "secret-session")
+
+        text = "\n".join(str(line.get("text", "")) for line in lines)
+        assert exit_code == 0
+        assert "SHODAN_API_KEY" in text
+        assert "shodan (required)" in text
+        assert "NUCLEI_TOKEN" in text
+        assert "nuclei (optional)" in text
 
     def test_real_registry_amass_uses_subcommand_scoped_autocomplete(self):
         context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
@@ -5625,3 +5681,84 @@ class TestSecretsVault:
             assert migrated == 1
             assert secrets_storage.list_secret_metadata("old-session") == []
             assert secrets_storage.get_secret_value_for_env("new-session", "virustotal_token") == "secret-value"
+
+    def test_storage_migration_keeps_source_secret_when_destination_name_collides(self, monkeypatch, tmp_path):
+        self._patch_master_key(monkeypatch, tmp_path)
+        db_path = os.path.join(tmp_path, "secrets.db")
+        with mock.patch("core.database.DB_PATH", db_path):
+            with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                database.db_init()
+            secrets_storage.upsert_secret("old-session", "vt_api_key", "source-secret")
+            secrets_storage.upsert_secret("new-session", "vt_api_key", "destination-secret")
+            with database.db_connect() as conn:
+                migrated = secrets_storage.migrate_session_secrets(conn, "old-session", "new-session")
+                conn.commit()
+
+            assert migrated == 0
+            assert secrets_storage.get_secret_value_for_env("old-session", "VT_API_KEY") == "source-secret"
+            assert secrets_storage.get_secret_value_for_env("new-session", "VT_API_KEY") == "destination-secret"
+
+    def test_storage_legacy_duplicate_consumer_env_uses_most_recent_update(self, monkeypatch, tmp_path):
+        self._patch_master_key(monkeypatch, tmp_path)
+        db_path = os.path.join(tmp_path, "secrets.db")
+        with mock.patch("core.database.DB_PATH", db_path):
+            with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                database.db_init()
+            older_ciphertext, older_nonce = secrets_vault.encrypt_secret("older-secret")
+            newer_ciphertext, newer_nonce = secrets_vault.encrypt_secret("newer-secret")
+            with database.db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO secrets "
+                    "(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        "secret-session",
+                        "OLDER_SHODAN",
+                        older_ciphertext,
+                        older_nonce,
+                        json.dumps(["SHODAN_API_KEY"]),
+                        "2026-01-01T00:00:00+00:00",
+                        "2026-01-01T00:00:00+00:00",
+                    ],
+                )
+                conn.execute(
+                    "INSERT INTO secrets "
+                    "(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        "secret-session",
+                        "NEWER_SHODAN",
+                        newer_ciphertext,
+                        newer_nonce,
+                        json.dumps(["SHODAN_API_KEY"]),
+                        "2026-01-01T00:00:01+00:00",
+                        "2026-01-01T00:00:01+00:00",
+                    ],
+                )
+                conn.commit()
+
+            assert secrets_storage.get_secret_value_for_env("secret-session", "SHODAN_API_KEY") == "newer-secret"
+
+    def test_storage_rejects_duplicate_consumer_env_bindings(self, monkeypatch, tmp_path):
+        self._patch_master_key(monkeypatch, tmp_path)
+        db_path = os.path.join(tmp_path, "secrets.db")
+        with mock.patch("core.database.DB_PATH", db_path):
+            with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                database.db_init()
+            secrets_storage.upsert_secret(
+                "secret-session",
+                "shodan_primary",
+                "primary-secret",
+                ["SHODAN_API_KEY"],
+            )
+
+            with pytest.raises(secrets_storage.SecretConsumerEnvConflict) as exc_info:
+                secrets_storage.upsert_secret(
+                    "secret-session",
+                    "shodan_backup",
+                    "backup-secret",
+                    ["SHODAN_API_KEY"],
+                )
+
+        assert exc_info.value.env_name == "SHODAN_API_KEY"
+        assert exc_info.value.existing_name == "SHODAN_PRIMARY"

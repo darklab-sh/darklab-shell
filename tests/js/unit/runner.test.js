@@ -573,6 +573,46 @@ describe('client-side UI command pipe helpers', () => {
     expect(appendCommandEcho).not.toHaveBeenCalled()
   })
 
+  it('scrubs accidental secret set values before history, echo, and client persistence', async () => {
+    const secretValue = 'plain-secret-value'
+    const addToHistory = vi.fn()
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/run/client') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const handleSecretCommand = vi.fn(async (cmd, tabId) => {
+      appendLine('Secret set canceled.', '', tabId)
+      return true
+    })
+    const { submitCommand, tabs } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      addToHistory,
+      appendLine,
+      apiFetch,
+      handleSecretCommand,
+    })
+
+    await submitCommand(`secret set SHODAN_API_KEY ${secretValue}`)
+    await vi.waitFor(() => expect(handleSecretCommand).toHaveBeenCalled())
+
+    expect(addToHistory).toHaveBeenCalledWith('secret set SHODAN_API_KEY')
+    expect(handleSecretCommand).toHaveBeenCalledWith('secret set SHODAN_API_KEY', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('secret set SHODAN_API_KEY', 'prompt-echo', 'tab-1')
+    expect(tabs[0].command).toBe('secret set SHODAN_API_KEY')
+
+    await vi.waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith('/run/client', expect.objectContaining({ method: 'POST' })),
+    )
+    const persisted = JSON.parse(apiFetch.mock.calls.find(([url]) => url === '/run/client')[1].body)
+    expect(persisted.command).toBe('secret set SHODAN_API_KEY')
+    expect(JSON.stringify(apiFetch.mock.calls)).not.toContain(secretValue)
+    expect(JSON.stringify(appendLine.mock.calls)).not.toContain(secretValue)
+    expect(JSON.stringify(addToHistory.mock.calls)).not.toContain(secretValue)
+  })
+
   it('routes exit and quit commands to tab close without persisting a run', () => {
     const closeTab = vi.fn()
     const addToHistory = vi.fn()
@@ -654,6 +694,7 @@ function loadRunnerFns({
   handleConfigCommand: handleConfigCommandOverride = undefined,
   handleTourCommand: handleTourCommandOverride = undefined,
   handleWorkflowTerminalCommand: handleWorkflowTerminalCommandOverride = undefined,
+  handleSecretCommand: handleSecretCommandOverride = undefined,
   closeTab: closeTabOverride = vi.fn(),
   refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride = undefined,
   openWorkspaceEditorFromCommand: openWorkspaceEditorFromCommandOverride = undefined,
@@ -828,6 +869,7 @@ function loadRunnerFns({
       ...(handleWorkflowTerminalCommandOverride
         ? { handleWorkflowTerminalCommand: handleWorkflowTerminalCommandOverride }
         : {}),
+      ...(handleSecretCommandOverride ? { handleSecretCommand: handleSecretCommandOverride } : {}),
       ...(refreshWorkspaceFileCacheOverride ? { refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride } : {}),
       ...(openWorkspaceEditorFromCommandOverride
         ? { openWorkspaceEditorFromCommand: openWorkspaceEditorFromCommandOverride }

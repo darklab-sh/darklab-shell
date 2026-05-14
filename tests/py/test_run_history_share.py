@@ -2804,6 +2804,26 @@ class TestRunStreaming:
         assert "5  cmd 5\\n" in body
         assert '"type": "exit"' in body
 
+    def test_secret_set_with_accidental_value_persists_sanitized_command(self):
+        client = get_client()
+        secret_value = "plain-secret-value"
+
+        resp = _post_run(
+            client,
+            json={"command": f"secret set SHODAN_API_KEY {secret_value}"},
+            headers={"X-Session-ID": "sess-secret-sanitized"},
+        )
+        body = resp.get_data(as_text=True)
+        hist = client.get("/history", headers={"X-Session-ID": "sess-secret-sanitized"})
+        data = json.loads(hist.data)
+
+        assert resp.status_code == 200
+        assert "Do not put the value on the command line." in body
+        assert secret_value not in body
+        assert hist.status_code == 200
+        assert data["runs"][0]["command"] == "secret set SHODAN_API_KEY"
+        assert secret_value not in hist.get_data(as_text=True)
+
     def test_builtin_pwd_returns_synthetic_path(self):
         client = get_client()
 
@@ -3154,6 +3174,134 @@ class TestRunStreaming:
         secret_event.assert_called_once()
         assert secret_event.call_args.args[0] == "SECRET_INJECTED"
         assert secret_event.call_args.kwargs["consumer_envs"] == ["SHODAN_API_KEY"]
+
+    def test_run_preserves_secret_environment_through_scanner_sudo_prefix(self, monkeypatch, tmp_path):
+        client = get_client()
+        session_id = "sess-secret-scanner"
+        monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+        monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path))
+        secrets_vault.reset_master_key_cache_for_tests()
+        secrets_storage.upsert_secret(session_id, "shodan_api_key", "shodan-secret")
+        fake_proc = _FakeProc(lines=["lookup complete\n", ""])
+        captured = {}
+
+        def _fake_popen(*args, **kwargs):
+            captured["argv"] = list(args[0])
+            captured["env_before_cleanup"] = dict(kwargs.get("env") or {})
+            return fake_proc
+
+        registry = {
+            "commands": [
+                {
+                    "root": "shodan",
+                    "category": "External Intel",
+                    "policy": {"allow": ["shodan"], "deny": []},
+                    "requires_secrets": [{"env": "SHODAN_API_KEY", "optional": False}],
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.run.SCANNER_PREFIX", ["sudo", "-u", "scanner", "-g", "appuser"]), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", side_effect=_fake_popen) as popen, \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            resp = _post_run(
+                client,
+                json={"command": "shodan host ip.darklab.sh"},
+                headers={"X-Session-ID": session_id},
+            )
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert captured["argv"][:2] == ["sudo", "--preserve-env=SHODAN_API_KEY"]
+        assert captured["env_before_cleanup"]["SHODAN_API_KEY"] == "shodan-secret"
+        assert "shodan-secret" not in " ".join(captured["argv"])
+        assert "shodan-secret" not in body
+        assert popen.call_args.kwargs["env"]["SHODAN_API_KEY"] == ""
+
+    def test_run_resolves_required_secrets_before_runtime_command_rewrites(self, monkeypatch, tmp_path):
+        client = get_client()
+        session_id = "sess-secret-rewrite"
+        monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+        monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path))
+        secrets_vault.reset_master_key_cache_for_tests()
+        secrets_storage.upsert_secret(session_id, "shodan_api_key", "shodan-secret")
+        fake_proc = _FakeProc(lines=["lookup complete\n", ""])
+        captured_env = {}
+
+        def _fake_popen(*args, **kwargs):
+            captured_env.update(kwargs.get("env") or {})
+            return fake_proc
+
+        def _rewrite_validation(command, session_id, workspace_cwd=""):  # noqa: ARG001
+            assert command == "shodan host ip.darklab.sh"
+            return run_routes.CommandValidationResult(
+                True,
+                display_command=command,
+                exec_command="env XDG_CONFIG_HOME=/tmp/tools shodan host ip.darklab.sh",
+            )
+
+        registry = {
+            "commands": [
+                {
+                    "root": "shodan",
+                    "category": "External Intel",
+                    "policy": {"allow": ["shodan"], "deny": []},
+                    "requires_secrets": [{"env": "SHODAN_API_KEY", "optional": False}],
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.run._validate_command_for_run", side_effect=_rewrite_validation), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", side_effect=_fake_popen), \
+             mock.patch("blueprints.run.emit_secret_event") as secret_event, \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            resp = _post_run(
+                client,
+                json={"command": "shodan host ip.darklab.sh"},
+                headers={"X-Session-ID": session_id},
+            )
+
+        assert resp.status_code == 200
+        assert captured_env["SHODAN_API_KEY"] == "shodan-secret"
+        secret_event.assert_called_once()
+        assert secret_event.call_args.kwargs["command_root"] == "shodan"
+
+    def test_run_requires_valid_session_before_secret_injection(self):
+        client = get_client()
+        registry = {
+            "commands": [
+                {
+                    "root": "shodan",
+                    "category": "External Intel",
+                    "policy": {"allow": ["shodan"], "deny": []},
+                    "requires_secrets": [{"env": "SHODAN_API_KEY", "optional": False}],
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen") as popen:
+            resp = _post_run(
+                client,
+                json={"command": "shodan host ip.darklab.sh"},
+                headers={"X-Session-ID": ""},
+            )
+
+        assert resp.status_code == 401
+        assert resp.get_json()["error"] == "A valid session is required before commands can use encrypted secrets."
+        popen.assert_not_called()
 
     def test_run_blocks_when_required_secret_is_missing(self):
         client = get_client()

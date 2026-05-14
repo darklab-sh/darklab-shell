@@ -6,6 +6,7 @@ import base64
 import logging
 import os
 import secrets
+import threading
 from pathlib import Path
 
 from cryptography.exceptions import InvalidTag
@@ -29,6 +30,7 @@ _master_key_cache: bytes | None = None
 _master_key_source: str = ""
 _warned_file_ignored = False
 _logged_generated = False
+_master_key_lock = threading.Lock()
 
 
 class SecretVaultError(ValueError):
@@ -131,6 +133,7 @@ def reset_master_key_cache_for_tests() -> None:
 
 
 def master_key_source() -> str:
+    """Return the active master-key source, loading the key on first use."""
     if _master_key_cache is None:
         get_wrapping_key()
     return _master_key_source
@@ -140,14 +143,17 @@ def get_wrapping_key() -> bytes:
     """Return the derived AES-GCM key for this deployment."""
     global _master_key_cache, _master_key_source
     if _master_key_cache is None:
-        master_key, source = _load_master_key()
-        _master_key_cache = HKDF(
-            algorithm=hashes.SHA256(),
-            length=MASTER_KEY_BYTES,
-            salt=HKDF_SALT,
-            info=HKDF_INFO,
-        ).derive(master_key)
-        _master_key_source = source
+        with _master_key_lock:
+            if _master_key_cache is None:
+                master_key, source = _load_master_key()
+                _master_key_cache = HKDF(
+                    algorithm=hashes.SHA256(),
+                    length=MASTER_KEY_BYTES,
+                    salt=HKDF_SALT,
+                    info=HKDF_INFO,
+                ).derive(master_key)
+                _master_key_source = source
+    assert _master_key_cache is not None
     return _master_key_cache
 
 

@@ -320,6 +320,10 @@ def normalize_commands_registry_entry(
     entry["runtime_adaptations"] = normalize_runtime_adaptations(raw_entry.get("runtime_adaptations"))
     entry["requires_secrets"] = normalize_required_secrets(raw_entry.get("requires_secrets"))
     interactive = normalize_interactive_spec(raw_entry.get("interactive"))
+    if interactive and entry["requires_secrets"]:
+        raise ValueError(
+            f"{root} cannot combine interactive PTY mode with requires_secrets until PTY secret injection is supported"
+        )
     if interactive:
         entry["interactive"] = interactive
     return entry

@@ -21,6 +21,15 @@ class InvalidSecretName(SecretStorageError):
     """Raised when a secret/env name is not accepted."""
 
 
+class SecretConsumerEnvConflict(SecretStorageError):
+    """Raised when an env binding would point at more than one secret."""
+
+    def __init__(self, env_name: str, existing_name: str):
+        super().__init__(f"{env_name} is already bound to {existing_name}")
+        self.env_name = env_name
+        self.existing_name = existing_name
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -83,6 +92,16 @@ def upsert_secret(session_token: str, name: str, value: str, consumer_envs=None)
             "SELECT created_at FROM secrets WHERE session_token = ? AND name = ?",
             (session_token, normalized_name),
         ).fetchone()
+        rows = conn.execute(
+            "SELECT name, consumer_envs FROM secrets WHERE session_token = ? AND name <> ? ORDER BY name",
+            (session_token, normalized_name),
+        ).fetchall()
+        requested_envs = set(normalized_envs)
+        for row in rows:
+            existing_envs = set(json.loads(row["consumer_envs"] or "[]"))
+            conflicts = sorted(requested_envs & existing_envs)
+            if conflicts:
+                raise SecretConsumerEnvConflict(conflicts[0], row["name"])
         created = existing is None
         created_at = now if created else existing["created_at"]
         conn.execute(
@@ -119,7 +138,8 @@ def get_secret_value_for_env(session_token: str, env_name: str) -> str | None:
     normalized_env = normalize_secret_name(env_name)
     with db_connect() as conn:
         rows = conn.execute(
-            "SELECT ciphertext, nonce, consumer_envs FROM secrets WHERE session_token = ?",
+            "SELECT ciphertext, nonce, consumer_envs FROM secrets "
+            "WHERE session_token = ? ORDER BY updated_at DESC, name ASC",
             (session_token,),
         ).fetchall()
     for row in rows:
@@ -159,6 +179,7 @@ def migrate_session_secrets(conn, from_session_id: str, to_session_id: str) -> i
         (from_session_id,),
     ).fetchall()
     migrated = 0
+    migrated_names = []
     for row in rows:
         cur = conn.execute(
             "INSERT OR IGNORE INTO secrets "
@@ -174,6 +195,12 @@ def migrate_session_secrets(conn, from_session_id: str, to_session_id: str) -> i
                 row["updated_at"],
             ),
         )
-        migrated += max(0, cur.rowcount)
-    conn.execute("DELETE FROM secrets WHERE session_token = ?", (from_session_id,))
+        if cur.rowcount:
+            migrated += 1
+            migrated_names.append(str(row["name"]))
+    if migrated_names:
+        conn.executemany(
+            "DELETE FROM secrets WHERE session_token = ? AND name = ?",
+            [[from_session_id, name] for name in migrated_names],
+        )
     return migrated

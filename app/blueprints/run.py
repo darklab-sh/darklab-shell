@@ -758,6 +758,7 @@ class _PreparedCommandInput:
 
 @dataclass(frozen=True)
 class _PreparedRealCommand:
+    registry_command: str
     execution_command: str
     command: str
     rewrite_notice: str | None
@@ -936,6 +937,11 @@ def _resolve_secret_environment(command: str, session_id: str) -> tuple[dict[str
     declarations = required_secrets_for_command(command)
     if not declarations:
         return {}, []
+    if not session_id:
+        raise _RunPreparationError(
+            "A valid session is required before commands can use encrypted secrets.",
+            status_code=401,
+        )
 
     env_overrides: dict[str, str] = {}
     missing_required: list[str] = []
@@ -959,11 +965,13 @@ def _resolve_secret_environment(command: str, session_id: str) -> tuple[dict[str
     if missing_required:
         if len(missing_required) == 1:
             subject = f"secret {missing_required[0]}"
+            setup_hint = "Set it via \"secret set NAME\" or the Options > Secrets panel."
         else:
             subject = "secrets " + ", ".join(missing_required)
+            setup_hint = "Set each one via \"secret set NAME\" or the Options > Secrets panel."
         raise _RunPreparationError(
-            f"Run requires {subject} which is not set. "
-            "Set it via \"secret set NAME\" or the Options > Secrets panel.",
+            f"Run requires {subject} which is not set. " +
+            setup_hint,
             status_code=403,
         )
     for env_name in missing_optional:
@@ -982,6 +990,7 @@ def _prepare_real_command(
     client_ip: str,
     workspace_cwd: str = "",
 ) -> _PreparedRealCommand:
+    registry_command = execution_command
     validation = _validate_command_for_run(execution_command, session_id, workspace_cwd)
     if not validation.allowed:
         log.warning("CMD_DENIED", extra={
@@ -1003,8 +1012,9 @@ def _prepare_real_command(
             "ip": client_ip, "session": get_log_session_id(session_id),
             "cmd": original_command, "missing": missing_runtime,
         })
-    env_overrides, secret_env_names = _resolve_secret_environment(execution_command, session_id)
+    env_overrides, secret_env_names = _resolve_secret_environment(registry_command, session_id)
     return _PreparedRealCommand(
+        registry_command=registry_command,
         execution_command=execution_command,
         command=command,
         rewrite_notice=notice,
@@ -1013,6 +1023,24 @@ def _prepare_real_command(
         env_overrides=env_overrides,
         secret_env_names=secret_env_names,
     )
+
+
+def _real_command_popen_argv(prepared_real: _PreparedRealCommand) -> list[str]:
+    scanner_prefix = list(SCANNER_PREFIX)
+    if scanner_prefix and prepared_real.secret_env_names and scanner_prefix[0] == "sudo":
+        scanner_prefix.insert(1, "--preserve-env=" + ",".join(prepared_real.secret_env_names))
+    return scanner_prefix + [SHELL_BIN, "-c", prepared_real.command] if scanner_prefix else [
+        SHELL_BIN,
+        "-c",
+        prepared_real.command,
+    ]
+
+
+def _history_safe_command_for_storage(command: str) -> str:
+    parts = split_command_argv(command)
+    if len(parts) > 3 and parts[0].lower() == "secret" and parts[1].lower() == "set":
+        return f"secret set {parts[2]}"
+    return command
 
 
 def _start_real_command_process(
@@ -1037,8 +1065,7 @@ def _start_real_command_process(
             popen_env = os.environ.copy()
             popen_env.update(env_overrides)
         proc = subprocess.Popen(
-            SCANNER_PREFIX + [SHELL_BIN, "-c", prepared_real.command] if SCANNER_PREFIX
-            else [SHELL_BIN, "-c", prepared_real.command],
+            _real_command_popen_argv(prepared_real),
             shell=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -1054,6 +1081,9 @@ def _start_real_command_process(
         })
         raise _RunSpawnError(str(exc)) from exc
     finally:
+        # Best-effort scrub of plaintext from the parent process after spawn.
+        # Python strings are immutable, so this drops references rather than
+        # guaranteeing bytewise heap clearing. The subprocess has its own copy.
         for key in env_overrides:
             env_overrides[key] = ""
         prepared_real.env_overrides.clear()
@@ -1081,7 +1111,7 @@ def _start_real_command_process(
             session_id,
             consumer_envs=prepared_real.secret_env_names,
             run_id=run_id,
-            command_root=command_root(prepared_real.execution_command) or "",
+            command_root=command_root(prepared_real.registry_command) or "",
         )
     return _StartedRealCommand(
         run_id=run_id,
@@ -1594,7 +1624,8 @@ def start_brokered_run():
 
     if resolves_exact_special_builtin_command(original_command):
         events, exit_code = execute_builtin_command(original_command, session_id)
-        run_id = _brokered_synthetic_run(original_command, session_id, client_ip, events, exit_code)
+        storage_command = _history_safe_command_for_storage(original_command)
+        run_id = _brokered_synthetic_run(storage_command, session_id, client_ip, events, exit_code)
         return jsonify({"run_id": run_id, "stream": f"/runs/{run_id}/stream"}), 202
 
     try:
@@ -1609,7 +1640,8 @@ def start_brokered_run():
             prepared_input.variable_notice,
             prepared_input.postfilter,
         )
-        run_id = _brokered_synthetic_run(original_command, session_id, client_ip, filtered_events, exit_code)
+        storage_command = _history_safe_command_for_storage(original_command)
+        run_id = _brokered_synthetic_run(storage_command, session_id, client_ip, filtered_events, exit_code)
         return jsonify({"run_id": run_id, "stream": f"/runs/{run_id}/stream"}), 202
 
     try:

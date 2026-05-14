@@ -15,6 +15,9 @@ window.DarklabRunnerPersistence = (() => {
       return value.replace(
         /\b(session-token\s+(?:set|revoke)\s+)(tok_[A-Za-z0-9]+|[0-9a-f]{8}-[0-9a-f-]{28,})\b/i,
         (_match, prefix, token) => `${prefix}${mask(token)}`,
+      ).replace(
+        /^(\s*secret\s+set\s+\S+)(?:\s+.+)$/i,
+        (_match, prefix) => prefix,
       );
     }
 

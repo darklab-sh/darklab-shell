@@ -180,7 +180,8 @@ def get_session_id():
     from core.database import db_connect  # noqa: PLC0415
     with db_connect() as conn:
         row = conn.execute(
-            "SELECT 1 FROM session_tokens WHERE token = ?", (session_id,)
+            "SELECT 1 FROM session_tokens WHERE token = ?",
+            [session_id],
         ).fetchone()
     return session_id if row else ""
 

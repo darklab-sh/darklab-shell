@@ -2113,7 +2113,7 @@ def get_project(session_id, project_id):
         row = conn.execute(
             "SELECT id, session_id, name, slug, description, status, color, created, updated "
             "FROM projects WHERE session_id = ? AND id = ?",
-            (session_id, project_id),
+            [session_id, project_id],
         ).fetchone()
         project = _row_to_project(row)
         _attach_project_notes(conn, session_id, [project])
@@ -2299,7 +2299,7 @@ def create_project(session_id, data):
     with db_connect() as conn:
         row = conn.execute(
             "SELECT COUNT(*) AS count FROM projects WHERE session_id = ?",
-            (session_id,),
+            [session_id],
         ).fetchone()
         if _quota_exceeded(int(row["count"] or 0) if row else 0, "max_projects_per_session", 100):
             _raise_quota("project quota exceeded for this session")
@@ -2338,7 +2338,7 @@ def update_project(session_id, project_id, data):
         current = conn.execute(
             "SELECT id, name, slug, description, status, color "
             "FROM projects WHERE session_id = ? AND id = ?",
-            (session_id, project_id),
+            [session_id, project_id],
         ).fetchone()
         if not current:
             return None
@@ -2465,7 +2465,7 @@ def get_evidence_package(session_id, project_id, package_id):
             "SELECT id, session_id, project_id, name, description, redaction_mode, "
             "include_artifacts, manifest, status, created, updated "
             "FROM evidence_packages WHERE session_id = ? AND project_id = ? AND id = ?",
-            (session_id, project_id, package_id),
+            [session_id, project_id, package_id],
         ).fetchone()
         package = _row_to_evidence_package(row)
         _attach_package_metadata(conn, session_id, [package])
@@ -3002,7 +3002,7 @@ def create_evidence_package(session_id, project_id, data):
     with db_connect() as conn:
         row = conn.execute(
             "SELECT COUNT(*) AS count FROM evidence_packages WHERE session_id = ? AND project_id = ?",
-            (session_id, project_id),
+            [session_id, project_id],
         ).fetchone()
         if _quota_exceeded(
             int(row["count"] or 0) if row else 0,
@@ -3346,7 +3346,7 @@ def get_active_project(session_id):
         row = conn.execute(
             "SELECT id, session_id, name, slug, description, status, color, created, updated "
             "FROM projects WHERE session_id = ? AND id = ? AND status != 'archived'",
-            (session_id, project_id),
+            [session_id, project_id],
         ).fetchone()
         if not row:
             _clear_active_project_preference(conn, session_id)
@@ -4193,7 +4193,7 @@ def list_project_links(session_id, project_id):
     with db_connect() as conn:
         project = conn.execute(
             "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-            (session_id, project_id),
+            [session_id, project_id],
         ).fetchone()
         if not project:
             return None
@@ -4225,14 +4225,14 @@ def link_project_entity(session_id, project_id, data):
         row = conn.execute(
             "SELECT id, project_id, entity_type, entity_id, source, created "
             "FROM project_links WHERE project_id = ? AND entity_type = ? AND entity_id = ?",
-            (project_id, entity_type, entity_id),
+            [project_id, entity_type, entity_id],
         ).fetchone()
         if row:
             return _row_to_link(row)
         count_row = conn.execute(
             "SELECT COUNT(*) AS count FROM project_links "
             "WHERE project_id = ? AND entity_type = 'run'",
-            (project_id,),
+            [project_id],
         ).fetchone()
         if _quota_exceeded(
             int(count_row["count"] or 0) if count_row else 0,
@@ -4251,7 +4251,7 @@ def link_project_entity(session_id, project_id, data):
             row = conn.execute(
                 "SELECT id, project_id, entity_type, entity_id, source, created "
                 "FROM project_links WHERE project_id = ? AND entity_type = ? AND entity_id = ?",
-                (project_id, entity_type, entity_id),
+                [project_id, entity_type, entity_id],
             ).fetchone()
             if row:
                 conn.commit()
@@ -4300,7 +4300,7 @@ def link_project_entities(session_id, project_id, data):
         conn.execute("BEGIN IMMEDIATE")
         project = conn.execute(
             "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-            (session_id, project_id),
+            [session_id, project_id],
         ).fetchone()
         if not project:
             return None
@@ -4316,7 +4316,7 @@ def link_project_entities(session_id, project_id, data):
         count_row = conn.execute(
             "SELECT COUNT(*) AS count FROM project_links "
             "WHERE project_id = ? AND entity_type = 'run'",
-            (project_id,),
+            [project_id],
         ).fetchone()
         current_count = int(count_row["count"] or 0) if count_row else 0
         limit = int(_config.CFG.get("max_project_links_per_project", 1000) or 1000)
@@ -4349,7 +4349,7 @@ def unlink_project_entity(session_id, project_id, data):
     with db_connect() as conn:
         project = conn.execute(
             "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-            (session_id, project_id),
+            [session_id, project_id],
         ).fetchone()
         if not project:
             return None
@@ -4375,7 +4375,7 @@ def unlink_project_entities(session_id, project_id, data):
     with db_connect() as conn:
         project = conn.execute(
             "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-            (session_id, project_id),
+            [session_id, project_id],
         ).fetchone()
         if not project:
             return None
@@ -4420,7 +4420,7 @@ def list_project_targets(session_id, project_id):
             f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec
             "FROM project_targets WHERE project_id = ? AND review_state != 'dismissed' "
             "ORDER BY type ASC, value COLLATE NOCASE ASC",
-            (project_id,),
+            [project_id],
         ).fetchall()
         targets = [_row_to_target(row) for row in rows]
         _attach_target_metadata(conn, session_id, targets)
@@ -4434,7 +4434,7 @@ def add_project_target(session_id, project_id, data):
     with db_connect() as conn:
         project = conn.execute(
             "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
-            (session_id, project_id),
+            [session_id, project_id],
         ).fetchone()
         if not project:
             return None
@@ -4443,7 +4443,7 @@ def add_project_target(session_id, project_id, data):
         row = conn.execute(
             f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec
             "FROM project_targets WHERE project_id = ? AND type = ? AND value = ?",
-            (project_id, payload["type"], payload["value"]),
+            [project_id, payload["type"], payload["value"]],
         ).fetchone()
         if row:
             if row["review_state"] in {"pending", "dismissed"}:
@@ -4466,14 +4466,14 @@ def add_project_target(session_id, project_id, data):
                 row = conn.execute(
                     f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec
                     "FROM project_targets WHERE project_id = ? AND id = ?",
-                    (project_id, row["id"]),
+                    [project_id, row["id"]],
                 ).fetchone()
             target = _row_to_target(row)
             _attach_target_metadata(conn, session_id, [target])
             return target
         count_row = conn.execute(
             "SELECT COUNT(*) AS count FROM project_targets WHERE project_id = ?",
-            (project_id,),
+            [project_id],
         ).fetchone()
         if _quota_exceeded(
             int(count_row["count"] or 0) if count_row else 0,
@@ -4503,7 +4503,7 @@ def add_project_target(session_id, project_id, data):
             row = conn.execute(
                 f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec
                 "FROM project_targets WHERE project_id = ? AND type = ? AND value = ?",
-                (project_id, payload["type"], payload["value"]),
+                [project_id, payload["type"], payload["value"]],
             ).fetchone()
             if row:
                 target = _row_to_target(row)
@@ -4629,7 +4629,7 @@ def update_project_target(session_id, project_id, target_id, data):
             "t.review_state, t.source, t.source_detail, t.seen_count, t.last_seen, t.dismissed_at "
             "FROM project_targets t JOIN projects p ON p.id = t.project_id "
             "WHERE p.session_id = ? AND t.project_id = ? AND t.id = ?",
-            (session_id, project_id, target_id),
+            [session_id, project_id, target_id],
         ).fetchone()
         if not current:
             return None
@@ -4678,7 +4678,7 @@ def update_project_target(session_id, project_id, target_id, data):
         row = conn.execute(
             f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec
             "FROM project_targets WHERE project_id = ? AND id = ?",
-            (project_id, target_id),
+            [project_id, target_id],
         ).fetchone()
         target = _row_to_target(row)
         _attach_target_metadata(conn, session_id, [target])
@@ -4776,7 +4776,7 @@ def update_finding_review_state(session_id, finding_id, data):
         row = conn.execute(
             "SELECT id, session_id, run_id, target_id, scope, title, raw_line, line_number, "
             "severity, fingerprint, review_state, created FROM findings WHERE session_id = ? AND id = ?",
-            (session_id, finding_id),
+            [session_id, finding_id],
         ).fetchone()
         conn.commit()
     return _row_to_finding(row)

@@ -162,11 +162,13 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser && \
 
 # Keep both sudoers forms: the first permits appuser to run as scanner,
 # while the second also permits the appuser run group for shared workspace files.
+# SETENV lets the app preserve only declared encrypted-secret env vars through
+# sudo without putting values in command arguments.
 RUN setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap && \
     setcap cap_net_raw,cap_net_admin+eip /usr/bin/masscan && \
     setcap cap_net_raw,cap_net_admin+eip /usr/local/bin/naabu && \
-    echo "appuser ALL=(scanner) NOPASSWD: ALL" >> /etc/sudoers && \
-    echo "appuser ALL=(scanner:appuser) NOPASSWD: ALL" >> /etc/sudoers
+    echo "appuser ALL=(scanner) NOPASSWD: SETENV: ALL" >> /etc/sudoers && \
+    echo "appuser ALL=(scanner:appuser) NOPASSWD: SETENV: ALL" >> /etc/sudoers
 
 # Pre-create /data owned by appuser with 700 permissions.
 # scanner user cannot write here. The entrypoint re-applies ownership
