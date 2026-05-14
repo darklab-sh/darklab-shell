@@ -185,6 +185,20 @@ class TestLoadConfig:
         assert cfg["workspace_max_file_mb"] == 5
         assert cfg["workspace_max_files"] == 100
         assert cfg["workspace_inactivity_ttl_hours"] == 1
+        assert cfg["intel_cache_ttl_shodan_ip_seconds"] == 86400
+        assert cfg["intel_cache_ttl_shodan_search_seconds"] == 21600
+        assert cfg["intel_cache_ttl_virustotal_domain_seconds"] == 21600
+        assert cfg["intel_cache_ttl_virustotal_file_seconds"] == 86400
+        assert cfg["intel_cache_ttl_greynoise_ip_seconds"] == 3600
+        assert cfg["intel_rate_limit_shodan_bucket"] == 5
+        assert cfg["intel_rate_limit_shodan_refill_seconds"] == 1
+        assert cfg["intel_rate_limit_virustotal_public_bucket"] == 4
+        assert cfg["intel_rate_limit_virustotal_public_refill_seconds"] == 15
+        assert cfg["intel_rate_limit_greynoise_community_bucket"] == 50
+        assert cfg["intel_rate_limit_greynoise_community_refill_seconds"] == 12096
+        assert cfg["intel_rate_limit_greynoise_unauthenticated_bucket"] == 10
+        assert cfg["intel_rate_limit_greynoise_unauthenticated_refill_seconds"] == 8640
+        assert cfg["intel_negative_cache_virustotal_quota_seconds"] == 21600
 
     def test_share_redaction_enabled_defaults_true(self):
         with tempfile.TemporaryDirectory() as tmp:

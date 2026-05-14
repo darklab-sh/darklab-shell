@@ -260,6 +260,46 @@
 # Server default if unset: 5
 # rate_limit_per_second: 5
 
+# ── External Intel Provider Defaults ─────────────────────────────────────────
+#
+# These defaults define the cache and quota contract for app-owned intel
+# providers. They do not enable a provider by themselves; provider commands
+# still require command-registry entries and matching encrypted secrets.
+
+# Normalized response cache TTLs, in seconds.
+# Server defaults if unset:
+#   Shodan IP: 86400 (24h)
+#   Shodan search: 21600 (6h)
+#   VirusTotal domain: 21600 (6h)
+#   VirusTotal file/hash: 86400 (24h)
+#   GreyNoise IP: 3600 (1h)
+# intel_cache_ttl_shodan_ip_seconds: 86400
+# intel_cache_ttl_shodan_search_seconds: 21600
+# intel_cache_ttl_virustotal_domain_seconds: 21600
+# intel_cache_ttl_virustotal_file_seconds: 86400
+# intel_cache_ttl_greynoise_ip_seconds: 3600
+
+# Redis token-bucket defaults for provider calls. Buckets are per session and
+# provider so one user's lookups don't spend another user's quota.
+# Server defaults if unset:
+#   Shodan: bucket 5, refill 1 token every 1s
+#   VirusTotal Public: bucket 4, refill 1 token every 15s
+#   GreyNoise Community: bucket 50, refill 1 token every 12096s
+#   GreyNoise unauthenticated fallback: bucket 10, refill 1 token every 8640s
+# intel_rate_limit_shodan_bucket: 5
+# intel_rate_limit_shodan_refill_seconds: 1
+# intel_rate_limit_virustotal_public_bucket: 4
+# intel_rate_limit_virustotal_public_refill_seconds: 15
+# intel_rate_limit_greynoise_community_bucket: 50
+# intel_rate_limit_greynoise_community_refill_seconds: 12096
+# intel_rate_limit_greynoise_unauthenticated_bucket: 10
+# intel_rate_limit_greynoise_unauthenticated_refill_seconds: 8640
+
+# Fallback negative-cache window for VirusTotal quota-exhausted responses when
+# the provider response does not include a reset time.
+# Server default if unset: 21600 (6h)
+# intel_negative_cache_virustotal_quota_seconds: 21600
+
 # Maximum number of interactive PTY input requests per minute per IP. This is
 # intentionally higher than /runs because normal typing can produce many small
 # terminal input events.

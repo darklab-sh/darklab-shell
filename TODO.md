@@ -121,14 +121,14 @@ This file tracks open work, known issues, technical debt, and product ideas for 
       - Wappalyzer OSS closure context — [HN discussion](https://news.ycombinator.com/item?id=37236746). Community forks: `wappybird`, `wappalyzer-next`, `wappalyzer-cli`.
     - Defunct:
       - BinaryEdge transition (shut down March 2025) — [Transition FAQ](https://www.binaryedge.io/pricing.html). Replaced by Coalition Control®.
-- **Phase 0 - Existing-code integration check**
-  - Confirm the encrypted secrets vault plan is landed; this plan is gated on it.
-  - Audit `app/services/commands/registry.py` runtime env-build path for the secret injection hook.
-  - Audit `app/core/output_signals.py` for the cleanest place to extract IP/domain/hash/CVE entities. Decide between extending existing event types or adding `entity_ip`, `entity_domain`, `entity_hash`, `entity_cve` events.
-  - Confirm where canonical entity helpers live before implementation starts. If the Session Entity Atlas has landed, import the canonicalizer from `app/services/atlas/materializer.py`; if intel ships first, create `app/services/intel/canonical.py` and have the Atlas reuse or re-export it later.
-  - Verify the Dockerfile install pipeline can absorb new vendor CLIs (`shodan`, `vt-cli`, `greynoise`) under the scanner-user PATH.
-  - Confirm `app/core/redaction.py` extension points support flagging response bodies as raw-only.
-  - Add config keys for provider cache TTLs and rate-limit buckets in `app/conf/config.yaml` before wiring the providers, so vendor limits can be tuned without code changes.
+- **Phase 0 - Existing-code integration check (complete)**
+  - Encrypted secrets vault is landed and is the dependency for Phase 2 CLI wrappers. `requires_secrets` already normalizes registry declarations, blocks interactive PTY combinations, resolves declarations before command rewrites, injects only declared env vars into subprocess environments, and preserves only those env vars through scanner-user sudo.
+  - `app/services/commands/registry.py` and `app/blueprints/run.py` are the right hook points for CLI wrapper env injection. Phase 2 can add `commands.yaml` entries with `requires_secrets` and does not need a new injection path for non-PTY commands.
+  - `app/core/output_signals.py` is the right place to extract IP/domain/hash/CVE entities because every live stream, restored run, share, comparison, and persisted preview already flows through its line metadata. Phase 4 should add structured `entities` metadata beside the existing `signals` list instead of overloading the finding/warning/error/summaries scopes.
+  - Canonical helpers live in `app/services/intel/canonical.py` if intel ships before the Atlas. When the Atlas lands, its materializer should import or re-export those helpers instead of creating a second canonicalization implementation.
+  - Dockerfile CLI installation should happen after the existing Python requirements install and before user creation/capability setup, so vendor CLIs land in `/usr/local/bin` and are visible to the scanner-user PATH.
+  - `app/core/redaction.py` currently redacts line text for share/export flows only. Phase 5 should extend the line-entry model with an intel raw-only marker so shares can replace whole intel response sections with an omission placeholder rather than trying to regex-redact provider JSON.
+  - Config defaults are in place for provider cache TTLs, rate-limit buckets, and VirusTotal quota negative caching. Phase 1 should consume the checked-in keys instead of hardcoding vendor limits in provider modules.
 - **Phase 1 - Provider abstraction**
   - New `app/services/intel/` service:
     - `base.py` — `Provider` ABC with `lookup_ip`, `lookup_domain`, `lookup_hash`, `lookup_cve`, `rate_limit`, `cache_ttl`.
@@ -170,7 +170,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - Hostnames / FQDNs (IDN-normalized, lowercased).
     - SHA256, SHA1, MD5 hashes (algorithm-tagged).
     - CVE identifiers (`CVE-YYYY-NNNNN`, uppercased).
-  - Emit `entity_ip`, `entity_domain`, `entity_hash`, `entity_cve` events with confidence and source line.
+  - Add structured line metadata as `entities: [{type, value, canonical_value, confidence, source_line}]` beside the existing `signals` list. Downstream consumers can derive entity-specific events from this metadata without overloading the existing finding/warning/error/summary scopes.
   - These events are the foundation that the Session Entity Atlas plan and the Findings inbox consume.
 - **Phase 5 - Sharing, redaction, audit, and tests**
   - `app/core/redaction.py` marks intel response bodies as raw-only. Snapshot permalinks of `intel` runs render a "Intel data omitted from share" placeholder where the card would normally appear. Saved HTML/PDF exports follow the same rule.
@@ -202,7 +202,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Schema cleanup is destructive. The run-centric `findings`, project-scoped `project_targets`, and `finding_targets` tables are dropped and replaced by an entity-first schema. Pre-release single-user app — no backwards-compatibility shim, no dual-write phase, no data backfill from legacy rows. The Findings triage inbox's `findings_inbox` table is also collapsed into the unified entity-owned `findings` table here.
   - Hard dependencies: entity-aware classifier hooks from the External intel service integrations plan are landed; encrypted secrets vault is landed for intel refresh actions.
 - **Phase 0 - Existing-code integration check**
-  - Confirm classifier entity events (`entity_ip`, `entity_domain`, `entity_hash`, `entity_cve`) are landed.
+  - Confirm classifier entity metadata (`entities: [{type, value, canonical_value, confidence, source_line}]`) is landed.
   - Audit `app/services/projects/workspace.py` and `app/services/projects/metadata.py` for label/note/finding/target storage that must be reused, not duplicated.
   - Audit `app/services/runs/comparison.py` for cross-run finding helpers the Atlas should reuse.
   - Audit `app/static/js/ui/ui_entity_metadata.js` to confirm label/note helpers work on Atlas entity types without changes.
