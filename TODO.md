@@ -44,7 +44,6 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - More vendor CLIs unless the CLI adds a materially better workflow than an app-native REST call.
 - **Provider management follow-up**
   - Add an optional operator provider denylist if deployments need to block outbound calls to specific vendors.
-  - Add a provider status modal showing usable providers, providers that need configuration, accepted secret names, supported entity types, and free/free-signup/paid/account-backed notes.
 
 ### Session Entity Atlas (entity-first triage surface)
 - **Scope**

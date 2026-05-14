@@ -215,12 +215,14 @@ async function ensureHistoryBulkSelectMode(page) {
 
 async function selectVisibleHistoryRuns(page, commands) {
   for (const command of commands) {
-    await page
+    const checkbox = page
       .locator('#history-list .history-entry')
       .filter({ hasText: command })
       .first()
       .locator('[data-action="select-run"]')
-      .check()
+    await expect(checkbox).toBeEnabled()
+    await checkbox.check()
+    await expect(checkbox).toBeChecked()
   }
 }
 

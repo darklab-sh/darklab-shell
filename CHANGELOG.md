@@ -10,6 +10,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Provider Status modal** — Options → Secrets now has a Provider Status view for app-native intel providers.
+  - **Why:** users need a quick way to see which intel providers are ready, which need API keys, and which secret names each provider accepts before running `intel`.
+  - **What:** added provider-status metadata to the command catalog payload, broad provider access notes, a Secrets-section button, and a wider modal that groups providers by usable versus needs-configuration state using the active session's metadata-only secret list. Provider secret names are clickable and open the add-secret prompt with that name selected; backend-only aliases such as `VTCLI_APIKEY` still work but are not shown as separate provider-status links.
+  - **Tests:** extended backend registry/catalog coverage and Options unit coverage for keyed and no-key provider status rendering.
 - **Censys app-native intel provider** — `intel ip` now includes Censys Platform host lookups without installing or exposing a Censys CLI.
   - **Why:** Censys host data is useful during IP triage, but the current app path only needs a normalized lookup provider rather than another interactive or config-writing CLI.
   - **What:** added `CENSYS_PAT` secret-consumer metadata, a Censys Platform HTTP client, host payload normalization, cache TTL and token-bucket defaults, quota-backoff defaults, terminal formatter output, and schema support for Censys ports, protocols, services, names, location, ASN, and update timestamps.
@@ -98,6 +102,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **CI e2e worker load** — GitLab Playwright runs now use three isolated browser/server projects instead of the default five.
   - **Why:** the shared runner can exceed its available CPU headroom during browser tests, which makes timing-sensitive e2e coverage noisier than local runs.
   - **What:** set `PLAYWRIGHT_PROJECT_COUNT=3` for the `test-js-e2e` job while keeping the local default at five projects and documenting the override knob.
+- **Secrets picker aliases** — the Options Secrets dropdown now lists VirusTotal as `VT_API_KEY` only, while the backend still accepts existing `VTCLI_APIKEY` secrets and injects the vendor-native environment variable when launching `vt`.
 - **Command registry secrets declarations are normalized** — `commands.yaml` entries can now carry `requires_secrets` metadata so the encrypted secrets vault can declare which environment variables a tool needs without changing the command schema again.
   - **Tests:** extended command-registry loader coverage for env-name normalization, invalid declaration filtering, dedupe behavior, and local-overlay merging.
 - **Saved runs now carry an explicit built-in/external kind** — run history stores whether a row came from the built-in command layer or an external command, so History filters, project links, and finding capture no longer need to infer that from command text. Built-in runs stay in History without project-link actions or project-derived findings, even if legacy data contains an old project link.
@@ -139,6 +144,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **History bulk re-selection waits for bulk actions to settle** — History rows rendered during an in-flight bulk action now keep their select checkboxes disabled until the action cleanup finishes, and the desktop bulk e2e helper waits for enabled checkboxes before re-selecting rows.
 - **App-native intel providers verify TLS with the system trust store** — Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, crt.sh, HIBP, and NVD lookups now build HTTPS contexts from explicit CA env settings or the system CA bundle, and the container links source-built OpenSSL's default CA path back to Debian's `ca-certificates` bundle.
 - **Shodan CLI runs use vault-backed keys without manual init** — Shodan commands now materialize the encrypted `SHODAN_API_KEY` into a temporary per-run Shodan config directory before launch, then remove that directory on exit. The key still stays out of command text, history, logs, and stored output, and the noisy Python `pkg_resources` deprecation warning is suppressed for Shodan CLI runs.
 - **Modal focus no longer steals typed input on slower browsers** — delayed initial-focus helpers in Files, Workflows, and Projects now leave focus alone once a field inside the opened surface is already active, preventing typed text from landing in the wrong input during fast interactions and CI runs. The History star reload e2e also waits for DOM readiness with a larger budget so normal startup hydration does not exhaust the test timeout.

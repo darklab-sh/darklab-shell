@@ -4718,7 +4718,7 @@ describe('app helpers', () => {
         'Consumer envs',
       ])
       expect([...select.options].map(option => option.value)).toContain('VT_API_KEY')
-      expect([...select.options].map(option => option.value)).toContain('VTCLI_APIKEY')
+      expect([...select.options].map(option => option.value)).not.toContain('VTCLI_APIKEY')
       select.value = 'VT_API_KEY'
       select.dispatchEvent(new Event('change'))
       expect(inputs[0].getAttribute('data-bwignore')).toBe('true')
@@ -4814,6 +4814,41 @@ describe('app helpers', () => {
                 optional: false,
               },
             ],
+            intel_providers: [
+              {
+                id: 'shodan',
+                label: 'Shodan',
+                entity_types: ['ip'],
+                secret_env: 'SHODAN_API_KEY',
+                secret_env_aliases: [],
+                secret_env_names: ['SHODAN_API_KEY'],
+                requires_secret: true,
+                access_note: 'Free signup; paid tiers',
+                app_native: true,
+              },
+              {
+                id: 'teamcymru',
+                label: 'Team Cymru',
+                entity_types: ['ip'],
+                secret_env: '',
+                secret_env_aliases: [],
+                secret_env_names: [],
+                requires_secret: false,
+                access_note: 'Free public lookup',
+                app_native: true,
+              },
+              {
+                id: 'virustotal',
+                label: 'VirusTotal',
+                entity_types: ['domain', 'hash'],
+                secret_env: 'VT_API_KEY',
+                secret_env_aliases: ['VTCLI_APIKEY'],
+                secret_env_names: ['VT_API_KEY', 'VTCLI_APIKEY'],
+                requires_secret: true,
+                access_note: 'Free signup; paid tiers',
+                app_native: true,
+              },
+            ],
           }),
         })
       }
@@ -4831,6 +4866,7 @@ describe('app helpers', () => {
       const select = opts.content[0].querySelector('select')
       const valueInput = opts.content.flatMap(node => Array.from(node.querySelectorAll('input')))[1]
       expect([...select.options].map(option => option.value)).toContain('SHODAN_API_KEY')
+      expect(select.value).toBe('SHODAN_API_KEY')
       select.value = 'SHODAN_API_KEY'
       select.dispatchEvent(new Event('change'))
       expect(opts.content.map(node => node.textContent).join(' ')).toContain('Used by intel Shodan')
@@ -4840,7 +4876,29 @@ describe('app helpers', () => {
     })
     await loadAppFns({ apiFetch, showConfirm })
 
-    document.getElementById('options-secret-new-btn').click()
+    document.getElementById('options-provider-status-btn').click()
+    const providerOverlay = document.getElementById('provider-status-overlay')
+    await vi.waitFor(() => expect(providerOverlay.classList.contains('u-hidden')).toBe(false))
+    const providerText = document.getElementById('provider-status-body').textContent
+    expect(providerText).toContain('1 usable · 2 need configuration')
+    expect(providerText).toContain('Team Cymru')
+    expect(providerText).toContain('No secret needed')
+    expect(providerText).toContain('Shodan')
+    expect(providerText).toContain('Needs configuration')
+    expect(providerText).toContain('SHODAN_API_KEY')
+    expect(providerText).toContain('VirusTotal')
+    expect(providerText).toContain('VT_API_KEY')
+    expect(providerText).not.toContain('VTCLI_APIKEY')
+
+    document.querySelector('.provider-status-close').click()
+    await vi.waitFor(() => expect(providerOverlay.classList.contains('u-hidden')).toBe(true))
+    document.getElementById('options-provider-status-btn').click()
+    await vi.waitFor(() => expect(providerOverlay.classList.contains('u-hidden')).toBe(false))
+
+    const shodanLink = Array.from(document.querySelectorAll('.options-secret-link'))
+      .find((button) => button.textContent === 'SHODAN_API_KEY')
+    shodanLink.click()
+    await vi.waitFor(() => expect(providerOverlay.classList.contains('u-hidden')).toBe(true))
     await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/session/secrets', expect.objectContaining({
       method: 'POST',
     })))

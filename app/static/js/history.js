@@ -1301,6 +1301,7 @@ function _historyRenderPanelData(data) {
           selectMode: _historySelection.selectMode,
           selectable,
           selected,
+          selectionBusy: _historySelection.bulkInFlight,
         });
         entry.addEventListener('click', e => {
           if (e.target.closest('[data-action]')) return;
@@ -1358,6 +1359,7 @@ function _historyRenderPanelData(data) {
         selectMode: _historySelection.selectMode,
         selectable,
         selected,
+        selectionBusy: _historySelection.bulkInFlight,
       });
 
       // Click anywhere on the entry (except buttons) to inspect the run. The

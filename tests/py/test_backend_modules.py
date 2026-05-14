@@ -321,6 +321,15 @@ class TestIntelServices:
         vt = registry.provider_definition("virustotal")
         assert vt is not None
         assert vt.secret_env_names == ("VT_API_KEY", "VTCLI_APIKEY")
+        provider_catalog = registry.provider_status_catalog()
+        assert {
+            (item["id"], tuple(item["entity_types"]), tuple(item["secret_env_names"]), item["access_note"])
+            for item in provider_catalog
+        } >= {
+            ("virustotal", ("domain", "hash"), ("VT_API_KEY", "VTCLI_APIKEY"), "Free signup; paid tiers"),
+            ("teamcymru", ("ip",), (), "Free public lookup"),
+            ("nvd", ("cve",), (), "Free public lookup"),
+        }
         consumers = registry.app_native_secret_consumers()
         assert {
             (item["consumer"], item["env"], tuple(item.get("fallback_envs") or []))

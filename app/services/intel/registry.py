@@ -33,6 +33,7 @@ class IntelProviderDefinition:
     rate_limits: dict[str, RateLimitSetting] = field(default_factory=dict)
     default_rate_limit_profile: str = ""
     tier: str = "shipped"
+    access_note: str = "Account-backed"
     app_native: bool = True
 
     @property
@@ -55,6 +56,7 @@ INTEL_PROVIDERS: dict[str, IntelProviderDefinition] = {
         rate_limits={
             "": RateLimitSetting("intel_rate_limit_shodan_bucket", "intel_rate_limit_shodan_refill_seconds", 5, 1),
         },
+        access_note="Free signup; paid tiers",
     ),
     "censys": IntelProviderDefinition(
         id="censys",
@@ -68,6 +70,7 @@ INTEL_PROVIDERS: dict[str, IntelProviderDefinition] = {
         rate_limits={
             "": RateLimitSetting("intel_rate_limit_censys_bucket", "intel_rate_limit_censys_refill_seconds", 10, 6),
         },
+        access_note="Account-backed; paid tiers",
     ),
     "virustotal": IntelProviderDefinition(
         id="virustotal",
@@ -88,6 +91,7 @@ INTEL_PROVIDERS: dict[str, IntelProviderDefinition] = {
                 15,
             ),
         },
+        access_note="Free signup; paid tiers",
     ),
     "greynoise": IntelProviderDefinition(
         id="greynoise",
@@ -112,6 +116,7 @@ INTEL_PROVIDERS: dict[str, IntelProviderDefinition] = {
                 8640,
             ),
         },
+        access_note="Free community key",
     ),
     "otx": IntelProviderDefinition(
         id="otx",
@@ -130,6 +135,7 @@ INTEL_PROVIDERS: dict[str, IntelProviderDefinition] = {
                 2,
             ),
         },
+        access_note="Free signup",
     ),
     "abuseipdb": IntelProviderDefinition(
         id="abuseipdb",
@@ -148,6 +154,7 @@ INTEL_PROVIDERS: dict[str, IntelProviderDefinition] = {
                 4,
             ),
         },
+        access_note="Free signup; paid tiers",
     ),
     "teamcymru": IntelProviderDefinition(
         id="teamcymru",
@@ -165,6 +172,7 @@ INTEL_PROVIDERS: dict[str, IntelProviderDefinition] = {
                 2,
             ),
         },
+        access_note="Free public lookup",
     ),
     "crtsh": IntelProviderDefinition(
         id="crtsh",
@@ -182,6 +190,7 @@ INTEL_PROVIDERS: dict[str, IntelProviderDefinition] = {
                 6,
             ),
         },
+        access_note="Free public lookup",
     ),
     "hibp": IntelProviderDefinition(
         id="hibp",
@@ -199,6 +208,7 @@ INTEL_PROVIDERS: dict[str, IntelProviderDefinition] = {
                 2,
             ),
         },
+        access_note="Free public lookup",
     ),
     "nvd": IntelProviderDefinition(
         id="nvd",
@@ -216,6 +226,7 @@ INTEL_PROVIDERS: dict[str, IntelProviderDefinition] = {
                 6,
             ),
         },
+        access_note="Free public lookup",
     ),
 }
 
@@ -277,3 +288,22 @@ def app_native_secret_consumers() -> list[dict[str, Any]]:
             "optional": definition.optional_secret,
         })
     return consumers
+
+
+def provider_status_catalog() -> list[dict[str, Any]]:
+    """Return metadata-only provider status inputs for the browser."""
+    return [
+        {
+            "id": definition.id,
+            "label": definition.label,
+            "entity_types": list(definition.entity_types),
+            "secret_env": definition.secret_env,
+            "secret_env_aliases": list(definition.secret_env_aliases),
+            "secret_env_names": list(definition.secret_env_names),
+            "requires_secret": bool(definition.secret_env),
+            "access_note": definition.access_note,
+            "app_native": definition.app_native,
+        }
+        for definition in INTEL_PROVIDERS.values()
+        if definition.app_native
+    ]

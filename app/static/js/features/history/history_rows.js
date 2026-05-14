@@ -140,17 +140,20 @@ function _createHistoryEntry(run, isStarred, options = {}) {
   header.className = 'history-entry-header';
 
   if (selectMode) {
+    const selectionBusy = !!options.selectionBusy;
     const selectLabel = document.createElement('label');
-    selectLabel.className = 'history-entry-select-row' + (selectable ? '' : ' history-entry-select-disabled');
+    selectLabel.className = 'history-entry-select-row' + (selectable && !selectionBusy ? '' : ' history-entry-select-disabled');
     if (!selectable) {
       selectLabel.title = 'This run cannot be selected until it has finished.';
+    } else if (selectionBusy) {
+      selectLabel.title = 'Bulk action is finishing.';
     }
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.dataset.action = 'select-run';
     checkbox.dataset.historySelectItemId = `run:${String(run.id || '')}`;
     checkbox.checked = selected;
-    checkbox.disabled = !selectable;
+    checkbox.disabled = !selectable || selectionBusy;
     checkbox.setAttribute('aria-label', `Select run: ${run.command || run.id || 'run'}`);
     selectLabel.appendChild(checkbox);
     header.appendChild(selectLabel);
@@ -253,14 +256,15 @@ function _createSnapshotHistoryEntry(snapshot, options = {}) {
   header.className = 'history-entry-header';
 
   if (selectMode) {
+    const selectionBusy = !!options.selectionBusy;
     const selectLabel = document.createElement('label');
-    selectLabel.className = 'history-entry-select-row' + (selectable ? '' : ' history-entry-select-disabled');
+    selectLabel.className = 'history-entry-select-row' + (selectable && !selectionBusy ? '' : ' history-entry-select-disabled');
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.dataset.action = 'select-run';
     checkbox.dataset.historySelectItemId = `snapshot:${String(snapshot.id || '')}`;
     checkbox.checked = selected;
-    checkbox.disabled = !selectable;
+    checkbox.disabled = !selectable || selectionBusy;
     checkbox.setAttribute('aria-label', `Select snapshot: ${snapshot.label || snapshot.id || 'snapshot'}`);
     selectLabel.appendChild(checkbox);
     header.appendChild(selectLabel);

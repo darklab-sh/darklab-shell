@@ -633,7 +633,8 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Behavior:**
 
-- The Options modal includes a **Secrets** section where users can add, replace, and delete secret values for the active session. The add flow suggests the API key names declared by the command registry first, with a custom option for local overlays or future integrations.
+- The Options modal includes a **Secrets** section where users can add, replace, and delete secret values for the active session. The add flow suggests the API key names declared by the command and provider registries first, with a custom option for local overlays or future integrations.
+- **Provider Status** in the Secrets section shows which app-native intel providers are usable now, which ones still need an API key, the app-facing secret names, supported lookup types, and broad account/free-tier notes. Clicking a secret name opens the add-secret prompt with that key selected.
 - `secret set NAME` opens the same browser-owned value prompt from the terminal. The command line contains only the name; the value is entered in the modal and is not echoed.
 - `secret list` shows stored names and their consumer environment bindings. It never prints values.
 - `secret unset NAME` deletes one stored secret, and `secret show-consumers` lists command-registry env vars that tools declare.
@@ -664,7 +665,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Limits:** Shodan, Censys, VirusTotal, GreyNoise, AlienVault OTX, and AbuseIPDB require user-provided provider keys. Team Cymru, crt.sh, HIBP Pwned Passwords, and NVD work without saved keys but still use the app's per-session rate limiting and cache layer to avoid accidental bursts. Provider terms and quotas are still enforced by each vendor.
 
-**Configuration:** users store `SHODAN_API_KEY`, `CENSYS_PAT`, `GREYNOISE_API_KEY`, `VT_API_KEY`, the native `VTCLI_APIKEY`, `OTX_API_KEY`, `ABUSEIPDB_API_KEY`, `URLSCAN_API_KEY`, or `PDCP_API_KEY` through Options → Secrets or `secret set NAME`. The Options picker suggests those known keys from the provider registry and command registry, while the terminal command still accepts an explicit name. Operators tune cache TTLs and rate-limit buckets in `conf/config.yaml`.
+**Configuration:** users store `SHODAN_API_KEY`, `CENSYS_PAT`, `GREYNOISE_API_KEY`, `VT_API_KEY`, `OTX_API_KEY`, `ABUSEIPDB_API_KEY`, `URLSCAN_API_KEY`, or `PDCP_API_KEY` through Options → Secrets or `secret set NAME`. The Options picker suggests those known keys from the provider registry and command registry, while the terminal command still accepts explicit names such as the VirusTotal CLI's native `VTCLI_APIKEY`. Operators tune cache TTLs and rate-limit buckets in `conf/config.yaml`.
 
 **Related files:** `app/services/intel/`, `app/services/commands/builtins_intel.py`, `app/conf/commands.yaml`, `app/conf/config.yaml`.
 

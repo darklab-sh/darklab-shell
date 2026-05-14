@@ -723,6 +723,11 @@ body.mobile-terminal-mode .output-follow-btn {
   width: min(720px, 94vw);
 }
 
+#provider-status-modal {
+  width: min(960px, 94vw);
+  height: min(760px, 86vh);
+}
+
 #workspace-modal {
   width: min(900px, 94vw);
   height: min(760px, 86vh);
@@ -1431,6 +1436,94 @@ body.mobile-terminal-mode .output-follow-btn {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;
+}
+
+.provider-status-subtitle,
+.provider-status-intro {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.provider-status-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 14px 16px 16px;
+  overflow: auto;
+}
+
+.options-provider-summary {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.options-provider-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.options-provider-row {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  background: var(--surface);
+}
+
+.options-provider-row-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.options-provider-name {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.options-provider-status {
+  flex: 0 0 auto;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.options-provider-status.is-usable {
+  color: var(--green);
+  background: var(--theme-button-ghost-hover-bg);
+}
+
+.options-provider-status.is-needed {
+  color: var(--amber);
+  background: var(--theme-button-secondary-bg);
+}
+
+.options-provider-meta {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.options-secret-link {
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.options-secret-link:focus-visible {
+  outline: 1px solid var(--green-dim);
+  box-shadow: 0 0 0 3px var(--green-glow);
 }
 
 .options-secret-field {

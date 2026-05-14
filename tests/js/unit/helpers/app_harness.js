@@ -220,10 +220,17 @@ export async function loadAppFns({
     <button id="options-session-token-clear-btn"></button>
     <button id="options-session-token-copy-btn"></button>
     <div id="options-session-token-msg"></div>
+    <button id="options-provider-status-btn"></button>
     <button id="options-secret-new-btn"></button>
     <button id="options-secrets-refresh-btn"></button>
     <div id="options-secrets-msg"></div>
     <div id="options-secrets-list"></div>
+    <div id="provider-status-overlay" class="u-hidden" aria-hidden="true">
+      <div id="provider-status-modal">
+        <button type="button" class="provider-status-close"></button>
+        <div id="provider-status-body"></div>
+      </div>
+    </div>
     <div id="workflows-overlay"></div>
     <button class="workflows-close"></button>
     <select id="options-ts-select">

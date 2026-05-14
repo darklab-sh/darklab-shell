@@ -122,6 +122,7 @@ function setupMobileSheetDragClose() {
   const workflowsModal = document.getElementById('workflows-modal');
   const workflowEditor = document.getElementById('workflow-editor-form');
   const projectWorkspaceModal = document.getElementById('project-workspace-modal');
+  const providerStatusModal = document.getElementById('provider-status-modal');
 
   bindMobileSheet(mobileMenu,         { onClose: () => hideMobileMenu() });
   bindMobileSheet(historyPanel,       { onClose: () => hideHistoryPanel() });
@@ -132,6 +133,7 @@ function setupMobileSheetDragClose() {
   bindMobileSheet(document.getElementById('command-registry-modal'), { onClose: () => closeCommandRegistryPanel() });
   bindMobileSheet(projectWorkspaceModal, { onClose: () => { if (typeof closeProjectWorkspace === 'function') closeProjectWorkspace(); } });
   bindMobileSheet(optionsModal,       { onClose: () => closeOptions() });
+  bindMobileSheet(providerStatusModal, { onClose: () => { if (typeof closeProviderStatusModal === 'function') closeProviderStatusModal(); } });
 }
 
 function setupDismissibleOverlays() {
@@ -148,6 +150,8 @@ function setupDismissibleOverlays() {
   const workflowEditorCloseBtns = workflowEditorOverlay?.querySelectorAll('.workflow-editor-close');
   const projectWorkspaceOverlay = document.getElementById('project-workspace-overlay');
   const projectWorkspaceCloseBtn = projectWorkspaceOverlay?.querySelector('.project-workspace-close');
+  const providerStatusOverlay = document.getElementById('provider-status-overlay');
+  const providerStatusCloseBtn = providerStatusOverlay?.querySelector('.provider-status-close');
 
   bindDismissible(_uiOverlayRefs.workflowsOverlay, {
     level: 'panel',
@@ -211,6 +215,12 @@ function setupDismissibleOverlays() {
     onClose: () => { if (typeof closeCommandCatalogModal === 'function') closeCommandCatalogModal(); },
     closeButtons: commandCatalogCloseBtn,
   });
+  bindDismissible(providerStatusOverlay, {
+    level: 'modal',
+    isOpen: () => typeof isProviderStatusModalOpen === 'function' && isProviderStatusModalOpen(),
+    onClose: () => { if (typeof closeProviderStatusModal === 'function') closeProviderStatusModal(); },
+    closeButtons: providerStatusCloseBtn,
+  });
   bindDismissible(_uiOverlayRefs.themeOverlay, {
     level: 'panel',
     isOpen: isThemeOverlayOpen,
@@ -259,6 +269,7 @@ function setupModalFocusTraps() {
     'theme-modal',
     'faq-modal',
     'command-registry-modal',
+    'provider-status-modal',
     'project-workspace-modal',
     'project-target-editor-modal',
     'project-package-manifest-modal',

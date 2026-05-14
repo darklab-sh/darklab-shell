@@ -3610,6 +3610,14 @@ class TestCommandCatalogRoute:
         assert index_data["groups"][0]["name"] == "Registry Group"
         assert index_data["groups"][0]["commands"] == index_data["commands"]
         assert {
+            (item["id"], tuple(item["entity_types"]), tuple(item["secret_env_names"]))
+            for item in index_data["intel_providers"]
+        } >= {
+            ("virustotal", ("domain", "hash"), ("VT_API_KEY", "VTCLI_APIKEY")),
+            ("teamcymru", ("ip",), ()),
+            ("nvd", ("cve",), ()),
+        }
+        assert {
             (item["consumer"], item["env"], tuple(item.get("fallback_envs") or []))
             for item in index_data["secret_consumers"]
         } == {

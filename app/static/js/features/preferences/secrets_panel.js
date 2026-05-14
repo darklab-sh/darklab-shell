@@ -3,6 +3,7 @@
 const SECRET_NAME_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
 let _optionsSecretsLoaded = false;
 let _optionsSecretsLoading = false;
+let _providerStatusFocusReturn = null;
 
 function _optionsSecretsListEl() {
   return document.getElementById('options-secrets-list');
@@ -10,6 +11,18 @@ function _optionsSecretsListEl() {
 
 function _optionsSecretsMsgEl() {
   return document.getElementById('options-secrets-msg');
+}
+
+function _providerStatusOverlayEl() {
+  return document.getElementById('provider-status-overlay');
+}
+
+function _providerStatusModalEl() {
+  return document.getElementById('provider-status-modal');
+}
+
+function _providerStatusBodyEl() {
+  return document.getElementById('provider-status-body');
 }
 
 function _normalizeOptionsSecretName(value) {
@@ -30,7 +43,7 @@ function _optionsSecretsShowMsg(message, isError = false) {
 
 function _optionsSecretsSetBusy(busy) {
   _optionsSecretsLoading = Boolean(busy);
-  ['options-secret-new-btn', 'options-secrets-refresh-btn'].forEach((id) => {
+  ['options-provider-status-btn', 'options-secret-new-btn', 'options-secrets-refresh-btn'].forEach((id) => {
     const btn = document.getElementById(id);
     if (btn) btn.disabled = _optionsSecretsLoading;
   });
@@ -74,23 +87,23 @@ function _optionsKnownSecretChoices() {
     const env = _normalizeOptionsSecretName(declaration?.env);
     if (!_optionsSecretNameIsValid(env)) return;
     const injectEnv = _normalizeOptionsSecretName(declaration?.inject_env || env);
-    const names = [env, ...(Array.isArray(declaration?.fallback_envs) ? declaration.fallback_envs : [])]
+    const fallbackEnvs = (Array.isArray(declaration?.fallback_envs) ? declaration.fallback_envs : [])
       .map((item) => _normalizeOptionsSecretName(item))
-      .filter((item, index, arr) => _optionsSecretNameIsValid(item) && arr.indexOf(item) === index);
-    names.forEach((name) => {
-      const existing = byName.get(name) || {
-        name,
-        roots: [],
-        inject_envs: [],
-        fallback: name !== env,
-        optional: true,
-      };
-      if (consumerName && !existing.roots.includes(consumerName)) existing.roots.push(consumerName);
-      if (injectEnv && !existing.inject_envs.includes(injectEnv)) existing.inject_envs.push(injectEnv);
-      existing.fallback = existing.fallback && name !== env;
-      existing.optional = existing.optional && Boolean(declaration?.optional);
-      byName.set(name, existing);
+      .filter((item, index, arr) => _optionsSecretNameIsValid(item) && item !== env && arr.indexOf(item) === index);
+    const existing = byName.get(env) || {
+      name: env,
+      roots: [],
+      inject_envs: [],
+      fallback_envs: [],
+      optional: true,
+    };
+    if (consumerName && !existing.roots.includes(consumerName)) existing.roots.push(consumerName);
+    if (injectEnv && !existing.inject_envs.includes(injectEnv)) existing.inject_envs.push(injectEnv);
+    fallbackEnvs.forEach((fallbackEnv) => {
+      if (!existing.fallback_envs.includes(fallbackEnv)) existing.fallback_envs.push(fallbackEnv);
     });
+    existing.optional = existing.optional && Boolean(declaration?.optional);
+    byName.set(env, existing);
   };
   if (secretConsumers.length) {
     secretConsumers.forEach((consumer) => {
@@ -113,11 +126,210 @@ function _optionsSecretChoiceDescription(choice) {
   if (!choice) return '';
   const roots = Array.isArray(choice.roots) && choice.roots.length ? choice.roots.join(', ') : 'configured commands';
   const injects = Array.isArray(choice.inject_envs) && choice.inject_envs.length ? choice.inject_envs : [];
+  const fallbackEnvs = Array.isArray(choice.fallback_envs) && choice.fallback_envs.length ? choice.fallback_envs : [];
   const injected = injects.length && !injects.includes(choice.name)
     ? ` It is passed to the command as ${injects.join(', ')}.`
     : '';
-  const fallback = choice.fallback ? ' Vendor-native alias.' : '';
+  const fallback = fallbackEnvs.length ? ` Also accepts existing ${fallbackEnvs.join(', ')} secrets.` : '';
   return `Used by ${roots}.${injected}${fallback}`.trim();
+}
+
+function _optionsProviderSecretNames(secrets = []) {
+  const names = new Set();
+  secrets.forEach((secret) => {
+    const name = _normalizeOptionsSecretName(secret?.name);
+    if (name) names.add(name);
+    const envs = Array.isArray(secret?.consumer_envs) ? secret.consumer_envs : [];
+    envs.forEach((env) => {
+      const normalized = _normalizeOptionsSecretName(env);
+      if (normalized) names.add(normalized);
+    });
+  });
+  return names;
+}
+
+function _optionsProviderPrimaryNames(provider) {
+  const env = _normalizeOptionsSecretName(provider?.secret_env);
+  return env ? [env] : [];
+}
+
+function _optionsProviderLookupNames(provider) {
+  return (Array.isArray(provider?.secret_env_names) && provider.secret_env_names.length
+    ? provider.secret_env_names
+    : [provider?.secret_env, ...(Array.isArray(provider?.secret_env_aliases) ? provider.secret_env_aliases : [])])
+    .map((item) => _normalizeOptionsSecretName(item))
+    .filter((item, index, arr) => _optionsSecretNameIsValid(item) && arr.indexOf(item) === index);
+}
+
+function _optionsProviderStatus(provider, secretNames) {
+  const acceptedNames = _optionsProviderPrimaryNames(provider);
+  const lookupNames = _optionsProviderLookupNames(provider);
+  const needsSecret = Boolean(provider?.requires_secret || lookupNames.length);
+  const configured = !needsSecret || lookupNames.some((name) => secretNames.has(name));
+  return {
+    acceptedNames,
+    configured,
+    label: configured ? 'Usable' : 'Needs configuration',
+  };
+}
+
+function _optionsChip(text, className = '', opts = {}) {
+  const chip = document.createElement('span');
+  chip.className = `options-secret-chip${className ? ` ${className}` : ''}`;
+  chip.textContent = text;
+  if (opts.title) chip.title = opts.title;
+  return chip;
+}
+
+function _optionsSecretLink(name) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'options-secret-chip options-secret-link';
+  btn.textContent = name;
+  btn.title = `Add ${name}`;
+  btn.addEventListener('click', () => {
+    closeProviderStatusModal({ refocus: false });
+    openSecretEditor({ name }).catch((err) => _optionsSecretsShowMsg(err.message || 'Unable to add secret', true));
+  });
+  return btn;
+}
+
+function _appendOptionsProviderChips(parent, items, emptyText) {
+  if (!items.length) {
+    parent.appendChild(_optionsChip(emptyText, 'is-muted'));
+    return;
+  }
+  items.forEach((item) => parent.appendChild(_optionsChip(item)));
+}
+
+function _optionsProviderRow(provider, secretNames) {
+  const status = _optionsProviderStatus(provider, secretNames);
+  const row = document.createElement('div');
+  row.className = 'options-provider-row';
+  row.dataset.status = status.configured ? 'usable' : 'needs-config';
+
+  const header = document.createElement('div');
+  header.className = 'options-provider-row-header';
+
+  const title = document.createElement('div');
+  title.className = 'options-provider-name';
+  title.textContent = String(provider?.label || provider?.id || 'Provider');
+  header.appendChild(title);
+
+  const badge = document.createElement('span');
+  badge.className = `options-provider-status ${status.configured ? 'is-usable' : 'is-needed'}`;
+  badge.textContent = status.label;
+  header.appendChild(badge);
+  row.appendChild(header);
+
+  const meta = document.createElement('div');
+  meta.className = 'options-provider-meta';
+  meta.textContent = String(provider?.access_note || (status.acceptedNames.length ? 'Account-backed' : 'Free public lookup'));
+  row.appendChild(meta);
+
+  const entityWrap = document.createElement('div');
+  entityWrap.className = 'options-secret-chips';
+  _appendOptionsProviderChips(
+    entityWrap,
+    (Array.isArray(provider?.entity_types) ? provider.entity_types : []).map((item) => String(item).toUpperCase()),
+    'No entity types',
+  );
+  row.appendChild(entityWrap);
+
+  const secretWrap = document.createElement('div');
+  secretWrap.className = 'options-secret-chips';
+  if (status.acceptedNames.length) {
+    status.acceptedNames.forEach((name) => secretWrap.appendChild(_optionsSecretLink(name)));
+  } else {
+    secretWrap.appendChild(_optionsChip('No secret needed', 'is-muted'));
+  }
+  row.appendChild(secretWrap);
+
+  return row;
+}
+
+async function _loadOptionsSecretsForProviderStatus() {
+  const resp = await apiFetch('/session/secrets', { cache: 'no-store' });
+  const data = await resp.json().catch(() => ({}));
+  if (resp && resp.ok === false) throw new Error(data.message || data.error || `HTTP ${resp.status}`);
+  return Array.isArray(data.secrets) ? data.secrets : [];
+}
+
+function isProviderStatusModalOpen() {
+  const overlay = _providerStatusOverlayEl();
+  return !!(overlay && overlay.classList && !overlay.classList.contains('u-hidden'));
+}
+
+function closeProviderStatusModal({ refocus = true } = {}) {
+  const overlay = _providerStatusOverlayEl();
+  if (!overlay) return;
+  overlay.classList.add('u-hidden');
+  overlay.setAttribute('aria-hidden', 'true');
+  if (typeof hideModalOverlay === 'function') hideModalOverlay(overlay);
+  if (refocus) {
+    const target = _providerStatusFocusReturn;
+    if (target && typeof target.focus === 'function') {
+      try { target.focus({ preventScroll: true }); } catch (_) { /* non-critical */ }
+    } else if (typeof refocusComposerAfterAction === 'function') {
+      refocusComposerAfterAction({ preventScroll: true });
+    }
+  }
+  _providerStatusFocusReturn = null;
+}
+
+async function openProviderStatusModal() {
+  const overlay = _providerStatusOverlayEl();
+  const body = _providerStatusBodyEl();
+  if (!overlay || !body) return null;
+  _optionsSecretsShowMsg('');
+  try {
+    const [catalog, secrets] = await Promise.all([
+      _ensureOptionsSecretCatalog(),
+      _loadOptionsSecretsForProviderStatus(),
+    ]);
+    const providers = Array.isArray(catalog?.intel_providers) ? catalog.intel_providers : [];
+    const secretNames = _optionsProviderSecretNames(secrets);
+    const usableCount = providers.filter((provider) => _optionsProviderStatus(provider, secretNames).configured).length;
+    const needsCount = Math.max(0, providers.length - usableCount);
+
+    const summary = document.createElement('div');
+    summary.className = 'options-provider-summary';
+    summary.textContent = providers.length
+      ? `${usableCount} usable · ${needsCount} need configuration`
+      : 'No app-native intel providers are registered.';
+
+    const list = document.createElement('div');
+    list.className = 'options-provider-list';
+    providers
+      .slice()
+      .sort((left, right) => {
+        const leftStatus = _optionsProviderStatus(left, secretNames).configured ? 0 : 1;
+        const rightStatus = _optionsProviderStatus(right, secretNames).configured ? 0 : 1;
+        if (leftStatus !== rightStatus) return leftStatus - rightStatus;
+        return String(left?.label || left?.id || '').localeCompare(String(right?.label || right?.id || ''));
+      })
+      .forEach((provider) => list.appendChild(_optionsProviderRow(provider, secretNames)));
+
+    body.innerHTML = '';
+    const intro = document.createElement('div');
+    intro.className = 'provider-status-intro';
+    intro.textContent = 'See which app-native intel providers can run now and which need an API key in this session.';
+    body.appendChild(intro);
+    body.appendChild(summary);
+    body.appendChild(list);
+
+    _providerStatusFocusReturn = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : document.getElementById('options-provider-status-btn');
+    overlay.classList.remove('u-hidden');
+    overlay.setAttribute('aria-hidden', 'false');
+    if (typeof showModalOverlay === 'function') showModalOverlay(overlay, 'flex');
+    _providerStatusModalEl()?.querySelector('.provider-status-close')?.focus({ preventScroll: true });
+    return true;
+  } catch (err) {
+    _optionsSecretsShowMsg(`Failed to load provider status — ${err.message || 'network error'}`, true);
+    return null;
+  }
 }
 
 function _optionsSecretUpdatedLabel(value) {
@@ -504,6 +716,10 @@ document.getElementById('options-secret-new-btn')?.addEventListener('click', () 
   openSecretEditor().catch((err) => _optionsSecretsShowMsg(err.message || 'Unable to add secret', true));
 });
 
+document.getElementById('options-provider-status-btn')?.addEventListener('click', () => {
+  openProviderStatusModal().catch((err) => _optionsSecretsShowMsg(err.message || 'Unable to load providers', true));
+});
+
 document.getElementById('options-secrets-refresh-btn')?.addEventListener('click', () => {
   refreshOptionsSecrets({ force: true }).catch((err) => {
     _optionsSecretsShowMsg(err.message || 'Unable to refresh secrets', true);
@@ -513,5 +729,8 @@ document.getElementById('options-secrets-refresh-btn')?.addEventListener('click'
 globalThis.refreshOptionsSecrets = refreshOptionsSecrets;
 globalThis.invalidateOptionsSecrets = invalidateOptionsSecrets;
 globalThis.openSecretEditor = openSecretEditor;
+globalThis.openProviderStatusModal = openProviderStatusModal;
+globalThis.closeProviderStatusModal = closeProviderStatusModal;
+globalThis.isProviderStatusModalOpen = isProviderStatusModalOpen;
 globalThis.deleteOptionsSecret = deleteOptionsSecret;
 globalThis.handleSecretCommand = handleSecretCommand;

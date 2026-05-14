@@ -1008,6 +1008,7 @@
         <div class="faq-a form-fieldset">
           <div class="options-session-token-desc">Store per-session API keys for tools that need them. Values are encrypted, passed to matching commands as environment variables, and never shown again.</div>
           <div class="options-session-token-actions">
+            <button id="options-provider-status-btn" class="btn btn-secondary btn-compact" type="button">Provider Status</button>
             <button id="options-secret-new-btn" class="btn btn-secondary btn-compact" type="button">Add secret</button>
           </div>
           <div id="options-secrets-msg" class="options-session-token-msg" role="status" aria-live="polite" style="display:none"></div>
@@ -1015,6 +1016,19 @@
         </div>
       </div>
     </div>
+  </div>
+</div>
+
+<div id="provider-status-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
+  <div id="provider-status-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="provider-status-title">
+    <div class="faq-header">
+      <div>
+        <span class="faq-title" id="provider-status-title">PROVIDER STATUS</span>
+        <div class="provider-status-subtitle">Intel providers available to this session.</div>
+      </div>
+      <button type="button" class="close-btn provider-status-close" aria-label="Close provider status">✕</button>
+    </div>
+    <div id="provider-status-body" class="provider-status-body nice-scroll" aria-live="polite"></div>
   </div>
 </div>
 
