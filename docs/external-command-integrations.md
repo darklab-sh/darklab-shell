@@ -25,7 +25,7 @@ The scanner wrapper sets `HOME=/tmp` so tools that insist on a writable home can
 
 Session workspace files are app-managed. Users can name relative files such as `targets.txt` or `amass`, and command validation rewrites those values to the active hashed session workspace path before subprocess launch.
 
-Command-specific runtime behavior is declared in `app/conf/commands.yaml` under each command's `runtime_adaptations` section. The registry supports injected flags, managed workspace directories, and environment variables derived from managed workspace paths. Python handles the common plumbing; the command registry handles the tool-specific rules.
+Command-specific runtime behavior is declared in `app/conf/commands.yaml`. The registry supports injected flags, managed workspace directories, environment variables derived from managed workspace paths, and encrypted secret requirements. Python handles the common plumbing; the command registry handles the tool-specific rules.
 
 ---
 
@@ -90,6 +90,14 @@ runtime_adaptations:
 `managed_workspace_directory` is evaluated by workspace-aware validation. When it applies, the declared directory is injected if absent, rewritten through the same workspace directory helper as user-provided directory flags, and optionally rejects alternate user values so tool state does not split across multiple databases.
 
 `environment` wraps the final execution command with `env NAME=value ...` after workspace path rewriting. The current template used by shipped commands is `{managed_workspace_parent}`, which resolves from the declared managed directory flag.
+
+Encrypted credentials use a separate `requires_secrets` declaration instead of the `environment` wrapper. At launch, `/runs` looks up the current session's matching encrypted secrets, decrypts them in memory, and passes them through `subprocess.Popen(env=...)`. Secret values are never inserted into the shell command string. Required missing secrets block launch with a clear error; optional missing secrets log a warning and let the command run without that env var.
+
+```yaml
+requires_secrets:
+  - env: SHODAN_API_KEY
+    optional: false
+```
 
 Run output is also filtered before it is captured or streamed: absolute paths under the current session workspace are displayed as user-facing workspace paths. For example:
 

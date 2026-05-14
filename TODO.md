@@ -79,6 +79,11 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - At command launch, a registry helper resolves the command root's normalized `requires_secrets` declarations. The run blueprint looks up matching vault rows by session token, decrypts in memory, and injects values through `subprocess.Popen(env=...)` rather than an `env NAME=value ...` shell wrapper. Decrypted values are cleared after subprocess spawn.
   - If a required secret is missing, block launch with a clear error: `Run requires secret SHODAN_API_KEY which is not set. Set it via "secret set SHODAN_API_KEY" or the Options → Secrets panel.`
   - Optional secrets log a `SECRET_OPTIONAL_MISSING` warning but do not block.
+  - **Phase 3 decisions and findings:**
+    - Secret injection is intentionally separate from `runtime_adaptations.environment`, which still exists for non-secret workspace-derived environment wrappers. Secret values are never rendered into command text.
+    - Missing required secrets are checked after registry validation and before subprocess spawn. If several required secrets are missing, the error lists all missing env names.
+    - Optional missing secrets emit `SECRET_OPTIONAL_MISSING` with the command root and env name only. Successful injection emits one `SECRET_INJECTED` audit event per run with env names only.
+    - Interactive PTY secret injection is out of scope for this phase because no current PTY-enabled command declares `requires_secrets`; add the same environment-override pattern to the PTY service if a future PTY command needs credentials.
 - **Phase 4 - Browser surface**
   - New `app/static/js/features/preferences/secrets_panel.js`: Options modal "Secrets" section sibling to "Session token". Rows show `name`, consumer-tool chips, last-updated, Edit / Delete.
   - Edit modal supports Replace and Delete only. Stored values are never revealed or copied back out of the vault in v1.

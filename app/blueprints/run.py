@@ -28,6 +28,7 @@ from services.commands.registry import (
     interactive_pty_spec_for_command,
     is_command_allowed,
     parse_synthetic_postfilter,
+    required_secrets_for_command,
     rewrite_command,
     runtime_missing_command_message,
     runtime_missing_command_name,
@@ -64,6 +65,9 @@ from services.runs.broker import (
 )
 from services.runs.output_store import RunOutputCapture, load_full_output_entries
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, run_kind_for_cmd_type
+from services.secrets.audit import emit_secret_event
+from services.secrets.storage import InvalidSecretName, get_secret_value_for_env
+from services.secrets.vault import MasterKeyError, SecretDecryptError
 from services.runs.streaming import (
     cleanup_proc_stream as _cleanup_proc_stream,
     make_nonblocking_stream_reader as _make_nonblocking_stream_reader,
@@ -759,6 +763,8 @@ class _PreparedRealCommand:
     rewrite_notice: str | None
     validation: CommandValidationResult
     missing_runtime: str | None
+    env_overrides: dict[str, str]
+    secret_env_names: list[str]
 
 
 @dataclass(frozen=True)
@@ -926,6 +932,49 @@ def _filter_builtin_command_events(events, variable_notice: str, postfilter: _Sy
     return filtered_events
 
 
+def _resolve_secret_environment(command: str, session_id: str) -> tuple[dict[str, str], list[str]]:
+    declarations = required_secrets_for_command(command)
+    if not declarations:
+        return {}, []
+
+    env_overrides: dict[str, str] = {}
+    missing_required: list[str] = []
+    missing_optional: list[str] = []
+    for declaration in declarations:
+        env_name = str(declaration.get("env") or "").strip().upper()
+        if not env_name:
+            continue
+        try:
+            value = get_secret_value_for_env(session_id, env_name)
+        except (InvalidSecretName, MasterKeyError, SecretDecryptError) as exc:
+            raise _RunPreparationError("Secrets vault unavailable. Check server logs.", status_code=503) from exc
+        if value is None:
+            if bool(declaration.get("optional", False)):
+                missing_optional.append(env_name)
+            else:
+                missing_required.append(env_name)
+            continue
+        env_overrides[env_name] = value
+
+    if missing_required:
+        if len(missing_required) == 1:
+            subject = f"secret {missing_required[0]}"
+        else:
+            subject = "secrets " + ", ".join(missing_required)
+        raise _RunPreparationError(
+            f"Run requires {subject} which is not set. "
+            "Set it via \"secret set NAME\" or the Options > Secrets panel.",
+            status_code=403,
+        )
+    for env_name in missing_optional:
+        log.warning("SECRET_OPTIONAL_MISSING", extra={
+            "session": get_log_session_id(session_id),
+            "secret_name": env_name,
+            "command_root": command_root(command) or "",
+        })
+    return env_overrides, sorted(env_overrides)
+
+
 def _prepare_real_command(
     original_command: str,
     execution_command: str,
@@ -954,12 +1003,15 @@ def _prepare_real_command(
             "ip": client_ip, "session": get_log_session_id(session_id),
             "cmd": original_command, "missing": missing_runtime,
         })
+    env_overrides, secret_env_names = _resolve_secret_environment(execution_command, session_id)
     return _PreparedRealCommand(
         execution_command=execution_command,
         command=command,
         rewrite_notice=notice,
         validation=validation,
         missing_runtime=missing_runtime,
+        env_overrides=env_overrides,
+        secret_env_names=secret_env_names,
     )
 
 
@@ -977,8 +1029,13 @@ def _start_real_command_process(
     capture = _run_output_capture(run_id)
     signal_classifier = OutputSignalClassifier(prepared_real.execution_command, cmd_type="real")
     workspace_path_filter = _WorkspacePathOutputFilter(session_id, CFG)
+    env_overrides = dict(prepared_real.env_overrides)
+    popen_env = None
 
     try:
+        if env_overrides:
+            popen_env = os.environ.copy()
+            popen_env.update(env_overrides)
         proc = subprocess.Popen(
             SCANNER_PREFIX + [SHELL_BIN, "-c", prepared_real.command] if SCANNER_PREFIX
             else [SHELL_BIN, "-c", prepared_real.command],
@@ -989,12 +1046,20 @@ def _start_real_command_process(
             bufsize=1,
             universal_newlines=True,
             preexec_fn=_prepare_run_child,
+            env=popen_env,
         )
     except Exception as exc:
         log.error("RUN_SPAWN_ERROR", exc_info=True, extra={
             "ip": client_ip, "session": get_log_session_id(session_id), "cmd": original_command,
         })
         raise _RunSpawnError(str(exc)) from exc
+    finally:
+        for key in env_overrides:
+            env_overrides[key] = ""
+        prepared_real.env_overrides.clear()
+        if popen_env is not None:
+            for key in prepared_real.secret_env_names:
+                popen_env[key] = ""
 
     pid_register(run_id, proc.pid)
     active_run_register(
@@ -1010,6 +1075,14 @@ def _start_real_command_process(
         "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
         "pid": proc.pid, "cmd": original_command, "cmd_type": "real",
     })
+    if prepared_real.secret_env_names:
+        emit_secret_event(
+            "SECRET_INJECTED",
+            session_id,
+            consumer_envs=prepared_real.secret_env_names,
+            run_id=run_id,
+            command_root=command_root(prepared_real.execution_command) or "",
+        )
     return _StartedRealCommand(
         run_id=run_id,
         run_started=run_started,

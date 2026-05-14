@@ -144,7 +144,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | Path | Purpose |
 |------|---------|
 | `app/conf/config.yaml` | Main application settings |
-| `app/conf/commands.yaml` | Command registry for catalog grouping, autocomplete, allow/deny policy, runtime adaptations, workspace flags, and smoke-test examples |
+| `app/conf/commands.yaml` | Command registry for catalog grouping, autocomplete, allow/deny policy, runtime adaptations, encrypted secret requirements, workspace flags, and smoke-test examples |
 | `app/conf/faq.yaml` | Operator FAQ entries appended to the built-in FAQ |
 | `app/conf/welcome.yaml` | Welcome command samples and featured sample metadata |
 | `app/conf/tour.yaml` | Versioned onboarding tour chapters shared by the `tour` command and visual tour |
@@ -181,7 +181,7 @@ The `tour_enabled` setting in `config.yaml` is the kill-switch for tour entry po
 
 ## Command Registry Autocomplete
 
-`app/conf/commands.yaml` stores each external command under `commands`, with policy, runtime adaptations, workspace file flags, and root-aware flag, argument, subcommand, and example hints. Optional local additions can live in `app/conf/commands.local.yaml`.
+`app/conf/commands.yaml` stores each external command under `commands`, with policy, runtime adaptations, encrypted secret requirements, workspace file flags, and root-aware flag, argument, subcommand, and example hints. Optional local additions can live in `app/conf/commands.local.yaml`.
 
 ```yaml
 commands:
@@ -197,11 +197,16 @@ commands:
         - flags: [-sT]
           position: prepend
           unless_any_regex: ["^-s[AFILMNOSTUWXYZn]"]
+    requires_secrets:
+      - env: EXAMPLE_API_KEY
+        optional: true
     autocomplete:
       flags:
         - value: -sV
           description: Service/version detection
 ```
+
+`requires_secrets` names encrypted session secrets that should be passed to the subprocess environment for that command root. Required missing secrets block launch before the process starts. Optional missing secrets log a warning and let the command run without that env var. Secret values are never rendered into command text.
 
 Inside each command's `autocomplete` block, a root can define:
 

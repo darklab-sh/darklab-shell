@@ -703,6 +703,8 @@ Session command variables are expanded inside the app before command policy vali
 
 Workspace-aware validation also rewrites declared file and directory flags from `app/conf/commands.yaml` into the active session workspace. Rewritten token lists are reassembled with shell-safe quoting before they cross the existing `sh -c` subprocess boundary, so app-injected workspace paths cannot accidentally change shell parsing when a valid session file or folder name contains spaces or shell metacharacters. The same command metadata drives target-value restrictions: flags and positional arguments declared with target-like `value_type` values (`domain`, `host`, `ip`, `cidr`, `target`, or `url`) can be checked against configured restricted networks without blanket string scanning. Runtime adaptation metadata also owns managed workspace directories, environment wrappers, and command-prefix injections; Amass declares its database-backed subcommands there, so `amass enum`, `amass subs`, `amass track`, and `amass viz` get a managed `-dir tools/amass` workspace directory and `XDG_CONFIG_HOME` is pointed at the session workspace's `tools/` folder so `amass engine` and the CLI share the same per-session database path. ProjectDiscovery tools declare a workspace-required `env XDG_CONFIG_HOME=<session workspace>/tools` prefix through the same metadata, and run output filters display absolute session-workspace paths as user-facing paths like `/tools/katana/resume.cfg`. See [External Command Integrations](docs/external-command-integrations.md) for the command-specific integration contracts.
 
+Registry-owned `requires_secrets` declarations use a separate launch path from runtime environment wrappers. After validation and before subprocess spawn, `/runs` resolves the command root's secret declarations against the current session vault. Required missing secrets block the launch; optional missing secrets log a warning. Found values are decrypted in memory and passed through `subprocess.Popen(env=...)`, never inserted into the shell command text. Successful secret use emits one `SECRET_INJECTED` audit event for the run with env names only.
+
 Workspace move and glob behavior stays app-mediated too. `move_workspace_path()` resolves both source and destination through the same session-root checks used by reads and deletes, rejects overwrites, rejects symlink escapes, prevents moving a folder into itself, and falls back to the scanner user for command-owned files that need group-write movement. Browser-side `file ls`, `file move` / `mv`, and confirmed `file delete` expand simple `*` patterns from the loaded session workspace cache for fast terminal feedback; backend built-ins use `expand_workspace_path_pattern()` so stale-browser or server-rendered paths follow the same one-segment matching rule. The shell never asks `/bin/sh` to expand workspace patterns. Before list/read-style operations, `normalize_session_workspace_permissions()` also repairs scanner-created child modes so tool config folders written under session-scoped `XDG_CONFIG_HOME` remain visible to the app without making the workspace world-readable.
 
 Synthetic post-filters also sit on this run-lifecycle boundary rather than on the shell-parser path. `parse_synthetic_postfilter()` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the brokered stream applies the selected helper before lines are emitted or persisted.
@@ -1249,12 +1251,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,678
+- behavior tests: 2,681
 - docs/inventory meta-tests: 32
-- `pytest`: 1343 (1311 behavior + 32 meta)
+- `pytest`: 1346 (1314 behavior + 32 meta)
 - `vitest`: 1118
 - `playwright`: 249
-- total: 2,710
+- total: 2,713
 
 ### Testing Architecture
 

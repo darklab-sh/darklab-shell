@@ -609,6 +609,17 @@ def load_commands_registry():
     )
 
 
+def required_secrets_for_command(command: str) -> list[dict[str, object]]:
+    """Return normalized secret declarations for a command root."""
+    root = command_root(command)
+    if not root:
+        return []
+    for entry in load_commands_registry().get("commands", []) or []:
+        if str(entry.get("root") or "").strip().lower() == root:
+            return [dict(item) for item in entry.get("requires_secrets") or [] if isinstance(item, dict)]
+    return []
+
+
 def interactive_pty_specs_from_registry(registry: dict | None = None) -> list[dict[str, object]]:
     """Return command-registry entries that opt into interactive PTY mode."""
     active_registry = registry or load_commands_registry()

@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,678
+- behavior tests: 2,681
 - docs/inventory meta-tests: 32
-- `pytest`: 1343 (1311 behavior + 32 meta)
+- `pytest`: 1346 (1314 behavior + 32 meta)
 - `vitest`: 1118
 - `playwright`: 249
-- total: 2,710
+- total: 2,713
 
 This document is organized in two parts:
 
@@ -1354,6 +1354,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunStreaming.test_run_checks_missing_binary_after_rewrite` | Checks that run checks missing binary after rewrite. |
 | `TestRunStreaming.test_run_rewrites_workspace_file_flags_and_emits_notices` | Verifies that `/runs` executes workspace-aware file flags with rewritten session paths, emits friendly workspace read/write notices, and preserves the original command in history. |
 | `TestRunStreaming.test_run_injects_projectdiscovery_workspace_state_and_surfaces_paths` | Verifies that ProjectDiscovery tools receive session-scoped runtime state and display generated workspace paths as user-facing paths. |
+| `TestRunStreaming.test_run_injects_required_secrets_through_process_environment` | Verifies registry-required secrets are decrypted into the subprocess environment without appearing in command text or streamed output. |
+| `TestRunStreaming.test_run_blocks_when_required_secret_is_missing` | Verifies a command with a missing required registry secret is rejected before subprocess spawn. |
+| `TestRunStreaming.test_run_allows_missing_optional_secret_and_logs_warning` | Verifies optional registry secrets warn when missing but do not block command launch. |
 | `TestRunStreaming.test_session_variables_expand_before_validation_and_preserve_typed_history` | Verifies that `/runs` expands session variables before launch, emits the expanded-command notice, and keeps typed command history. |
 | `TestRunStreaming.test_session_variables_reject_undefined_reference_before_spawn` | Verifies that undefined session-variable references fail before spawning a process. |
 | `TestRunStreaming.test_session_variables_validate_policy_after_expansion` | Verifies that command policy receives the expanded command rather than the typed variable reference. |
