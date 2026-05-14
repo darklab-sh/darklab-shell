@@ -51,6 +51,14 @@ def _key_file_path() -> Path:
     return Path(resolve_data_dir()) / MASTER_KEY_FILENAME
 
 
+def _ensure_key_file_mode(path: Path) -> None:
+    try:
+        if path.stat().st_mode & 0o777 != 0o600:
+            os.chmod(path, 0o600)
+    except OSError as exc:
+        raise MasterKeyError(f"could not secure {path}") from exc
+
+
 def _decode_master_key(raw: str, source: str) -> bytes:
     try:
         key = base64.b64decode(str(raw or "").strip(), validate=True)
@@ -64,6 +72,7 @@ def _decode_master_key(raw: str, source: str) -> bytes:
 def _read_key_file(path: Path) -> bytes | None:
     if not path.exists():
         return None
+    _ensure_key_file_mode(path)
     try:
         return _decode_master_key(path.read_text(encoding="utf-8"), str(path))
     except OSError as exc:

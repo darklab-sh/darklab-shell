@@ -5538,6 +5538,71 @@ class TestSecretsVault:
         with pytest.raises(secrets_vault.MasterKeyError):
             secrets_vault.get_wrapping_key()
 
+    def test_key_file_bootstrap_generates_and_reuses_secure_file(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("SECRETS_MASTER_KEY", raising=False)
+        monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path))
+        secrets_vault.reset_master_key_cache_for_tests()
+
+        first_wrapping_key = secrets_vault.get_wrapping_key()
+        key_path = tmp_path / ".secrets_master_key"
+        first_file_value = key_path.read_text(encoding="utf-8")
+
+        assert key_path.exists()
+        assert os.stat(key_path).st_mode & 0o777 == 0o600
+        assert secrets_vault.master_key_source() == "file"
+
+        secrets_vault.reset_master_key_cache_for_tests()
+        second_wrapping_key = secrets_vault.get_wrapping_key()
+
+        assert key_path.read_text(encoding="utf-8") == first_file_value
+        assert second_wrapping_key == first_wrapping_key
+
+    def test_existing_key_file_permissions_are_repaired(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("SECRETS_MASTER_KEY", raising=False)
+        monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path))
+        key_path = tmp_path / ".secrets_master_key"
+        key_path.write_text(base64.b64encode(b"c" * 32).decode("ascii"), encoding="utf-8")
+        os.chmod(key_path, 0o644)
+        secrets_vault.reset_master_key_cache_for_tests()
+
+        secrets_vault.get_wrapping_key()
+
+        assert os.stat(key_path).st_mode & 0o777 == 0o600
+
+    def test_env_master_key_wins_over_key_file_and_logs_warning(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("SECRETS_MASTER_KEY", base64.b64encode(b"d" * 32).decode("ascii"))
+        monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path))
+        key_path = tmp_path / ".secrets_master_key"
+        key_path.write_text(base64.b64encode(b"e" * 32).decode("ascii"), encoding="utf-8")
+        secrets_vault.reset_master_key_cache_for_tests()
+
+        with mock.patch.object(secrets_vault.log, "warning") as mock_warning:
+            secrets_vault.get_wrapping_key()
+
+        assert secrets_vault.master_key_source() == "env"
+        mock_warning.assert_called_once()
+        assert mock_warning.call_args.args[0] == "MASTER_KEY_FILE_IGNORED"
+
+    def test_database_init_creates_secrets_table_and_index_idempotently(self, tmp_path):
+        db_path = os.path.join(tmp_path, "secrets-schema.db")
+        with mock.patch("core.database.DB_PATH", db_path):
+            with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                database.db_init()
+                database.db_init()
+            conn = sqlite3.connect(db_path)
+            try:
+                table = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'secrets'",
+                ).fetchone()
+                index = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_secrets_session_updated'",
+                ).fetchone()
+            finally:
+                conn.close()
+
+        assert table is not None
+        assert index is not None
+
     def test_storage_normalizes_names_and_migrates_without_decrypting(self, monkeypatch, tmp_path):
         self._patch_master_key(monkeypatch, tmp_path)
         db_path = os.path.join(tmp_path, "secrets.db")

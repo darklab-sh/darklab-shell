@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,674
+- behavior tests: 2,678
 - docs/inventory meta-tests: 32
-- `pytest`: 1339 (1307 behavior + 32 meta)
+- `pytest`: 1343 (1311 behavior + 32 meta)
 - `vitest`: 1118
 - `playwright`: 249
-- total: 2,706
+- total: 2,710
 
 This document is organized in two parts:
 
@@ -653,6 +653,10 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestBuiltinStats.test_top_commands_empty_state_ignores_builtin_only_sessions` | Verifies that built-in-only sessions still affect `stats` totals but do not appear in the external-tool Top commands section. |
 | `TestSecretsVault.test_encrypt_decrypt_round_trip_uses_unique_nonces` | Verifies encrypted secrets decrypt back to their original values and use a fresh nonce for each write. |
 | `TestSecretsVault.test_master_key_rejects_short_decoded_env_value` | Verifies the secrets vault rejects a base64 master key that does not decode to exactly 32 bytes. |
+| `TestSecretsVault.test_key_file_bootstrap_generates_and_reuses_secure_file` | Verifies the secrets vault lazily creates a reusable `0600` master-key file when no env key is configured. |
+| `TestSecretsVault.test_existing_key_file_permissions_are_repaired` | Verifies an existing secrets master-key file with broader permissions is repaired to `0600` before use. |
+| `TestSecretsVault.test_env_master_key_wins_over_key_file_and_logs_warning` | Verifies `SECRETS_MASTER_KEY` wins over an existing key file and logs the ignored-file warning. |
+| `TestSecretsVault.test_database_init_creates_secrets_table_and_index_idempotently` | Verifies repeated database initialization creates the secrets table and session/update-time index safely. |
 | `TestSecretsVault.test_storage_normalizes_names_and_migrates_without_decrypting` | Verifies secret storage normalizes names, dedupes consumer envs, and moves session rows without decrypting values. |
 
 #### `test_container_smoke_test.py`
