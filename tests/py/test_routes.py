@@ -3583,6 +3583,7 @@ class TestCommandCatalogRoute:
                     "category": "Registry Group",
                     "description": "Inspect a target.",
                     "policy": {"allow": ["sentinel"]},
+                    "requires_secrets": [{"env": "SHODAN_API_KEY", "optional": False}],
                     "autocomplete": {
                         "examples": [{"value": "sentinel darklab.sh"}],
                         "flags": [{"value": "--json", "description": "Emit JSON"}],
@@ -3601,6 +3602,7 @@ class TestCommandCatalogRoute:
             "root": "sentinel",
             "category": "Registry Group",
             "description": "Inspect a target.",
+            "requires_secrets": [{"env": "SHODAN_API_KEY", "optional": False}],
             "example_count": 1,
             "subcommand_count": 0,
             "flag_count": 1,
@@ -3611,6 +3613,7 @@ class TestCommandCatalogRoute:
         data = json.loads(resp.data)
         assert data["root"] == "sentinel"
         assert data["description"] == "Inspect a target."
+        assert data["requires_secrets"] == [{"env": "SHODAN_API_KEY", "optional": False}]
         assert data["examples"][0]["value"] == "sentinel darklab.sh"
         assert data["flags"][0]["value"] == "--json"
 

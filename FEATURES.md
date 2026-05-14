@@ -633,7 +633,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Behavior:**
 
-- The Options modal includes a **Secrets** section where users can add, replace, and delete secret values for the active session.
+- The Options modal includes a **Secrets** section where users can add, replace, and delete secret values for the active session. The add flow suggests the API key names declared by the command registry first, with a custom option for local overlays or future integrations.
 - `secret set NAME` opens the same browser-owned value prompt from the terminal. The command line contains only the name; the value is entered in the modal and is not echoed.
 - `secret list` shows stored names and their consumer environment bindings. It never prints values.
 - `secret unset NAME` deletes one stored secret, and `secret show-consumers` lists command-registry env vars that tools declare.
@@ -663,7 +663,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Limits:** Shodan, VirusTotal, and GreyNoise require user-provided provider keys. Provider terms and quotas are enforced by the vendor; the app adds its own per-session rate limiting and cache layer to avoid accidental bursts.
 
-**Configuration:** users store `SHODAN_API_KEY`, `GREYNOISE_API_KEY`, `VT_API_KEY`, or the native `VTCLI_APIKEY` through Options → Secrets or `secret set NAME`. Operators tune cache TTLs and rate-limit buckets in `conf/config.yaml`.
+**Configuration:** users store `SHODAN_API_KEY`, `GREYNOISE_API_KEY`, `VT_API_KEY`, or the native `VTCLI_APIKEY` through Options → Secrets or `secret set NAME`. The Options picker suggests those known keys from the command registry, while the terminal command still accepts an explicit name. Operators tune cache TTLs and rate-limit buckets in `conf/config.yaml`.
 
 **Related files:** `app/services/intel/`, `app/services/commands/builtins_intel.py`, `app/conf/commands.yaml`, `app/conf/config.yaml`.
 

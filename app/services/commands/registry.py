@@ -789,6 +789,34 @@ def _catalog_interactive_notes(interactive_spec: object) -> list[str]:
     return [f"Use `{trigger}` to open the interactive terminal view for this command."]
 
 
+def _catalog_required_secrets(items: object) -> list[dict[str, object]]:
+    secrets = []
+    if not isinstance(items, list):
+        return secrets
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        env = str(item.get("env") or "").strip().upper()
+        if not env:
+            continue
+        entry: dict[str, object] = {
+            "env": env,
+            "optional": bool(item.get("optional", False)),
+        }
+        inject_env = str(item.get("inject_env") or "").strip().upper()
+        if inject_env and inject_env != env:
+            entry["inject_env"] = inject_env
+        fallback_envs = [
+            str(fallback or "").strip().upper()
+            for fallback in item.get("fallback_envs", []) or []
+            if str(fallback or "").strip()
+        ]
+        if fallback_envs:
+            entry["fallback_envs"] = fallback_envs
+        secrets.append(entry)
+    return secrets
+
+
 def command_catalog_from_registry(registry: dict | None = None) -> list[dict[str, object]]:
     """Return user-facing command reference data from the external command registry."""
     active_registry = registry or load_commands_registry()
@@ -824,6 +852,7 @@ def command_catalog_from_registry(registry: dict | None = None) -> list[dict[str
             "arguments": autocomplete["arguments"],
             "subcommands": autocomplete["subcommands"],
             "workspace_flags": _catalog_workspace_flags(entry.get("workspace_flags")),
+            "requires_secrets": _catalog_required_secrets(entry.get("requires_secrets")),
             "runtime_notes": _dedupe_preserve_order([
                 *_catalog_runtime_notes(entry.get("runtime_adaptations")),
                 *_catalog_interactive_notes(entry.get("interactive")),

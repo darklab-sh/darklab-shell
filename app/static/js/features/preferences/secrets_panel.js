@@ -50,6 +50,65 @@ function _optionsSecretConsumerInputValue(secret) {
   return envs.join(', ');
 }
 
+async function _ensureOptionsSecretCatalog() {
+  if (typeof commandRegistryData !== 'undefined' && commandRegistryData) return commandRegistryData;
+  if (typeof apiFetch !== 'function') return null;
+  try {
+    const resp = await apiFetch('/commands/catalog');
+    const data = await resp.json().catch(() => ({}));
+    if (resp && resp.ok === false) throw new Error(data.message || data.error || `HTTP ${resp.status}`);
+    if (typeof commandRegistryData !== 'undefined') commandRegistryData = data;
+    return data;
+  } catch (err) {
+    if (typeof logClientError === 'function') logClientError('failed to load secret consumer catalog', err);
+    return null;
+  }
+}
+
+function _optionsKnownSecretChoices() {
+  const data = typeof commandRegistryData !== 'undefined' ? commandRegistryData : null;
+  const commands = Array.isArray(data?.commands) ? data.commands : [];
+  const byName = new Map();
+  commands.forEach((command) => {
+    const root = String(command?.root || '').trim();
+    const declarations = Array.isArray(command?.requires_secrets) ? command.requires_secrets : [];
+    declarations.forEach((declaration) => {
+      const env = _normalizeOptionsSecretName(declaration?.env);
+      if (!_optionsSecretNameIsValid(env)) return;
+      const injectEnv = _normalizeOptionsSecretName(declaration?.inject_env || env);
+      const names = [env, ...(Array.isArray(declaration?.fallback_envs) ? declaration.fallback_envs : [])]
+        .map((item) => _normalizeOptionsSecretName(item))
+        .filter((item, index, arr) => _optionsSecretNameIsValid(item) && arr.indexOf(item) === index);
+      names.forEach((name) => {
+        const existing = byName.get(name) || {
+          name,
+          roots: [],
+          inject_envs: [],
+          fallback: name !== env,
+          optional: true,
+        };
+        if (root && !existing.roots.includes(root)) existing.roots.push(root);
+        if (injectEnv && !existing.inject_envs.includes(injectEnv)) existing.inject_envs.push(injectEnv);
+        existing.fallback = existing.fallback && name !== env;
+        existing.optional = existing.optional && Boolean(declaration?.optional);
+        byName.set(name, existing);
+      });
+    });
+  });
+  return Array.from(byName.values()).sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function _optionsSecretChoiceDescription(choice) {
+  if (!choice) return '';
+  const roots = Array.isArray(choice.roots) && choice.roots.length ? choice.roots.join(', ') : 'configured commands';
+  const injects = Array.isArray(choice.inject_envs) && choice.inject_envs.length ? choice.inject_envs : [];
+  const injected = injects.length && !injects.includes(choice.name)
+    ? ` It is passed to the command as ${injects.join(', ')}.`
+    : '';
+  const fallback = choice.fallback ? ' Vendor-native alias.' : '';
+  return `Used by ${roots}.${injected}${fallback}`.trim();
+}
+
 function _optionsSecretUpdatedLabel(value) {
   const raw = String(value || '').trim();
   if (!raw) return 'Updated unknown';
@@ -174,15 +233,42 @@ function _optionsSecretInput(labelText, input) {
 
 async function openSecretEditor({ secret = null, name = '', source = 'options' } = {}) {
   if (typeof showConfirm !== 'function') return null;
+  await _ensureOptionsSecretCatalog();
   const existingName = _normalizeOptionsSecretName(secret?.name || name);
   const isExisting = Boolean(secret && secret.name);
+  const lockName = isExisting || (source === 'terminal' && Boolean(existingName));
+  const knownChoices = _optionsKnownSecretChoices();
+  const knownNames = new Set(knownChoices.map((item) => item.name));
+  const startsCustom = Boolean(existingName && !knownNames.has(existingName));
+
+  const nameSelect = document.createElement('select');
+  nameSelect.className = 'form-select';
+  nameSelect.disabled = lockName;
+  nameSelect.autocomplete = 'off';
+  if (!existingName) {
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = knownChoices.length ? 'Choose an API key' : 'No app tool secrets found';
+    nameSelect.appendChild(placeholder);
+  }
+  knownChoices.forEach((choice) => {
+    const option = document.createElement('option');
+    option.value = choice.name;
+    option.textContent = `${choice.name} — ${choice.roots.join(', ')}`;
+    nameSelect.appendChild(option);
+  });
+  const customOption = document.createElement('option');
+  customOption.value = '__custom__';
+  customOption.textContent = 'Custom secret...';
+  nameSelect.appendChild(customOption);
+  nameSelect.value = startsCustom || (!existingName && !knownChoices.length) ? '__custom__' : existingName;
 
   const nameInput = document.createElement('input');
   nameInput.type = 'text';
   nameInput.className = 'options-token-input';
-  nameInput.placeholder = 'SHODAN_API_KEY';
-  nameInput.value = existingName;
-  nameInput.disabled = isExisting;
+  nameInput.placeholder = 'CUSTOM_API_KEY';
+  nameInput.value = startsCustom ? existingName : '';
+  nameInput.disabled = lockName;
   nameInput.autocomplete = 'off';
   nameInput.autocapitalize = 'none';
   nameInput.autocorrect = 'off';
@@ -219,6 +305,13 @@ async function openSecretEditor({ secret = null, name = '', source = 'options' }
   consumersInput.setAttribute('data-1p-ignore', 'true');
   consumersInput.setAttribute('data-lpignore', 'true');
 
+  const choiceDesc = document.createElement('div');
+  choiceDesc.className = 'options-session-token-desc';
+
+  const customWarning = document.createElement('div');
+  customWarning.className = 'options-session-token-msg';
+  customWarning.textContent = 'Custom secrets are stored, but commands only use them when a registry entry declares a matching consumer env.';
+
   const err = document.createElement('div');
   err.className = 'options-session-token-msg is-error';
   err.style.display = 'none';
@@ -227,10 +320,29 @@ async function openSecretEditor({ secret = null, name = '', source = 'options' }
   note.className = 'options-session-token-desc';
   note.textContent = 'Stored values are replace-only and cannot be revealed from this panel.';
 
+  const nameInputField = _optionsSecretInput('Custom secret name', nameInput);
+  const consumersInputField = _optionsSecretInput('Consumer envs', consumersInput);
+  function syncSecretEditorMode() {
+    const selectedName = nameSelect.value;
+    const selectedChoice = knownChoices.find((item) => item.name === selectedName);
+    const custom = selectedName === '__custom__';
+    nameInputField.style.display = custom ? '' : 'none';
+    consumersInputField.style.display = custom ? '' : 'none';
+    customWarning.style.display = custom ? '' : 'none';
+    choiceDesc.textContent = custom
+      ? 'Use this only for local command-registry overlays or future integrations.'
+      : _optionsSecretChoiceDescription(selectedChoice);
+  }
+  nameSelect.addEventListener('change', syncSecretEditorMode);
+  syncSecretEditorMode();
+
   const content = [
-    _optionsSecretInput('Secret name', nameInput),
+    _optionsSecretInput('Secret', nameSelect),
+    choiceDesc,
+    nameInputField,
     _optionsSecretInput(isExisting ? 'Replacement API key or token' : 'API key or token', valueInput),
-    _optionsSecretInput('Consumer envs', consumersInput),
+    consumersInputField,
+    customWarning,
     note,
     err,
   ];
@@ -240,9 +352,14 @@ async function openSecretEditor({ secret = null, name = '', source = 'options' }
     label: isExisting ? 'Replace' : 'Save',
     role: 'primary',
     onActivate: async () => {
-      const normalizedName = _normalizeOptionsSecretName(nameInput.value);
+      const isCustom = nameSelect.value === '__custom__';
+      const normalizedName = isCustom
+        ? _normalizeOptionsSecretName(nameInput.value)
+        : _normalizeOptionsSecretName(nameSelect.value);
       if (!_optionsSecretNameIsValid(normalizedName)) {
-        err.textContent = 'Secret names must start with a letter and use letters, numbers, or underscores.';
+        err.textContent = isCustom
+          ? 'Secret names must start with a letter and use letters, numbers, or underscores.'
+          : 'Choose the API key this value belongs to.';
         err.style.display = '';
         return false;
       }
@@ -257,7 +374,7 @@ async function openSecretEditor({ secret = null, name = '', source = 'options' }
         .map((item) => _normalizeOptionsSecretName(item))
         .filter(Boolean);
       const invalidEnv = consumerEnvs.find((env) => !_optionsSecretNameIsValid(env));
-      if (invalidEnv) {
+      if (isCustom && invalidEnv) {
         err.textContent = `Invalid consumer env: ${invalidEnv}`;
         err.style.display = '';
         return false;
@@ -269,14 +386,18 @@ async function openSecretEditor({ secret = null, name = '', source = 'options' }
           body: JSON.stringify({
             name: normalizedName,
             value,
-            consumer_envs: consumerEnvs.length ? consumerEnvs : undefined,
+            consumer_envs: isCustom && consumerEnvs.length ? consumerEnvs : undefined,
           }),
         });
         const data = await resp.json().catch(() => ({}));
         if (resp && resp.ok === false) throw new Error(data.message || data.error || `HTTP ${resp.status}`);
         invalidateOptionsSecrets();
         await refreshOptionsSecrets({ force: true });
-        _optionsSecretsShowMsg(isExisting ? `${normalizedName} replaced.` : `${normalizedName} saved.`);
+        _optionsSecretsShowMsg(
+          isCustom && !isExisting
+            ? `${normalizedName} saved. It is not currently used unless a command declares that consumer env.`
+            : (isExisting ? `${normalizedName} replaced.` : `${normalizedName} saved.`),
+        );
         return true;
       } catch (error) {
         err.textContent = `Save failed — ${error.message || 'network error'}`;
@@ -292,7 +413,7 @@ async function openSecretEditor({ secret = null, name = '', source = 'options' }
       note: 'The value is sent to the server once, encrypted, and never shown here again.',
     },
     content,
-    defaultFocus: isExisting ? valueInput : nameInput,
+    defaultFocus: isExisting || lockName ? valueInput : nameSelect,
     actions: [
       { id: 'cancel', label: 'Cancel', role: 'cancel' },
       saveAction,

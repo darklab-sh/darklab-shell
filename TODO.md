@@ -29,6 +29,86 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Keep the route read-only and cheap enough for occasional operator use; this does not need live polling.
   - Surface the same summary through a terminal built-in later if it fits naturally with `stats`, `retention`, or `limits`.
 
+### External intel provider expansion
+- **Scope**
+  - Expand the app-native `intel` system beyond Shodan, VirusTotal, and GreyNoise without turning the container into a bundle of every possible vendor CLI.
+  - Treat provider expansion as an app capability first: normalized provider responses, cache/quota/rate-limit behavior, redacted audit events, raw-only share/export handling, and predictable secret setup all matter more than exposing a CLI for every vendor.
+  - Add CLI wrappers only when a vendor CLI is official, stable, meaningfully useful by itself, and safe to allowlist.
+  - Keep `docs/intel-commands.md` as a research snapshot only while this work is active. Do not promote that file into official docs as-is because vendor install methods and licensing drift, and TODO.md is the right place for future-state implementation details.
+- **Firm decisions**
+  - Add a provider registry before adding more providers. The registry is the source of truth for provider id, display name, supported entity types, secret env names and aliases, tier, cache scope, rate-limit profile, paid-provider gating, and whether the provider is app-native or CLI-backed.
+  - App-native providers must publish secret-consumer metadata too. The Options Secrets picker and `secret show-consumers` cannot depend only on `commands.yaml`, because HTTP-only providers have no command-registry entry.
+  - Use per-provider paid enablement, not one global paid-provider switch. Recommended config shape: `intel_enabled_paid_providers: []`, with provider ids such as `censys`, `zoomeye`, `dehashed`, and `dnsdb`.
+  - For paired credentials, store two separate secrets unless the provider truly expects one value under multiple env names. Censys and PassiveTotal-style username/key pairs are two secrets, not one secret with two consumer envs.
+  - Sidecar enrichment stays opt-in per session or project. Normal scanner runs must not call live intel APIs automatically because that burns quota and surprises users.
+  - Intel response bodies remain raw-only outside owner-controlled live/history views. Share snapshots, public non-owner permalinks, and local styled exports keep the existing omission behavior.
+- **Provider batches**
+  - **Batch 1: no-key app-native providers**
+    - `crt.sh` for domain certificate transparency lookups.
+    - Team Cymru and/or BGPView for IP/ASN ownership context.
+    - NVD for `intel cve <id>` with anonymous-rate-limit handling.
+    - HIBP Pwned Passwords only via k-anonymity prefix range; never send full hashes.
+  - **Batch 2: key-backed app-native providers**
+    - AlienVault OTX for IP/domain/hash pulses and reputation.
+    - AbuseIPDB for IP reputation.
+    - Vulners for CVE enrichment.
+    - BuiltWith only if the API result adds enough value over local tech-detection tooling.
+  - **Batch 3: carefully chosen CLI wrappers**
+    - urlscan.io should use the current official `urlscan-cli` with `URLSCAN_API_KEY`, not stale `urlscan-python` CLI assumptions.
+    - IPinfo can use the official CLI with `IPINFO_TOKEN`; unauthenticated lookup can remain supported if the CLI handles it cleanly.
+    - ProjectDiscovery Chaos should use `go install github.com/projectdiscovery/chaos-client/cmd/chaos@...` and `PDCP_API_KEY`, not `CHAOS_API_KEY`.
+    - Censys needs a deliberate choice before implementation: either app-native SDK integration or one CLI generation. Do not install both legacy `censys` and newer `cencli`.
+  - **Batch 4: paid/operator-driven providers**
+    - ZoomEye, DeHashed, HIBP breach API, IntelligenceX, Triage, PassiveTotal/Defender TI, DNSDB, and BuiltWith Pro ship only when explicitly enabled through `intel_enabled_paid_providers`.
+    - Prefer app-native REST/SDK integrations over wrapper scripts for paid providers unless the vendor CLI is clearly official and safe.
+  - **Batch 5: self-hosted/local providers**
+    - MISP requires both `MISP_URL` and `MISP_API_KEY`; app-native is preferred unless a small in-tree shim proves cleaner.
+    - Wappalyzer-style tech detection should avoid pulling Chromium into the runtime image unless the value clearly justifies the image cost. Prefer a lighter local-fingerprint or HTTP-only path first.
+- **Phase 0 - Provider registry foundation**
+  - Add `app/services/intel/registry.py` with typed provider definitions.
+  - Move Shodan, VirusTotal, and GreyNoise metadata into the registry without changing current behavior.
+  - Teach `default_provider_factories()`, provider labels, cache/rate-limit lookup, and missing-key setup text to read registry metadata.
+  - Add a registry helper that returns metadata-only secret consumers for both app-native providers and CLI-backed command-registry providers.
+  - Update the Options Secrets picker and `secret show-consumers` to include app-native intel consumers.
+  - Tests: registry normalization, existing provider parity, app-native secret consumers in Options, app-native secret consumers in `secret show-consumers`, and missing-key messaging.
+- **Phase 1 - No-key app-native providers**
+  - Extend `intel` grammar with `intel cve <id>` and any needed typed aliases without breaking existing `intel ip|domain|hash`.
+  - Add crt.sh domain lookup with aggressive cache TTL and defensive parsing for duplicate/malformed rows.
+  - Add one IP ownership provider first, Team Cymru or BGPView, then decide if the other adds enough distinct value.
+  - Add NVD CVE lookup with anonymous rate-limit handling and cache TTLs.
+  - Add HIBP Pwned Passwords only as `intel hash <sha1>` or a dedicated safe subcommand that sends only the SHA1 prefix.
+  - Tests: canonicalization, cache hit/miss, provider error rendering, no-secret provider inclusion, private-IP behavior, and raw-only share/export omission.
+- **Phase 2 - Key-backed app-native providers**
+  - Add OTX and AbuseIPDB first; both are API-shaped and should not require Dockerfile changes.
+  - Add provider-specific config defaults for cache TTLs, token buckets, and quota/backoff windows.
+  - Store normalized provider payloads through the existing schema helpers, not raw vendor responses.
+  - Tests: missing-secret placeholder, configured provider lookup, quota/rate-limit behavior, redacted audit events, and setup guidance.
+- **Phase 3 - CLI-backed providers**
+  - Add only one CLI wrapper at a time.
+  - For each wrapper:
+    - install the official CLI with a pinned version or reproducible release URL,
+    - declare `requires_secrets` in `commands.yaml`,
+    - deny inline key flags such as `--apikey`, `--api-key`, `--token`, and config-writing setup commands,
+    - deny broad file-write flags unless they are explicitly workspace-aware,
+    - add autocomplete, command catalog details, smoke expectations, and allowlist tests.
+  - First candidates: urlscan.io, IPinfo, Chaos. Censys waits until the app-native-versus-CLI choice is made.
+- **Phase 4 - Paid-provider gating**
+  - Add `intel_enabled_paid_providers` to config with an empty default.
+  - Registry loading marks paid providers unavailable unless their id is listed.
+  - CLI command entries for paid providers are either generated/merged only when enabled or rejected with a clear startup error if accidentally configured while disabled.
+  - UI/setup text says "operator disabled" separately from "missing secret".
+  - Tests: disabled paid provider is hidden from provider fan-out and secret setup, enabled paid provider appears, and command-registry paid entries cannot load accidentally.
+- **Phase 5 - Atlas and enrichment integration**
+  - When Session Entity Atlas lands, provider registry metadata drives the intel snapshot card and explicit refresh actions.
+  - Sidecar enrichment writes through the same provider lookup path as explicit `intel` commands.
+  - Project enrichment stores selected snapshots under the entity/project model rather than creating parallel project-only intel records.
+  - Tests: entity refresh respects provider gating, cache state is visible, and share/export omission still applies to refreshed intel.
+- **Docs and verification**
+  - Update README.md, FEATURES.md, CONFIGURATION.md, ARCHITECTURE.md, docs/release-drafts, and CHANGELOG.md as provider batches land. Keep official docs current-state; keep future provider lists in TODO.md.
+  - Add/update container smoke fixtures for every installed CLI.
+  - Re-run provider facts against official vendor docs immediately before each Dockerfile or `commands.yaml` change.
+  - Track image size growth after each CLI install and prefer app-native HTTP integrations when the CLI adds significant runtime weight.
+
 ### Session Entity Atlas (entity-first triage surface)
 - **Scope**
   - Top-level Atlas surface with first-class chrome treatment: desktop left-rail entry between History and Workflows, mobile menu item, dedicated keyboard shortcut. Not a stacked modal.

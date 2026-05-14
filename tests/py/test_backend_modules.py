@@ -1193,6 +1193,13 @@ class TestDerivedCommandRegistry:
                     "category": "Registry Group",
                     "description": "Inspect a target.",
                     "policy": {"allow": ["sentinel"], "deny": ["sentinel --unsafe"]},
+                    "requires_secrets": [
+                        {
+                            "env": "VT_API_KEY",
+                            "inject_env": "VTCLI_APIKEY",
+                            "fallback_envs": ["VTCLI_APIKEY"],
+                        },
+                    ],
                     "workspace_flags": [
                         {"flag": "-i", "mode": "read", "value": "separate"},
                     ],
@@ -1229,6 +1236,14 @@ class TestDerivedCommandRegistry:
         assert [item["root"] for item in catalog] == ["sentinel"]
         assert entry is not None
         assert entry["description"] == "Inspect a target."
+        assert entry["requires_secrets"] == [
+            {
+                "env": "VT_API_KEY",
+                "inject_env": "VTCLI_APIKEY",
+                "fallback_envs": ["VTCLI_APIKEY"],
+                "optional": False,
+            },
+        ]
         entry_flags = entry.get("flags")
         workspace_flags = entry.get("workspace_flags")
         assert isinstance(entry_flags, list)

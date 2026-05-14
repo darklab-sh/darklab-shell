@@ -250,6 +250,7 @@ def command_catalog_index():
             "root": entry.get("root"),
             "category": entry.get("category"),
             "description": entry.get("description"),
+            "requires_secrets": entry.get("requires_secrets") if isinstance(entry.get("requires_secrets"), list) else [],
             "example_count": len(examples) if isinstance(examples, list) else 0,
             "subcommand_count": len(subcommands) if isinstance(subcommands, list) else 0,
             "flag_count": len(flags) if isinstance(flags, list) else 0,

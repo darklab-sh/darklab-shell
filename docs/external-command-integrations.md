@@ -105,6 +105,8 @@ requires_secrets:
 
 `inject_env` is for tools whose runtime variable name differs from the app-facing secret name. `fallback_envs` lets users store an accepted vendor-native name too. The shipped VirusTotal CLI entry accepts `VT_API_KEY` or `VTCLI_APIKEY` from the encrypted vault and always launches `vt` with `VTCLI_APIKEY` in its environment.
 
+The Options Secrets picker reads this command-registry metadata so users see the known tool key names first. Custom names remain available for local registry overlays and future integrations.
+
 Run output is also filtered before it is captured or streamed: absolute paths under the current session workspace are displayed as user-facing workspace paths. For example:
 
 ```text

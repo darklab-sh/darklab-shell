@@ -4674,6 +4674,26 @@ describe('app helpers', () => {
   it('adds encrypted secrets through the replace-only options prompt', async () => {
     let secrets = []
     const apiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/commands/catalog') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            restricted: true,
+            commands: [{
+              root: 'vt',
+              category: 'External Intelligence',
+              description: 'VirusTotal lookups',
+              requires_secrets: [{
+                env: 'VT_API_KEY',
+                inject_env: 'VTCLI_APIKEY',
+                fallback_envs: ['VTCLI_APIKEY'],
+                optional: false,
+              }],
+            }],
+            groups: [],
+          }),
+        })
+      }
       if (url === '/session/secrets' && opts.method === 'POST') {
         const body = JSON.parse(opts.body)
         secrets = [{
@@ -4689,20 +4709,24 @@ describe('app helpers', () => {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
     const showConfirm = vi.fn().mockImplementation(async (opts) => {
+      const select = opts.content[0].querySelector('select')
       const inputs = opts.content.flatMap(node => Array.from(node.querySelectorAll('input')))
       expect(opts.content.map(node => node.querySelector('.options-secret-field-label')?.textContent).filter(Boolean)).toEqual([
-        'Secret name',
+        'Secret',
+        'Custom secret name',
         'API key or token',
         'Consumer envs',
       ])
+      expect([...select.options].map(option => option.value)).toContain('VT_API_KEY')
+      expect([...select.options].map(option => option.value)).toContain('VTCLI_APIKEY')
+      select.value = 'VT_API_KEY'
+      select.dispatchEvent(new Event('change'))
       expect(inputs[0].getAttribute('data-bwignore')).toBe('true')
       expect(inputs[1].autocomplete).toBe('off')
       expect(inputs[1].placeholder).toBe('Paste API key or token')
       expect(inputs[1].getAttribute('data-bwignore')).toBe('true')
       expect(inputs[2].getAttribute('data-bwignore')).toBe('true')
-      inputs[0].value = 'vt_api_key'
       inputs[1].value = 'value-that-must-not-render'
-      inputs[2].value = 'VT_API_KEY, VIRUSTOTAL_TOKEN'
       const ok = await opts.actions.find(action => action.id === 'save').onActivate()
       return ok ? 'save' : null
     })
@@ -4717,10 +4741,57 @@ describe('app helpers', () => {
     expect(postBody).toEqual({
       name: 'VT_API_KEY',
       value: 'value-that-must-not-render',
-      consumer_envs: ['VT_API_KEY', 'VIRUSTOTAL_TOKEN'],
+      consumer_envs: undefined,
     })
     await vi.waitFor(() => expect(document.getElementById('options-secrets-list').textContent).toContain('VT_API_KEY'))
     expect(document.getElementById('options-secrets-list').textContent).not.toContain('value-that-must-not-render')
+  })
+
+  it('keeps a custom secret escape hatch with an unused-secret warning', async () => {
+    let secrets = []
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/commands/catalog') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ restricted: true, commands: [], groups: [] }),
+        })
+      }
+      if (url === '/session/secrets' && opts.method === 'POST') {
+        const body = JSON.parse(opts.body)
+        secrets = [{ name: body.name, consumer_envs: body.consumer_envs, updated_at: '2026-05-14T10:00:00+00:00' }]
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(secrets[0]) })
+      }
+      if (url === '/session/secrets') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ secrets }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const showConfirm = vi.fn().mockImplementation(async (opts) => {
+      const select = opts.content[0].querySelector('select')
+      const inputs = opts.content.flatMap(node => Array.from(node.querySelectorAll('input')))
+      expect(opts.content.map(node => node.textContent).join(' ')).toContain('Custom secrets are stored')
+      select.value = '__custom__'
+      select.dispatchEvent(new Event('change'))
+      inputs[0].value = 'future_api_key'
+      inputs[1].value = 'custom-secret-value'
+      inputs[2].value = 'FUTURE_API_KEY'
+      const ok = await opts.actions.find(action => action.id === 'save').onActivate()
+      return ok ? 'save' : null
+    })
+    await loadAppFns({ apiFetch, showConfirm })
+
+    document.getElementById('options-secret-new-btn').click()
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/session/secrets', expect.objectContaining({
+      method: 'POST',
+    })))
+
+    const postBody = JSON.parse(apiFetch.mock.calls.find(([url, opts]) => url === '/session/secrets' && opts?.method === 'POST')[1].body)
+    expect(postBody).toEqual({
+      name: 'FUTURE_API_KEY',
+      value: 'custom-secret-value',
+      consumer_envs: ['FUTURE_API_KEY'],
+    })
+    expect(document.getElementById('options-secrets-msg').textContent).toContain('not currently used')
   })
 
   it('opens the encrypted secret prompt for terminal secret set without echoing the value', async () => {
