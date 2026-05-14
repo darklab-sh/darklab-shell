@@ -1013,7 +1013,7 @@ erDiagram
 - `session_variables` — one row per session command variable `(session_id, name, value, updated)`. Backs the `var` built-in, `/session/variables`, and app-managed command expansion before validation.
 - `user_workflows` — one row per saved workflow `(id, session_id, title, description, inputs, steps, created, updated)`. Backs the Workflows panel's **My workflows** section, the `workflow` terminal command, and session-token migration.
 - `recent_domains` — one row per recently used domain per session `(session_id, domain, last_used, use_count)`. Backs domain autocomplete across browsers that share the same named session token and follows the session-token migration path.
-- `secrets` — one row per encrypted secret per session `(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at)`. Values are AES-GCM ciphertext and are never returned by list routes or stored in transcripts. The wrapping key comes from `SECRETS_MASTER_KEY` or `<data_dir>/.secrets_master_key`, with a fixed HKDF-SHA256 app context deriving the key used for row encryption. When the key file is used, the app creates or repairs it with `0600` permissions.
+- `secrets` — one row per encrypted secret name per session `(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at)`, with a unique `(session_token, name)` binding so replacing a secret updates the existing row. Values are AES-GCM ciphertext and are never returned by list routes or stored in transcripts. The wrapping key comes from `SECRETS_MASTER_KEY` or `<data_dir>/.secrets_master_key`, with a fixed HKDF-SHA256 app context deriving the key used for row encryption. When the key file is used, the app creates or repairs it with `0600` permissions.
 - `projects` — one row per project/case folder. Stores session ownership, display metadata, status, timestamps, and a session-scoped slug. Project notes are stored through `entity_notes` with `entity_type='project'`.
 - `project_links` — generic project membership rows `(project_id, entity_type, entity_id)`. The app owns the valid entity vocabulary and link sources so projects can link completed runs without copying source data. Run-owned records such as file artifacts and findings are intentionally reached through linked runs instead of direct project links.
 - `run_file_artifacts` — durable file manifest rows for workspace files produced or consumed by a run, including recorded size and optional SHA-256 content checksum so project views can flag missing or changed workspace files. This is separate from `run_output_artifacts`, which stores the terminal transcript artifact behind a run permalink.
@@ -1251,12 +1251,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,685
+- behavior tests: 2,686
 - docs/inventory meta-tests: 32
 - `pytest`: 1346 (1314 behavior + 32 meta)
-- `vitest`: 1122
+- `vitest`: 1123
 - `playwright`: 249
-- total: 2,717
+- total: 2,718
 
 ### Testing Architecture
 

@@ -457,6 +457,10 @@ describe('app helpers', () => {
     const saved = document.getElementById('options-prompt-username-saved')
     expect(promptPrefix.textContent).toBe('nona@darklab.sh:/ $')
     expect(input.value).toBe('nona')
+    expect(input.getAttribute('aria-label')).toBe('Prompt name')
+    expect(input.getAttribute('data-bwignore')).toBe('true')
+    expect(input.getAttribute('data-1p-ignore')).toBe('true')
+    expect(input.getAttribute('data-lpignore')).toBe('true')
     expect(saved.classList.contains('u-hidden')).toBe(true)
 
     input.value = 'ops-user'
@@ -4686,6 +4690,16 @@ describe('app helpers', () => {
     })
     const showConfirm = vi.fn().mockImplementation(async (opts) => {
       const inputs = opts.content.flatMap(node => Array.from(node.querySelectorAll('input')))
+      expect(opts.content.map(node => node.querySelector('.options-secret-field-label')?.textContent).filter(Boolean)).toEqual([
+        'Secret name',
+        'API key or token',
+        'Consumer envs',
+      ])
+      expect(inputs[0].getAttribute('data-bwignore')).toBe('true')
+      expect(inputs[1].autocomplete).toBe('off')
+      expect(inputs[1].placeholder).toBe('Paste API key or token')
+      expect(inputs[1].getAttribute('data-bwignore')).toBe('true')
+      expect(inputs[2].getAttribute('data-bwignore')).toBe('true')
       inputs[0].value = 'vt_api_key'
       inputs[1].value = 'value-that-must-not-render'
       inputs[2].value = 'VT_API_KEY, VIRUSTOTAL_TOKEN'
@@ -4737,7 +4751,7 @@ describe('app helpers', () => {
 
     expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
       body: expect.objectContaining({
-        note: expect.stringContaining('never returned by list routes'),
+        note: expect.stringContaining('never shown here again'),
       }),
     }))
     const postBody = JSON.parse(apiFetch.mock.calls.find(([url, opts]) => url === '/session/secrets' && opts?.method === 'POST')[1].body)

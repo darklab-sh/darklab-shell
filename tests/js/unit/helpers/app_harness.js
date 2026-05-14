@@ -260,7 +260,7 @@ export async function loadAppFns({
         <option value="10">10</option>
         <option value="all">all</option>
       </select>
-      <input id="options-prompt-username-input" />
+      <input id="options-prompt-username-input" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Prompt name" data-bwignore="true" data-1p-ignore="true" data-lpignore="true" />
       <div id="options-prompt-username-error" class="u-hidden"></div>
       <div id="options-prompt-username-saved" class="u-hidden"></div>
       <div id="shell-input-row" data-mobile-label="$">

@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,685
+- behavior tests: 2,686
 - docs/inventory meta-tests: 32
 - `pytest`: 1346 (1314 behavior + 32 meta)
-- `vitest`: 1122
+- `vitest`: 1123
 - `playwright`: 249
-- total: 2,717
+- total: 2,718
 
 This document is organized in two parts:
 
@@ -2203,6 +2203,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `runCommand shows a fetch error when the /runs request rejects` | Verifies that runCommand shows a fetch error when the `/runs` request rejects. |
 | `runCommand handles a 500 response as a friendly server error` | Verifies that runCommand handles a 500 response as a friendly server error. |
 | `runCommand handles a 403 response as a denied command` | Verifies that runCommand handles a 403 response as a denied command. |
+| `runCommand shows the missing-secret setup hint from the server` | Verifies that missing required secret denials render the server-provided setup hint in the terminal. |
 | `runCommand handles a 429 response as rate limited` | Verifies that runCommand handles a 429 response as rate limited. |
 | `runCommand dismisses the mobile keyboard after a successful submit` | Verifies that runCommand dismisses the mobile keyboard after a successful submit. |
 | `runCommand cancels and clears welcome output when the active tab owns welcome` | Verifies that runCommand cancels and clears welcome output when the active tab owns welcome. |

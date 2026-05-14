@@ -1789,6 +1789,36 @@ describe('runner helpers', () => {
     expect(runBtn.disabled).toBe(false)
   })
 
+  it('runCommand shows the missing-secret setup hint from the server', async () => {
+    const apiFetch = vi.fn(() =>
+      Promise.resolve({
+        status: 403,
+        json: () => Promise.resolve({
+          error: 'Run requires secret SHODAN_API_KEY which is not set. Set it via "secret set NAME" or the Options > Secrets panel.',
+        }),
+      }),
+    )
+    const appendLine = vi.fn()
+    const { runCommand, status, runBtn } = loadRunnerFns({
+      cmdValue: 'shodan host ip.darklab.sh',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      appendLine,
+    })
+
+    runCommand()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(appendLine).toHaveBeenLastCalledWith(
+      '[denied] Run requires secret SHODAN_API_KEY which is not set. Set it via "secret set NAME" or the Options > Secrets panel.',
+      'denied',
+      'tab-1',
+    )
+    expect(status.className).toBe('status-pill fail')
+    expect(runBtn.disabled).toBe(false)
+  })
+
   it('runCommand handles a 429 response as rate limited', async () => {
     const apiFetch = vi.fn(() =>
       Promise.resolve({

@@ -188,16 +188,22 @@ async function openSecretEditor({ secret = null, name = '', source = 'options' }
   nameInput.autocorrect = 'off';
   nameInput.spellcheck = false;
   nameInput.inputMode = 'text';
+  nameInput.setAttribute('data-bwignore', 'true');
+  nameInput.setAttribute('data-1p-ignore', 'true');
+  nameInput.setAttribute('data-lpignore', 'true');
 
   const valueInput = document.createElement('input');
   valueInput.type = 'password';
   valueInput.className = 'options-token-input';
-  valueInput.placeholder = isExisting ? 'New value' : 'Secret value';
-  valueInput.autocomplete = 'new-password';
+  valueInput.placeholder = isExisting ? 'Paste replacement API key or token' : 'Paste API key or token';
+  valueInput.autocomplete = 'off';
   valueInput.autocapitalize = 'none';
   valueInput.autocorrect = 'off';
   valueInput.spellcheck = false;
   valueInput.inputMode = 'text';
+  valueInput.setAttribute('data-bwignore', 'true');
+  valueInput.setAttribute('data-1p-ignore', 'true');
+  valueInput.setAttribute('data-lpignore', 'true');
 
   const consumersInput = document.createElement('input');
   consumersInput.type = 'text';
@@ -209,6 +215,9 @@ async function openSecretEditor({ secret = null, name = '', source = 'options' }
   consumersInput.autocorrect = 'off';
   consumersInput.spellcheck = false;
   consumersInput.inputMode = 'text';
+  consumersInput.setAttribute('data-bwignore', 'true');
+  consumersInput.setAttribute('data-1p-ignore', 'true');
+  consumersInput.setAttribute('data-lpignore', 'true');
 
   const err = document.createElement('div');
   err.className = 'options-session-token-msg is-error';
@@ -219,8 +228,8 @@ async function openSecretEditor({ secret = null, name = '', source = 'options' }
   note.textContent = 'Stored values are replace-only and cannot be revealed from this panel.';
 
   const content = [
-    _optionsSecretInput('Name', nameInput),
-    _optionsSecretInput(isExisting ? 'Replacement value' : 'Value', valueInput),
+    _optionsSecretInput('Secret name', nameInput),
+    _optionsSecretInput(isExisting ? 'Replacement API key or token' : 'API key or token', valueInput),
     _optionsSecretInput('Consumer envs', consumersInput),
     note,
     err,
@@ -280,7 +289,7 @@ async function openSecretEditor({ secret = null, name = '', source = 'options' }
   const choice = await showConfirm({
     body: {
       text: isExisting ? `Replace ${existingName}?` : 'Store a new encrypted secret.',
-      note: 'The value is sent to the server once, encrypted, and never returned by list routes.',
+      note: 'The value is sent to the server once, encrypted, and never shown here again.',
     },
     content,
     defaultFocus: isExisting ? valueInput : nameInput,
