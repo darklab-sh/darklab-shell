@@ -652,6 +652,7 @@ function _streamOutputMetadata(msg) {
   if (Number.isInteger(msg.line_index)) metadata.line_index = msg.line_index;
   if (typeof msg.command_root === 'string' && msg.command_root) metadata.command_root = msg.command_root;
   if (typeof msg.target === 'string' && msg.target) metadata.target = msg.target;
+  if (Array.isArray(msg.entities) && msg.entities.length) metadata.entities = msg.entities;
   return Object.keys(metadata).length ? metadata : null;
 }
 

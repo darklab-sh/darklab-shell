@@ -8,8 +8,18 @@ can agree on what counts as a finding, warning, error, or summary line.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ipaddress
 import re
 from urllib.parse import urlparse
+
+from services.intel.canonical import (
+    CanonicalizationError,
+    canonical_cve,
+    canonical_domain,
+    canonical_hash,
+    canonical_ip,
+    detect_hash_algorithm,
+)
 
 
 SIGNAL_SCOPES = ("findings", "warnings", "errors", "summaries")
@@ -157,6 +167,62 @@ _HOSTNAME_RE = re.compile(
     re.I,
 )
 _NMAP_REPORT_TARGET_RE = re.compile(r"^Nmap scan report for\s+(.+?)(?:\s+\(([^)]+)\))?$", re.I)
+_ENTITY_IPV4_RE = re.compile(
+    r"(?<![\w.])(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}(?![\w.])"
+)
+_ENTITY_IPV6_RE = re.compile(r"(?<![\w:])(?:[0-9a-f]{0,4}:){2,}[0-9a-f:.%]{0,45}(?![\w:])", re.I)
+_ENTITY_HOSTNAME_RE = re.compile(
+    r"(?<![@\w-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}\.?(?![\w-])",
+    re.I,
+)
+_ENTITY_URL_RE = re.compile(r"https?://[^\s<>'\"]+", re.I)
+_ENTITY_HASH_RE = re.compile(r"(?<![0-9a-f])(?:[0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{64})(?![0-9a-f])", re.I)
+_ENTITY_CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,}\b", re.I)
+_ENTITY_FILELIKE_SUFFIXES = {
+    "bak", "cfg", "conf", "csv", "db", "gz", "html", "ini", "js", "json", "log", "md",
+    "out", "sqlite", "txt", "xml", "yaml", "yml", "zip",
+}
+
+
+def _is_public_ip(value: str) -> bool:
+    try:
+        return ipaddress.ip_address(value).is_global
+    except ValueError:
+        return False
+
+
+def _entity_confidence(entity_type: str) -> str:
+    return "medium" if entity_type == "domain" else "high"
+
+
+def _add_entity(
+    entities: list[dict[str, object]],
+    seen: set[tuple[str, str]],
+    *,
+    entity_type: str,
+    value: str,
+    canonical_value: str,
+    source_line: int | None,
+) -> None:
+    key = (entity_type, canonical_value)
+    if key in seen:
+        return
+    seen.add(key)
+    item: dict[str, object] = {
+        "type": entity_type,
+        "value": value,
+        "canonical_value": canonical_value,
+        "confidence": _entity_confidence(entity_type),
+    }
+    if source_line is not None:
+        item["source_line"] = source_line
+    entities.append(item)
+
+
+def _looks_like_file_hostname(value: str) -> bool:
+    token = str(value or "").strip().rstrip(".").lower()
+    suffix = token.rsplit(".", 1)[-1] if "." in token else ""
+    return suffix in _ENTITY_FILELIKE_SUFFIXES
 
 
 def strip_ansi_codes(value: str) -> str:
@@ -171,6 +237,76 @@ def _normalize_signal_text(value: str) -> str:
     # Match against plain text while preserving the original ANSI-rich line for
     # terminal rendering, history, exports, and shares.
     return _strip_ansi_codes(str(value or "")).strip()
+
+
+def extract_entities(text: str, *, include_private_ips: bool = False, source_line: int | None = None) -> list[dict[str, object]]:
+    stripped = _normalize_signal_text(text)
+    if not stripped:
+        return []
+
+    entities: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+
+    for match in _ENTITY_IPV4_RE.finditer(stripped):
+        raw = match.group(0)
+        try:
+            canonical = canonical_ip(raw)
+        except CanonicalizationError:
+            continue
+        if not include_private_ips and not _is_public_ip(canonical):
+            continue
+        _add_entity(entities, seen, entity_type="ip", value=raw, canonical_value=canonical, source_line=source_line)
+
+    for match in _ENTITY_IPV6_RE.finditer(stripped):
+        raw = match.group(0).strip("[]")
+        try:
+            canonical = canonical_ip(raw)
+        except CanonicalizationError:
+            continue
+        if "." in canonical:
+            continue
+        if not include_private_ips and not _is_public_ip(canonical):
+            continue
+        _add_entity(entities, seen, entity_type="ip", value=raw, canonical_value=canonical, source_line=source_line)
+
+    for match in _ENTITY_URL_RE.finditer(stripped):
+        host = urlparse(match.group(0)).hostname or ""
+        if not host or _looks_like_file_hostname(host):
+            continue
+        try:
+            canonical = canonical_domain(host)
+        except CanonicalizationError:
+            continue
+        _add_entity(entities, seen, entity_type="domain", value=host, canonical_value=canonical, source_line=source_line)
+
+    for match in _ENTITY_HOSTNAME_RE.finditer(stripped):
+        raw = match.group(0).rstrip(".")
+        if _looks_like_file_hostname(raw):
+            continue
+        try:
+            canonical = canonical_domain(raw)
+        except CanonicalizationError:
+            continue
+        _add_entity(entities, seen, entity_type="domain", value=raw, canonical_value=canonical, source_line=source_line)
+
+    for match in _ENTITY_HASH_RE.finditer(stripped):
+        raw = match.group(0)
+        try:
+            algorithm = detect_hash_algorithm(raw)
+            canonical = canonical_hash(raw, algorithm=algorithm)
+        except CanonicalizationError:
+            continue
+        _add_entity(entities, seen, entity_type="hash", value=raw, canonical_value=canonical, source_line=source_line)
+
+    for match in _ENTITY_CVE_RE.finditer(stripped):
+        raw = match.group(0)
+        try:
+            canonical = canonical_cve(raw)
+        except CanonicalizationError:
+            continue
+        _add_entity(entities, seen, entity_type="cve", value=raw, canonical_value=canonical, source_line=source_line)
+
+    return entities
 
 
 def _looks_like_clean_url(value: str) -> bool:
@@ -436,6 +572,10 @@ class OutputSignalClassifier:
             metadata["target"] = target
         if scopes:
             metadata["signals"] = scopes
+        if self.cmd_type not in {"builtin"}:
+            entities = extract_entities(text, source_line=self.line_index)
+            if entities:
+                metadata["entities"] = entities
         self.line_index += 1
         self.previous_text = _normalize_signal_text(text)
         return metadata

@@ -9,7 +9,7 @@ configured data directory.
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 import gzip
 import json
 import os
@@ -106,6 +106,27 @@ class RunOutputCapture:
             while self.preview_bytes > self.preview_max_bytes and len(self.preview_lines) > 1:
                 self._drop_oldest_preview_line()
 
+    @staticmethod
+    def _normalize_entities(entities: Sequence[Mapping[str, object]] | None) -> list[dict[str, object]]:
+        normalized: list[dict[str, object]] = []
+        for entity in entities or []:
+            if not isinstance(entity, Mapping):
+                continue
+            entity_type = str(entity.get("type", "")).strip()
+            canonical_value = str(entity.get("canonical_value", "")).strip()
+            if not entity_type or not canonical_value:
+                continue
+            item: dict[str, object] = {
+                "type": entity_type,
+                "value": str(entity.get("value", "")).strip() or canonical_value,
+                "canonical_value": canonical_value,
+                "confidence": str(entity.get("confidence", "")).strip() or "medium",
+            }
+            if isinstance(entity.get("source_line"), int):
+                item["source_line"] = entity["source_line"]
+            normalized.append(item)
+        return normalized
+
     def add_line(
         self,
         text: str,
@@ -116,6 +137,7 @@ class RunOutputCapture:
         line_index: int | None = None,
         command_root: str = "",
         target: str = "",
+        entities: Sequence[Mapping[str, object]] | None = None,
     ):
         line = str(text).rstrip("\n")
         entry: dict[str, object] = {
@@ -133,6 +155,9 @@ class RunOutputCapture:
             entry["command_root"] = str(command_root)
         if target:
             entry["target"] = str(target)
+        entity_values = self._normalize_entities(entities)
+        if entity_values:
+            entry["entities"] = entity_values
         self.output_line_count += 1
 
         self._append_preview_entry(entry)
@@ -206,5 +231,11 @@ def load_full_output_entries(rel_path: str) -> list[dict[str, object]]:
             entry["command_root"] = item["command_root"]
         if isinstance(item.get("target"), str):
             entry["target"] = item["target"]
+        if isinstance(item.get("entities"), list):
+            entities = RunOutputCapture._normalize_entities([
+                entity for entity in item["entities"] if isinstance(entity, dict)
+            ])
+            if entities:
+                entry["entities"] = entities
         parsed.append(entry)
     return parsed

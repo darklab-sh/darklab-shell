@@ -393,6 +393,10 @@ function _normalizeOutputSignals(signals) {
   return _outputCore.normalizeSignals(signals);
 }
 
+function _normalizeOutputEntities(entities) {
+  return _outputCore.normalizeEntities(entities);
+}
+
 function _applyOutputSignalMetadata(span, rawLine, metadata) {
   if (!metadata || typeof metadata !== 'object') return;
   const signals = _normalizeOutputSignals(metadata.signals);
@@ -415,6 +419,11 @@ function _applyOutputSignalMetadata(span, rawLine, metadata) {
   if (typeof metadata.target === 'string' && metadata.target) {
     rawLine.target = metadata.target;
     span.dataset.signalTarget = metadata.target;
+  }
+  const entities = _normalizeOutputEntities(metadata.entities);
+  if (entities.length) {
+    rawLine.entities = entities;
+    span.dataset.entities = JSON.stringify(entities);
   }
 }
 
@@ -625,6 +634,7 @@ function renderRestoredTabOutput(tabId, rawLines) {
     line_number: Number.isInteger(line && line.line_number) ? line.line_number : undefined,
     command_root: String(line && line.command_root || ''),
     target: String(line && line.target || ''),
+    entities: _normalizeOutputEntities(line && line.entities),
   })) : [];
   out.innerHTML = '';
   resetAnsiRendererForTab(tabId);

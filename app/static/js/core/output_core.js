@@ -97,6 +97,24 @@ var DarklabOutputCore = (function (global) {
       : [];
   }
 
+  function normalizeEntities(entities) {
+    if (!Array.isArray(entities)) return [];
+    return entities.map(entity => {
+      if (!entity || typeof entity !== 'object') return null;
+      const type = String(entity.type || '').trim();
+      const canonicalValue = String(entity.canonical_value || '').trim();
+      if (!type || !canonicalValue) return null;
+      const normalized = {
+        type,
+        value: String(entity.value || canonicalValue).trim() || canonicalValue,
+        canonical_value: canonicalValue,
+        confidence: String(entity.confidence || 'medium').trim() || 'medium',
+      };
+      if (Number.isInteger(entity.source_line)) normalized.source_line = entity.source_line;
+      return normalized;
+    }).filter(Boolean);
+  }
+
   function countableSignalScopes(rawLine, builtinRoots = []) {
     if (!isSignalCountableLine(rawLine)) return [];
     const commandRoot = String(rawLine?.command_root || '').trim();
@@ -118,6 +136,7 @@ var DarklabOutputCore = (function (global) {
     isSignalCountableLine,
     isSignalSummaryClassName,
     lineHasClass,
+    normalizeEntities,
     normalizeSignals,
     normalizeWorkspaceCwd,
     promptIdentityFromParts,

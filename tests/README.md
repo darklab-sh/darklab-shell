@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,714
+- behavior tests: 2,717
 - docs/inventory meta-tests: 32
-- `pytest`: 1373 (1341 behavior + 32 meta)
+- `pytest`: 1376 (1344 behavior + 32 meta)
 - `vitest`: 1124
 - `playwright`: 249
-- total: 2,746
+- total: 2,749
 
 This document is organized in two parts:
 
@@ -595,6 +595,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestOutputSignals.test_classifies_nuclei_findings_by_command` | Verifies that common Nuclei template result lines classify as command-scoped findings. |
 | `TestOutputSignals.test_classifies_warning_error_and_summary_lines` | Verifies that backend output-signal classification separates warning, error, and summary-style lines. |
 | `TestOutputSignals.test_workspace_notices_are_not_output_signals` | Verifies that app-owned workspace read/write notices do not count as findings, warnings, errors, or summaries. |
+| `TestOutputSignals.test_extracts_structured_entities_from_output` | Verifies that backend output metadata extracts public IPs, domains, hashes, and CVEs while skipping loopback addresses and filename-like hostnames. |
+| `TestOutputSignals.test_extract_entities_can_include_private_ips_when_requested` | Verifies that entity extraction can opt into private and loopback IP metadata for explicit caller-controlled contexts. |
+| `TestOutputSignals.test_classifier_adds_entity_metadata_to_real_output` | Verifies that real command output lines carry structured entity metadata with source-line indexes. |
 | `TestOutputSignals.test_nmap_input_file_sections_update_signal_target` | Verifies that nmap input-file scans update output metadata targets as each `Nmap scan report for ...` section starts. |
 | `TestOutputSignals.test_user_killed_process_is_not_an_error` | Verifies that user-killed process notices are not classified as errors. |
 | `TestOutputSignals.test_builtin_classifier_keeps_metadata_but_omits_signals` | Verifies that built-in command output keeps line metadata while omitting findings, warnings, errors, and summaries. |

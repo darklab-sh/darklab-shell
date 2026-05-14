@@ -155,12 +155,12 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Documented the normalized response and provider-pane behavior in `docs/external-command-integrations.md`.
   - Rich browser-card rendering remains deferred until the share/export raw-only marker work needs structured client rendering.
 - **Phase 4 - Entity-aware classifier hooks**
-  - Extend `app/core/output_signals.py` to extract:
-    - IPv4 and IPv6 (with configurable public-context filter that drops loopback/RFC1918 by default).
+  - Extended `app/core/output_signals.py` to extract:
+    - IPv4 and IPv6 (with a caller-controlled public-context filter that drops loopback/RFC1918 by default).
     - Hostnames / FQDNs (IDN-normalized, lowercased).
     - SHA256, SHA1, MD5 hashes (algorithm-tagged).
     - CVE identifiers (`CVE-YYYY-NNNNN`, uppercased).
-  - Add structured line metadata as `entities: [{type, value, canonical_value, confidence, source_line}]` beside the existing `signals` list. Downstream consumers can derive entity-specific events from this metadata without overloading the existing finding/warning/error/summary scopes.
+  - Added structured line metadata as `entities: [{type, value, canonical_value, confidence, source_line}]` beside the existing `signals` list. Downstream consumers can derive entity-specific events from this metadata without overloading the existing finding/warning/error/summary scopes.
   - These events are the foundation that the Session Entity Atlas plan and the Findings inbox consume.
 - **Phase 5 - Sharing, redaction, audit, and tests**
   - `app/core/redaction.py` marks intel response bodies as raw-only. Snapshot permalinks of `intel` runs render a "Intel data omitted from share" placeholder where the card would normally appear. Saved HTML/PDF exports follow the same rule.

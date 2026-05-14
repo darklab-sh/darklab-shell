@@ -455,7 +455,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── database.py         # SQLite connection, schema init, retention pruning
 │   │   ├── helpers.py          # Trusted-proxy IP resolver, session-ID extraction, and shared request helpers
 │   │   ├── logging_setup.py    # Structured logging formatters and logger configuration
-│   │   ├── output_signals.py   # Server-side findings/warnings/errors/summaries classifier
+│   │   ├── output_signals.py   # Server-side output signal and entity classifier
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and in-process fallback
 │   │   └── redaction.py        # Snapshot-share redaction helpers and built-in rule application
 │   ├── extensions.py           # Flask-Limiter singleton (init_app deferred to app.py)

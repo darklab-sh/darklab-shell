@@ -24,6 +24,7 @@ ARG WAFW00F_VERSION=2.4.2
 ARG RUSTSCAN_VERSION=2.4.1
 ARG WPSCAN_VERSION=3.8.28
 ARG VT_CLI_VERSION=latest
+ARG SETUPTOOLS_VERSION=80.9.0
 
 # Remove dpkg config that prevents man pages from being installed
 RUN rm -f /etc/dpkg/dpkg.cfg.d/docker
@@ -125,8 +126,9 @@ RUN ln -s /opt/Nikto/program/nikto.pl /usr/local/bin/nikto
 # Upgrade pip to ensure latest versions of dependencies can be installed
 RUN pip install --upgrade pip
 
-# Install sslyze via pip.
-RUN pip install --upgrade setuptools wheel
+# Install sslyze via pip. Shodan's CLI still imports pkg_resources, so keep a
+# setuptools release that includes that compatibility module.
+RUN pip install --upgrade setuptools==${SETUPTOOLS_VERSION} wheel
 RUN pip install --upgrade sslyze==${SSLYZE_VERSION}
 RUN pip install --upgrade wafw00f==${WAFW00F_VERSION}
 
@@ -150,7 +152,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 # Install external-intel CLIs. These are launched through the same command
 # allowlist and vault-backed environment injection path as other scanner tools.
-RUN pip install --no-cache-dir shodan greynoise
+RUN pip install --no-cache-dir setuptools==${SETUPTOOLS_VERSION} shodan greynoise
 RUN go install -v github.com/VirusTotal/vt-cli/vt@${VT_CLI_VERSION}
 
 

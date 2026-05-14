@@ -18,6 +18,9 @@ function _snapshotTabRawLines(rawLines) {
     line_number: Number.isInteger(line && line.line_number) ? line.line_number : undefined,
     command_root: String(line && line.command_root || ''),
     target: String(line && line.target || ''),
+    entities: window.DarklabOutputCore && typeof window.DarklabOutputCore.normalizeEntities === 'function'
+      ? window.DarklabOutputCore.normalizeEntities(line && line.entities)
+      : [],
   }));
 }
 

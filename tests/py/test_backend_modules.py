@@ -63,7 +63,7 @@ from services.history.permalinks import (
     _permalink_error_page,
     _prompt_echo_text,
 )
-from core.output_signals import OutputSignalClassifier, classify_line, command_root, extract_target
+from core.output_signals import OutputSignalClassifier, classify_line, command_root, extract_entities, extract_target
 from services.runs.output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_entries, load_full_output_lines
 from services.workspace.files import (
     InvalidWorkspacePath, WorkspaceDisabled, WorkspacePermissionDenied, WorkspaceQuotaExceeded,
@@ -4486,6 +4486,40 @@ class TestOutputSignals:
         assert metadata["command_root"] == "nmap"
         assert "signals" not in metadata
 
+    def test_extracts_structured_entities_from_output(self):
+        sha256 = "a" * 64
+        entities = extract_entities(
+            f"https://Bücher.Example/path CVE-2024-12345 {sha256} 8.8.8.8 127.0.0.1 subs.txt",
+            source_line=7,
+        )
+
+        by_type = {(item["type"], item["canonical_value"]): item for item in entities}
+        assert ("domain", "xn--bcher-kva.example") in by_type
+        assert ("cve", "CVE-2024-12345") in by_type
+        assert ("hash", f"sha256:{sha256}") in by_type
+        assert ("ip", "8.8.8.8") in by_type
+        assert ("ip", "127.0.0.1") not in by_type
+        assert ("domain", "subs.txt") not in by_type
+        assert all(item["source_line"] == 7 for item in entities)
+
+    def test_extract_entities_can_include_private_ips_when_requested(self):
+        entities = extract_entities("localhost-ish: 127.0.0.1 and fd00::1", include_private_ips=True)
+        values = {(item["type"], item["canonical_value"]) for item in entities}
+
+        assert ("ip", "127.0.0.1") in values
+        assert ("ip", "fd00::1") in values
+
+    def test_classifier_adds_entity_metadata_to_real_output(self):
+        classifier = OutputSignalClassifier("host darklab.sh")
+        metadata = classifier.classify_line("darklab.sh has address 104.21.4.35")
+
+        entities = metadata["entities"]
+        assert isinstance(entities, list)
+        values = {(item["type"], item["canonical_value"]) for item in entities}
+        assert ("domain", "darklab.sh") in values
+        assert ("ip", "104.21.4.35") in values
+        assert all(item["source_line"] == 0 for item in entities)
+
     def test_nmap_input_file_sections_update_signal_target(self):
         classifier = OutputSignalClassifier("nmap -iL darklab_inputs.txt -sT")
 
@@ -4511,6 +4545,7 @@ class TestOutputSignals:
         assert metadata["line_index"] == 0
         assert metadata["command_root"] == "status"
         assert "signals" not in metadata
+        assert "entities" not in metadata
 
 
 class TestRunOutputCapture:
@@ -4595,6 +4630,13 @@ class TestRunOutputCapture:
             line_index=0,
             command_root="nmap",
             target="ip.darklab.sh",
+            entities=[{
+                "type": "domain",
+                "value": "ip.darklab.sh",
+                "canonical_value": "ip.darklab.sh",
+                "confidence": "medium",
+                "source_line": 0,
+            }],
         )
         capture.finalize()
 
@@ -4607,6 +4649,13 @@ class TestRunOutputCapture:
             "line_index": 0,
             "command_root": "nmap",
             "target": "ip.darklab.sh",
+            "entities": [{
+                "type": "domain",
+                "value": "ip.darklab.sh",
+                "canonical_value": "ip.darklab.sh",
+                "confidence": "medium",
+                "source_line": 0,
+            }],
         }]
         assert list(capture.preview_lines) == expected
         assert capture.artifact_rel_path is not None

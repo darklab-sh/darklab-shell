@@ -228,6 +228,7 @@ def _capture_add_line_with_signals(capture, classifier, text, *, cls="", ts_cloc
         line_index=metadata.get("line_index") if isinstance(metadata.get("line_index"), int) else None,
         command_root=str(metadata.get("command_root", "")),
         target=str(metadata.get("target", "")),
+        entities=metadata.get("entities") if isinstance(metadata.get("entities"), list) else None,
     )
     return metadata
 
@@ -245,6 +246,8 @@ def _broker_output_payload(event_type, text, *, cls="", metadata=None):
             payload["command_root"] = metadata["command_root"]
         if isinstance(metadata.get("target"), str):
             payload["target"] = metadata["target"]
+        if isinstance(metadata.get("entities"), list):
+            payload["entities"] = metadata["entities"]
     return payload
 
 
