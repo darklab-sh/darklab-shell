@@ -56,6 +56,7 @@ from services.commands.builtins_session import (
     run_builtin_session_token as _run_builtin_session_token,
     run_builtin_var as _run_builtin_var,
 )
+from services.commands.builtins_secrets import run_builtin_secret as _run_builtin_secret
 from services.commands.builtins_shortcuts import (
     get_current_shortcuts as _get_current_shortcuts,
     run_builtin_shortcuts as _run_builtin_shortcuts,
@@ -322,6 +323,7 @@ _BUILTIN_COMMAND_DISPATCH = {
     "rm_root":   lambda cmd, sid: _run_builtin_rm_root(),
     "route":     lambda cmd, sid: _run_builtin_route(),
     "runs":      lambda cmd, sid: _run_builtin_runs(cmd, sid),
+    "secret":    lambda cmd, sid: _run_builtin_secret(cmd, sid),
     "session-token": lambda cmd, sid: _run_builtin_session_token(cmd, sid),
     "shortcuts": lambda cmd, sid: _run_builtin_shortcuts(),
     "sort":      lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),

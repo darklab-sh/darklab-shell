@@ -509,6 +509,13 @@ class TestRateLimitEvent:
         data = json.loads(response.data)
         assert "error" in data
 
+        with shell_app.app.test_request_context("/session/secrets", method="POST"):
+            response, status = shell_app._rate_limit_handler(e)
+        assert status == 429
+        data = json.loads(response.data)
+        assert data["error"] == "rate_limited"
+        assert "retry_after" in data
+
 
 class TestHealthFailEvents:
     """HEALTH_DB_FAIL and HEALTH_REDIS_FAIL are emitted at ERROR."""

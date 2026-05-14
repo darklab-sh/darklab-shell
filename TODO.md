@@ -49,7 +49,8 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - Non-Docker dev bootstrap uses the same app-owned key-file path as Docker: when `SECRETS_MASTER_KEY` is unset, `app/services/secrets/vault.py` creates `<data_dir>/.secrets_master_key` with mode `0600` on first use and logs `MASTER_KEY_GENERATED`.
 - **Phase 1 - Backend contracts**
   - New `app/services/secrets/` service: `vault.py` (wrap/unwrap with AES-GCM + per-secret nonce), `storage.py` (SQLite `secrets` table `(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at)`), `audit.py` (emits structured events without value content).
-  - Master key sourced from `SECRETS_MASTER_KEY` env. Reject startup if shorter than 32 bytes (base64-decoded). HKDF-SHA256 with a fixed application salt derives the wrapping key.
+  - Master key resolution follows the pinned Open Decisions: `SECRETS_MASTER_KEY` wins when set; otherwise `<data_dir>/.secrets_master_key` is generated or loaded. The decoded key must be exactly 32 bytes. HKDF-SHA256 with fixed application salt/info derives the wrapping key.
+  - Add the `secrets` table migration in `app/core/database.py` during Phase 1 so the route contracts are live and testable. Phase 2 keeps the Docker/operator bootstrap polish and migration-path verification.
   - Routes in new `app/blueprints/secrets.py`:
     - `GET /session/secrets` returns `[{name, consumer_envs, updated_at}]` only — never values.
     - `POST /session/secrets` accepts `{name, value, consumer_envs?}`. `201` on create, `200` on update.
@@ -58,8 +59,12 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Built-ins in new `app/services/commands/builtins_secrets.py`: `secret set NAME` (transcript-suppressed value entry; the command line that triggered the call must not include the value), `secret list`, `secret unset NAME`, `secret show-consumers` (lists tools in `commands.yaml` declaring each env).
   - Audit log: `SECRET_CREATED`, `SECRET_UPDATED`, `SECRET_DELETED`, `SECRET_INJECTED` (one per run with consumer env names only).
   - Rate-limit secrets routes with a dedicated limit so brute-force scanning of secret names is blocked.
+  - **Phase 1 findings:**
+    - The backend contracts are live behind metadata-only `/session/secrets` routes and the `secret` built-in family.
+    - The browser-owned value-entry modal remains the right follow-up for `secret set NAME`; until that surface exists, the built-in opens the safe terminal contract without accepting a value on the command line.
+    - The table migration belongs in Phase 1 because the route contracts and storage tests need a real table to prove the metadata-only/no-value-return behavior.
 - **Phase 2 - Storage and master key bootstrap**
-  - Add the `secrets` table migration in `app/core/database.py` with a unique index on `(session_token, name)`.
+  - Verify the `secrets` table migration path against existing dev databases and ensure the unique index on `(session_token, name)` is present after repeated `db_init()` runs.
   - `app/services/secrets/vault.py` generates `<data_dir>/.secrets_master_key` (mode `0600`) on first use if `SECRETS_MASTER_KEY` is unset; emits a one-time `MASTER_KEY_GENERATED` log line. Docker uses the same app-owned bootstrap path rather than a parallel entrypoint-only flow.
   - Operator can override via `SECRETS_MASTER_KEY` env to use an externally managed key (KMS, Vault, manual operator key).
   - Session-token rotate/migrate re-keys secret rows to the new session token but does not change ciphertext (only the row key); migration is idempotent.

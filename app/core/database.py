@@ -170,7 +170,24 @@ def _create_schema(conn):
             PRIMARY KEY (session_id, domain)
         )
     """)
+    _create_secrets_schema(conn)
     _create_project_workspace_schema(conn)
+
+
+def _create_secrets_schema(conn):
+    """Create encrypted per-session secret storage."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS secrets (
+            session_token TEXT NOT NULL,
+            name          TEXT NOT NULL,
+            ciphertext    BLOB NOT NULL,
+            nonce         BLOB NOT NULL,
+            consumer_envs TEXT NOT NULL DEFAULT '[]',
+            created_at    TEXT NOT NULL,
+            updated_at    TEXT NOT NULL,
+            PRIMARY KEY (session_token, name)
+        )
+    """)
 
 
 def _create_project_workspace_schema(conn):
@@ -336,6 +353,10 @@ def _create_indexes(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_recent_domains_session_last_used "
         "ON recent_domains (session_id, last_used DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_secrets_session_updated "
+        "ON secrets (session_token, updated_at DESC)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_projects_session_status_updated "
@@ -604,6 +625,11 @@ def _migrate_schema(conn):
                 PRIMARY KEY (session_id, domain)
             )
         """)
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        _create_secrets_schema(conn)
     except sqlite3.OperationalError:
         pass
 

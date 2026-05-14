@@ -424,6 +424,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── history.py          # /history*, /share*; preview/full-output shaping helpers
 │   │   ├── projects.py         # /projects* project workspace CRUD and relationship routes
 │   │   ├── run.py              # /runs broker starts/streams, /run/client history persistence, /kill, and run orchestration
+│   │   ├── secrets.py          # /session/secrets* encrypted per-session secret metadata and write routes
 │   │   ├── session.py          # /session/token/*, /session/preferences, /session/variables, /session/workflows*, /session/recent-domains, /session/migrate, /session/starred*
 │   │   └── workspace.py        # /workspace/files* app-managed session file routes
 │   ├── conf/                   # Operator-configurable files — edit these to customize the deployment
@@ -464,6 +465,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── builtins_misc.py # Miscellaneous and guardrail-flavored built-in command handlers
 │   │   │   ├── builtins_project.py # Project workspace built-in command family and project target helpers
 │   │   │   ├── builtins_runtime.py # Runtime/history/status built-in command handlers
+│   │   │   ├── builtins_secrets.py # Encrypted session secret built-in command handlers
 │   │   │   ├── builtins_session.py # Session token status and session variable built-in command handlers
 │   │   │   ├── builtins_shortcuts.py # Keyboard shortcut reference and shortcuts built-in command handler
 │   │   │   ├── builtins_system.py # Small system-style built-in command handlers
@@ -497,6 +499,11 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── output_store.py # Preview/full-output capture and artifact persistence helpers
 │   │   │   ├── streaming.py    # Low-level subprocess stdout readiness, nonblocking read, and cleanup helpers
 │   │   │   └── workspace_artifacts.py # Run-scoped workspace artifact detection and size helpers
+│   │   ├── secrets/
+│   │   │   ├── __init__.py     # Secrets service package marker
+│   │   │   ├── audit.py        # Structured audit events for secret metadata operations
+│   │   │   ├── storage.py      # SQLite metadata and ciphertext row helpers for encrypted session secrets
+│   │   │   └── vault.py        # Master-key loading, HKDF derivation, and AES-GCM wrap/unwrap helpers
 │   │   ├── session/
 │   │   │   ├── __init__.py     # Session service package marker
 │   │   │   └── variables.py    # Per-session command-variable storage and expansion helpers

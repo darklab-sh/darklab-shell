@@ -5,6 +5,7 @@ Run with: pytest tests/ (from the repo root)
 """
 
 import errno
+import base64
 import hashlib
 import io
 import json
@@ -29,8 +30,9 @@ import blueprints.history as history_routes
 import blueprints.projects as project_routes
 import config
 import services.runs.comparison as run_comparison
+import services.secrets.vault as secrets_vault
 from services.commands.builtins import execute_builtin_command
-from core.database import DB_PATH, db_connect
+from core.database import DB_PATH, db_connect, db_init
 from services.projects.workspace import record_run_findings
 from services.workspace.files import resolve_workspace_path
 
@@ -166,6 +168,84 @@ class TestHealthRoute:
         data = json.loads(resp.data)
         assert data["status"] == "degraded"
         assert data["redis"] is False
+
+
+class TestSecretsRoutes:
+    def _secret_client(self, monkeypatch, tmp_path):
+        key = base64.b64encode(b"b" * 32).decode("ascii")
+        monkeypatch.setenv("SECRETS_MASTER_KEY", key)
+        monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path))
+        secrets_vault.reset_master_key_cache_for_tests()
+        db_path = str(tmp_path / "secrets-routes.db")
+        lock_path = str(tmp_path / "secrets-routes.lock")
+        patchers = [
+            mock.patch("core.database.DB_PATH", db_path),
+            mock.patch("core.database.DB_INIT_LOCK_PATH", lock_path),
+        ]
+        for patcher in patchers:
+            patcher.start()
+        db_init()
+        client = get_client()
+        return client, patchers
+
+    def test_session_secrets_crud_never_returns_value(self, monkeypatch, tmp_path):
+        client, patchers = self._secret_client(monkeypatch, tmp_path)
+        try:
+            headers = {"X-Session-ID": "secrets-route-session"}
+            create = client.post(
+                "/session/secrets",
+                headers=headers,
+                json={
+                    "name": "shodan_api_key",
+                    "value": "super-secret",
+                    "consumer_envs": ["SHODAN_API_KEY"],
+                },
+            )
+            assert create.status_code == 201
+            created_payload = create.get_json()
+            assert created_payload["name"] == "SHODAN_API_KEY"
+            assert "value" not in created_payload
+            assert "super-secret" not in create.get_data(as_text=True)
+
+            update = client.post(
+                "/session/secrets",
+                headers=headers,
+                json={"name": "SHODAN_API_KEY", "value": "replacement"},
+            )
+            assert update.status_code == 200
+
+            listed = client.get("/session/secrets", headers=headers)
+            assert listed.status_code == 200
+            listed_payload = listed.get_json()
+            assert listed_payload["secrets"][0]["name"] == "SHODAN_API_KEY"
+            assert "replacement" not in listed.get_data(as_text=True)
+
+            rotated = client.post("/session/secrets/rotate", headers=headers)
+            assert rotated.status_code == 200
+            assert rotated.get_json()["rewrapped"] == 1
+            assert "replacement" not in rotated.get_data(as_text=True)
+
+            removed = client.delete("/session/secrets/shodan_api_key", headers=headers)
+            assert removed.status_code == 200
+            assert removed.get_json()["removed"] is True
+            assert client.get("/session/secrets", headers=headers).get_json()["secrets"] == []
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_session_secrets_reject_invalid_name(self, monkeypatch, tmp_path):
+        client, patchers = self._secret_client(monkeypatch, tmp_path)
+        try:
+            resp = client.post(
+                "/session/secrets",
+                headers={"X-Session-ID": "secrets-invalid-name-session"},
+                json={"name": "../token", "value": "secret"},
+            )
+            assert resp.status_code == 400
+            assert resp.get_json()["error"] == "invalid_name"
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
 
 
 # ── /projects ────────────────────────────────────────────────────────────────

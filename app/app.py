@@ -61,6 +61,7 @@ from blueprints.content import content_bp  # noqa: E402
 from blueprints.run import run_bp, SUDO_BIN, KILL_BIN  # noqa: E402, F401 — re-exported
 from blueprints.history import history_bp  # noqa: E402
 from blueprints.session import session_bp  # noqa: E402
+from blueprints.secrets import secrets_bp  # noqa: E402
 from blueprints.workspace import workspace_bp  # noqa: E402
 from blueprints.projects import projects_bp  # noqa: E402
 from services.workspace.files import cleanup_inactive_workspaces  # noqa: E402
@@ -77,6 +78,13 @@ _last_workspace_cleanup_monotonic = 0.0
 def _rate_limit_handler(e):
     ip = get_client_ip()
     log.warning("RATE_LIMIT", extra={"ip": ip, "path": request.path, "limit": str(e.description)})
+    if request.path.startswith("/session/secrets"):
+        retry_after = None
+        limit = getattr(e, "limit", None)
+        limit_item = getattr(limit, "limit", None)
+        if limit_item and hasattr(limit_item, "get_expiry"):
+            retry_after = int(limit_item.get_expiry())
+        return jsonify({"error": "rate_limited", "retry_after": retry_after}), 429
     return jsonify({"error": "Rate limit exceeded. Please slow down."}), 429
 
 
@@ -130,6 +138,7 @@ app.register_blueprint(content_bp)
 app.register_blueprint(run_bp)
 app.register_blueprint(history_bp)
 app.register_blueprint(session_bp)
+app.register_blueprint(secrets_bp)
 app.register_blueprint(workspace_bp)
 app.register_blueprint(projects_bp)
 

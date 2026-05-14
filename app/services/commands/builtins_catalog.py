@@ -178,6 +178,7 @@ _DOCUMENTED_BUILTIN_COMMANDS = [
     {"name": "rm <file>", "description": "Remove a session file after confirmation.", "root": "rm"},
     {"name": "route", "description": "Show the shell routing table summary.", "root": "route"},
     {"name": "runs [-v|--json]", "description": "Show app-native active run metadata for this session.", "root": "runs"},
+    {"name": "secret", "description": "Set, list, and remove encrypted session secrets for API-backed tools.", "root": "secret"},
     {"name": "session-token", "description": "Show session token status.", "root": "session-token"},
     {"name": "shortcuts", "description": "Show current keyboard shortcuts.", "root": "shortcuts"},
     {"name": "stats", "description": "Show session activity totals and command-root breakdowns.", "root": "stats"},

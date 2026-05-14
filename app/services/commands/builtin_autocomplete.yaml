@@ -477,6 +477,32 @@ commands:
           description: "Show full IDs, started timestamps, and metadata source"
         - value: --json
           description: "Print active-run metadata as JSON"
+  - root: secret
+    description: "built-in: manage encrypted session secrets"
+    autocomplete:
+      subcommands:
+        - value: set
+          description: "Store or replace an encrypted secret through the browser prompt"
+          takes_value: true
+          insert: "set "
+          value_hint:
+            value: "<NAME>"
+            hint_only: true
+            description: "Environment-style secret name"
+        - value: list
+          description: "List stored secret names without values"
+          closes: true
+        - value: unset
+          description: "Remove a stored secret"
+          takes_value: true
+          insert: "unset "
+          value_hint:
+            value: "<NAME>"
+            hint_only: true
+            description: "Environment-style secret name"
+        - value: show-consumers
+          description: "Show command registry env vars that consume secrets"
+          closes: true
   - root: session-token
     description: "built-in: show or manage persistent session tokens"
     autocomplete:

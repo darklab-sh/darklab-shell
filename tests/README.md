@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,669
+- behavior tests: 2,674
 - docs/inventory meta-tests: 32
-- `pytest`: 1334 (1302 behavior + 32 meta)
+- `pytest`: 1339 (1307 behavior + 32 meta)
 - `vitest`: 1118
 - `playwright`: 249
-- total: 2,701
+- total: 2,706
 
 This document is organized in two parts:
 
@@ -651,6 +651,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestBuiltinStatus.test_includes_session_summary_counts` | Checks that the `status` built-in reports session type, run and snapshot counts, starred-command count, saved-options presence, and active-job count for the current session. |
 | `TestBuiltinStats.test_reports_session_activity_and_command_breakdown` | Checks that the `stats` built-in reports masked session identity, activity totals, success rate, average duration, and external command-root breakdowns for the current session. |
 | `TestBuiltinStats.test_top_commands_empty_state_ignores_builtin_only_sessions` | Verifies that built-in-only sessions still affect `stats` totals but do not appear in the external-tool Top commands section. |
+| `TestSecretsVault.test_encrypt_decrypt_round_trip_uses_unique_nonces` | Verifies encrypted secrets decrypt back to their original values and use a fresh nonce for each write. |
+| `TestSecretsVault.test_master_key_rejects_short_decoded_env_value` | Verifies the secrets vault rejects a base64 master key that does not decode to exactly 32 bytes. |
+| `TestSecretsVault.test_storage_normalizes_names_and_migrates_without_decrypting` | Verifies secret storage normalizes names, dedupes consumer envs, and moves session rows without decrypting values. |
 
 #### `test_container_smoke_test.py`
 
@@ -945,6 +948,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestHealthRoute.test_status_degraded_when_db_fails` | Checks that status degraded when database fails. |
 | `TestHealthRoute.test_status_ok_when_redis_pings_successfully` | Checks that status ok when Redis pings successfully. |
 | `TestHealthRoute.test_status_degraded_when_redis_ping_fails` | Checks that status degraded when Redis ping fails. |
+| `TestSecretsRoutes.test_session_secrets_crud_never_returns_value` | Verifies session secret create, list, rotate, and delete routes return metadata only and never echo stored values. |
+| `TestSecretsRoutes.test_session_secrets_reject_invalid_name` | Verifies session secret routes reject invalid secret names with the expected error shape. |
 | `TestProjectRoutes.test_builtin_runs_do_not_record_findings_even_with_legacy_project_link` | Verifies built-in runs stay out of persisted findings even if old data links them to a project. |
 | `TestProjectRoutes.test_project_write_routes_are_rate_limited` | Verifies project workspace write routes are wrapped by the shared limiter. |
 | `TestProjectRoutes.test_create_list_get_update_archive_and_delete_project` | Verifies the current-session project CRUD and archive filtering route flow. |

@@ -14,6 +14,7 @@ from core.database import db_connect
 from services.commands.registry import load_tour
 from core.helpers import get_client_ip, get_log_session_id, get_session_id, is_valid_anonymous_session_id
 from services.projects.workspace import migrate_project_workspace_session
+from services.secrets.storage import migrate_session_secrets
 from services.session.variables import list_session_variables
 from services.workflows.user_workflows import (
     UserWorkflowError,
@@ -490,6 +491,7 @@ def session_migrate():
             (to_session_id, from_session_id),
         )
         project_migration = migrate_project_workspace_session(conn, from_session_id, to_session_id)
+        migrated_secrets = migrate_session_secrets(conn, from_session_id, to_session_id)
         migrated_recent_domains = _migrate_recent_domains(conn, from_session_id, to_session_id)
         conn.execute(
             "DELETE FROM starred_commands WHERE session_id = ?",
@@ -532,6 +534,7 @@ def session_migrate():
         "migrated_workflows": migrated_workflows,
         **project_migration,
         "migrated_recent_domains": migrated_recent_domains,
+        "migrated_secrets": migrated_secrets,
         "migrated_workspace_files": workspace_migration.migrated_files,
         "skipped_workspace_files": workspace_migration.skipped_files,
         "migrated_workspace_directories": workspace_migration.migrated_directories,
@@ -547,6 +550,7 @@ def session_migrate():
         "migrated_workflows": migrated_workflows,
         **project_migration,
         "migrated_recent_domains": migrated_recent_domains,
+        "migrated_secrets": migrated_secrets,
         "migrated_workspace_files": workspace_migration.migrated_files,
         "skipped_workspace_files": workspace_migration.skipped_files,
         "migrated_workspace_directories": workspace_migration.migrated_directories,

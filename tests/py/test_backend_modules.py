@@ -13,6 +13,7 @@ Run with: pytest tests/ (from the repo root)
 """
 
 import errno
+import base64
 import gzip
 import importlib.util
 import json
@@ -42,6 +43,8 @@ import config as app_config
 import services.commands.registry as commands  # noqa: F401 — used as mock.patch("services.commands.registry.X") target
 import services.commands.builtins as builtin_commands
 import services.session.variables as session_variables
+import services.secrets.storage as secrets_storage
+import services.secrets.vault as secrets_vault
 import services.workspace.files as workspace_module
 import services.commands.wordlists as wordlists
 from services.commands.registry import (
@@ -5508,3 +5511,52 @@ class TestBuiltinStats:
         assert re.search(r"success rate\s+100% \(1 ok / 0 failed\)", text)
         assert "No external tool runs for this session yet." in text
         assert not re.search(r"status\s+1 run", text)
+
+
+class TestSecretsVault:
+    def _patch_master_key(self, monkeypatch, tmp_path, key=b"a" * 32):
+        monkeypatch.setenv("SECRETS_MASTER_KEY", base64.b64encode(key).decode("ascii"))
+        monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path))
+        secrets_vault.reset_master_key_cache_for_tests()
+
+    def test_encrypt_decrypt_round_trip_uses_unique_nonces(self, monkeypatch, tmp_path):
+        self._patch_master_key(monkeypatch, tmp_path)
+
+        first_ciphertext, first_nonce = secrets_vault.encrypt_secret("shodan-secret")
+        second_ciphertext, second_nonce = secrets_vault.encrypt_secret("shodan-secret")
+
+        assert first_nonce != second_nonce
+        assert first_ciphertext != second_ciphertext
+        assert secrets_vault.decrypt_secret(first_ciphertext, first_nonce) == "shodan-secret"
+        assert secrets_vault.decrypt_secret(second_ciphertext, second_nonce) == "shodan-secret"
+
+    def test_master_key_rejects_short_decoded_env_value(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("SECRETS_MASTER_KEY", base64.b64encode(b"short").decode("ascii"))
+        monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path))
+        secrets_vault.reset_master_key_cache_for_tests()
+
+        with pytest.raises(secrets_vault.MasterKeyError):
+            secrets_vault.get_wrapping_key()
+
+    def test_storage_normalizes_names_and_migrates_without_decrypting(self, monkeypatch, tmp_path):
+        self._patch_master_key(monkeypatch, tmp_path)
+        db_path = os.path.join(tmp_path, "secrets.db")
+        with mock.patch("core.database.DB_PATH", db_path):
+            with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                database.db_init()
+            metadata, created = secrets_storage.upsert_secret(
+                "old-session",
+                "vt_api_key",
+                "secret-value",
+                ["vt_api_key", "VIRUSTOTAL_TOKEN", "vt_api_key"],
+            )
+            with database.db_connect() as conn:
+                migrated = secrets_storage.migrate_session_secrets(conn, "old-session", "new-session")
+                conn.commit()
+
+            assert created is True
+            assert metadata["name"] == "VT_API_KEY"
+            assert metadata["consumer_envs"] == ["VT_API_KEY", "VIRUSTOTAL_TOKEN"]
+            assert migrated == 1
+            assert secrets_storage.list_secret_metadata("old-session") == []
+            assert secrets_storage.get_secret_value_for_env("new-session", "virustotal_token") == "secret-value"

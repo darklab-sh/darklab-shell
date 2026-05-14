@@ -260,6 +260,10 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | `GET` | `/session/recent-domains` | Returns current-session recent domain values for metadata-gated autocomplete suggestions. |
 | `POST` | `/session/recent-domains` | Saves normalized recent domain values for the current session and prunes the list to the autocomplete cap. |
 | `POST` | `/session/migrate` | Migrates runs, snapshots, starred commands, preferences, command variables, user workflows, project workspace records, recent domains, and non-conflicting workspace paths between session IDs. |
+| `GET` | `/session/secrets` | Lists encrypted secret names, consumer env bindings, and update timestamps for the current session without returning values. |
+| `POST` | `/session/secrets` | Creates or replaces one encrypted current-session secret value. |
+| `POST` | `/session/secrets/rotate` | Re-wraps the current session's encrypted secret rows under the active master key. |
+| `DELETE` | `/session/secrets/<name>` | Removes one encrypted secret from the current session. |
 | `GET` | `/session/preferences` | Returns the current session's normalized saved Options snapshot. |
 | `POST` | `/session/preferences` | Persists the current session's normalized saved Options snapshot. |
 | `POST` | `/session/tour-seen` | Records that the current session opened the current onboarding tour version. |
@@ -776,7 +780,7 @@ That split is what allows the app to keep the interactive shell fast while still
 
 ### Database
 
-`<data_dir>/history.db` — SQLite, WAL mode. Eighteen persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable.
+`<data_dir>/history.db` — SQLite, WAL mode. Nineteen persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable.
 
 Logical relationships are owned by the app rather than SQLite foreign-key constraints. Anonymous browser sessions can appear as `session_id` values without a matching `session_tokens` row.
 
@@ -853,6 +857,15 @@ erDiagram
     TEXT domain PK
     TEXT last_used
     INTEGER use_count
+  }
+  SECRETS {
+    TEXT session_token PK
+    TEXT name PK
+    BLOB ciphertext
+    BLOB nonce
+    TEXT consumer_envs
+    TEXT created_at
+    TEXT updated_at
   }
   PROJECTS {
     TEXT id PK
@@ -969,6 +982,7 @@ erDiagram
   LOGICAL_SESSION ||--o{ SESSION_VARIABLES : "defines"
   LOGICAL_SESSION ||--o{ USER_WORKFLOWS : "saves"
   LOGICAL_SESSION ||--o{ RECENT_DOMAINS : "remembers"
+  LOGICAL_SESSION ||--o{ SECRETS : "stores encrypted"
   LOGICAL_SESSION ||--o{ PROJECTS : "owns"
   LOGICAL_SESSION ||--o{ RUN_FILE_ARTIFACTS : "tracks"
   LOGICAL_SESSION ||--o{ FINDINGS : "captures"
@@ -997,6 +1011,7 @@ erDiagram
 - `session_variables` — one row per session command variable `(session_id, name, value, updated)`. Backs the `var` built-in, `/session/variables`, and app-managed command expansion before validation.
 - `user_workflows` — one row per saved workflow `(id, session_id, title, description, inputs, steps, created, updated)`. Backs the Workflows panel's **My workflows** section, the `workflow` terminal command, and session-token migration.
 - `recent_domains` — one row per recently used domain per session `(session_id, domain, last_used, use_count)`. Backs domain autocomplete across browsers that share the same named session token and follows the session-token migration path.
+- `secrets` — one row per encrypted secret per session `(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at)`. Values are AES-GCM ciphertext and are never returned by list routes or stored in transcripts. The wrapping key comes from `SECRETS_MASTER_KEY` or `<data_dir>/.secrets_master_key`, with a fixed HKDF-SHA256 app context deriving the key used for row encryption.
 - `projects` — one row per project/case folder. Stores session ownership, display metadata, status, timestamps, and a session-scoped slug. Project notes are stored through `entity_notes` with `entity_type='project'`.
 - `project_links` — generic project membership rows `(project_id, entity_type, entity_id)`. The app owns the valid entity vocabulary and link sources so projects can link completed runs without copying source data. Run-owned records such as file artifacts and findings are intentionally reached through linked runs instead of direct project links.
 - `run_file_artifacts` — durable file manifest rows for workspace files produced or consumed by a run, including recorded size and optional SHA-256 content checksum so project views can flag missing or changed workspace files. This is separate from `run_output_artifacts`, which stores the terminal transcript artifact behind a run permalink.
@@ -1005,7 +1020,7 @@ erDiagram
 - `entity_labels` — short user-controlled labels/bookmarks for supported entities, including projects, runs, snapshots, workspace files, run file artifacts, findings, targets, and packages.
 - `entity_notes` — one private note attached to each supported entity per session, including project notes. Notes are intentionally singular so entity metadata remains an editable note surface instead of a comment thread.
 - `evidence_packages` — draft package manifests scoped to a project and session. The first pass records package name/description, redaction mode, artifact-inclusion preference, and a JSON manifest over the currently linked project data, then exports that manifest plus any still-available selected workspace artifacts as a downloadable archive. Package-level labels/notes are stored through the generic entity metadata tables.
-- Supporting indexes are part of the schema even though the ER diagram stays table-focused. `idx_runs_session_command_started` backs the Recent menu and prompt-history distinct-command query shape `(session_id, command, started DESC)`, `idx_runs_session_kind_started` backs built-in/external history filtering, while `idx_runs_session_started`, `idx_snapshots_session_created`, `idx_user_workflows_session_updated_created`, and `idx_recent_domains_session_last_used` keep session-scoped startup, history, workflow, share, and autocomplete reads bounded on large history databases. Project workspace indexes cover session project lists, project contents, reverse entity lookup, run file artifacts, targets, findings, labels, notes, and evidence packages before UI routes depend on those query shapes.
+- Supporting indexes are part of the schema even though the ER diagram stays table-focused. `idx_runs_session_command_started` backs the Recent menu and prompt-history distinct-command query shape `(session_id, command, started DESC)`, `idx_runs_session_kind_started` backs built-in/external history filtering, while `idx_runs_session_started`, `idx_snapshots_session_created`, `idx_user_workflows_session_updated_created`, `idx_recent_domains_session_last_used`, and `idx_secrets_session_updated` keep session-scoped startup, history, workflow, share, autocomplete, and secret-list reads bounded on large history databases. Project workspace indexes cover session project lists, project contents, reverse entity lookup, run file artifacts, targets, findings, labels, notes, and evidence packages before UI routes depend on those query shapes.
 - Redis-backed active-run metadata plus browser `sessionStorage` form a second persistence layer for reload continuity:
   - `/history/active` covers in-flight runs owned by the server/session
   - browser `sessionStorage` covers non-running tabs, transcript previews, status, draft input, and active-tab selection
@@ -1234,12 +1249,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,669
+- behavior tests: 2,674
 - docs/inventory meta-tests: 32
-- `pytest`: 1334 (1302 behavior + 32 meta)
+- `pytest`: 1339 (1307 behavior + 32 meta)
 - `vitest`: 1118
 - `playwright`: 249
-- total: 2,701
+- total: 2,706
 
 ### Testing Architecture
 
