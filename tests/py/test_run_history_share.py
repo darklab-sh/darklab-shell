@@ -3168,7 +3168,13 @@ class TestRunStreaming:
 
         assert resp.status_code == 200
         assert captured_env["SHODAN_API_KEY"] == "shodan-secret"
-        assert "shodan-secret" not in popen.call_args.args[0][-1]
+        launched_command = popen.call_args.args[0][-1]
+        assert ".shodan/api_key" in launched_command
+        assert '"$SHODAN_API_KEY"' in launched_command
+        assert 'HOME="$__darklab_shodan_home"' in launched_command
+        assert "pkg_resources is deprecated" in launched_command
+        assert "shodan host ip.darklab.sh" in launched_command
+        assert "shodan-secret" not in launched_command
         assert "shodan-secret" not in body
         assert popen.call_args.kwargs["env"]["SHODAN_API_KEY"] == ""
         secret_event.assert_called_once()

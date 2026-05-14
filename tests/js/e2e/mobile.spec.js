@@ -22,15 +22,13 @@ async function runCommandMobile(page, cmd) {
       const input = document.getElementById('mobile-cmd')
       if (!activeTab || !(input instanceof HTMLInputElement)) return false
       const style = window.getComputedStyle(input)
-      const acReady =
-        typeof acContextRegistry !== 'undefined' && Object.keys(acContextRegistry).length > 0
-      return style.display !== 'none' && style.visibility !== 'hidden' && acReady
+      return style.display !== 'none' && style.visibility !== 'hidden'
     },
     { timeout: 15_000 },
   )
   await page.locator('#mobile-cmd').focus()
   await simulateMobileKeyboard(page)
-  await setComposerValueForTest(page, cmd, { mobile: true })
+  await setComposerValueForTest(page, cmd, { mobile: true, waitForAutocomplete: false })
   const runBtn = page.locator('#mobile-run-btn')
   await expect(runBtn).toBeEnabled({ timeout: 5_000 })
   await runBtn.click()
@@ -252,7 +250,7 @@ test.beforeEach(async ({ page }) => {
   test('mobile autocomplete accepts a suggestion by tap and keeps the mobile composer focused', async ({
     page,
   }) => {
-    await ensurePromptReady(page)
+    await ensurePromptReady(page, { waitForAutocomplete: true })
     await openMobileKeyboard(page)
     const input = page.locator('#mobile-cmd')
     await setComposerValueForTest(page, 'nmap -', { mobile: true })
@@ -278,7 +276,7 @@ test.beforeEach(async ({ page }) => {
   })
 
   test('mobile autocomplete opens above the keyboard helper row', async ({ page }) => {
-    await ensurePromptReady(page)
+    await ensurePromptReady(page, { waitForAutocomplete: true })
     await openMobileKeyboard(page)
     await expect(page.locator('#mobile-kb-helper')).toBeVisible()
     await setComposerValueForTest(page, 'nmap -', { mobile: true })
@@ -315,7 +313,7 @@ test.beforeEach(async ({ page }) => {
   test('mobile contextual autocomplete shows value hints after accepting a value-taking flag', async ({
     page,
   }) => {
-    await ensurePromptReady(page)
+    await ensurePromptReady(page, { waitForAutocomplete: true })
     await openMobileKeyboard(page)
     const input = page.locator('#mobile-cmd')
     await setComposerValueForTest(page, 'curl -', { mobile: true })

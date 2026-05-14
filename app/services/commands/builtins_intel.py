@@ -9,6 +9,7 @@ from services.commands.builtins_format import format_native_record, output_line
 from services.commands.registry import split_command_argv
 from services.intel.canonical import CanonicalizationError
 from services.intel.lookup import IntelLookupResult, ProviderLookup, lookup_entity
+from services.intel.registry import provider_label
 
 
 def run_builtin_intel(command: str, session_id: str) -> tuple[list[dict[str, str]], int]:
@@ -17,7 +18,7 @@ def run_builtin_intel(command: str, session_id: str) -> tuple[list[dict[str, str
         return _intel_usage(), 0
 
     entity_type = parts[1].lower()
-    if entity_type not in {"ip", "domain", "hash"}:
+    if entity_type not in {"ip", "domain", "hash", "cve"}:
         return [output_line(f"intel: unsupported lookup type '{entity_type}'"), *_intel_usage()], 1
 
     include_private = "--include-private" in parts[2:]
@@ -48,6 +49,7 @@ def _intel_usage() -> list[dict[str, str]]:
         output_line("  intel ip <ip> [--include-private]", "builtin-help-row"),
         output_line("  intel domain <domain>", "builtin-help-row"),
         output_line("  intel hash <md5|sha1|sha256>", "builtin-help-row"),
+        output_line("  intel cve <CVE-ID>", "builtin-help-row"),
         output_line("Configure provider keys with `secret set NAME` or Options > Secrets.", "builtin-note"),
     ]
 
@@ -98,12 +100,30 @@ def _format_provider_lookup(provider: ProviderLookup, entity_type: str) -> list[
         return [*lines, output_line("  no provider data returned", "builtin-note")]
     if entity_type == "ip" and provider.provider == "shodan":
         lines.extend(_format_shodan(provider_payload))
+    elif entity_type == "ip" and provider.provider == "censys":
+        lines.extend(_format_censys(provider_payload))
     elif entity_type == "ip" and provider.provider == "greynoise":
         lines.extend(_format_greynoise(provider_payload))
-    elif entity_type == "domain":
+    elif entity_type == "ip" and provider.provider == "otx":
+        lines.extend(_format_otx(provider_payload))
+    elif entity_type == "ip" and provider.provider == "abuseipdb":
+        lines.extend(_format_abuseipdb(provider_payload))
+    elif entity_type == "ip" and provider.provider == "teamcymru":
+        lines.extend(_format_teamcymru(provider_payload))
+    elif entity_type == "domain" and provider.provider == "virustotal":
         lines.extend(_format_virustotal_domain(provider_payload))
-    elif entity_type == "hash":
+    elif entity_type == "domain" and provider.provider == "otx":
+        lines.extend(_format_otx(provider_payload))
+    elif entity_type == "domain" and provider.provider == "crtsh":
+        lines.extend(_format_crtsh(provider_payload))
+    elif entity_type == "hash" and provider.provider == "virustotal":
         lines.extend(_format_virustotal_hash(provider_payload))
+    elif entity_type == "hash" and provider.provider == "otx":
+        lines.extend(_format_otx(provider_payload))
+    elif entity_type == "hash" and provider.provider == "hibp":
+        lines.extend(_format_hibp(provider_payload))
+    elif entity_type == "cve" and provider.provider == "nvd":
+        lines.extend(_format_nvd(provider_payload))
     else:
         lines.append(output_line("  no formatter for provider data", "builtin-note"))
     return lines
@@ -140,6 +160,78 @@ def _format_greynoise(payload: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
+def _format_censys(payload: dict[str, Any]) -> list[dict[str, str]]:
+    autonomous_system = payload.get("autonomous_system")
+    asn = autonomous_system if isinstance(autonomous_system, dict) else {}
+    location = payload.get("location")
+    place = location if isinstance(location, dict) else {}
+    lines = [
+        output_line(format_native_record("ports", _join_values(payload.get("ports")) or "none", 14), "builtin-kv"),
+        output_line(format_native_record("protocols", _join_values(payload.get("protocols")) or "none", 14), "builtin-kv"),
+        output_line(format_native_record("asn", str(asn.get("asn") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("org", str(asn.get("name") or asn.get("description") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("country", str(place.get("country") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("updated", str(payload.get("last_updated_at") or "-"), 14), "builtin-kv"),
+    ]
+    services = payload.get("services")
+    if isinstance(services, list) and services:
+        lines.append(output_line("services:", "builtin-subsection"))
+        for row in services[:5]:
+            if not isinstance(row, dict):
+                continue
+            port = str(row.get("port") or "?")
+            transport = str(row.get("transport") or "-")
+            protocol = str(row.get("protocol") or "-")
+            software = _truncate(str(row.get("software") or "").strip(), 64)
+            suffix = f" - {software}" if software else ""
+            lines.append(output_line(f"  {port}/{transport} {protocol}{suffix}".rstrip(), "builtin-kv"))
+    names = payload.get("names")
+    if isinstance(names, list) and names:
+        lines.append(output_line(format_native_record("names", _join_values(names) or "none", 14), "builtin-kv"))
+    return lines
+
+
+def _format_teamcymru(payload: dict[str, Any]) -> list[dict[str, str]]:
+    return [
+        output_line(format_native_record("asn", str(payload.get("asn") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("prefix", str(payload.get("prefix") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("registry", str(payload.get("registry") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("name", str(payload.get("name") or "-"), 14), "builtin-kv"),
+    ]
+
+
+def _format_otx(payload: dict[str, Any]) -> list[dict[str, str]]:
+    lines = [
+        output_line(format_native_record("pulses", str(payload.get("pulse_count") or 0), 14), "builtin-kv"),
+        output_line(format_native_record("reputation", str(payload.get("reputation")), 14), "builtin-kv"),
+        output_line(format_native_record("tags", _join_values(payload.get("tags")) or "none", 14), "builtin-kv"),
+    ]
+    pulses = payload.get("pulses")
+    if isinstance(pulses, list) and pulses:
+        lines.append(output_line("pulses:", "builtin-subsection"))
+        for pulse in pulses[:5]:
+            if not isinstance(pulse, dict):
+                continue
+            name = _truncate(str(pulse.get("name") or pulse.get("id") or ""), 96)
+            modified = str(pulse.get("modified") or "")
+            suffix = f" ({modified})" if modified else ""
+            lines.append(output_line(f"  {name}{suffix}".rstrip(), "builtin-kv"))
+    return lines
+
+
+def _format_abuseipdb(payload: dict[str, Any]) -> list[dict[str, str]]:
+    score = payload.get("abuse_confidence_score")
+    return [
+        output_line(format_native_record("confidence", str(score) if score is not None else "-", 14), "builtin-kv"),
+        output_line(format_native_record("reports", str(payload.get("total_reports") or 0), 14), "builtin-kv"),
+        output_line(format_native_record("country", str(payload.get("country_code") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("usage", str(payload.get("usage_type") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("isp", str(payload.get("isp") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("tor", "yes" if payload.get("is_tor") else "no", 14), "builtin-kv"),
+        output_line(format_native_record("last report", str(payload.get("last_reported_at") or "-"), 14), "builtin-kv"),
+    ]
+
+
 def _format_virustotal_domain(payload: dict[str, Any]) -> list[dict[str, str]]:
     lines = [
         output_line(format_native_record("reputation", str(payload.get("reputation")), 14), "builtin-kv"),
@@ -156,6 +248,23 @@ def _format_virustotal_domain(payload: dict[str, Any]) -> list[dict[str, str]]:
     return lines
 
 
+def _format_crtsh(payload: dict[str, Any]) -> list[dict[str, str]]:
+    lines = [
+        output_line(format_native_record("certificates", str(payload.get("certificate_count") or 0), 14), "builtin-kv"),
+        output_line(format_native_record("first seen", str(payload.get("first_seen") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("last seen", str(payload.get("last_seen") or "-"), 14), "builtin-kv"),
+    ]
+    names = payload.get("names")
+    if isinstance(names, list) and names:
+        lines.append(output_line("names:", "builtin-subsection"))
+        for name in names[:8]:
+            lines.append(output_line(f"  {name}", "builtin-kv"))
+    issuers = payload.get("issuers")
+    if isinstance(issuers, list) and issuers:
+        lines.append(output_line(format_native_record("issuers", _join_values(issuers) or "none", 14), "builtin-kv"))
+    return lines
+
+
 def _format_virustotal_hash(payload: dict[str, Any]) -> list[dict[str, str]]:
     return [
         output_line(format_native_record("verdict", str(payload.get("verdict") or "unknown"), 14), "builtin-kv"),
@@ -164,6 +273,33 @@ def _format_virustotal_hash(payload: dict[str, Any]) -> list[dict[str, str]]:
         output_line(format_native_record("tags", _join_values(payload.get("tags")) or "none", 14), "builtin-kv"),
         output_line(format_native_record("names", _join_values(payload.get("names")) or "none", 14), "builtin-kv"),
     ]
+
+
+def _format_hibp(payload: dict[str, Any]) -> list[dict[str, str]]:
+    count = int(payload.get("count") or 0)
+    return [
+        output_line(format_native_record("pwned", "yes" if count else "no", 14), "builtin-kv"),
+        output_line(format_native_record("seen count", str(count), 14), "builtin-kv"),
+        output_line(format_native_record("sent prefix", str(payload.get("prefix") or "-"), 14), "builtin-kv"),
+    ]
+
+
+def _format_nvd(payload: dict[str, Any]) -> list[dict[str, str]]:
+    lines = [
+        output_line(format_native_record("severity", str(payload.get("severity") or "unknown"), 14), "builtin-kv"),
+        output_line(format_native_record("score", str(payload.get("score") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("published", str(payload.get("published") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("modified", str(payload.get("last_modified") or "-"), 14), "builtin-kv"),
+    ]
+    description = str(payload.get("description") or "").strip().replace("\n", " ")
+    if description:
+        lines.append(output_line(format_native_record("summary", _truncate(description, 110), 14), "builtin-kv"))
+    refs = payload.get("references")
+    if isinstance(refs, list) and refs:
+        lines.append(output_line("references:", "builtin-subsection"))
+        for ref in refs[:5]:
+            lines.append(output_line(f"  {_truncate(str(ref), 110)}", "builtin-kv"))
+    return lines
 
 
 def _stats_summary(value: object) -> str:
@@ -184,9 +320,4 @@ def _truncate(value: str, length: int) -> str:
 
 
 def _provider_label(provider: str) -> str:
-    labels = {
-        "shodan": "Shodan",
-        "virustotal": "VirusTotal",
-        "greynoise": "GreyNoise",
-    }
-    return labels.get(str(provider or "").strip().lower(), str(provider or "").strip() or "Provider")
+    return provider_label(provider)

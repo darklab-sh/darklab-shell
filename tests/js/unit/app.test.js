@@ -4794,6 +4794,65 @@ describe('app helpers', () => {
     expect(document.getElementById('options-secrets-msg').textContent).toContain('not currently used')
   })
 
+  it('suggests app-native intel secret consumers in the options prompt', async () => {
+    let secrets = []
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/commands/catalog') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            restricted: true,
+            commands: [],
+            groups: [],
+            secret_consumers: [
+              {
+                source: 'app_native_intel',
+                consumer: 'intel Shodan',
+                provider: 'shodan',
+                env: 'SHODAN_API_KEY',
+                fallback_envs: [],
+                optional: false,
+              },
+            ],
+          }),
+        })
+      }
+      if (url === '/session/secrets' && opts.method === 'POST') {
+        const body = JSON.parse(opts.body)
+        secrets = [{ name: body.name, consumer_envs: body.consumer_envs, updated_at: '2026-05-14T10:00:00+00:00' }]
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(secrets[0]) })
+      }
+      if (url === '/session/secrets') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ secrets }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const showConfirm = vi.fn().mockImplementation(async (opts) => {
+      const select = opts.content[0].querySelector('select')
+      const valueInput = opts.content.flatMap(node => Array.from(node.querySelectorAll('input')))[1]
+      expect([...select.options].map(option => option.value)).toContain('SHODAN_API_KEY')
+      select.value = 'SHODAN_API_KEY'
+      select.dispatchEvent(new Event('change'))
+      expect(opts.content.map(node => node.textContent).join(' ')).toContain('Used by intel Shodan')
+      valueInput.value = 'shodan-secret-value'
+      const ok = await opts.actions.find(action => action.id === 'save').onActivate()
+      return ok ? 'save' : null
+    })
+    await loadAppFns({ apiFetch, showConfirm })
+
+    document.getElementById('options-secret-new-btn').click()
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/session/secrets', expect.objectContaining({
+      method: 'POST',
+    })))
+
+    const postBody = JSON.parse(apiFetch.mock.calls.find(([url, opts]) => url === '/session/secrets' && opts?.method === 'POST')[1].body)
+    expect(postBody).toEqual({
+      name: 'SHODAN_API_KEY',
+      value: 'shodan-secret-value',
+      consumer_envs: undefined,
+    })
+  })
+
   it('opens the encrypted secret prompt for terminal secret set without echoing the value', async () => {
     const apiFetch = vi.fn((url, opts = {}) => {
       if (url === '/session/secrets' && opts.method === 'POST') {

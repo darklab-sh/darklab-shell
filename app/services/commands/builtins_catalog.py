@@ -161,7 +161,7 @@ _DOCUMENTED_BUILTIN_COMMANDS = [
     {"name": "history", "description": "List command history from this session.", "root": "history"},
     {"name": "hostname", "description": "Show the configured shell instance name.", "root": "hostname"},
     {"name": "id", "description": "Show the shell identity.", "root": "id"},
-    {"name": "intel <type> <value>", "description": "Look up passive intel from configured providers.", "root": "intel"},
+    {"name": "intel <type> <value>", "description": "Look up passive intel from app-native providers.", "root": "intel"},
     {"name": "ip a", "description": "Show a minimal shell network interface view.", "exact": "ip a"},
     {"name": "jobs", "description": "Alias for `runs`.", "root": "jobs"},
     {"name": "last", "description": "Show recent completed runs with timestamps and exit codes.", "root": "last"},

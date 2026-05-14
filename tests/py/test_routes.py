@@ -3609,6 +3609,18 @@ class TestCommandCatalogRoute:
         }]
         assert index_data["groups"][0]["name"] == "Registry Group"
         assert index_data["groups"][0]["commands"] == index_data["commands"]
+        assert {
+            (item["consumer"], item["env"], tuple(item.get("fallback_envs") or []))
+            for item in index_data["secret_consumers"]
+        } == {
+            ("sentinel", "SHODAN_API_KEY", ()),
+            ("intel Shodan", "SHODAN_API_KEY", ()),
+            ("intel Censys", "CENSYS_PAT", ()),
+            ("intel VirusTotal", "VT_API_KEY", ("VTCLI_APIKEY",)),
+            ("intel GreyNoise", "GREYNOISE_API_KEY", ()),
+            ("intel AlienVault OTX", "OTX_API_KEY", ()),
+            ("intel AbuseIPDB", "ABUSEIPDB_API_KEY", ()),
+        }
         assert resp.status_code == 200
         data = json.loads(resp.data)
         assert data["root"] == "sentinel"

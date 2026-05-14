@@ -10,6 +10,7 @@ from typing import Any
 
 from config import CFG
 from core import process
+from services.intel.registry import rate_limit_setting
 
 
 _MEMORY_LOCK = threading.Lock()
@@ -32,31 +33,11 @@ def _coerce_positive_int(value: Any, fallback: int) -> int:
 
 
 def _bucket_settings(provider: str, cfg: dict[str, Any], profile: str = "") -> tuple[int, int]:
-    normalized = str(provider or "").strip().lower()
-    normalized_profile = str(profile or "").strip().lower()
-    if normalized == "shodan":
-        # Shodan's API permits steady one-request-per-second pacing; the bucket allows small local bursts.
+    setting = rate_limit_setting(provider, profile)
+    if setting:
         return (
-            _coerce_positive_int(cfg.get("intel_rate_limit_shodan_bucket"), 5),
-            _coerce_positive_int(cfg.get("intel_rate_limit_shodan_refill_seconds"), 1),
-        )
-    if normalized == "virustotal":
-        # VirusTotal Public is 4 requests/minute, modeled as one refill every 15 seconds.
-        return (
-            _coerce_positive_int(cfg.get("intel_rate_limit_virustotal_public_bucket"), 4),
-            _coerce_positive_int(cfg.get("intel_rate_limit_virustotal_public_refill_seconds"), 15),
-        )
-    if normalized == "greynoise" and normalized_profile == "unauthenticated":
-        # GreyNoise unauthenticated lookups are intentionally stricter: 10/day.
-        return (
-            _coerce_positive_int(cfg.get("intel_rate_limit_greynoise_unauthenticated_bucket"), 10),
-            _coerce_positive_int(cfg.get("intel_rate_limit_greynoise_unauthenticated_refill_seconds"), 8640),
-        )
-    if normalized == "greynoise":
-        # GreyNoise Community is 50/day, so the default refill cadence is 12,096 seconds.
-        return (
-            _coerce_positive_int(cfg.get("intel_rate_limit_greynoise_community_bucket"), 50),
-            _coerce_positive_int(cfg.get("intel_rate_limit_greynoise_community_refill_seconds"), 12096),
+            _coerce_positive_int(cfg.get(setting.bucket_config_key), setting.default_bucket),
+            _coerce_positive_int(cfg.get(setting.refill_config_key), setting.default_refill_seconds),
         )
     return 60, 60
 

@@ -17,9 +17,28 @@ from services.intel.base import (
     ProviderMissingSecret,
 )
 from services.intel.canonical import canonical_entity
-from services.intel.clients import GreyNoiseApiClient, ShodanApiClient, VirusTotalApiClient
+from services.intel.clients import (
+    AbuseIpdbApiClient,
+    CensysApiClient,
+    CrtshApiClient,
+    GreyNoiseApiClient,
+    HibpPwnedPasswordsClient,
+    NvdApiClient,
+    OtxApiClient,
+    ShodanApiClient,
+    TeamCymruDnsClient,
+    VirusTotalApiClient,
+)
+from services.intel.abuseipdb import AbuseIpdbProvider
+from services.intel.censys import CensysProvider
+from services.intel.crtsh import CrtshProvider
 from services.intel.greynoise import GreyNoiseProvider
+from services.intel.hibp import HibpPwnedPasswordsProvider
+from services.intel.nvd import NvdProvider
+from services.intel.otx import OtxProvider
+from services.intel.registry import provider_label, providers_for_entity_type
 from services.intel.shodan import ShodanProvider
+from services.intel.teamcymru import TeamCymruProvider
 from services.intel.virustotal import VirusTotalProvider
 
 
@@ -51,16 +70,39 @@ class IntelLookupResult:
         return sum(1 for item in self.providers if item.result is not None)
 
 
-def default_provider_factories(entity_type: str) -> list[ProviderFactory]:
-    normalized = str(entity_type or "").strip().lower()
-    if normalized == "ip":
-        return [
-            lambda: ShodanProvider(client=ShodanApiClient()),
-            lambda: GreyNoiseProvider(client=GreyNoiseApiClient()),
-        ]
-    if normalized in {"domain", "hash"}:
-        return [lambda: VirusTotalProvider(client=VirusTotalApiClient())]
-    return []
+def default_provider_factories(entity_type: str, canonical_value: str = "") -> list[ProviderFactory]:
+    factories = []
+    for definition in providers_for_entity_type(entity_type):
+        if definition.id == "hibp" and not str(canonical_value or "").startswith("sha1:"):
+            continue
+        factory = _provider_factory(definition.id)
+        if factory:
+            factories.append(factory)
+    return factories
+
+
+def _provider_factory(provider_id: str) -> ProviderFactory | None:
+    if provider_id == "shodan":
+        return lambda: ShodanProvider(client=ShodanApiClient())
+    if provider_id == "censys":
+        return lambda: CensysProvider(client=CensysApiClient())
+    if provider_id == "greynoise":
+        return lambda: GreyNoiseProvider(client=GreyNoiseApiClient())
+    if provider_id == "virustotal":
+        return lambda: VirusTotalProvider(client=VirusTotalApiClient())
+    if provider_id == "otx":
+        return lambda: OtxProvider(client=OtxApiClient())
+    if provider_id == "abuseipdb":
+        return lambda: AbuseIpdbProvider(client=AbuseIpdbApiClient())
+    if provider_id == "teamcymru":
+        return lambda: TeamCymruProvider(client=TeamCymruDnsClient())
+    if provider_id == "crtsh":
+        return lambda: CrtshProvider(client=CrtshApiClient())
+    if provider_id == "hibp":
+        return lambda: HibpPwnedPasswordsProvider(client=HibpPwnedPasswordsClient())
+    if provider_id == "nvd":
+        return lambda: NvdProvider(client=NvdApiClient())
+    return None
 
 
 def lookup_entity(
@@ -78,7 +120,11 @@ def lookup_entity(
     active_redis = process.redis_client if redis_client is None else redis_client
     canonical = canonical_entity(normalized_type, value)
     lookups: list[ProviderLookup] = []
-    factories = provider_factories if provider_factories is not None else default_provider_factories(normalized_type)
+    factories = (
+        provider_factories
+        if provider_factories is not None
+        else default_provider_factories(normalized_type, canonical)
+    )
     for factory in factories:
         provider = factory()
         lookups.append(_lookup_provider(
@@ -190,16 +236,13 @@ def _provider_lookup(provider: Provider, entity_type: str, canonical: str, *, se
     if entity_type == "hash":
         hash_value = canonical.split(":", 1)[1] if ":" in canonical else canonical
         return provider.lookup_hash(hash_value, session_token=session_id, run_id=run_id)
+    if entity_type == "cve":
+        return provider.lookup_cve(canonical, session_token=session_id, run_id=run_id)
     raise IntelProviderError(f"unsupported intel entity type: {entity_type}")
 
 
 def _provider_label(provider: str) -> str:
-    labels = {
-        "shodan": "Shodan",
-        "virustotal": "VirusTotal",
-        "greynoise": "GreyNoise",
-    }
-    return labels.get(str(provider or "").strip().lower(), str(provider or "").strip())
+    return provider_label(provider)
 
 
 def _quota_message(provider: str, quota: dict) -> str:

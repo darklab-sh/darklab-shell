@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,724
+- behavior tests: 2,728
 - docs/inventory meta-tests: 32
-- `pytest`: 1380 (1348 behavior + 32 meta)
-- `vitest`: 1127
+- `pytest`: 1388 (1356 behavior + 32 meta)
+- `vitest`: 1128
 - `playwright`: 249
-- total: 2,756
+- total: 2,765
 
 This document is organized in two parts:
 
@@ -119,7 +119,7 @@ bash scripts/run_playwright.sh tests/js/e2e/failure-paths.spec.js --grep "histor
 
 Playwright notes:
 
-- `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps local Playwright output quiet by default, captures isolated server logs under `test-results/e2e-server-logs/`, and prints server log tails only when Playwright exits non-zero. It uses [.tooling/playwright.parallel.config.js](../.tooling/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
+- `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps local Playwright output quiet by default, captures isolated server logs under `test-results/e2e-server-logs/`, and prints server log tails only when Playwright exits non-zero. It uses [.tooling/playwright.parallel.config.js](../.tooling/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, `PLAYWRIGHT_PROJECT_COUNT=N` to tune worker load, or `--force-color` when color must be forced through non-TTY output.
 - The wrapper defaults `PW_DISABLE_TS_ESM=1` because the repo's current Playwright configs/specs are plain JavaScript and do not require Playwright's TypeScript/ESM loader. Set `PW_DISABLE_TS_ESM=0` only when adding TypeScript Playwright files that need the loader.
 - plain `npx playwright test` uses [.tooling/playwright.config.js](../.tooling/playwright.config.js), the single-project config intended for VS Code Test Explorer and focused local debugging
 - each parallel project gets its own Flask server port plus isolated `APP_DATA_DIR` state, so SQLite history, run-output artifacts, and limiter/process state do not leak between workers
@@ -170,7 +170,7 @@ Large jsdom setup lives in focused helper modules under `tests/js/unit/helpers/`
 The browser layer now uses a split config model:
 
 - [.tooling/playwright.config.js](../.tooling/playwright.config.js) keeps a simple single-project run path for editor integration and focused debugging
-- [.tooling/playwright.parallel.config.js](../.tooling/playwright.parallel.config.js) is the normal CLI path and balances the suite across 5 isolated projects using measured per-file runtime weights
+- [.tooling/playwright.parallel.config.js](../.tooling/playwright.parallel.config.js) is the normal CLI path and balances the suite across 5 isolated projects by default using measured per-file runtime weights. CI currently sets `PLAYWRIGHT_PROJECT_COUNT=3` to reduce browser/server contention on the shared runner.
 
 ### Demo Recording
 
@@ -390,17 +390,24 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestLoadConfig.test_resolve_data_dir_falls_back_to_tmp_when_data_is_not_writable` | Verifies that auto-detection falls back to `/tmp` when image-created `/data` is not writable. |
 | `TestLoadConfig.test_resolve_data_dir_rejects_unwritable_configured_data_dir` | Verifies that an explicit but unwritable `data_dir` fails loudly instead of silently falling back. |
 | `TestLoadConfig.test_workspace_root_env_warning_only_logs_on_mismatch` | Verifies that startup warns when `WORKSPACE_ROOT` and configured `workspace_root` diverge, without warning for matching paths. |
+| `TestIntelServices.test_provider_registry_exposes_existing_provider_metadata` | Verifies the app-native intel provider registry exposes shipped provider labels, entity support, cache scopes, and secret consumers. |
 | `TestIntelServices.test_canonical_entity_normalizes_supported_values` | Verifies canonical IP, domain, URL, hash, and CVE values for external intel lookups. |
 | `TestIntelServices.test_canonical_entity_rejects_invalid_values` | Verifies unsupported or malformed intel entities fail before provider lookup. |
 | `TestIntelServices.test_schema_response_tracks_provider_data_and_cache_state` | Verifies normalized provider responses include empty peers, data flags, and cache-hit state. |
 | `TestIntelServices.test_cache_round_trips_normalized_payload_with_provider_ttl` | Verifies normalized intel cache storage, provider TTL overrides, and quota-exhausted backoff state. |
 | `TestIntelServices.test_rate_limiter_consumes_bucket_and_reports_retry` | Verifies per-session provider token buckets consume quota and report retry timing. |
 | `TestIntelServices.test_audit_event_omits_sensitive_provider_fields` | Verifies intel audit events include lookup metadata without API keys or raw provider bodies. |
+| `TestIntelServices.test_json_api_client_uses_system_ca_bundle_for_https` | Verifies app-native intel HTTPS clients prefer the system CA bundle when no explicit CA env is set. |
+| `TestIntelServices.test_json_api_client_honors_explicit_ca_env` | Verifies app-native intel HTTPS clients honor explicit `SSL_CERT_FILE` and `SSL_CERT_DIR` settings. |
 | `TestIntelServices.test_provider_modules_read_secret_at_call_time_and_normalize_payloads` | Verifies provider modules read vault-backed secrets, including VirusTotal's native `VTCLI_APIKEY` alias, at lookup time and return normalized payloads. |
 | `TestIntelServices.test_provider_missing_secret_blocks_lookup_before_client_call` | Verifies provider calls stop before client access when the required secret is missing. |
 | `TestIntelServices.test_lookup_entity_requires_secret_before_cache_hit` | Verifies cached provider data is not returned when the current session lacks the required provider secret. |
+| `TestIntelServices.test_lookup_entity_includes_no_secret_provider_and_caches_result` | Verifies no-key providers run through the same lookup and cache path as keyed providers. |
+| `TestIntelServices.test_default_hash_providers_only_include_hibp_for_sha1` | Verifies HIBP Pwned Passwords is included only for SHA1 hash lookups. |
 | `TestIntelServices.test_builtin_intel_ip_formats_partial_provider_results` | Verifies the `intel ip` built-in renders configured provider results beside missing-provider placeholders. |
+| `TestIntelServices.test_builtin_intel_ip_formats_censys_provider_results` | Verifies the `intel ip` built-in renders normalized Censys host ports, services, ownership, and names. |
 | `TestIntelServices.test_builtin_intel_reports_all_missing_provider_keys` | Verifies all-missing provider lookups exit with setup guidance instead of reporting success. |
+| `TestIntelServices.test_builtin_intel_formats_cve_provider_results` | Verifies the `intel cve` built-in renders normalized NVD provider results. |
 | `TestIntelServices.test_builtin_intel_rejects_private_ip_without_override` | Verifies `intel ip` blocks private or loopback addresses by default before provider lookup. |
 | `TestIntelServices.test_builtin_intel_hash_rejects_invalid_value` | Verifies `intel hash` rejects non-hex or unsupported hash lengths with the expected user-facing message. |
 | `TestSessionWorkspace.test_disabled_workspace_rejects_operations` | Verifies that workspace helpers reject operations while the feature is disabled. |
@@ -1747,6 +1754,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `loads encrypted secrets metadata in options without revealing values` | Verifies that the Options Secrets section loads names, consumer envs, and timestamps without rendering stored secret values. |
 | `adds encrypted secrets through the replace-only options prompt` | Verifies that the Options Secrets prompt stores a registry-known key from the picker while keeping the value out of the rendered panel. |
 | `keeps a custom secret escape hatch with an unused-secret warning` | Verifies that the Options Secrets prompt still supports custom secret names while warning that undeclared consumer envs are not used by shipped commands. |
+| `suggests app-native intel secret consumers in the options prompt` | Verifies that app-native intel provider secrets from the command catalog metadata appear in the Options Secrets picker. |
 | `opens the encrypted secret prompt for terminal secret set without echoing the value` | Verifies that `secret set NAME` opens the browser-owned value prompt and does not echo the typed value into visible UI. |
 | `deletes encrypted secrets from the options panel only after confirming` | Verifies that deleting a secret uses the shared destructive confirm before calling the delete route and refreshing the list. |
 | `persists options changes through cookies and syncs quick-toggle state` | Verifies that option changes update cookies, quick-toggle UI, and the persisted `/session/preferences` snapshot together. |

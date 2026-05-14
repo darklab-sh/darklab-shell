@@ -54,7 +54,7 @@ from services.commands.registry import (
     load_autocomplete_context_from_commands_registry, load_command_policy, load_container_smoke_test_commands,
     load_container_smoke_test_interactive_commands, load_allow_grouping_flags, load_commands_registry, load_workflows,
     interactive_pty_specs_from_registry,
-    command_catalog_entry, command_catalog_from_registry, is_command_allowed, rewrite_command,
+    command_catalog_entry, command_catalog_from_registry, command_secret_consumers, is_command_allowed, rewrite_command,
 )
 from services.history.permalinks import (
     _expiry_note,
@@ -188,18 +188,42 @@ class TestLoadConfig:
         assert cfg["workspace_inactivity_ttl_hours"] == 1
         assert cfg["intel_cache_ttl_shodan_ip_seconds"] == 86400
         assert cfg["intel_cache_ttl_shodan_search_seconds"] == 21600
+        assert cfg["intel_cache_ttl_censys_host_seconds"] == 21600
         assert cfg["intel_cache_ttl_virustotal_domain_seconds"] == 21600
         assert cfg["intel_cache_ttl_virustotal_file_seconds"] == 86400
         assert cfg["intel_cache_ttl_greynoise_ip_seconds"] == 3600
+        assert cfg["intel_cache_ttl_otx_indicator_seconds"] == 21600
+        assert cfg["intel_cache_ttl_abuseipdb_ip_seconds"] == 21600
+        assert cfg["intel_cache_ttl_teamcymru_ip_seconds"] == 86400
+        assert cfg["intel_cache_ttl_crtsh_domain_seconds"] == 86400
+        assert cfg["intel_cache_ttl_hibp_password_seconds"] == 604800
+        assert cfg["intel_cache_ttl_nvd_cve_seconds"] == 86400
         assert cfg["intel_rate_limit_shodan_bucket"] == 5
         assert cfg["intel_rate_limit_shodan_refill_seconds"] == 1
+        assert cfg["intel_rate_limit_censys_bucket"] == 10
+        assert cfg["intel_rate_limit_censys_refill_seconds"] == 6
         assert cfg["intel_rate_limit_virustotal_public_bucket"] == 4
         assert cfg["intel_rate_limit_virustotal_public_refill_seconds"] == 15
         assert cfg["intel_rate_limit_greynoise_community_bucket"] == 50
         assert cfg["intel_rate_limit_greynoise_community_refill_seconds"] == 12096
         assert cfg["intel_rate_limit_greynoise_unauthenticated_bucket"] == 10
         assert cfg["intel_rate_limit_greynoise_unauthenticated_refill_seconds"] == 8640
+        assert cfg["intel_rate_limit_otx_bucket"] == 30
+        assert cfg["intel_rate_limit_otx_refill_seconds"] == 2
+        assert cfg["intel_rate_limit_abuseipdb_bucket"] == 20
+        assert cfg["intel_rate_limit_abuseipdb_refill_seconds"] == 4
+        assert cfg["intel_rate_limit_teamcymru_bucket"] == 30
+        assert cfg["intel_rate_limit_teamcymru_refill_seconds"] == 2
+        assert cfg["intel_rate_limit_crtsh_bucket"] == 10
+        assert cfg["intel_rate_limit_crtsh_refill_seconds"] == 6
+        assert cfg["intel_rate_limit_hibp_bucket"] == 10
+        assert cfg["intel_rate_limit_hibp_refill_seconds"] == 2
+        assert cfg["intel_rate_limit_nvd_anonymous_bucket"] == 5
+        assert cfg["intel_rate_limit_nvd_anonymous_refill_seconds"] == 6
         assert cfg["intel_negative_cache_virustotal_quota_seconds"] == 21600
+        assert cfg["intel_negative_cache_censys_quota_seconds"] == 21600
+        assert cfg["intel_negative_cache_otx_quota_seconds"] == 21600
+        assert cfg["intel_negative_cache_abuseipdb_quota_seconds"] == 21600
 
     def test_share_redaction_enabled_defaults_true(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -278,6 +302,38 @@ class TestLoadConfig:
 
 
 class TestIntelServices:
+    def test_provider_registry_exposes_existing_provider_metadata(self):
+        from services.intel import registry
+
+        assert [item.id for item in registry.providers_for_entity_type("ip")] == [
+            "shodan",
+            "censys",
+            "greynoise",
+            "otx",
+            "abuseipdb",
+            "teamcymru",
+        ]
+        assert [item.id for item in registry.providers_for_entity_type("domain")] == ["virustotal", "otx", "crtsh"]
+        assert [item.id for item in registry.providers_for_entity_type("hash")] == ["virustotal", "otx", "hibp"]
+        assert [item.id for item in registry.providers_for_entity_type("cve")] == ["nvd"]
+        assert registry.provider_label("GREYNOISE") == "GreyNoise"
+        assert registry.cache_scope("virustotal", "hash") == "file"
+        vt = registry.provider_definition("virustotal")
+        assert vt is not None
+        assert vt.secret_env_names == ("VT_API_KEY", "VTCLI_APIKEY")
+        consumers = registry.app_native_secret_consumers()
+        assert {
+            (item["consumer"], item["env"], tuple(item.get("fallback_envs") or []))
+            for item in consumers
+        } == {
+            ("intel Shodan", "SHODAN_API_KEY", ()),
+            ("intel Censys", "CENSYS_PAT", ()),
+            ("intel VirusTotal", "VT_API_KEY", ("VTCLI_APIKEY",)),
+            ("intel GreyNoise", "GREYNOISE_API_KEY", ()),
+            ("intel AlienVault OTX", "OTX_API_KEY", ()),
+            ("intel AbuseIPDB", "ABUSEIPDB_API_KEY", ()),
+        }
+
     def test_canonical_entity_normalizes_supported_values(self):
         from services.intel import canonical
 
@@ -320,9 +376,27 @@ class TestIntelServices:
         )
         assert enriched["providers"]["shodan"]["ports"] == [443]
         assert enriched["providers"]["greynoise"] == {"classification": "", "name": "", "last_seen": ""}
+        assert enriched["providers"]["otx"]["pulse_count"] == 0
+        assert enriched["providers"]["abuseipdb"]["total_reports"] == 0
+        assert enriched["providers"]["teamcymru"]["asn"] == ""
         assert enriched["summary"]["has_intel"] is True
         assert enriched["summary"]["providers_with_data"] == ["shodan"]
         assert enriched["summary"]["cache_status"] == {"shodan": "hit"}
+
+        cve = schema.response_with_provider(
+            "cve",
+            "nvd",
+            {
+                "published": "2024-01-01",
+                "last_modified": "2024-01-02",
+                "severity": "HIGH",
+                "score": 8.8,
+                "description": "Example CVE",
+                "references": ["https://example.test/advisory"],
+            },
+        )
+        assert cve["providers"]["nvd"]["severity"] == "HIGH"
+        assert cve["summary"]["providers_with_data"] == ["nvd"]
 
     def test_cache_round_trips_normalized_payload_with_provider_ttl(self):
         from services.intel import cache
@@ -336,6 +410,11 @@ class TestIntelServices:
         cached = cache.get_cached_response("SHODAN", "IP", "8.8.8.8", redis_client=redis)
         assert cached == payload
         assert cache.quota_negative_cache_ttl("virustotal", cfg={"intel_negative_cache_virustotal_quota_seconds": 44}) == 44
+        assert cache.quota_negative_cache_ttl("otx", cfg={"intel_negative_cache_otx_quota_seconds": 45}) == 45
+        assert cache.quota_negative_cache_ttl(
+            "abuseipdb",
+            cfg={"intel_negative_cache_abuseipdb_quota_seconds": 46},
+        ) == 46
 
         quota = cache.set_quota_exhausted("session-1", "virustotal", reset_at=200.0, redis_client=redis, now=100.0)
         assert quota["expires_at"] == 200.0
@@ -371,6 +450,14 @@ class TestIntelServices:
             now=1.0,
         ).allowed is True
 
+        assert rate_limiter.check_rate_limit(
+            "session-1",
+            "unknown-provider",
+            cfg={},
+            redis_client=process._FakeRedisClient(),
+            now=1.0,
+        ).remaining == 59
+
     def test_audit_event_omits_sensitive_provider_fields(self):
         from services.intel import audit
 
@@ -401,9 +488,76 @@ class TestIntelServices:
         assert "api_key" not in payload
         assert "response_body" not in payload
 
+    def test_json_api_client_uses_system_ca_bundle_for_https(self, monkeypatch):
+        from services.intel import clients
+
+        contexts = []
+        connections = []
+
+        class FakeResponse:
+            status = 200
+
+            def read(self):
+                return b'{"ok": true}'
+
+            def getheader(self, name):  # noqa: ARG002
+                return None
+
+        class FakeHttpsConnection:
+            def __init__(self, host, *, timeout, context):
+                self.host = host
+                self.timeout = timeout
+                self.context = context
+                connections.append(self)
+
+            def request(self, method, path, headers=None):
+                self.method = method
+                self.path = path
+                self.headers = headers or {}
+
+            def getresponse(self):
+                return FakeResponse()
+
+            def close(self):
+                self.closed = True
+
+        monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+        monkeypatch.delenv("REQUESTS_CA_BUNDLE", raising=False)
+        monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+        monkeypatch.setattr(clients.os.path, "exists", lambda path: path == "/etc/ssl/certs/ca-certificates.crt")
+        monkeypatch.setattr(clients.ssl, "create_default_context", lambda **kwargs: contexts.append(kwargs) or "ctx")
+        monkeypatch.setattr(clients.http.client, "HTTPSConnection", FakeHttpsConnection)
+
+        loaded = clients.JsonApiClient()._json_request("https://provider.example.test/v1?x=1")
+
+        assert loaded == {"ok": True}
+        assert contexts == [{"cafile": "/etc/ssl/certs/ca-certificates.crt"}]
+        assert connections[0].host == "provider.example.test"
+        assert connections[0].context == "ctx"
+        assert connections[0].path == "/v1?x=1"
+
+    def test_json_api_client_honors_explicit_ca_env(self, monkeypatch):
+        from services.intel import clients
+
+        contexts = []
+        monkeypatch.setenv("SSL_CERT_FILE", "/custom/ca.pem")
+        monkeypatch.setenv("SSL_CERT_DIR", "/custom/certs")
+        monkeypatch.setenv("REQUESTS_CA_BUNDLE", "/ignored/requests.pem")
+        monkeypatch.setattr(clients.ssl, "create_default_context", lambda **kwargs: contexts.append(kwargs) or "ctx")
+
+        assert clients._default_ssl_context() == "ctx"
+        assert contexts == [{"cafile": "/custom/ca.pem", "capath": "/custom/certs"}]
+
     def test_provider_modules_read_secret_at_call_time_and_normalize_payloads(self):
+        from services.intel.abuseipdb import AbuseIpdbProvider
+        from services.intel.censys import CensysProvider
+        from services.intel.crtsh import CrtshProvider
         from services.intel.greynoise import GreyNoiseProvider
+        from services.intel.hibp import HibpPwnedPasswordsProvider
+        from services.intel.nvd import NvdProvider
+        from services.intel.otx import OtxProvider
         from services.intel.shodan import ShodanProvider
+        from services.intel.teamcymru import TeamCymruProvider
         from services.intel.virustotal import VirusTotalProvider
 
         class FakeIntelClient:
@@ -422,7 +576,42 @@ class TestIntelServices:
                     "last_update": "2026-05-14T00:00:00Z",
                 }
 
-            def lookup_domain(self, value, *, api_key):
+            def lookup_host(self, value, *, api_key):
+                self.calls.append(("censys-host", value, api_key))
+                return {
+                    "host": {
+                        "services": [
+                            {
+                                "port": 443,
+                                "transport_protocol": "tcp",
+                                "protocol": "HTTPS",
+                                "software": [{"vendor": "Example", "product": "nginx", "version": "1.2.3"}],
+                                "observed_at": "2026-05-14T00:00:00Z",
+                            },
+                            {"port": "53", "transport_protocol": "udp", "protocol": "DNS"},
+                        ],
+                        "names": ["dns.google", "DNS.Google"],
+                        "location": {"country": "United States", "city": "Mountain View"},
+                        "autonomous_system": {"asn": 15169, "name": "GOOGLE", "bgp_prefix": "8.8.8.0/24"},
+                        "last_updated_at": "2026-05-14T00:01:00Z",
+                    },
+                }
+
+            def lookup_domain(self, value, *, api_key=None):
+                if api_key is None:
+                    self.calls.append(("crtsh-domain", value))
+                    return [
+                        {
+                            "name_value": "www.example.test\n*.Example.TEST",
+                            "issuer_name": "Test CA",
+                            "not_before": "2026-01-02T00:00:00",
+                        },
+                        {
+                            "name_value": "api.example.test",
+                            "issuer_name": "Test CA",
+                            "not_before": "2026-01-01T00:00:00",
+                        },
+                    ]
                 self.calls.append(("domain", value, api_key))
                 return {
                     "data": {
@@ -448,11 +637,60 @@ class TestIntelServices:
                     },
                 }
 
+            def lookup_sha1_prefix(self, prefix):
+                self.calls.append(("hibp", prefix))
+                return f"{'b' * 35}:7\n{'c' * 35}:1"
+
+            def lookup_cve(self, value):
+                self.calls.append(("nvd", value))
+                return {
+                    "vulnerabilities": [{
+                        "cve": {
+                            "published": "2026-01-01T00:00:00.000",
+                            "lastModified": "2026-01-02T00:00:00.000",
+                            "descriptions": [{"lang": "en", "value": "Example vulnerability."}],
+                            "metrics": {
+                                "cvssMetricV31": [{
+                                    "baseSeverity": "HIGH",
+                                    "cvssData": {"baseScore": 8.8},
+                                }],
+                            },
+                            "references": [{"url": "https://example.test/advisory"}],
+                        },
+                    }],
+                }
+
+            def lookup_indicator(self, indicator_type, value, *, api_key):
+                self.calls.append(("otx", indicator_type, value, api_key))
+                return {
+                    "reputation": 1,
+                    "pulse_info": {
+                        "count": 2,
+                        "pulses": [
+                            {
+                                "id": "pulse-1",
+                                "name": "Example Pulse",
+                                "modified": "2026-05-14T00:00:00",
+                                "tags": ["malware", "scanner"],
+                            },
+                            {
+                                "id": "pulse-2",
+                                "name": "Second Pulse",
+                                "modified": "2026-05-13T00:00:00",
+                                "tags": ["scanner"],
+                            },
+                        ],
+                    },
+                }
+
         secrets = {
             ("session-1", "SHODAN_API_KEY"): "shodan-key",
+            ("session-1", "CENSYS_PAT"): "censys-token",
             ("session-1", "VT_API_KEY"): "vt-key",
             ("session-2", "VTCLI_APIKEY"): "vtcli-key",
             ("session-1", "GREYNOISE_API_KEY"): "greynoise-key",
+            ("session-1", "OTX_API_KEY"): "otx-key",
+            ("session-1", "ABUSEIPDB_API_KEY"): "abuse-key",
         }
 
         def getter(session, env):
@@ -471,6 +709,10 @@ class TestIntelServices:
             "8.8.8.8",
             session_token="session-1",
         )
+        censys_result = CensysProvider(secret_getter=getter, client=client).lookup_ip(
+            "8.8.8.8",
+            session_token="session-1",
+        )
         vt_domain = VirusTotalProvider(secret_getter=getter, client=client).lookup_domain(
             "Example.TEST.",
             session_token="session-1",
@@ -480,6 +722,44 @@ class TestIntelServices:
             "alias.example.test",
             session_token="session-2",
         )
+        otx_domain = OtxProvider(secret_getter=getter, client=client).lookup_domain(
+            "Example.TEST.",
+            session_token="session-1",
+        )
+        otx_hash = OtxProvider(secret_getter=getter, client=client).lookup_hash(
+            "A" * 64,
+            session_token="session-1",
+        )
+        abuseipdb_result = AbuseIpdbProvider(
+            secret_getter=getter,
+            client=mock.Mock(
+                last_status=200,
+                lookup_ip=mock.Mock(return_value={
+                    "data": {
+                        "abuseConfidenceScore": 65,
+                        "totalReports": 12,
+                        "countryCode": "US",
+                        "usageType": "Data Center/Web Hosting/Transit",
+                        "isp": "Example ISP",
+                        "domain": "example.net",
+                        "isTor": False,
+                        "lastReportedAt": "2026-05-14T00:00:00+00:00",
+                    },
+                }),
+            ),
+        ).lookup_ip("8.8.8.8", session_token="session-1")
+        crtsh_result = CrtshProvider(client=client).lookup_domain("Example.TEST.", session_token="session-1")
+        teamcymru_result = TeamCymruProvider(client=mock.Mock(
+            last_status=200,
+            lookup_ip=mock.Mock(return_value={
+                "records": ['"15169 | 8.8.8.0/24 | US | arin | 1992-12-01 | GOOGLE, US"'],
+            }),
+        )).lookup_ip("8.8.8.8", session_token="session-1")
+        hibp_result = HibpPwnedPasswordsProvider(client=client).lookup_hash(
+            f"{'a' * 5}{'b' * 35}",
+            session_token="session-1",
+        )
+        nvd_result = NvdProvider(client=client).lookup_cve("cve-2026-12345", session_token="session-1")
         greynoise_result = GreyNoiseProvider(secret_getter=getter, client=client).lookup_ip(
             "8.8.4.4",
             session_token="session-1",
@@ -487,16 +767,41 @@ class TestIntelServices:
 
         assert shodan_result.payload["providers"]["shodan"]["ports"] == [443]
         assert shodan_result.payload["providers"]["shodan"]["cves"] == ["CVE-2024-12345"]
+        assert censys_result.payload["providers"]["censys"]["ports"] == [53, 443]
+        assert censys_result.payload["providers"]["censys"]["protocols"] == ["dns", "https"]
+        assert censys_result.payload["providers"]["censys"]["services"][0]["software"] == "Example nginx 1.2.3"
+        assert censys_result.payload["providers"]["censys"]["autonomous_system"]["asn"] == "15169"
         assert vt_domain.canonical_value == "example.test"
         assert vt_domain.payload["providers"]["virustotal"]["reputation"] == 5
         assert vt_hash.canonical_value == f"sha256:{'a' * 64}"
         assert vt_hash.payload["providers"]["virustotal"]["verdict"] == "malicious"
         assert vt_alias.canonical_value == "alias.example.test"
+        assert otx_domain.payload["providers"]["otx"]["pulse_count"] == 2
+        assert otx_domain.payload["providers"]["otx"]["tags"] == ["malware", "scanner"]
+        assert otx_hash.payload["providers"]["otx"]["reputation"] == 1
+        assert abuseipdb_result.payload["providers"]["abuseipdb"]["abuse_confidence_score"] == 65
+        assert abuseipdb_result.payload["providers"]["abuseipdb"]["total_reports"] == 12
+        assert crtsh_result.payload["providers"]["crtsh"]["certificate_count"] == 2
+        assert crtsh_result.payload["providers"]["crtsh"]["names"] == [
+            "www.example.test",
+            "example.test",
+            "api.example.test",
+        ]
+        assert teamcymru_result.payload["providers"]["teamcymru"]["asn"] == "15169"
+        assert hibp_result.payload["providers"]["hibp"]["pwned"] is True
+        assert hibp_result.payload["providers"]["hibp"]["count"] == 7
+        assert nvd_result.payload["providers"]["nvd"]["severity"] == "HIGH"
         assert greynoise_result.payload["providers"]["greynoise"]["classification"] == "benign"
         assert ("ip", "8.8.8.8", "shodan-key") in client.calls
+        assert ("censys-host", "8.8.8.8", "censys-token") in client.calls
         assert ("domain", "example.test", "vt-key") in client.calls
         assert ("hash", "a" * 64, "vt-key") in client.calls
         assert ("domain", "alias.example.test", "vtcli-key") in client.calls
+        assert ("otx", "hostname", "example.test", "otx-key") in client.calls
+        assert ("otx", "file", "a" * 64, "otx-key") in client.calls
+        assert ("crtsh-domain", "example.test") in client.calls
+        assert ("hibp", "aaaaa") in client.calls
+        assert ("nvd", "CVE-2026-12345") in client.calls
         assert ("ip", "8.8.4.4", "greynoise-key") in client.calls
 
     def test_provider_missing_secret_blocks_lookup_before_client_call(self):
@@ -539,6 +844,52 @@ class TestIntelServices:
         assert result.providers[0].result is None
         provider.client.lookup_ip.assert_not_called()
 
+    def test_lookup_entity_includes_no_secret_provider_and_caches_result(self):
+        from services.intel import cache
+        from services.intel.lookup import lookup_entity
+        from services.intel.teamcymru import TeamCymruProvider
+
+        redis = process._FakeRedisClient()
+        client = mock.Mock(
+            last_status=200,
+            lookup_ip=mock.Mock(return_value={
+                "records": ['"15169 | 8.8.8.0/24 | US | arin | 1992-12-01 | GOOGLE, US"'],
+            }),
+        )
+
+        first = lookup_entity(
+            "ip",
+            "8.8.8.8",
+            session_id="session-1",
+            provider_factories=[lambda: TeamCymruProvider(client=client)],
+            redis_client=redis,
+        )
+        second = lookup_entity(
+            "ip",
+            "8.8.8.8",
+            session_id="session-1",
+            provider_factories=[lambda: TeamCymruProvider(client=client)],
+            redis_client=redis,
+        )
+
+        assert first.providers[0].status == "ok"
+        assert first.providers[0].result is not None
+        assert first.providers[0].result.payload["providers"]["teamcymru"]["asn"] == "15169"
+        assert second.providers[0].result is not None
+        assert second.providers[0].result.cache_hit is True
+        client.lookup_ip.assert_called_once_with("8.8.8.8")
+        cached = cache.get_cached_response("teamcymru", "ip", "8.8.8.8", redis_client=redis)
+        assert cached is not None
+
+    def test_default_hash_providers_only_include_hibp_for_sha1(self):
+        from services.intel.lookup import default_provider_factories
+
+        sha1_names = [factory().name for factory in default_provider_factories("hash", f"sha1:{'a' * 40}")]
+        sha256_names = [factory().name for factory in default_provider_factories("hash", f"sha256:{'a' * 64}")]
+
+        assert sha1_names == ["virustotal", "otx", "hibp"]
+        assert sha256_names == ["virustotal", "otx"]
+
     def test_builtin_intel_ip_formats_partial_provider_results(self):
         from services.intel.base import IntelResult
         from services.intel.lookup import IntelLookupResult, ProviderLookup
@@ -578,6 +929,49 @@ class TestIntelServices:
         assert "CVE-2024-12345" in text
         assert "GreyNoise: not configured - GREYNOISE_API_KEY is not configured" in text
 
+    def test_builtin_intel_ip_formats_censys_provider_results(self):
+        from services.intel.base import IntelResult
+        from services.intel.lookup import IntelLookupResult, ProviderLookup
+
+        payload = {
+            "providers": {
+                "censys": {
+                    "ports": [53, 443],
+                    "protocols": ["dns", "https"],
+                    "services": [
+                        {
+                            "port": 443,
+                            "transport": "tcp",
+                            "protocol": "https",
+                            "software": "Example nginx 1.2.3",
+                            "observed_at": "2026-05-14T00:00:00Z",
+                        },
+                    ],
+                    "names": ["dns.google"],
+                    "location": {"country": "United States"},
+                    "autonomous_system": {"asn": "15169", "name": "GOOGLE"},
+                    "last_updated_at": "2026-05-14T00:01:00Z",
+                },
+            },
+            "summary": {"has_intel": True},
+        }
+        lookup = IntelLookupResult(
+            "ip",
+            "8.8.8.8",
+            [ProviderLookup("censys", result=IntelResult("censys", "ip", "8.8.8.8", payload))],
+        )
+
+        with mock.patch("services.commands.builtins_intel.lookup_entity", return_value=lookup):
+            lines, exit_code = builtin_commands.execute_builtin_command("intel ip 8.8.8.8", "intel-session")
+
+        text = "\n".join(str(line.get("text", "")) for line in lines)
+        assert exit_code == 0
+        assert "Censys: cache miss" in text
+        assert "53, 443" in text
+        assert "GOOGLE" in text
+        assert "443/tcp https - Example nginx 1.2.3" in text
+        assert "dns.google" in text
+
     def test_builtin_intel_reports_all_missing_provider_keys(self):
         from services.intel.lookup import IntelLookupResult, ProviderLookup
 
@@ -601,6 +995,39 @@ class TestIntelServices:
         assert "VirusTotal: not configured - VT_API_KEY or VTCLI_APIKEY is not configured" in text
         assert "No providers are configured for this lookup." in text
         assert "secret show-consumers" in text
+
+    def test_builtin_intel_formats_cve_provider_results(self):
+        from services.intel.base import IntelResult
+        from services.intel.lookup import IntelLookupResult, ProviderLookup
+
+        payload = {
+            "providers": {
+                "nvd": {
+                    "severity": "HIGH",
+                    "score": 8.8,
+                    "published": "2026-01-01",
+                    "last_modified": "2026-01-02",
+                    "description": "Example vulnerability.",
+                    "references": ["https://example.test/advisory"],
+                },
+            },
+            "summary": {"has_intel": True},
+        }
+        lookup = IntelLookupResult(
+            "cve",
+            "CVE-2026-12345",
+            [ProviderLookup("nvd", result=IntelResult("nvd", "cve", "CVE-2026-12345", payload))],
+        )
+
+        with mock.patch("services.commands.builtins_intel.lookup_entity", return_value=lookup):
+            lines, exit_code = builtin_commands.execute_builtin_command("intel cve CVE-2026-12345", "intel-session")
+
+        text = "\n".join(str(line.get("text", "")) for line in lines)
+        assert exit_code == 0
+        assert "Intel lookup: cve CVE-2026-12345" in text
+        assert "NVD: cache miss" in text
+        assert "severity" in text
+        assert "HIGH" in text
 
     def test_builtin_intel_rejects_private_ip_without_override(self):
         with mock.patch("services.commands.builtins_intel.lookup_entity") as lookup:
@@ -1232,6 +1659,7 @@ class TestDerivedCommandRegistry:
         catalog = command_catalog_from_registry(registry)
         entry = command_catalog_entry("sentinel", registry=registry)
         subcommand = command_catalog_entry("sentinel", "scan", registry=registry)
+        secret_consumers = command_secret_consumers(registry)
 
         assert [item["root"] for item in catalog] == ["sentinel"]
         assert entry is not None
@@ -1242,6 +1670,16 @@ class TestDerivedCommandRegistry:
                 "inject_env": "VTCLI_APIKEY",
                 "fallback_envs": ["VTCLI_APIKEY"],
                 "optional": False,
+            },
+        ]
+        assert secret_consumers == [
+            {
+                "env": "VT_API_KEY",
+                "inject_env": "VTCLI_APIKEY",
+                "fallback_envs": ["VTCLI_APIKEY"],
+                "optional": False,
+                "source": "command_registry",
+                "consumer": "sentinel",
             },
         ]
         entry_flags = entry.get("flags")
@@ -1415,6 +1853,18 @@ class TestDerivedCommandRegistry:
                     "requires_secrets": [{"env": "NUCLEI_TOKEN", "optional": True}],
                 },
                 {
+                    "root": "ipinfo",
+                    "requires_secrets": [{"env": "IPINFO_TOKEN", "optional": True}],
+                },
+                {
+                    "root": "urlscan",
+                    "requires_secrets": [{"env": "URLSCAN_API_KEY", "optional": False}],
+                },
+                {
+                    "root": "chaos",
+                    "requires_secrets": [{"env": "PDCP_API_KEY", "optional": False}],
+                },
+                {
                     "root": "vt",
                     "requires_secrets": [
                         {
@@ -1437,9 +1887,18 @@ class TestDerivedCommandRegistry:
         assert "shodan (required)" in text
         assert "NUCLEI_TOKEN" in text
         assert "nuclei (optional)" in text
+        assert "IPINFO_TOKEN" in text
+        assert "ipinfo (optional)" in text
+        assert "URLSCAN_API_KEY" in text
+        assert "urlscan (required)" in text
+        assert "PDCP_API_KEY" in text
+        assert "chaos (required)" in text
         assert "VT_API_KEY" in text
         assert "VTCLI_APIKEY" in text
         assert "vt (required)" in text
+        assert "intel Shodan (required)" in text
+        assert "intel VirusTotal (required)" in text
+        assert "intel GreyNoise (required)" in text
 
     def test_real_registry_amass_uses_subcommand_scoped_autocomplete(self):
         context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
@@ -1664,6 +2123,7 @@ class TestDerivedCommandRegistry:
 
     def test_real_registry_commands_have_root_descriptions(self):
         registry = load_commands_registry()
+        by_root = {str(item.get("root") or ""): item for item in registry.get("commands", [])}
 
         missing = [
             str(item.get("root") or "<unknown>").strip()
@@ -1672,6 +2132,27 @@ class TestDerivedCommandRegistry:
         ]
 
         assert missing == []
+        ipinfo = by_root["ipinfo"]
+        assert ipinfo["requires_secrets"] == [{"env": "IPINFO_TOKEN", "optional": True}]
+        assert "ipinfo --token" in ipinfo["policy"]["deny"]
+        assert "ipinfo completion install" in ipinfo["policy"]["deny"]
+        urlscan = by_root["urlscan"]
+        assert urlscan["requires_secrets"] == [{"env": "URLSCAN_API_KEY", "optional": False}]
+        assert "urlscan key" in urlscan["policy"]["deny"]
+        assert "urlscan --api-key" in urlscan["policy"]["deny"]
+        assert "urlscan scan submit -" in urlscan["policy"]["deny"]
+        assert is_command_allowed("urlscan scan submit https://darklab.sh/")[0]
+        assert is_command_allowed("urlscan search domain:darklab.sh")[0]
+        assert not is_command_allowed("urlscan key set")[0]
+        assert not is_command_allowed("urlscan scan submit --api-key secret https://darklab.sh/")[0]
+        chaos = by_root["chaos"]
+        assert chaos["requires_secrets"] == [{"env": "PDCP_API_KEY", "optional": False}]
+        assert "chaos -key" in chaos["policy"]["deny"]
+        assert "chaos -o" in chaos["policy"]["deny"]
+        assert "chaos -dL" in chaos["policy"]["deny"]
+        assert is_command_allowed("chaos -d darklab.sh -silent")[0]
+        assert not is_command_allowed("chaos -d darklab.sh -key secret")[0]
+        assert not is_command_allowed("chaos -dL domains.txt")[0]
 
     def test_real_registry_workspace_file_flags_cover_supported_file_io_tools(self):
         with tempfile.TemporaryDirectory() as tmp:

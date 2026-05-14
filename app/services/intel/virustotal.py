@@ -6,6 +6,7 @@ from typing import Any
 
 from services.intel.base import IntelResult, Provider, ProviderClientUnavailable
 from services.intel.canonical import canonical_domain, canonical_hash
+from services.intel.registry import provider_definition
 from services.intel.schema import response_with_provider
 
 
@@ -45,11 +46,12 @@ def normalize_hash_payload(raw: dict[str, Any]) -> dict[str, Any]:
 
 class VirusTotalProvider(Provider):
     def __init__(self, **kwargs):
+        definition = provider_definition("virustotal")
         super().__init__(
             name="virustotal",
-            secret_env="VT_API_KEY",
-            secret_env_aliases=("VTCLI_APIKEY",),
-            cache_scopes={"domain": "domain", "hash": "file"},
+            secret_env=definition.secret_env if definition else "VT_API_KEY",
+            secret_env_aliases=definition.secret_env_aliases if definition else ("VTCLI_APIKEY",),
+            cache_scopes=definition.cache_scopes if definition else {"domain": "domain", "hash": "file"},
             **kwargs,
         )
 

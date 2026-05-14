@@ -83,7 +83,7 @@ async function starCommand(page, command) {
 
 async function answerTerminalConfirm(page, answer, expectedText, { timeout = 30_000 } = {}) {
   await ensurePromptReady(page, { timeout })
-  await setComposerValueForTest(page, answer)
+  await setComposerValueForTest(page, answer, { waitForAutocomplete: false })
   await page.keyboard.press('Enter')
   await expect(page.locator('.tab-panel.active .output')).toContainText(expectedText, {
     timeout,
@@ -97,9 +97,9 @@ async function answerTerminalConfirm(page, answer, expectedText, { timeout = 30_
 
 test.describe('session-token lifecycle', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/', { waitUntil: 'domcontentloaded' })
     await page.evaluate(() => localStorage.clear())
-    await page.reload()
+    await page.reload({ waitUntil: 'domcontentloaded' })
     await ensurePromptReady(page)
   })
 
@@ -116,7 +116,7 @@ test.describe('session-token lifecycle', () => {
     expect(token).toMatch(/^tok_[a-f0-9]{32}$/)
     expect(await currentSessionId(page)).toBe(token)
 
-    await page.reload()
+    await page.reload({ waitUntil: 'domcontentloaded' })
     await ensurePromptReady(page)
     expect(await storedSessionToken(page)).toBe(token)
     expect(await currentSessionId(page)).toBe(token)
@@ -200,7 +200,7 @@ test.describe('session-token lifecycle', () => {
         localStorage.setItem('session_token', sessionToken)
       }, token)
       await otherPage.goto('/')
-      await ensurePromptReady(otherPage, { timeout: 30_000 })
+      await ensurePromptReady(otherPage, { timeout: 30_000, waitForAutocomplete: true })
       await expect.poll(async () => currentSessionId(otherPage)).toBe(token)
       await expect.poll(async () => otherPage.evaluate(() => (
         typeof _readRecentDomains === 'function' ? _readRecentDomains() : []

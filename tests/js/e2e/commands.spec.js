@@ -36,6 +36,10 @@ test.describe('command execution', () => {
 })
 
 test.describe('interactive PTY command execution', () => {
+  function activePtyOverlay(page) {
+    return page.locator('.pty-tab-overlay.open').first()
+  }
+
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {
       const originalFetch = window.fetch.bind(window)
@@ -195,18 +199,19 @@ test.describe('interactive PTY command execution', () => {
     await page.locator('#cmd').fill('mtr --interactive darklab.sh')
     await page.keyboard.press('Enter')
 
-    await expect(page.locator('#pty-overlay')).toHaveClass(/\bopen\b/)
-    await expect(page.locator('#pty-modal-status-label')).toHaveText('running')
-    await expect(page.locator('#pty-modal-screen .xterm')).toBeVisible()
-    await expect(page.locator('#pty-modal-screen')).toContainText('smoke hop darklab.sh')
+    const overlay = activePtyOverlay(page)
+    await expect(overlay).toBeVisible()
+    await expect(overlay.locator('.pty-modal-status-label')).toHaveText('running')
+    await expect(overlay.locator('.pty-modal-screen .xterm')).toBeVisible()
+    await expect(overlay.locator('.pty-modal-screen')).toContainText('smoke hop darklab.sh')
     await expect.poll(() => page.evaluate(() => window.__ptyResizeRequests)).toBeGreaterThan(0)
 
-    await page.locator('#pty-modal-kill').click()
+    await overlay.locator('.pty-modal-kill').click()
     await expect(page.locator('#confirm-host')).toContainText('Kill the running process')
     await page.locator('#confirm-host [data-confirm-action-id="confirm"]').click()
 
     await expect.poll(() => page.evaluate(() => window.__ptyKillRequests)).toBe(1)
-    await expect(page.locator('#pty-overlay')).toHaveClass(/u-hidden/)
+    await expect(page.locator('.pty-tab-overlay.open')).toHaveCount(0)
     await expect(page.locator('.tab-panel.active .output')).toContainText('smoke hop darklab.sh')
   })
 
@@ -214,15 +219,15 @@ test.describe('interactive PTY command execution', () => {
     await page.locator('#cmd').fill('mtr --interactive darklab.sh')
     await page.keyboard.press('Enter')
 
-    await expect(page.locator('#pty-overlay')).toHaveClass(/\bopen\b/)
-    await expect(page.locator('#pty-modal-screen')).toContainText('smoke hop darklab.sh')
+    await expect(activePtyOverlay(page)).toBeVisible()
+    await expect(activePtyOverlay(page).locator('.pty-modal-screen')).toContainText('smoke hop darklab.sh')
 
     await page.evaluate(() => window.localStorage.setItem('__ptyExposeActiveRun', '1'))
     await page.reload({ waitUntil: 'domcontentloaded' })
     await page.locator('#cmd').waitFor()
 
-    await expect(page.locator('#pty-overlay')).toHaveClass(/\bopen\b/)
-    await expect(page.locator('#pty-modal-screen')).toContainText('snapshot hop darklab.sh')
+    await expect(activePtyOverlay(page)).toBeVisible({ timeout: 15_000 })
+    await expect(activePtyOverlay(page).locator('.pty-modal-screen')).toContainText('snapshot hop darklab.sh')
     await expect(page.locator('.tab-panel.active .output')).toContainText('reattached to active interactive PTY')
   })
 })

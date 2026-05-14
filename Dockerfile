@@ -24,6 +24,9 @@ ARG WAFW00F_VERSION=2.4.2
 ARG RUSTSCAN_VERSION=2.4.1
 ARG WPSCAN_VERSION=3.8.28
 ARG VT_CLI_VERSION=latest
+ARG IPINFO_CLI_VERSION=ipinfo-3.3.2
+ARG URLSCAN_CLI_VERSION=v2026.03.26
+ARG CHAOS_CLIENT_VERSION=v0.5.2
 ARG SETUPTOOLS_VERSION=80.9.0
 
 # Remove dpkg config that prevents man pages from being installed
@@ -73,8 +76,12 @@ WORKDIR /tmp/openssl-${OPENSSL_VERSION}
 RUN multiarch="$(gcc -print-multiarch)" && \
     ./config --prefix=/usr/local --openssldir=/usr/local/ssl --libdir="lib/${multiarch}" shared zlib && \
     make -j"$(nproc)" && \
-    make install_sw && \
+    make install_sw install_ssldirs && \
+    ln -sf /etc/ssl/certs/ca-certificates.crt /usr/local/ssl/cert.pem && \
+    ln -sfn /etc/ssl/certs /usr/local/ssl/certs && \
     ldconfig
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 WORKDIR /tmp
 RUN rm -rf "openssl-${OPENSSL_VERSION}"
 
@@ -154,6 +161,9 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # allowlist and vault-backed environment injection path as other scanner tools.
 RUN pip install --no-cache-dir setuptools==${SETUPTOOLS_VERSION} shodan greynoise
 RUN go install -v github.com/VirusTotal/vt-cli/vt@${VT_CLI_VERSION}
+RUN go install -v github.com/ipinfo/cli/ipinfo@${IPINFO_CLI_VERSION}
+RUN go install -v github.com/urlscan/urlscan-cli@${URLSCAN_CLI_VERSION}
+RUN go install -v github.com/projectdiscovery/chaos-client/cmd/chaos@${CHAOS_CLIENT_VERSION}
 
 
 # Create two unprivileged users:

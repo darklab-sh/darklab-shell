@@ -3451,6 +3451,160 @@ commands:
               hint_only: true
               value_type: ip
               description: Public IP address to query
+  - root: ipinfo
+    description: Queries IPinfo for IP geolocation, ASN, and ownership context.
+    category: External Intelligence
+    policy:
+      allow:
+        - ipinfo
+      deny:
+        - ipinfo init
+        - ipinfo config
+        - ipinfo completion install
+        - ipinfo download
+        - ipinfo signup
+        - ipinfo login
+        - ipinfo logout
+        - ipinfo --token
+        - ipinfo -t
+        - ipinfo 127.0.0.1
+        - ipinfo 0.0.0.0
+        - ipinfo localhost
+        - ipinfo ::1
+    requires_secrets:
+      - env: IPINFO_TOKEN
+        optional: true
+    autocomplete:
+      examples:
+        - value: ipinfo --help
+          description: Show help and usage
+      flags:
+        - value: --help
+          description: Show help and usage
+          closes: true
+        - value: --nocolor
+          description: Disable ANSI color output
+        - value: -j
+          description: Print JSON output
+      subcommands:
+        myip:
+          description: Show the scanner container's public IP details
+        asn:
+          description: Look up ASN details
+          arguments:
+            - placeholder: <asn>
+              hint_only: true
+              description: Autonomous system number, such as 15169
+      arguments:
+        - placeholder: <ip>
+          hint_only: true
+          value_type: ip
+          description: Public IP address to query
+  - root: urlscan
+    description: Submits URLs to urlscan.io, retrieves scan results, and searches urlscan data.
+    category: External Intelligence
+    policy:
+      allow:
+        - urlscan --help
+        - urlscan scan submit
+        - urlscan scan result
+        - urlscan search
+      deny:
+        - urlscan key
+        - urlscan config
+        - urlscan completion
+        - urlscan --api-key
+        - urlscan --apikey
+        - urlscan --token
+        - urlscan -k
+        - urlscan scan submit -
+        - urlscan scan result -
+    requires_secrets:
+      - env: URLSCAN_API_KEY
+    autocomplete:
+      examples:
+        - value: urlscan --help
+          description: Show help and usage
+        - value: urlscan scan submit https://darklab.sh/
+          description: Submit a URL for scanning
+        - value: urlscan search domain:darklab.sh
+          description: Search urlscan results
+      subcommands:
+        scan:
+          description: Submit URLs and retrieve scan results
+          subcommands:
+            submit:
+              description: Submit a URL for scanning
+              examples:
+                - value: urlscan scan submit https://darklab.sh/
+                  description: Submit a URL for scanning
+              arguments:
+                - placeholder: <url>
+                  hint_only: true
+                  value_type: url
+                  description: URL to submit
+            result:
+              description: Retrieve a scan result by UUID
+              examples:
+                - value: urlscan scan result 00000000-0000-0000-0000-000000000000
+                  description: Retrieve a scan result by UUID
+              arguments:
+                - placeholder: <uuid>
+                  hint_only: true
+                  description: urlscan result UUID
+        search:
+          description: Search urlscan indexed results
+          examples:
+            - value: urlscan search domain:darklab.sh
+              description: Search urlscan results
+          arguments:
+            - placeholder: <query>
+              hint_only: true
+              description: urlscan search query
+  - root: chaos
+    description: Queries ProjectDiscovery Chaos for known subdomains of a domain.
+    category: External Intelligence
+    policy:
+      allow:
+        - chaos -h
+        - chaos -d
+      deny:
+        - chaos -key
+        - chaos -o
+        - chaos -dL
+        - chaos -up
+        - chaos -update
+    requires_secrets:
+      - env: PDCP_API_KEY
+    autocomplete:
+      examples:
+        - value: chaos -h
+          description: Show help and usage
+        - value: chaos -d darklab.sh -silent
+          description: List known subdomains for a domain
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: -d
+          description: Domain to search
+          takes_value: true
+          value_hint:
+            placeholder: <domain>
+            hint_only: true
+            value_type: domain
+            description: Domain to query
+          suggest:
+            - value: darklab.sh
+              description: Query this domain
+        - value: -count
+          description: Show statistics for the domain
+        - value: -silent
+          description: Print compact output
+        - value: -json
+          description: Print JSON output
+        - value: -duc
+          description: Disable update checks
   - root: testssl
     description: Tests TLS services for protocol support, cipher choices, certificate issues, and known weaknesses.
     category: Vulnerability Scanning

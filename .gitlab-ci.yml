@@ -70,6 +70,8 @@ test-js-unit:
 test-js-e2e:
   stage: test
   image: $CI_PYTHON_E2E_IMAGE
+  variables:
+    PLAYWRIGHT_PROJECT_COUNT: "3"
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
       when: never

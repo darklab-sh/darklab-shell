@@ -1049,11 +1049,34 @@ def _real_command_popen_argv(prepared_real: _PreparedRealCommand) -> list[str]:
     scanner_prefix = list(SCANNER_PREFIX)
     if scanner_prefix and prepared_real.secret_env_names and scanner_prefix[0] == "sudo":
         scanner_prefix.insert(1, "--preserve-env=" + ",".join(prepared_real.secret_env_names))
-    return scanner_prefix + [SHELL_BIN, "-c", prepared_real.command] if scanner_prefix else [
+    command = _secret_aware_shell_command(prepared_real)
+    return scanner_prefix + [SHELL_BIN, "-c", command] if scanner_prefix else [
         SHELL_BIN,
         "-c",
-        prepared_real.command,
+        command,
     ]
+
+
+def _secret_aware_shell_command(prepared_real: _PreparedRealCommand) -> str:
+    if (
+        command_root(prepared_real.registry_command) == "shodan" and
+        "SHODAN_API_KEY" in prepared_real.secret_env_names
+    ):
+        return _shodan_configured_shell_command(prepared_real.command)
+    return prepared_real.command
+
+
+def _shodan_configured_shell_command(command: str) -> str:
+    warnings_filter = "ignore:pkg_resources is deprecated as an API:UserWarning"
+    return (
+        "__darklab_shodan_home=$(mktemp -d) && "
+        "trap 'rm -rf \"$__darklab_shodan_home\"' EXIT HUP INT TERM && "
+        "mkdir -p \"$__darklab_shodan_home/.shodan\" && "
+        "chmod 700 \"$__darklab_shodan_home/.shodan\" && "
+        "printf '%s' \"$SHODAN_API_KEY\" > \"$__darklab_shodan_home/.shodan/api_key\" && "
+        "chmod 600 \"$__darklab_shodan_home/.shodan/api_key\" && "
+        f"HOME=\"$__darklab_shodan_home\" PYTHONWARNINGS={shlex.quote(warnings_filter)} {command}"
+    )
 
 
 def _history_safe_command_for_storage(command: str) -> str:

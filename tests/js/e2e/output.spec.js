@@ -78,20 +78,24 @@ test.describe('output actions', () => {
   // ── Save .html ────────────────────────────────────────────────────────────
 
   test('save-html button triggers a .html file download', async ({ page }) => {
-    await page.locator('.hud-actions [data-action="save-menu"]').click()
+    const saveWrap = page.locator('.hud-actions .hud-save-wrap')
+    await saveWrap.locator('[data-action="save-menu"]').click()
+    await expect(saveWrap.locator('[data-action="save-html"]')).toBeVisible()
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('.hud-actions [data-action="save-html"]').click(),
+      saveWrap.locator('[data-action="save-html"]').click(),
     ])
 
     expect(download.suggestedFilename()).toMatch(/\.html$/)
   })
 
   test('downloaded html file contains the command text', async ({ page }) => {
-    await page.locator('.hud-actions [data-action="save-menu"]').click()
+    const saveWrap = page.locator('.hud-actions .hud-save-wrap')
+    await saveWrap.locator('[data-action="save-menu"]').click()
+    await expect(saveWrap.locator('[data-action="save-html"]')).toBeVisible()
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('.hud-actions [data-action="save-html"]').click(),
+      saveWrap.locator('[data-action="save-html"]').click(),
     ])
 
     const stream = await download.createReadStream()

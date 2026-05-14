@@ -68,33 +68,44 @@ async function _ensureOptionsSecretCatalog() {
 function _optionsKnownSecretChoices() {
   const data = typeof commandRegistryData !== 'undefined' ? commandRegistryData : null;
   const commands = Array.isArray(data?.commands) ? data.commands : [];
+  const secretConsumers = Array.isArray(data?.secret_consumers) ? data.secret_consumers : [];
   const byName = new Map();
-  commands.forEach((command) => {
-    const root = String(command?.root || '').trim();
-    const declarations = Array.isArray(command?.requires_secrets) ? command.requires_secrets : [];
-    declarations.forEach((declaration) => {
-      const env = _normalizeOptionsSecretName(declaration?.env);
-      if (!_optionsSecretNameIsValid(env)) return;
-      const injectEnv = _normalizeOptionsSecretName(declaration?.inject_env || env);
-      const names = [env, ...(Array.isArray(declaration?.fallback_envs) ? declaration.fallback_envs : [])]
-        .map((item) => _normalizeOptionsSecretName(item))
-        .filter((item, index, arr) => _optionsSecretNameIsValid(item) && arr.indexOf(item) === index);
-      names.forEach((name) => {
-        const existing = byName.get(name) || {
-          name,
-          roots: [],
-          inject_envs: [],
-          fallback: name !== env,
-          optional: true,
-        };
-        if (root && !existing.roots.includes(root)) existing.roots.push(root);
-        if (injectEnv && !existing.inject_envs.includes(injectEnv)) existing.inject_envs.push(injectEnv);
-        existing.fallback = existing.fallback && name !== env;
-        existing.optional = existing.optional && Boolean(declaration?.optional);
-        byName.set(name, existing);
+  const visitDeclaration = (consumerName, declaration) => {
+    const env = _normalizeOptionsSecretName(declaration?.env);
+    if (!_optionsSecretNameIsValid(env)) return;
+    const injectEnv = _normalizeOptionsSecretName(declaration?.inject_env || env);
+    const names = [env, ...(Array.isArray(declaration?.fallback_envs) ? declaration.fallback_envs : [])]
+      .map((item) => _normalizeOptionsSecretName(item))
+      .filter((item, index, arr) => _optionsSecretNameIsValid(item) && arr.indexOf(item) === index);
+    names.forEach((name) => {
+      const existing = byName.get(name) || {
+        name,
+        roots: [],
+        inject_envs: [],
+        fallback: name !== env,
+        optional: true,
+      };
+      if (consumerName && !existing.roots.includes(consumerName)) existing.roots.push(consumerName);
+      if (injectEnv && !existing.inject_envs.includes(injectEnv)) existing.inject_envs.push(injectEnv);
+      existing.fallback = existing.fallback && name !== env;
+      existing.optional = existing.optional && Boolean(declaration?.optional);
+      byName.set(name, existing);
+    });
+  };
+  if (secretConsumers.length) {
+    secretConsumers.forEach((consumer) => {
+      const name = String(consumer?.consumer || consumer?.root || consumer?.provider || '').trim();
+      visitDeclaration(name, consumer);
+    });
+  } else {
+    commands.forEach((command) => {
+      const root = String(command?.root || '').trim();
+      const declarations = Array.isArray(command?.requires_secrets) ? command.requires_secrets : [];
+      declarations.forEach((declaration) => {
+        visitDeclaration(root, declaration);
       });
     });
-  });
+  }
   return Array.from(byName.values()).sort((left, right) => left.name.localeCompare(right.name));
 }
 

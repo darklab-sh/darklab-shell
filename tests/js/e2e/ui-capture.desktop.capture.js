@@ -147,7 +147,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
-      await setComposerValueForTest(page, 'curl -')
+      await setComposerValueForTest(page, 'curl -', { waitForAutocomplete: true })
       await expect(page.locator('#ac-dropdown')).not.toHaveClass(/u-hidden/)
     },
   },

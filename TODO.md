@@ -29,91 +29,29 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Keep the route read-only and cheap enough for occasional operator use; this does not need live polling.
   - Surface the same summary through a terminal built-in later if it fits naturally with `stats`, `retention`, or `limits`.
 
-### External intel provider expansion
-- **Scope**
-  - Expand the app-native `intel` system beyond Shodan, VirusTotal, and GreyNoise without turning the container into a bundle of every possible vendor CLI.
-  - Treat provider expansion as an app capability first: normalized provider responses, cache/quota/rate-limit behavior, redacted audit events, raw-only share/export handling, and predictable secret setup all matter more than exposing a CLI for every vendor.
-  - Add CLI wrappers only when a vendor CLI is official, stable, meaningfully useful by itself, and safe to allowlist.
-  - Keep `docs/intel-commands.md` as a research snapshot only while this work is active. Do not promote that file into official docs as-is because vendor install methods and licensing drift, and TODO.md is the right place for future-state implementation details.
-- **Firm decisions**
-  - Add a provider registry before adding more providers. The registry is the source of truth for provider id, display name, supported entity types, secret env names and aliases, tier, cache scope, rate-limit profile, paid-provider gating, and whether the provider is app-native or CLI-backed.
-  - App-native providers must publish secret-consumer metadata too. The Options Secrets picker and `secret show-consumers` cannot depend only on `commands.yaml`, because HTTP-only providers have no command-registry entry.
-  - Use per-provider paid enablement, not one global paid-provider switch. Recommended config shape: `intel_enabled_paid_providers: []`, with provider ids such as `censys`, `zoomeye`, `dehashed`, and `dnsdb`.
-  - For paired credentials, store two separate secrets unless the provider truly expects one value under multiple env names. Censys and PassiveTotal-style username/key pairs are two secrets, not one secret with two consumer envs.
-  - Sidecar enrichment stays opt-in per session or project. Normal scanner runs must not call live intel APIs automatically because that burns quota and surprises users.
-  - Intel response bodies remain raw-only outside owner-controlled live/history views. Share snapshots, public non-owner permalinks, and local styled exports keep the existing omission behavior.
-- **Provider batches**
-  - **Batch 1: no-key app-native providers**
-    - `crt.sh` for domain certificate transparency lookups.
-    - Team Cymru and/or BGPView for IP/ASN ownership context.
-    - NVD for `intel cve <id>` with anonymous-rate-limit handling.
-    - HIBP Pwned Passwords only via k-anonymity prefix range; never send full hashes.
-  - **Batch 2: key-backed app-native providers**
-    - AlienVault OTX for IP/domain/hash pulses and reputation.
-    - AbuseIPDB for IP reputation.
-    - Vulners for CVE enrichment.
-    - BuiltWith only if the API result adds enough value over local tech-detection tooling.
-  - **Batch 3: carefully chosen CLI wrappers**
-    - urlscan.io should use the current official `urlscan-cli` with `URLSCAN_API_KEY`, not stale `urlscan-python` CLI assumptions.
-    - IPinfo can use the official CLI with `IPINFO_TOKEN`; unauthenticated lookup can remain supported if the CLI handles it cleanly.
-    - ProjectDiscovery Chaos should use `go install github.com/projectdiscovery/chaos-client/cmd/chaos@...` and `PDCP_API_KEY`, not `CHAOS_API_KEY`.
-    - Censys needs a deliberate choice before implementation: either app-native SDK integration or one CLI generation. Do not install both legacy `censys` and newer `cencli`.
-  - **Batch 4: paid/operator-driven providers**
-    - ZoomEye, DeHashed, HIBP breach API, IntelligenceX, Triage, PassiveTotal/Defender TI, DNSDB, and BuiltWith Pro ship only when explicitly enabled through `intel_enabled_paid_providers`.
-    - Prefer app-native REST/SDK integrations over wrapper scripts for paid providers unless the vendor CLI is clearly official and safe.
-  - **Batch 5: self-hosted/local providers**
-    - MISP requires both `MISP_URL` and `MISP_API_KEY`; app-native is preferred unless a small in-tree shim proves cleaner.
-    - Wappalyzer-style tech detection should avoid pulling Chromium into the runtime image unless the value clearly justifies the image cost. Prefer a lighter local-fingerprint or HTTP-only path first.
-- **Phase 0 - Provider registry foundation**
-  - Add `app/services/intel/registry.py` with typed provider definitions.
-  - Move Shodan, VirusTotal, and GreyNoise metadata into the registry without changing current behavior.
-  - Teach `default_provider_factories()`, provider labels, cache/rate-limit lookup, and missing-key setup text to read registry metadata.
-  - Add a registry helper that returns metadata-only secret consumers for both app-native providers and CLI-backed command-registry providers.
-  - Update the Options Secrets picker and `secret show-consumers` to include app-native intel consumers.
-  - Tests: registry normalization, existing provider parity, app-native secret consumers in Options, app-native secret consumers in `secret show-consumers`, and missing-key messaging.
-- **Phase 1 - No-key app-native providers**
-  - Extend `intel` grammar with `intel cve <id>` and any needed typed aliases without breaking existing `intel ip|domain|hash`.
-  - Add crt.sh domain lookup with aggressive cache TTL and defensive parsing for duplicate/malformed rows.
-  - Add one IP ownership provider first, Team Cymru or BGPView, then decide if the other adds enough distinct value.
-  - Add NVD CVE lookup with anonymous rate-limit handling and cache TTLs.
-  - Add HIBP Pwned Passwords only as `intel hash <sha1>` or a dedicated safe subcommand that sends only the SHA1 prefix.
-  - Tests: canonicalization, cache hit/miss, provider error rendering, no-secret provider inclusion, private-IP behavior, and raw-only share/export omission.
-- **Phase 2 - Key-backed app-native providers**
-  - Add OTX and AbuseIPDB first; both are API-shaped and should not require Dockerfile changes.
-  - Add provider-specific config defaults for cache TTLs, token buckets, and quota/backoff windows.
-  - Store normalized provider payloads through the existing schema helpers, not raw vendor responses.
-  - Tests: missing-secret placeholder, configured provider lookup, quota/rate-limit behavior, redacted audit events, and setup guidance.
-- **Phase 3 - CLI-backed providers**
-  - Add only one CLI wrapper at a time.
-  - For each wrapper:
-    - install the official CLI with a pinned version or reproducible release URL,
-    - declare `requires_secrets` in `commands.yaml`,
-    - deny inline key flags such as `--apikey`, `--api-key`, `--token`, and config-writing setup commands,
-    - deny broad file-write flags unless they are explicitly workspace-aware,
-    - add autocomplete, command catalog details, smoke expectations, and allowlist tests.
-  - First candidates: urlscan.io, IPinfo, Chaos. Censys waits until the app-native-versus-CLI choice is made.
-- **Phase 4 - Paid-provider gating**
-  - Add `intel_enabled_paid_providers` to config with an empty default.
-  - Registry loading marks paid providers unavailable unless their id is listed.
-  - CLI command entries for paid providers are either generated/merged only when enabled or rejected with a clear startup error if accidentally configured while disabled.
-  - UI/setup text says "operator disabled" separately from "missing secret".
-  - Tests: disabled paid provider is hidden from provider fan-out and secret setup, enabled paid provider appears, and command-registry paid entries cannot load accidentally.
-- **Phase 5 - Atlas and enrichment integration**
-  - When Session Entity Atlas lands, provider registry metadata drives the intel snapshot card and explicit refresh actions.
-  - Sidecar enrichment writes through the same provider lookup path as explicit `intel` commands.
-  - Project enrichment stores selected snapshots under the entity/project model rather than creating parallel project-only intel records.
-  - Tests: entity refresh respects provider gating, cache state is visible, and share/export omission still applies to refreshed intel.
-- **Docs and verification**
-  - Update README.md, FEATURES.md, CONFIGURATION.md, ARCHITECTURE.md, docs/release-drafts, and CHANGELOG.md as provider batches land. Keep official docs current-state; keep future provider lists in TODO.md.
-  - Add/update container smoke fixtures for every installed CLI.
-  - Re-run provider facts against official vendor docs immediately before each Dockerfile or `commands.yaml` change.
-  - Track image size growth after each CLI install and prefer app-native HTTP integrations when the CLI adds significant runtime weight.
+### External intel provider enhancements
+- **Provider candidates**
+  - URLhaus for URL/host/hash malware-distribution context. It fits `intel url`, `intel domain`, `intel ip`, and `intel hash`, but it needs a clear `url` entity type before implementation.
+  - ThreatFox for IOC and hash context. It needs a free abuse.ch Auth-Key, maps well to IP/domain/URL/hash entities, and is likely more useful once Atlas can show an entity's threat context.
+  - Vulners for richer CVE context beyond NVD, including exploitability and active-exploitation signals. It requires `VULNERS_API_KEY` and should attach to `intel cve`.
+  - urlscan.io app-native search/result lookups. The CLI wrapper already exists, so app-native support should start with read/search/result flows; scan submission needs an explicit visibility/privacy decision.
+  - SecurityTrails for DNS, WHOIS, and subdomain/domain pivots. It is useful but overlaps with existing recon tools, so it should probably wait until Atlas can display domain relationships cleanly.
+  - RouteViews for no-key BGP/RPKI context if Team Cymru proves too thin. This is lower priority because Team Cymru already covers the main IP-to-ASN summary.
+  - MISP for operator-owned intel. Treat it as a self-hosted integration with `MISP_URL` plus `MISP_API_KEY`, not as a globally available default.
+- **Lower-priority candidates**
+  - BuiltWith Pro and other commercial tech-fingerprint services until local/lightweight tech detection proves insufficient.
+  - DeHashed, IntelligenceX, PassiveTotal/Defender TI, and DNSDB until entity storage, provider-status UI, and operator policy controls exist.
+  - More vendor CLIs unless the CLI adds a materially better workflow than an app-native REST call.
+- **Provider management follow-up**
+  - Add an optional operator provider denylist if deployments need to block outbound calls to specific vendors.
+  - Add a provider status modal showing usable providers, providers that need configuration, accepted secret names, supported entity types, and free/free-signup/paid/account-backed notes.
 
 ### Session Entity Atlas (entity-first triage surface)
 - **Scope**
   - Top-level Atlas surface with first-class chrome treatment: desktop left-rail entry between History and Workflows, mobile menu item, dedicated keyboard shortcut. Not a stacked modal.
   - Tabs: Findings, Hosts/IPs, Domains, Hashes, CVEs, URLs. Each tab is a filterable, sortable list of distinct entities deduped across every saved run for the active session token.
   - Entity Detail side sheet: identity strip, intel snapshot card, source-run list with jump-to-line, findings on entity, labels and notes (reusing `ui_entity_metadata`), promote-to-project action.
+  - Intel snapshot cards are driven by the external-intel provider registry, including provider labels, supported entity types, missing-secret state, cache state, and explicit refresh actions.
   - Transcript ↔ Atlas wiring: tagged tokens click into entity detail, hover popover summarizes high-signal intel, "see in run" navigation jumps back to source line.
   - Findings tab absorbs the Findings triage inbox plan if both are scheduled — the inbox modal is retired in favor of the Atlas tab.
   - Project workspaces become a curation layer over the entity store; project_links are tags on entity rows, not parallel copies.
@@ -169,6 +107,8 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - `materializer.py` consumes entity events from `output_signals` at run-finalize. Idempotent on re-finalization. Computes stable canonical forms per type.
     - `lookup.py` exposes list/filter/detail queries used by both the Atlas and the rewritten Projects routes.
     - `intel_bridge.py` writes normalized intel payloads into `entity_intel_snapshots` when `intel` runs complete or when sidecar enrichment runs.
+    - Explicit `intel` commands, sidecar enrichment, and future pipe-helper enrichment all write through the same provider lookup path so cache, quota, missing-secret, and audit behavior cannot drift.
+    - Project enrichment stores selected snapshots under the entity/project model rather than creating parallel project-only intel records.
   - **Routes in new `app/blueprints/atlas.py`:**
     - `GET /atlas` tab summary (entity counts per type, computed from indexed `entities` rows unless profiling proves a rollup table is needed).
     - `GET /atlas/entities` paginated list with filters (`type`, `q`, `status`, `seen_in_last`, `has_intel`, `project_id`).
@@ -192,6 +132,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Entry points: left-rail entry between History and Workflows; mobile menu item; keyboard shortcut documented in the `?` overlay; History row context menu "Open entities"; Run Details linked-entities sidebar; Projects modal "Open in Atlas (filtered to this project)".
   - Reuses `ui_dismissible`, `ui_focus_trap`, `ui_outside_click`, `ui_pressable`, `ui_entity_metadata`, and the existing bulk-action toast contract.
   - Hover popover shows the high-signal summary: type, occurrence count, last seen, GreyNoise verdict (if any), Shodan port count (if any), VT positives (if any).
+  - Intel snapshot card renders from provider registry metadata so future providers appear with consistent labels, setup state, cache state, and refresh affordances.
 - **Phase 4 - Transcript wiring**
   - Output renderer in `app/static/js/output.js` decorates classifier-extracted entities as tagged spans.
   - Click opens entity detail; long-press / right-click opens a shared action menu (label, note, promote, copy, lookup intel, open in Atlas, see in run). The action menu is the same primitive flagged for the project-workspace transcript right-click idea — that work and this plan share the implementation.
@@ -213,7 +154,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Honors share-redaction baseline so redacted exports omit raw intel response bodies.
 - **Phase 8 - Feedback and tests**
   - Empty-state UX: runs producing zero entities are normal and do not surface as warnings. Saved runs from before the migration also produce no Atlas rows and must not appear as broken.
-  - Backend coverage: destructive migration drops the legacy `project_targets`, `finding_targets`, and run-centric `findings` tables and re-initializes the new schema from scratch; deduplication signature stability across every entity type; unscoped finding materialization without an entity row; materialization idempotency on re-finalization; intel snapshot freshness and TTL expiry behavior; `project_links` `entity_type='atlas_entity'` round-trip (promote/unpromote); label/note helper reuse against entity rows; cross-session rejection; retention pruning preserves `entities` and `findings` rows when their last run-link or occurrence row is pruned; one consolidated `findings` table services both Projects routes and Atlas routes without divergence.
+  - Backend coverage: destructive migration drops the legacy `project_targets`, `finding_targets`, and run-centric `findings` tables and re-initializes the new schema from scratch; deduplication signature stability across every entity type; unscoped finding materialization without an entity row; materialization idempotency on re-finalization; intel snapshot freshness and TTL expiry behavior; entity refresh respects missing-secret/provider availability states; cache state is visible; share/export omission still applies to refreshed intel; `project_links` `entity_type='atlas_entity'` round-trip (promote/unpromote); label/note helper reuse against entity rows; cross-session rejection; retention pruning preserves `entities` and `findings` rows when their last run-link or occurrence row is pruned; one consolidated `findings` table services both Projects routes and Atlas routes without divergence.
   - Service-layer regression coverage: rewritten Projects routes (`/projects/<id>/targets*`, `/projects/<id>/findings`, `/findings/<id>/review`, `/entities/run/<id>/findings`) return parity-equivalent shapes to the pre-migration responses where possible, so the Projects modal UI does not need to be reskinned just because the backing store changed.
   - Frontend coverage: tab filter combinations, entity detail render with and without intel snapshots, transcript hover popover and action menu, see-in-run navigation, project promotion and unpromotion, rail entry plus mobile menu integration, keyboard shortcut, empty-state rendering, Projects modal Targets and Findings tabs continue to function against the rewritten routes.
   - Playwright: one desktop and one mobile flow covering scan → atlas → entity detail → intel refresh → promote-to-project → see-in-run → unpromote, plus one regression flow exercising the Projects modal Targets/Findings tabs end-to-end against the rewritten store.
@@ -605,31 +546,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Browser surface: new `app/static/js/features/findings/findings_inbox.js` and `app/static/css/features/findings.css`; entry points from the History drawer, Run Details modal, and Projects modal.
   - The natural consumer of the structured output model in Architecture: design the inbox schema so it can move onto richer line/event data later without breaking the dedupe signature.
 
-### External intel provider expansion
-- The shipped foundation connects darklab_shell to Shodan, VirusTotal, and GreyNoise through vault-backed CLI wrappers, the app-native `intel ip|domain|hash` built-in, normalized provider responses, cache/quota controls, lookup audit events, entity-aware output metadata, and raw-only share/export handling.
-- This research item now tracks provider and workflow expansion beyond that foundation.
-- **Integration patterns**
-  - CLI wrapper — install a vendor CLI in the Dockerfile, register it in `commands.yaml`, inject the secret, and let the normal allowlist/history/Files/rate-limit path do the rest.
-  - App-native `intel` built-in — extend the existing built-in for new entity types such as `intel cve <id>` when a provider justifies it.
-  - Sidecar enrichment panel — opt-in passive lookups fire alongside a scanner run; render Shodan ports, GreyNoise verdict, IPinfo ASN, VT reputation in a collapsible panel next to the transcript. Off by default per session; auditable per run.
-  - Findings enricher — when the classifier extracts an entity, the findings inbox auto-attaches enrichment from relevant providers, turning the inbox from a queue into a triage workbench.
-  - Workflow steps — Workflows can chain native tools with intel lookups (for example `subfinder → dnsx → pd-httpx → virustotal-domain → urlscan`).
-  - Pipe helper enrichment — new `| enrich-shodan` / `| enrich-greynoise` post-filters that walk stdin for entities and append one annotation per line. Fits the existing synthetic pipe-helper model in `app/services/commands/postfilters.py`.
-  - Project workspace enrichment — when a host/domain is added as a project target, optionally pre-fetch passive snapshots and store them as workspace artifacts under `/intel/<target>/`, becoming part of evidence packages and the engagement report builder idea.
-- **Future provider candidates (after v1)**
-  - Host/port intel — Censys, ZoomEye.
-  - URL/file reputation — urlscan.io, Hybrid Analysis, Triage, Joe Sandbox.
-  - Passive DNS / asset discovery — SecurityTrails, AlienVault OTX, Chaos (ProjectDiscovery; integrates naturally with the already-shipped subfinder/dnsx/pd-httpx via env var), crt.sh (free, no key needed).
-  - Threat intel / reputation — AbuseIPDB, ThreatFox, MISP.
-  - ASN / WHOIS / geo — IPinfo, Team Cymru, BGPView (free).
-  - Breach / credential exposure — HaveIBeenPwned, DeHashed, IntelX.
-  - Tech detection — BuiltWith, Wappalyzer CLI.
-  - CVE / vuln data — NVD, Vulners, ExploitDB.
-- **Anti-patterns to avoid**
-  - Do not call live intel APIs during a scanner run by default. It costs API quota and surprises users; sidecar enrichment must be opt-in per session or project.
-  - Do not log API keys, full response bodies, or raw entity lists into shared transcripts, snapshot permalinks, or exports. Treat intel response bodies as raw-only in the share-redaction baseline.
-  - Do not reimplement what a vendor CLI already does well — wrap it, inject the secret, log usage, move on.
-
 ### Session Entity Atlas (entity-first triage surface)
 - Reframe darklab_shell's exploration model so entities (findings, hosts/IPs, domains, hashes, CVEs, URLs) become the primary navigation primitive — not runs, not projects. Runs become the *source* of entities. Projects become a *curated subset* of entities for engagement work. The active session token owns the entity graph.
 - **The gap it closes:**
@@ -684,7 +600,7 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Do not break runs that have no findings. Utility commands and failed commands produce zero entities; the Atlas must treat that as the normal case, not an empty state worth surfacing.
 - **Relationships to other ideas:**
   - Folds in the **Findings triage inbox** idea as phase 4 — the inbox becomes the Findings lens on the Atlas, not a separate surface.
-  - Provides the natural home for **External intel provider expansion** — entity detail is where intel snapshots live; sidecar enrichment, the `intel` built-in, and pipe-helper enrichment all write here.
+  - Provides the natural home for **External intel provider enhancements** — entity detail is where intel snapshots live; sidecar enrichment, the `intel` built-in, and pipe-helper enrichment all write here.
   - Consumes the entity-aware output classifier hooks called out under intel integrations and the **structured output model** under Architecture.
   - Reframes **Project workspaces** as a curation layer over the entity store rather than the only triage surface; project linking is a tag, not a copy.
 

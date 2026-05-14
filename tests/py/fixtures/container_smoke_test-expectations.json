@@ -157,6 +157,14 @@
     {
       "no_output": false,
       "exit_code": 0,
+      "command": "ipinfo --help",
+      "expected_text": [
+        "Usage"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
       "command": "testssl --help",
       "expected_text": [
         "[options]"

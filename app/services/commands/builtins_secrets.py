@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections import defaultdict
 
 from services.commands.builtins_format import format_native_record, output_line
-from services.commands.registry import load_commands_registry, split_command_argv
+from services.commands.registry import command_secret_consumers, load_commands_registry, split_command_argv
+from services.intel.registry import app_native_secret_consumers
 from services.secrets.storage import InvalidSecretName, delete_secret, list_secret_metadata, normalize_secret_name
 from services.secrets.vault import MasterKeyError, SecretDecryptError
 
@@ -24,21 +25,20 @@ def _secret_usage() -> list[dict[str, str]]:
 def _secret_consumer_map() -> dict[str, list[str]]:
     registry = load_commands_registry()
     consumers: dict[str, list[str]] = defaultdict(list)
-    for command in registry.get("commands", []):
-        root = str(command.get("root") or "").strip()
-        if not root:
+    for item in [*command_secret_consumers(registry), *app_native_secret_consumers()]:
+        env = str(item.get("env") or "").strip().upper()
+        fallback_envs = [
+            str(fallback or "").strip().upper()
+            for fallback in item.get("fallback_envs", []) or []
+            if str(fallback or "").strip()
+        ]
+        consumer = str(item.get("consumer") or "").strip()
+        if not consumer:
             continue
-        for item in command.get("requires_secrets") or []:
-            env = str(item.get("env") or "").strip().upper()
-            fallback_envs = [
-                str(fallback or "").strip().upper()
-                for fallback in item.get("fallback_envs", []) or []
-                if str(fallback or "").strip()
-            ]
-            requirement = "optional" if bool(item.get("optional", False)) else "required"
-            for env_name in [env, *fallback_envs]:
-                if env_name:
-                    consumers[env_name].append(f"{root} ({requirement})")
+        requirement = "optional" if bool(item.get("optional", False)) else "required"
+        for env_name in [env, *fallback_envs]:
+            if env_name:
+                consumers[env_name].append(f"{consumer} ({requirement})")
     return {env: sorted(set(roots)) for env, roots in consumers.items()}
 
 

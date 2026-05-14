@@ -654,16 +654,17 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Behavior:**
 
-- `intel ip <ip>` queries Shodan and GreyNoise, then shows ports, CVEs, banner summaries, and GreyNoise classification when those providers are configured.
-- `intel domain <domain>` queries VirusTotal and shows reputation, analysis stats, recent URLs, and WHOIS summary data.
-- `intel hash <md5|sha1|sha256>` autodetects the hash type by length, queries VirusTotal, and shows verdict, analysis stats, file type, tags, and names.
+- `intel ip <ip>` queries Shodan, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, and Team Cymru, then shows ports, CVEs, banner summaries, Censys services and ownership context, GreyNoise classification, OTX pulse context, AbuseIPDB report confidence, and IP-to-ASN ownership context when those providers return data.
+- `intel domain <domain>` queries VirusTotal, AlienVault OTX, and crt.sh, then shows reputation, analysis stats, recent URLs, WHOIS summary data, OTX pulse context, certificate counts, names, issuers, and first/last certificate sightings.
+- `intel hash <md5|sha1|sha256>` autodetects the hash type by length, queries VirusTotal and AlienVault OTX, and checks SHA1 hashes against HIBP Pwned Passwords by sending only the first five SHA1 characters.
+- `intel cve <CVE-ID>` queries NVD and shows severity, score, publish/modified dates, summary, and references.
 - Each provider pane reports whether it came from cache, was rate-limited, hit quota backoff, or is missing a required encrypted secret.
 - Private, loopback, and other non-public IPs are blocked by default because vendor intel on those addresses is not useful. `--include-private` allows an explicit override.
-- The external `shodan`, `vt`, and `greynoise` CLI wrappers remain available for users who want provider-native output.
+- The external `shodan`, `vt`, `greynoise`, `ipinfo`, `urlscan`, and `chaos` CLI wrappers remain available for users who want provider-native output.
 
-**Limits:** Shodan, VirusTotal, and GreyNoise require user-provided provider keys. Provider terms and quotas are enforced by the vendor; the app adds its own per-session rate limiting and cache layer to avoid accidental bursts.
+**Limits:** Shodan, Censys, VirusTotal, GreyNoise, AlienVault OTX, and AbuseIPDB require user-provided provider keys. Team Cymru, crt.sh, HIBP Pwned Passwords, and NVD work without saved keys but still use the app's per-session rate limiting and cache layer to avoid accidental bursts. Provider terms and quotas are still enforced by each vendor.
 
-**Configuration:** users store `SHODAN_API_KEY`, `GREYNOISE_API_KEY`, `VT_API_KEY`, or the native `VTCLI_APIKEY` through Options → Secrets or `secret set NAME`. The Options picker suggests those known keys from the command registry, while the terminal command still accepts an explicit name. Operators tune cache TTLs and rate-limit buckets in `conf/config.yaml`.
+**Configuration:** users store `SHODAN_API_KEY`, `CENSYS_PAT`, `GREYNOISE_API_KEY`, `VT_API_KEY`, the native `VTCLI_APIKEY`, `OTX_API_KEY`, `ABUSEIPDB_API_KEY`, `URLSCAN_API_KEY`, or `PDCP_API_KEY` through Options → Secrets or `secret set NAME`. The Options picker suggests those known keys from the provider registry and command registry, while the terminal command still accepts an explicit name. Operators tune cache TTLs and rate-limit buckets in `conf/config.yaml`.
 
 **Related files:** `app/services/intel/`, `app/services/commands/builtins_intel.py`, `app/conf/commands.yaml`, `app/conf/config.yaml`.
 

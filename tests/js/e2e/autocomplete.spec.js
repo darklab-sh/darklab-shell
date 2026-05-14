@@ -5,7 +5,7 @@ test.describe('autocomplete', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.locator('#cmd').waitFor()
-    await ensurePromptReady(page)
+    await ensurePromptReady(page, { waitForAutocomplete: true })
   })
 
   test('Tab expands to the shared prefix and Enter accepts a reselected suggestion', async ({

@@ -57,6 +57,8 @@ class Provider(ABC):
     cache_scopes: dict[str, str] = field(default_factory=dict)
 
     def secret_value(self, session_token: str) -> str:
+        if not self.secret_env:
+            return ""
         env_names = (self.secret_env, *self.secret_env_aliases)
         for env_name in env_names:
             value = self.secret_getter(session_token, env_name)

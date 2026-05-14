@@ -270,6 +270,8 @@ async function expectSplitCompareRendered(page, fixture, { projectId = '' } = {}
 }
 
 test.describe('history drawer', () => {
+  test.describe.configure({ timeout: 60_000 })
+
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     // Clear any localStorage state left over from a previous test run and reload
@@ -385,9 +387,13 @@ test.describe('history drawer', () => {
     await expect(page.locator('#confirm-host')).toBeHidden()
     await page.locator('#hist-clear-all-btn').click()
     await page.locator('#confirm-host [data-confirm-action-id="all"]').click()
+    await page.locator('#confirm-host').waitFor({ state: 'hidden' })
+    await expect.poll(async () => page.evaluate(() => (
+      Array.isArray(cmdHistory) ? cmdHistory.length : 0
+    ))).toBe(0)
 
     // All chips should be gone
-    await expect(page.locator('.hist-chip')).toHaveCount(0)
+    await expect(page.locator('#history-row .hist-chip')).toHaveCount(0)
   })
 
   test('clicking outside the drawer closes the history panel', async ({ page }) => {

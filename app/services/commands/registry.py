@@ -817,6 +817,24 @@ def _catalog_required_secrets(items: object) -> list[dict[str, object]]:
     return secrets
 
 
+def command_secret_consumers(registry: dict | None = None) -> list[dict[str, object]]:
+    """Return metadata-only secret consumers declared by command registry entries."""
+    active_registry = registry or load_commands_registry()
+    consumers: list[dict[str, object]] = []
+    for entry in active_registry.get("commands", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        root = str(entry.get("root") or "").strip().lower()
+        if not root:
+            continue
+        for secret in _catalog_required_secrets(entry.get("requires_secrets")):
+            consumer = dict(secret)
+            consumer["source"] = "command_registry"
+            consumer["consumer"] = root
+            consumers.append(consumer)
+    return consumers
+
+
 def command_catalog_from_registry(registry: dict | None = None) -> list[dict[str, object]]:
     """Return user-facing command reference data from the external command registry."""
     active_registry = registry or load_commands_registry()

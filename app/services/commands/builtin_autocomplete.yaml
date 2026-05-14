@@ -224,7 +224,7 @@ commands:
     autocomplete:
       arguments: []
   - root: intel
-    description: "built-in: query configured external intel providers"
+    description: "built-in: query app-native external intel providers"
     autocomplete:
       subcommands:
         - value: ip
@@ -253,6 +253,15 @@ commands:
             value: "<md5|sha1|sha256>"
             hint_only: true
             description: "File hash"
+        - value: cve
+          description: "Look up a CVE"
+          takes_value: true
+          insert: "cve "
+          value_hint:
+            value: "<CVE-ID>"
+            hint_only: true
+            value_type: cve
+            description: "CVE ID"
       flags:
         - value: --include-private
           description: "Allow private or loopback IP lookups"

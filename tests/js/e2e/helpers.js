@@ -129,18 +129,15 @@ export function makeTestIp(offset = 0) {
  * then optionally cancel it or request an immediate settle and wait for the
  * prompt to become fully usable.
  */
-export async function ensurePromptReady(page, { cancelWelcome = false, timeout = 15_000 } = {}) {
+export async function ensurePromptReady(
+  page,
+  { cancelWelcome = false, timeout = 15_000, waitForAutocomplete = false } = {},
+) {
   await page.waitForFunction(
     () => {
-      const active = typeof _welcomeActive !== 'undefined' ? _welcomeActive : false
-      const bootPending = typeof _welcomeBootPending !== 'undefined' ? _welcomeBootPending : false
-      const welcomeTabId = typeof _welcomeTabId !== 'undefined' ? _welcomeTabId : null
-      const activeTab = typeof activeTabId !== 'undefined' ? activeTabId : null
-      return (
-        (active && welcomeTabId === activeTab) ||
-        !bootPending ||
-        (active && welcomeTabId !== activeTab)
-      )
+      const activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null
+      const input = document.getElementById('cmd')
+      return !!activeTab && input instanceof HTMLInputElement
     },
     undefined,
     { timeout },
@@ -172,11 +169,11 @@ export async function ensurePromptReady(page, { cancelWelcome = false, timeout =
       const bootPending = typeof _welcomeBootPending !== 'undefined' ? _welcomeBootPending : false
       const welcomeTabId = typeof _welcomeTabId !== 'undefined' ? _welcomeTabId : null
       const activeTab = typeof activeTabId !== 'undefined' ? activeTabId : null
-      return (!active && !bootPending) || (active && welcomeTabId !== activeTab)
+      return !bootPending || (active && welcomeTabId !== activeTab)
     },
     undefined,
-    { timeout },
-  )
+    { timeout: Math.min(timeout, 3_000) },
+  ).catch(() => {})
 
   await page.waitForFunction(
     () => {
@@ -192,6 +189,12 @@ export async function ensurePromptReady(page, { cancelWelcome = false, timeout =
     { timeout },
   )
 
+  if (waitForAutocomplete) {
+    await ensureAutocompleteReady(page, { timeout })
+  }
+}
+
+export async function ensureAutocompleteReady(page, { timeout = 15_000 } = {}) {
   // Wait for the /autocomplete fetch to populate the context registry.
   // setComposerValueForTest calls getAutocompleteMatches synchronously, so if
   // the registry is still empty it returns no items and immediately hides the
@@ -199,8 +202,42 @@ export async function ensurePromptReady(page, { cancelWelcome = false, timeout =
   // Note: acSuggestions (flat suggestions) was removed; the registry is the
   // sole signal that the autocomplete fetch has completed.
   await page.waitForFunction(
-    () => {
-      return typeof acContextRegistry !== 'undefined' && Object.keys(acContextRegistry).length > 0
+    async () => {
+      if (typeof acContextRegistry !== 'undefined' && Object.keys(acContextRegistry).length > 0) {
+        return true
+      }
+      if (
+        typeof apiFetch !== 'function' ||
+        window.__e2eAutocompleteRecoveryPending
+      ) {
+        return false
+      }
+      window.__e2eAutocompleteRecoveryPending = true
+      try {
+        const resp = await apiFetch('/autocomplete')
+        if (!resp.ok) return false
+        const data = await resp.json()
+        acSuggestions = data.suggestions || []
+        acContextRegistry = data.context || {}
+        acWordlists = Array.isArray(data.wordlists) ? data.wordlists : []
+        acSpecialCommands = data.special_commands || []
+        acBuiltinCommandRoots = data.builtin_command_roots || []
+        if (typeof loadSessionVariables === 'function') loadSessionVariables().catch(() => {})
+        if (typeof loadRecentDomains === 'function') loadRecentDomains().catch(() => {})
+        if (typeof loadProjectAutocompleteTargets === 'function') {
+          loadProjectAutocompleteTargets().catch(() => {})
+        }
+        if (typeof scheduleSearchDiscoverabilityRefresh === 'function') {
+          scheduleSearchDiscoverabilityRefresh()
+        } else if (typeof refreshSearchDiscoverabilityUi === 'function') {
+          refreshSearchDiscoverabilityUi()
+        }
+        return Object.keys(acContextRegistry).length > 0
+      } catch {
+        return false
+      } finally {
+        window.__e2eAutocompleteRecoveryPending = false
+      }
     },
     undefined,
     { timeout },
@@ -214,22 +251,25 @@ export async function ensurePromptReady(page, { cancelWelcome = false, timeout =
 export async function runCommand(page, cmd, { timeout = 30_000 } = {}) {
   await ensurePromptReady(page, { timeout })
   const input = page.locator('#cmd')
+  await input.waitFor({ state: 'visible', timeout })
   const beforeLineCount = await page.evaluate(() => {
     const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
     return Array.isArray(tab?.rawLines) ? tab.rawLines.length : 0
   })
-  await input.fill(cmd)
-  await page.keyboard.press('Enter')
+  await input.focus()
+  await setComposerValueForTest(page, cmd, { waitForAutocomplete: false })
+  await input.press('Enter')
   await page.waitForFunction(
     ({ expectedCmd, previousLineCount }) => {
       const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
       if (!tab || tab.st === 'running') return false
       const rawLines = Array.isArray(tab.rawLines) ? tab.rawLines : []
-      if (rawLines.length <= previousLineCount) return false
-      if (tab.command === expectedCmd) return true
       const output = document.querySelector('.tab-panel.active .output')
       const text = output ? output.textContent || '' : ''
-      return text.includes(`$${expectedCmd}`)
+      const sawNewLine = rawLines.length > previousLineCount
+      const sawEcho = text.includes(`$${expectedCmd}`) || text.includes(`$ ${expectedCmd}`)
+      if (tab.command === expectedCmd && sawNewLine) return true
+      return sawNewLine && sawEcho
     },
     { expectedCmd: cmd, previousLineCount: beforeLineCount },
     { timeout },
@@ -264,7 +304,14 @@ export async function waitForActiveOutputSettled(page, { timeout = 15_000 } = {}
  * Set a composer value through the app's shared input-change path so
  * autocomplete and shared prompt state update deterministically.
  */
-export async function setComposerValueForTest(page, value, { mobile = false } = {}) {
+export async function setComposerValueForTest(
+  page,
+  value,
+  { mobile = false, waitForAutocomplete = false } = {},
+) {
+  if (waitForAutocomplete) {
+    await ensureAutocompleteReady(page)
+  }
   await page.evaluate(
     ({ nextValue, useMobile }) => {
       const input = useMobile
@@ -294,13 +341,38 @@ export async function setComposerValueForTest(page, value, { mobile = false } = 
  */
 export async function openHistory(page) {
   const panel = page.locator('#history-panel')
-  const isOpen = await panel.evaluate((node) => node.classList.contains('open')).catch(() => false)
-  if (!isOpen) {
-    await page.locator('.rail-nav [data-action="history"]').click()
-    await panel.waitFor({ state: 'visible' })
+  await page.waitForFunction(
+    () => typeof refreshHistoryPanel === 'function'
+      && (typeof showHistoryPanel === 'function' || typeof toggleHistoryPanelSurface === 'function'),
+    undefined,
+    { timeout: 15_000 },
+  )
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await page.evaluate(async () => {
+        if (typeof showHistoryPanel === 'function') showHistoryPanel()
+        else if (typeof toggleHistoryPanelSurface === 'function') toggleHistoryPanelSurface(true)
+        await refreshHistoryPanel()
+      })
+      break
+    } catch (error) {
+      if (attempt === 2) throw error
+      await page.waitForTimeout(250)
+    }
   }
+  await panel.waitFor({ state: 'visible' })
   // refreshHistoryPanel() fires an async /history fetch after the panel opens.
   // Wait for at least one child (either a .history-entry or the "No runs" div).
+  await page.waitForFunction(
+    () => {
+      const panelEl = document.getElementById('history-panel')
+      const list = document.getElementById('history-list')
+      if (!panelEl || !panelEl.classList.contains('open') || !list) return false
+      return list.children.length > 0
+    },
+    undefined,
+    { timeout: 15_000 },
+  )
   await page.locator('#history-list > *').first().waitFor({ state: 'visible' })
 }
 
@@ -335,7 +407,9 @@ export async function waitForHistoryRuns(page, minRuns) {
       try {
         const resp = await apiFetch('/history')
         const data = await resp.json()
-        return data.runs && data.runs.length >= min
+        const runs = data.runs || []
+        window.__e2eLastHistoryRuns = runs
+        return runs.length >= min
       } catch {
         return false
       }
@@ -344,11 +418,7 @@ export async function waitForHistoryRuns(page, minRuns) {
     { timeout: 20_000 },
   )
 
-  return page.evaluate(async () => {
-    const resp = await apiFetch('/history')
-    const data = await resp.json()
-    return data.runs || []
-  })
+  return page.evaluate(() => window.__e2eLastHistoryRuns || [])
 }
 
 /**

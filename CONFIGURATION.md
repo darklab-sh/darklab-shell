@@ -87,18 +87,42 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `rate_limit_per_second` | `5` | Max `/runs` requests per second per IP |
 | `intel_cache_ttl_shodan_ip_seconds` | `86400` | Server-side only. Default cache lifetime for normalized Shodan IP responses |
 | `intel_cache_ttl_shodan_search_seconds` | `21600` | Server-side only. Default cache lifetime for normalized Shodan search responses |
+| `intel_cache_ttl_censys_host_seconds` | `21600` | Server-side only. Default cache lifetime for normalized Censys host responses |
 | `intel_cache_ttl_virustotal_domain_seconds` | `21600` | Server-side only. Default cache lifetime for normalized VirusTotal domain responses |
 | `intel_cache_ttl_virustotal_file_seconds` | `86400` | Server-side only. Default cache lifetime for normalized VirusTotal file or hash responses |
 | `intel_cache_ttl_greynoise_ip_seconds` | `3600` | Server-side only. Default cache lifetime for normalized GreyNoise IP responses |
+| `intel_cache_ttl_otx_indicator_seconds` | `21600` | Server-side only. Default cache lifetime for normalized AlienVault OTX indicator responses |
+| `intel_cache_ttl_abuseipdb_ip_seconds` | `21600` | Server-side only. Default cache lifetime for normalized AbuseIPDB IP responses |
+| `intel_cache_ttl_teamcymru_ip_seconds` | `86400` | Server-side only. Default cache lifetime for normalized Team Cymru IP ownership responses |
+| `intel_cache_ttl_crtsh_domain_seconds` | `86400` | Server-side only. Default cache lifetime for normalized crt.sh domain responses |
+| `intel_cache_ttl_hibp_password_seconds` | `604800` | Server-side only. Default cache lifetime for HIBP Pwned Passwords SHA1 range responses |
+| `intel_cache_ttl_nvd_cve_seconds` | `86400` | Server-side only. Default cache lifetime for normalized NVD CVE responses |
 | `intel_rate_limit_shodan_bucket` | `5` | Server-side only. Token-bucket size for Shodan lookups per session |
 | `intel_rate_limit_shodan_refill_seconds` | `1` | Server-side only. Seconds between Shodan token refills |
+| `intel_rate_limit_censys_bucket` | `10` | Server-side only. Token-bucket size for Censys lookups per session |
+| `intel_rate_limit_censys_refill_seconds` | `6` | Server-side only. Seconds between Censys token refills |
 | `intel_rate_limit_virustotal_public_bucket` | `4` | Server-side only. Token-bucket size for VirusTotal Public API lookups per session |
 | `intel_rate_limit_virustotal_public_refill_seconds` | `15` | Server-side only. Seconds between VirusTotal Public API token refills |
 | `intel_rate_limit_greynoise_community_bucket` | `50` | Server-side only. Token-bucket size for GreyNoise Community lookups per session |
 | `intel_rate_limit_greynoise_community_refill_seconds` | `12096` | Server-side only. Seconds between GreyNoise Community token refills |
 | `intel_rate_limit_greynoise_unauthenticated_bucket` | `10` | Server-side only. Token-bucket size for unauthenticated GreyNoise fallback lookups |
 | `intel_rate_limit_greynoise_unauthenticated_refill_seconds` | `8640` | Server-side only. Seconds between unauthenticated GreyNoise fallback token refills |
+| `intel_rate_limit_otx_bucket` | `30` | Server-side only. Token-bucket size for AlienVault OTX lookups per session |
+| `intel_rate_limit_otx_refill_seconds` | `2` | Server-side only. Seconds between AlienVault OTX token refills |
+| `intel_rate_limit_abuseipdb_bucket` | `20` | Server-side only. Token-bucket size for AbuseIPDB lookups per session |
+| `intel_rate_limit_abuseipdb_refill_seconds` | `4` | Server-side only. Seconds between AbuseIPDB token refills |
+| `intel_rate_limit_teamcymru_bucket` | `30` | Server-side only. Token-bucket size for Team Cymru lookups per session |
+| `intel_rate_limit_teamcymru_refill_seconds` | `2` | Server-side only. Seconds between Team Cymru token refills |
+| `intel_rate_limit_crtsh_bucket` | `10` | Server-side only. Token-bucket size for crt.sh lookups per session |
+| `intel_rate_limit_crtsh_refill_seconds` | `6` | Server-side only. Seconds between crt.sh token refills |
+| `intel_rate_limit_hibp_bucket` | `10` | Server-side only. Token-bucket size for HIBP Pwned Passwords lookups per session |
+| `intel_rate_limit_hibp_refill_seconds` | `2` | Server-side only. Seconds between HIBP Pwned Passwords token refills |
+| `intel_rate_limit_nvd_anonymous_bucket` | `5` | Server-side only. Token-bucket size for anonymous NVD lookups per session |
+| `intel_rate_limit_nvd_anonymous_refill_seconds` | `6` | Server-side only. Seconds between anonymous NVD token refills |
 | `intel_negative_cache_virustotal_quota_seconds` | `21600` | Server-side only. Fallback cache window for VirusTotal quota-exhausted responses when no reset time is available |
+| `intel_negative_cache_censys_quota_seconds` | `21600` | Server-side only. Fallback cache window for Censys quota-exhausted responses when no reset time is available |
+| `intel_negative_cache_otx_quota_seconds` | `21600` | Server-side only. Fallback cache window for AlienVault OTX quota-exhausted responses when no reset time is available |
+| `intel_negative_cache_abuseipdb_quota_seconds` | `21600` | Server-side only. Fallback cache window for AbuseIPDB quota-exhausted responses when no reset time is available |
 | `interactive_pty_input_rate_limit_per_minute` | `500` | Max interactive PTY input requests per minute per IP. This is separate from `/runs` because normal terminal typing produces many small input requests |
 | `interactive_pty_input_rate_limit_per_second` | `10` | Max interactive PTY input request burst per second per IP |
 | `max_tabs` | `8` | Maximum number of tabs a user can have open at once. `0` means unlimited |
@@ -224,7 +248,7 @@ commands:
           description: Service/version detection
 ```
 
-`requires_secrets` names encrypted session secrets that should be passed to the subprocess environment for that command root. Required missing secrets or a missing session identity block launch before the process starts. Optional missing secrets log a warning and let the command run without that env var. Secret values are never rendered into command text. `inject_env` lets a registry entry store a friendly app secret name while exporting the vendor-required env var to the subprocess. `fallback_envs` lets users store an accepted native name instead; the VirusTotal CLI entry accepts either `VT_API_KEY` or `VTCLI_APIKEY` and always launches `vt` with `VTCLI_APIKEY`. Interactive PTY commands can't declare `requires_secrets`; the registry rejects that combination because the PTY path doesn't inject secret env vars.
+`requires_secrets` names encrypted session secrets that should be passed to the subprocess environment for that command root. Required missing secrets or a missing session identity block launch before the process starts. Optional missing secrets log a warning and let the command run without that env var; the `ipinfo` wrapper uses this for `IPINFO_TOKEN` because the CLI can still return limited unauthenticated output. Secret values are never rendered into command text. `inject_env` lets a registry entry store a friendly app secret name while exporting the vendor-required env var to the subprocess. `fallback_envs` lets users store an accepted native name instead; the VirusTotal CLI entry accepts either `VT_API_KEY` or `VTCLI_APIKEY` and always launches `vt` with `VTCLI_APIKEY`. The urlscan and Chaos CLI wrappers use `URLSCAN_API_KEY` and `PDCP_API_KEY` from the same vault path. Interactive PTY commands can't declare `requires_secrets`; the registry rejects that combination because the PTY path doesn't inject secret env vars.
 
 Users manage matching values from **Options → Secrets** or with `secret set NAME` in the terminal. The browser prompt collects the value; the terminal command line contains only the secret name. Stored values are replace-only: list routes and the Options panel return names, consumer env bindings, and update times, never the saved value. A consumer env name can belong to only one secret in the current session, so a command that asks for `SHODAN_API_KEY` can't receive an arbitrary matching row.
 

@@ -9,6 +9,7 @@ from typing import Any
 
 from config import CFG
 from core import process
+from services.intel.registry import cache_ttl_setting
 
 
 _MEMORY_LOCK = threading.Lock()
@@ -25,15 +26,11 @@ def _coerce_positive_int(value: Any, fallback: int) -> int:
 
 def cache_ttl(provider: str, scope: str, cfg: dict[str, Any] | None = None) -> int:
     active_cfg = cfg or CFG
+    setting = cache_ttl_setting(provider, scope)
+    if setting:
+        return _coerce_positive_int(active_cfg.get(setting.config_key), setting.default_seconds)
     key = f"intel_cache_ttl_{str(provider or '').lower()}_{str(scope or '').lower()}_seconds"
-    defaults = {
-        "intel_cache_ttl_shodan_ip_seconds": 86400,
-        "intel_cache_ttl_shodan_search_seconds": 21600,
-        "intel_cache_ttl_virustotal_domain_seconds": 21600,
-        "intel_cache_ttl_virustotal_file_seconds": 86400,
-        "intel_cache_ttl_greynoise_ip_seconds": 3600,
-    }
-    return _coerce_positive_int(active_cfg.get(key), defaults.get(key, 3600))
+    return _coerce_positive_int(active_cfg.get(key), 3600)
 
 
 def cache_key(provider: str, entity_type: str, canonical_value: str) -> str:
@@ -94,8 +91,15 @@ def set_cached_response(
 
 
 def quota_negative_cache_ttl(provider: str, cfg: dict[str, Any] | None = None) -> int:
-    if str(provider or "").strip().lower() == "virustotal":
-        return _coerce_positive_int((cfg or CFG).get("intel_negative_cache_virustotal_quota_seconds"), 21600)
+    normalized_provider = str(provider or "").strip().lower()
+    provider_keys = {
+        "virustotal": "intel_negative_cache_virustotal_quota_seconds",
+        "censys": "intel_negative_cache_censys_quota_seconds",
+        "otx": "intel_negative_cache_otx_quota_seconds",
+        "abuseipdb": "intel_negative_cache_abuseipdb_quota_seconds",
+    }
+    if normalized_provider in provider_keys:
+        return _coerce_positive_int((cfg or CFG).get(provider_keys[normalized_provider]), 21600)
     return 3600
 
 

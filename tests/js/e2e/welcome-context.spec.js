@@ -54,7 +54,7 @@ test.describe('welcome context', () => {
       await page.addInitScript(() => {
         sessionStorage.clear()
       })
-      await page.reload()
+      await page.reload({ waitUntil: 'domcontentloaded' })
       await page.locator('#mobile-cmd').waitFor()
 
       await expect(page.locator('.welcome-ascii-art')).toContainText('mobile console')

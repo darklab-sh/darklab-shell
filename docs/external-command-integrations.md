@@ -42,6 +42,9 @@ Command-specific runtime behavior is declared in `app/conf/commands.yaml`. The r
 | `katana` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>/tools` when Files are enabled and declares workspace paths for list/config inputs, error logs, stored response directories, and stored field directories. | Katana can generate useful secondary request/response and field-extraction artifacts; keeping those directories in Files makes them inspectable and reusable. |
 | `naabu` | Adds `-scan-type c` when no scan type is present, wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>/tools` when Files are enabled, and declares workspace paths for host lists, exclude lists, ports files, and normal outputs. | TCP connect scanning works reliably inside container runtimes where raw SYN scanning via libpcap may fail; config state and secondary input lists should remain session-visible. |
 | `amass enum` / `amass subs` / `amass track` / `amass viz` | Adds managed `-dir tools/amass` when absent, rewrites it to the session workspace, and launches with `XDG_CONFIG_HOME=<session workspace>/tools`. | Amass v5 is database-first and auto-starts `amass engine`; the engine and CLI must use the same per-session database path instead of falling back to `$HOME/.config/amass`. |
+| `ipinfo` | Injects optional `IPINFO_TOKEN` from the encrypted secrets vault and blocks config-writing/token-on-command-line flows such as `init`, `config`, `completion install`, and inline token flags. | Users can run the official IPinfo CLI for provider-native IP/ASN output without storing tokens in shell history or letting the CLI write persistent config inside the container. |
+| `urlscan` | Injects `URLSCAN_API_KEY` from the encrypted secrets vault and blocks key/config/completion setup, inline key flags, and stdin-driven scan/result forms. | Users can submit URLs, fetch scan results, and search urlscan.io without writing keys to a local keyring/config file or putting tokens into command history. |
+| `chaos` | Injects `PDCP_API_KEY` from the encrypted secrets vault and blocks inline key flags, updater flows, list-file input, and direct output-file writes. | Users can query ProjectDiscovery Chaos for domain subdomains while keeping the provider key in the app vault and avoiding unmanaged file reads/writes. |
 
 ---
 
@@ -105,7 +108,13 @@ requires_secrets:
 
 `inject_env` is for tools whose runtime variable name differs from the app-facing secret name. `fallback_envs` lets users store an accepted vendor-native name too. The shipped VirusTotal CLI entry accepts `VT_API_KEY` or `VTCLI_APIKEY` from the encrypted vault and always launches `vt` with `VTCLI_APIKEY` in its environment.
 
+Shodan's CLI still expects its `shodan init` config file. Users do not need to run that setup command inside darklab_shell: when a Shodan command launches, the app writes the vault-backed `SHODAN_API_KEY` into a temporary per-run Shodan config directory, points that command at the temporary home, and removes the directory when the command exits. The key stays out of command text, history, and stored output.
+
 The Options Secrets picker reads this command-registry metadata so users see the known tool key names first. Custom names remain available for local registry overlays and future integrations.
+
+`ipinfo` declares `IPINFO_TOKEN` as optional. The CLI can show limited unauthenticated output, while saved tokens unlock the provider data attached to the user's IPinfo account.
+
+`urlscan` and `chaos` declare required CLI secrets. `urlscan` receives `URLSCAN_API_KEY`; `chaos` receives `PDCP_API_KEY`. Their setup and inline-key flags are blocked so the vault stays the only supported key path.
 
 Run output is also filtered before it is captured or streamed: absolute paths under the current session workspace are displayed as user-facing workspace paths. For example:
 
@@ -123,13 +132,14 @@ Creating resume file: /tools/katana/resume-abcd.cfg
 
 ## App-Native Intel Lookups
 
-The `intel` built-in uses the same provider keys without launching the vendor CLI:
+The `intel` built-in uses the same provider keys when a provider needs them, without launching the vendor CLI:
 
-- `intel ip <ip>` queries Shodan and GreyNoise.
-- `intel domain <domain>` queries VirusTotal.
-- `intel hash <md5|sha1|sha256>` queries VirusTotal after autodetecting the hash type by hex length.
+- `intel ip <ip>` queries Shodan, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, and Team Cymru.
+- `intel domain <domain>` queries VirusTotal, AlienVault OTX, and crt.sh.
+- `intel hash <md5|sha1|sha256>` queries VirusTotal and AlienVault OTX after autodetecting the hash type by hex length, and checks SHA1 hashes against HIBP Pwned Passwords by sending only the first five SHA1 characters.
+- `intel cve <CVE-ID>` queries NVD.
 
-Provider responses are normalized through `app/services/intel/schema.py` before they are rendered, cached, or logged. Each provider pane reports whether the result came from cache, was blocked by rate limiting or quota backoff, or is missing the needed encrypted secret. If all providers for a lookup are missing, the built-in exits with setup guidance and does not make provider calls. If only some providers are missing, configured providers still render normally and the missing providers show placeholders.
+Provider metadata lives in `app/services/intel/registry.py`, including display labels, supported entity types, secret names and aliases, cache scopes, and rate-limit config keys. Provider responses are normalized through `app/services/intel/schema.py` before they are rendered, cached, or logged. Each provider pane reports whether the result came from cache, was blocked by rate limiting or quota backoff, or is missing the needed encrypted secret. If all keyed providers for a lookup are missing, the built-in exits with setup guidance only when no no-key provider can run. If only some providers are missing, available providers still render normally and the missing providers show placeholders. The same provider metadata feeds `secret show-consumers` and the Options Secrets picker for providers that need stored keys, so app-native HTTP providers are discoverable even though they do not have `commands.yaml` entries.
 
 The built-in refuses private, loopback, and other non-public IP addresses by default because passive-intel providers cannot meaningfully classify them. Users can pass `--include-private` when they intentionally want to send that address to configured providers.
 
