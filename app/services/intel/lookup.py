@@ -25,9 +25,15 @@ from services.intel.clients import (
     HibpPwnedPasswordsClient,
     NvdApiClient,
     OtxApiClient,
+    RouteViewsApiClient,
+    SecurityTrailsApiClient,
     ShodanApiClient,
     TeamCymruDnsClient,
+    ThreatFoxApiClient,
+    UrlhausApiClient,
+    UrlscanApiClient,
     VirusTotalApiClient,
+    VulnersApiClient,
 )
 from services.intel.abuseipdb import AbuseIpdbProvider
 from services.intel.censys import CensysProvider
@@ -36,10 +42,16 @@ from services.intel.greynoise import GreyNoiseProvider
 from services.intel.hibp import HibpPwnedPasswordsProvider
 from services.intel.nvd import NvdProvider
 from services.intel.otx import OtxProvider
+from services.intel.routeviews import RouteViewsProvider
+from services.intel.securitytrails import SecurityTrailsProvider
 from services.intel.registry import provider_label, providers_for_entity_type
 from services.intel.shodan import ShodanProvider
 from services.intel.teamcymru import TeamCymruProvider
+from services.intel.threatfox import ThreatFoxProvider
+from services.intel.urlhaus import UrlhausProvider
+from services.intel.urlscan import UrlscanProvider
 from services.intel.virustotal import VirusTotalProvider
+from services.intel.vulners import VulnersProvider
 
 
 ProviderFactory = Callable[[], Provider]
@@ -102,6 +114,18 @@ def _provider_factory(provider_id: str) -> ProviderFactory | None:
         return lambda: HibpPwnedPasswordsProvider(client=HibpPwnedPasswordsClient())
     if provider_id == "nvd":
         return lambda: NvdProvider(client=NvdApiClient())
+    if provider_id == "vulners":
+        return lambda: VulnersProvider(client=VulnersApiClient())
+    if provider_id == "urlscan":
+        return lambda: UrlscanProvider(client=UrlscanApiClient())
+    if provider_id == "urlhaus":
+        return lambda: UrlhausProvider(client=UrlhausApiClient())
+    if provider_id == "threatfox":
+        return lambda: ThreatFoxProvider(client=ThreatFoxApiClient())
+    if provider_id == "securitytrails":
+        return lambda: SecurityTrailsProvider(client=SecurityTrailsApiClient())
+    if provider_id == "routeviews":
+        return lambda: RouteViewsProvider(client=RouteViewsApiClient())
     return None
 
 
@@ -238,6 +262,8 @@ def _provider_lookup(provider: Provider, entity_type: str, canonical: str, *, se
         return provider.lookup_hash(hash_value, session_token=session_id, run_id=run_id)
     if entity_type == "cve":
         return provider.lookup_cve(canonical, session_token=session_id, run_id=run_id)
+    if entity_type == "url":
+        return provider.lookup_url(canonical, session_token=session_id, run_id=run_id)
     raise IntelProviderError(f"unsupported intel entity type: {entity_type}")
 
 

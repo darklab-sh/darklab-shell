@@ -97,6 +97,11 @@ def quota_negative_cache_ttl(provider: str, cfg: dict[str, Any] | None = None) -
         "censys": "intel_negative_cache_censys_quota_seconds",
         "otx": "intel_negative_cache_otx_quota_seconds",
         "abuseipdb": "intel_negative_cache_abuseipdb_quota_seconds",
+        "urlhaus": "intel_negative_cache_urlhaus_quota_seconds",
+        "vulners": "intel_negative_cache_vulners_quota_seconds",
+        "urlscan": "intel_negative_cache_urlscan_quota_seconds",
+        "threatfox": "intel_negative_cache_threatfox_quota_seconds",
+        "securitytrails": "intel_negative_cache_securitytrails_quota_seconds",
     }
     if normalized_provider in provider_keys:
         return _coerce_positive_int((cfg or CFG).get(provider_keys[normalized_provider]), 21600)

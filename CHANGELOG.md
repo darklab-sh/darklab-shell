@@ -10,6 +10,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Expanded app-native intel providers** — `intel` now covers URL lookups plus richer malware, CVE, DNS, and BGP context.
+  - **Why:** common triage needs more than one provider per entity type, and URL/hash/domain/IP/CVE lookups should stay in the same normalized terminal workflow.
+  - **What:** added `intel url <url>` and app-native providers for URLhaus, ThreatFox, Vulners, urlscan.io read/search lookups, SecurityTrails domain pivots, and RouteViews prefix/RPKI context. URLhaus uses `URLHAUS_AUTH_KEY`; RouteViews follows provider redirects and normalizes prefix-list responses. The new providers use the existing registry, provider-status, encrypted-secret, cache, quota-backoff, token-bucket, audit, autocomplete, and terminal formatter paths; urlscan.io remains read-only for app-native lookups so the app does not submit scans without an explicit privacy decision. `ARCHITECTURE.md` now documents the `intel` command fan-out and provider credential matrix.
+  - **Tests:** extended backend coverage for provider metadata, config defaults, URL entity schemas, hash-provider fan-out, and normalized payload handling across the new provider modules.
 - **Provider Status modal** — Options → Secrets now has a Provider Status view for app-native intel providers.
   - **Why:** users need a quick way to see which intel providers are ready, which need API keys, and which secret names each provider accepts before running `intel`.
   - **What:** added provider-status metadata to the command catalog payload, broad provider access notes, a Secrets-section button, and a wider modal that groups providers by usable versus needs-configuration state using the active session's metadata-only secret list. Provider secret names are clickable and open the add-secret prompt with that name selected; backend-only aliases such as `VTCLI_APIKEY` still work but are not shown as separate provider-status links.

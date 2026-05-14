@@ -18,7 +18,7 @@ def run_builtin_intel(command: str, session_id: str) -> tuple[list[dict[str, str
         return _intel_usage(), 0
 
     entity_type = parts[1].lower()
-    if entity_type not in {"ip", "domain", "hash", "cve"}:
+    if entity_type not in {"ip", "domain", "hash", "cve", "url"}:
         return [output_line(f"intel: unsupported lookup type '{entity_type}'"), *_intel_usage()], 1
 
     include_private = "--include-private" in parts[2:]
@@ -48,6 +48,7 @@ def _intel_usage() -> list[dict[str, str]]:
         output_line("Intel commands:", "builtin-section"),
         output_line("  intel ip <ip> [--include-private]", "builtin-help-row"),
         output_line("  intel domain <domain>", "builtin-help-row"),
+        output_line("  intel url <url>", "builtin-help-row"),
         output_line("  intel hash <md5|sha1|sha256>", "builtin-help-row"),
         output_line("  intel cve <CVE-ID>", "builtin-help-row"),
         output_line("Configure provider keys with `secret set NAME` or Options > Secrets.", "builtin-note"),
@@ -110,20 +111,46 @@ def _format_provider_lookup(provider: ProviderLookup, entity_type: str) -> list[
         lines.extend(_format_abuseipdb(provider_payload))
     elif entity_type == "ip" and provider.provider == "teamcymru":
         lines.extend(_format_teamcymru(provider_payload))
+    elif entity_type == "ip" and provider.provider == "urlhaus":
+        lines.extend(_format_urlhaus_host(provider_payload))
+    elif entity_type == "ip" and provider.provider == "threatfox":
+        lines.extend(_format_threatfox(provider_payload))
+    elif entity_type == "ip" and provider.provider == "routeviews":
+        lines.extend(_format_routeviews(provider_payload))
     elif entity_type == "domain" and provider.provider == "virustotal":
         lines.extend(_format_virustotal_domain(provider_payload))
     elif entity_type == "domain" and provider.provider == "otx":
         lines.extend(_format_otx(provider_payload))
     elif entity_type == "domain" and provider.provider == "crtsh":
         lines.extend(_format_crtsh(provider_payload))
+    elif entity_type == "domain" and provider.provider == "urlhaus":
+        lines.extend(_format_urlhaus_host(provider_payload))
+    elif entity_type == "domain" and provider.provider == "threatfox":
+        lines.extend(_format_threatfox(provider_payload))
+    elif entity_type == "domain" and provider.provider == "urlscan":
+        lines.extend(_format_urlscan(provider_payload))
+    elif entity_type == "domain" and provider.provider == "securitytrails":
+        lines.extend(_format_securitytrails(provider_payload))
     elif entity_type == "hash" and provider.provider == "virustotal":
         lines.extend(_format_virustotal_hash(provider_payload))
     elif entity_type == "hash" and provider.provider == "otx":
         lines.extend(_format_otx(provider_payload))
     elif entity_type == "hash" and provider.provider == "hibp":
         lines.extend(_format_hibp(provider_payload))
+    elif entity_type == "hash" and provider.provider == "urlhaus":
+        lines.extend(_format_urlhaus_hash(provider_payload))
+    elif entity_type == "hash" and provider.provider == "threatfox":
+        lines.extend(_format_threatfox(provider_payload))
     elif entity_type == "cve" and provider.provider == "nvd":
         lines.extend(_format_nvd(provider_payload))
+    elif entity_type == "cve" and provider.provider == "vulners":
+        lines.extend(_format_vulners(provider_payload))
+    elif entity_type == "url" and provider.provider == "urlhaus":
+        lines.extend(_format_urlhaus_url(provider_payload))
+    elif entity_type == "url" and provider.provider == "threatfox":
+        lines.extend(_format_threatfox(provider_payload))
+    elif entity_type == "url" and provider.provider == "urlscan":
+        lines.extend(_format_urlscan(provider_payload))
     else:
         lines.append(output_line("  no formatter for provider data", "builtin-note"))
     return lines
@@ -299,6 +326,176 @@ def _format_nvd(payload: dict[str, Any]) -> list[dict[str, str]]:
         lines.append(output_line("references:", "builtin-subsection"))
         for ref in refs[:5]:
             lines.append(output_line(f"  {_truncate(str(ref), 110)}", "builtin-kv"))
+    return lines
+
+
+def _format_vulners(payload: dict[str, Any]) -> list[dict[str, str]]:
+    lines = [
+        output_line(format_native_record("severity", str(payload.get("severity") or "unknown"), 14), "builtin-kv"),
+        output_line(format_native_record("score", str(payload.get("score") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("exploits", str(payload.get("exploit_count") or 0), 14), "builtin-kv"),
+        output_line(format_native_record("published", str(payload.get("published") or "-"), 14), "builtin-kv"),
+    ]
+    title = str(payload.get("title") or "").strip()
+    if title:
+        lines.append(output_line(format_native_record("title", _truncate(title, 110), 14), "builtin-kv"))
+    exploits = payload.get("exploits")
+    if isinstance(exploits, list) and exploits:
+        lines.append(output_line("exploits:", "builtin-subsection"))
+        for item in exploits[:5]:
+            if not isinstance(item, dict):
+                continue
+            label = _truncate(str(item.get("title") or item.get("id") or ""), 96)
+            href = str(item.get("href") or "")
+            suffix = f" - {href}" if href else ""
+            lines.append(output_line(f"  {label}{suffix}".rstrip(), "builtin-kv"))
+    refs = payload.get("references")
+    if isinstance(refs, list) and refs:
+        lines.append(output_line("references:", "builtin-subsection"))
+        for ref in refs[:5]:
+            lines.append(output_line(f"  {_truncate(str(ref), 110)}", "builtin-kv"))
+    return lines
+
+
+def _format_urlhaus_host(payload: dict[str, Any]) -> list[dict[str, str]]:
+    lines = [
+        output_line(format_native_record("status", str(payload.get("query_status") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("urls", str(payload.get("url_count") or 0), 14), "builtin-kv"),
+        output_line(format_native_record("payloads", str(payload.get("payload_count") or 0), 14), "builtin-kv"),
+    ]
+    urls = payload.get("urls")
+    if isinstance(urls, list) and urls:
+        lines.append(output_line("urls:", "builtin-subsection"))
+        for item in urls[:5]:
+            if not isinstance(item, dict):
+                continue
+            lines.append(output_line(
+                f"  {_truncate(str(item.get('url') or ''), 110)} {str(item.get('status') or '')}".rstrip(),
+                "builtin-kv",
+            ))
+    return lines
+
+
+def _format_urlhaus_hash(payload: dict[str, Any]) -> list[dict[str, str]]:
+    lines = [
+        output_line(format_native_record("status", str(payload.get("query_status") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("signature", str(payload.get("signature") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("file type", str(payload.get("file_type") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("urls", str(payload.get("url_count") or 0), 14), "builtin-kv"),
+    ]
+    payloads = payload.get("payloads")
+    if isinstance(payloads, list) and payloads:
+        lines.append(output_line("payloads:", "builtin-subsection"))
+        for item in payloads[:5]:
+            if not isinstance(item, dict):
+                continue
+            lines.append(output_line(
+                f"  {_truncate(str(item.get('sha256') or ''), 72)} {str(item.get('signature') or '')}".rstrip(),
+                "builtin-kv",
+            ))
+    return lines
+
+
+def _format_urlhaus_url(payload: dict[str, Any]) -> list[dict[str, str]]:
+    lines = [
+        output_line(
+            format_native_record("status", str(payload.get("status") or payload.get("query_status") or "-"), 14),
+            "builtin-kv",
+        ),
+        output_line(format_native_record("threat", str(payload.get("threat") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("host", str(payload.get("host") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("tags", _join_values(payload.get("tags")) or "none", 14), "builtin-kv"),
+    ]
+    payloads = payload.get("payloads")
+    if isinstance(payloads, list) and payloads:
+        lines.append(output_line("payloads:", "builtin-subsection"))
+        for item in payloads[:5]:
+            if not isinstance(item, dict):
+                continue
+            lines.append(output_line(
+                f"  {_truncate(str(item.get('sha256') or ''), 72)} {str(item.get('signature') or '')}".rstrip(),
+                "builtin-kv",
+            ))
+    return lines
+
+
+def _format_threatfox(payload: dict[str, Any]) -> list[dict[str, str]]:
+    lines = [
+        output_line(format_native_record("status", str(payload.get("query_status") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("iocs", str(payload.get("ioc_count") or 0), 14), "builtin-kv"),
+        output_line(format_native_record("malware", _join_values(payload.get("malware")) or "none", 14), "builtin-kv"),
+        output_line(format_native_record("tags", _join_values(payload.get("tags")) or "none", 14), "builtin-kv"),
+    ]
+    iocs = payload.get("iocs")
+    if isinstance(iocs, list) and iocs:
+        lines.append(output_line("iocs:", "builtin-subsection"))
+        for item in iocs[:5]:
+            if not isinstance(item, dict):
+                continue
+            ioc = _truncate(str(item.get("ioc") or ""), 80)
+            malware = str(item.get("malware") or "")
+            threat_type = str(item.get("threat_type") or "")
+            suffix = " - ".join(part for part in (threat_type, malware) if part)
+            lines.append(output_line(f"  {ioc} {suffix}".rstrip(), "builtin-kv"))
+    return lines
+
+
+def _format_urlscan(payload: dict[str, Any]) -> list[dict[str, str]]:
+    lines = [
+        output_line(format_native_record("results", str(payload.get("result_count") or 0), 14), "builtin-kv"),
+        output_line(format_native_record("has more", "yes" if payload.get("has_more") else "no", 14), "builtin-kv"),
+    ]
+    results = payload.get("results")
+    if isinstance(results, list) and results:
+        lines.append(output_line("results:", "builtin-subsection"))
+        for item in results[:5]:
+            if not isinstance(item, dict):
+                continue
+            marker = "malicious" if item.get("malicious") else "observed"
+            url = _truncate(str(item.get("url") or item.get("domain") or ""), 90)
+            scan_id = str(item.get("scan_id") or "")
+            lines.append(output_line(f"  {marker}: {url} {scan_id}".rstrip(), "builtin-kv"))
+    return lines
+
+
+def _format_securitytrails(payload: dict[str, Any]) -> list[dict[str, str]]:
+    whois = payload.get("whois")
+    dns = payload.get("dns")
+    whois_obj = whois if isinstance(whois, dict) else {}
+    dns_obj = dns if isinstance(dns, dict) else {}
+    lines = [
+        output_line(format_native_record("subdomains", str(payload.get("subdomain_count") or 0), 14), "builtin-kv"),
+        output_line(format_native_record("registrar", str(whois_obj.get("registrar") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("created", str(whois_obj.get("created") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("expires", str(whois_obj.get("expires") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("a", _join_values(dns_obj.get("a")) or "none", 14), "builtin-kv"),
+        output_line(format_native_record("ns", _join_values(dns_obj.get("ns")) or "none", 14), "builtin-kv"),
+    ]
+    subdomains = payload.get("subdomains")
+    if isinstance(subdomains, list) and subdomains:
+        lines.append(output_line("subdomains:", "builtin-subsection"))
+        for item in subdomains[:8]:
+            lines.append(output_line(f"  {item}", "builtin-kv"))
+    return lines
+
+
+def _format_routeviews(payload: dict[str, Any]) -> list[dict[str, str]]:
+    lines = [
+        output_line(format_native_record("prefix", str(payload.get("prefix") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("rpki", str(payload.get("rpki") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("collectors", str(payload.get("collector_count") or 0), 14), "builtin-kv"),
+    ]
+    origins = payload.get("origins")
+    if isinstance(origins, list) and origins:
+        lines.append(output_line("origins:", "builtin-subsection"))
+        for item in origins[:5]:
+            if not isinstance(item, dict):
+                continue
+            asn = str(item.get("asn") or "")
+            name = str(item.get("name") or "")
+            collector = str(item.get("collector") or "")
+            suffix = " - ".join(part for part in (name, collector) if part)
+            lines.append(output_line(f"  AS{asn} {suffix}".rstrip(), "builtin-kv"))
     return lines
 
 

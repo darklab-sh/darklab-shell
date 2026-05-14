@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,730
+- behavior tests: 2,731
 - docs/inventory meta-tests: 32
-- `pytest`: 1390 (1358 behavior + 32 meta)
+- `pytest`: 1391 (1359 behavior + 32 meta)
 - `vitest`: 1128
 - `playwright`: 249
-- total: 2,767
+- total: 2,768
 
 This document is organized in two parts:
 
@@ -401,6 +401,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestIntelServices.test_json_api_client_honors_explicit_ca_env` | Verifies app-native intel HTTPS clients honor explicit `SSL_CERT_FILE` and `SSL_CERT_DIR` settings. |
 | `TestIntelServices.test_provider_modules_read_secret_at_call_time_and_normalize_payloads` | Verifies provider modules read vault-backed secrets, including VirusTotal's native `VTCLI_APIKEY` alias, at lookup time and return normalized payloads. |
 | `TestIntelServices.test_teamcymru_dns_origin_records_and_asn_description_records_are_normalized` | Verifies Team Cymru DNS origin and ASN-description records normalize into rendered ownership fields. |
+| `TestIntelServices.test_new_intel_provider_modules_normalize_payloads` | Verifies URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, and RouteViews provider modules normalize representative payloads. |
 | `TestIntelServices.test_teamcymru_dns_client_fetches_origin_and_asn_description_records` | Verifies the Team Cymru DNS client fetches origin records and matching ASN-description records. |
 | `TestIntelServices.test_provider_missing_secret_blocks_lookup_before_client_call` | Verifies provider calls stop before client access when the required secret is missing. |
 | `TestIntelServices.test_lookup_entity_requires_secret_before_cache_hit` | Verifies cached provider data is not returned when the current session lacks the required provider secret. |

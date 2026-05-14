@@ -228,6 +228,98 @@ INTEL_PROVIDERS: dict[str, IntelProviderDefinition] = {
         },
         access_note="Free public lookup",
     ),
+    "vulners": IntelProviderDefinition(
+        id="vulners",
+        label="Vulners",
+        entity_types=("cve",),
+        secret_env="VULNERS_API_KEY",
+        cache_scopes={"cve": "cve"},
+        cache_ttls={
+            "cve": CacheTtlSetting("intel_cache_ttl_vulners_cve_seconds", 86400),
+        },
+        rate_limits={
+            "": RateLimitSetting("intel_rate_limit_vulners_bucket", "intel_rate_limit_vulners_refill_seconds", 10, 6),
+        },
+        access_note="Free signup; paid tiers",
+    ),
+    "urlscan": IntelProviderDefinition(
+        id="urlscan",
+        label="urlscan.io",
+        entity_types=("domain", "url"),
+        secret_env="URLSCAN_API_KEY",
+        cache_scopes={"domain": "search", "url": "search"},
+        cache_ttls={
+            "search": CacheTtlSetting("intel_cache_ttl_urlscan_search_seconds", 21600),
+            "result": CacheTtlSetting("intel_cache_ttl_urlscan_result_seconds", 86400),
+        },
+        rate_limits={
+            "": RateLimitSetting("intel_rate_limit_urlscan_bucket", "intel_rate_limit_urlscan_refill_seconds", 10, 6),
+        },
+        access_note="Free signup; paid tiers",
+    ),
+    "urlhaus": IntelProviderDefinition(
+        id="urlhaus",
+        label="URLhaus",
+        entity_types=("ip", "domain", "hash", "url"),
+        secret_env="URLHAUS_AUTH_KEY",
+        cache_scopes={"ip": "host", "domain": "host", "hash": "payload", "url": "url"},
+        cache_ttls={
+            "host": CacheTtlSetting("intel_cache_ttl_urlhaus_host_seconds", 21600),
+            "payload": CacheTtlSetting("intel_cache_ttl_urlhaus_payload_seconds", 86400),
+            "url": CacheTtlSetting("intel_cache_ttl_urlhaus_url_seconds", 21600),
+        },
+        rate_limits={
+            "": RateLimitSetting("intel_rate_limit_urlhaus_bucket", "intel_rate_limit_urlhaus_refill_seconds", 20, 3),
+        },
+        access_note="Free abuse.ch Auth-Key",
+    ),
+    "threatfox": IntelProviderDefinition(
+        id="threatfox",
+        label="ThreatFox",
+        entity_types=("ip", "domain", "hash", "url"),
+        secret_env="THREATFOX_AUTH_KEY",
+        cache_scopes={"ip": "ioc", "domain": "ioc", "hash": "hash", "url": "ioc"},
+        cache_ttls={
+            "ioc": CacheTtlSetting("intel_cache_ttl_threatfox_ioc_seconds", 21600),
+            "hash": CacheTtlSetting("intel_cache_ttl_threatfox_hash_seconds", 86400),
+        },
+        rate_limits={
+            "": RateLimitSetting("intel_rate_limit_threatfox_bucket", "intel_rate_limit_threatfox_refill_seconds", 20, 3),
+        },
+        access_note="Free abuse.ch Auth-Key",
+    ),
+    "securitytrails": IntelProviderDefinition(
+        id="securitytrails",
+        label="SecurityTrails",
+        entity_types=("domain",),
+        secret_env="SECURITYTRAILS_API_KEY",
+        cache_scopes={"domain": "domain"},
+        cache_ttls={
+            "domain": CacheTtlSetting("intel_cache_ttl_securitytrails_domain_seconds", 86400),
+        },
+        rate_limits={
+            "": RateLimitSetting(
+                "intel_rate_limit_securitytrails_bucket",
+                "intel_rate_limit_securitytrails_refill_seconds",
+                10,
+                6,
+            ),
+        },
+        access_note="Free signup; paid tiers",
+    ),
+    "routeviews": IntelProviderDefinition(
+        id="routeviews",
+        label="RouteViews",
+        entity_types=("ip",),
+        cache_scopes={"ip": "prefix"},
+        cache_ttls={
+            "prefix": CacheTtlSetting("intel_cache_ttl_routeviews_prefix_seconds", 21600),
+        },
+        rate_limits={
+            "": RateLimitSetting("intel_rate_limit_routeviews_bucket", "intel_rate_limit_routeviews_refill_seconds", 20, 3),
+        },
+        access_note="Free public lookup",
+    ),
 }
 
 

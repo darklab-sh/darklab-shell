@@ -198,6 +198,12 @@ class TestLoadConfig:
         assert cfg["intel_cache_ttl_crtsh_domain_seconds"] == 86400
         assert cfg["intel_cache_ttl_hibp_password_seconds"] == 604800
         assert cfg["intel_cache_ttl_nvd_cve_seconds"] == 86400
+        assert cfg["intel_cache_ttl_vulners_cve_seconds"] == 86400
+        assert cfg["intel_cache_ttl_urlscan_search_seconds"] == 21600
+        assert cfg["intel_cache_ttl_urlhaus_host_seconds"] == 21600
+        assert cfg["intel_cache_ttl_threatfox_ioc_seconds"] == 21600
+        assert cfg["intel_cache_ttl_securitytrails_domain_seconds"] == 86400
+        assert cfg["intel_cache_ttl_routeviews_prefix_seconds"] == 21600
         assert cfg["intel_rate_limit_shodan_bucket"] == 5
         assert cfg["intel_rate_limit_shodan_refill_seconds"] == 1
         assert cfg["intel_rate_limit_censys_bucket"] == 10
@@ -220,10 +226,21 @@ class TestLoadConfig:
         assert cfg["intel_rate_limit_hibp_refill_seconds"] == 2
         assert cfg["intel_rate_limit_nvd_anonymous_bucket"] == 5
         assert cfg["intel_rate_limit_nvd_anonymous_refill_seconds"] == 6
+        assert cfg["intel_rate_limit_vulners_bucket"] == 10
+        assert cfg["intel_rate_limit_urlscan_bucket"] == 10
+        assert cfg["intel_rate_limit_urlhaus_bucket"] == 20
+        assert cfg["intel_rate_limit_threatfox_bucket"] == 20
+        assert cfg["intel_rate_limit_securitytrails_bucket"] == 10
+        assert cfg["intel_rate_limit_routeviews_bucket"] == 20
         assert cfg["intel_negative_cache_virustotal_quota_seconds"] == 21600
         assert cfg["intel_negative_cache_censys_quota_seconds"] == 21600
         assert cfg["intel_negative_cache_otx_quota_seconds"] == 21600
         assert cfg["intel_negative_cache_abuseipdb_quota_seconds"] == 21600
+        assert cfg["intel_negative_cache_urlhaus_quota_seconds"] == 21600
+        assert cfg["intel_negative_cache_vulners_quota_seconds"] == 21600
+        assert cfg["intel_negative_cache_urlscan_quota_seconds"] == 21600
+        assert cfg["intel_negative_cache_threatfox_quota_seconds"] == 21600
+        assert cfg["intel_negative_cache_securitytrails_quota_seconds"] == 21600
 
     def test_share_redaction_enabled_defaults_true(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -312,10 +329,28 @@ class TestIntelServices:
             "otx",
             "abuseipdb",
             "teamcymru",
+            "urlhaus",
+            "threatfox",
+            "routeviews",
         ]
-        assert [item.id for item in registry.providers_for_entity_type("domain")] == ["virustotal", "otx", "crtsh"]
-        assert [item.id for item in registry.providers_for_entity_type("hash")] == ["virustotal", "otx", "hibp"]
-        assert [item.id for item in registry.providers_for_entity_type("cve")] == ["nvd"]
+        assert [item.id for item in registry.providers_for_entity_type("domain")] == [
+            "virustotal",
+            "otx",
+            "crtsh",
+            "urlscan",
+            "urlhaus",
+            "threatfox",
+            "securitytrails",
+        ]
+        assert [item.id for item in registry.providers_for_entity_type("hash")] == [
+            "virustotal",
+            "otx",
+            "hibp",
+            "urlhaus",
+            "threatfox",
+        ]
+        assert [item.id for item in registry.providers_for_entity_type("cve")] == ["nvd", "vulners"]
+        assert [item.id for item in registry.providers_for_entity_type("url")] == ["urlscan", "urlhaus", "threatfox"]
         assert registry.provider_label("GREYNOISE") == "GreyNoise"
         assert registry.cache_scope("virustotal", "hash") == "file"
         vt = registry.provider_definition("virustotal")
@@ -329,6 +364,8 @@ class TestIntelServices:
             ("virustotal", ("domain", "hash"), ("VT_API_KEY", "VTCLI_APIKEY"), "Free signup; paid tiers"),
             ("teamcymru", ("ip",), (), "Free public lookup"),
             ("nvd", ("cve",), (), "Free public lookup"),
+            ("urlhaus", ("ip", "domain", "hash", "url"), ("URLHAUS_AUTH_KEY",), "Free abuse.ch Auth-Key"),
+            ("vulners", ("cve",), ("VULNERS_API_KEY",), "Free signup; paid tiers"),
         }
         consumers = registry.app_native_secret_consumers()
         assert {
@@ -341,6 +378,11 @@ class TestIntelServices:
             ("intel GreyNoise", "GREYNOISE_API_KEY", ()),
             ("intel AlienVault OTX", "OTX_API_KEY", ()),
             ("intel AbuseIPDB", "ABUSEIPDB_API_KEY", ()),
+            ("intel URLhaus", "URLHAUS_AUTH_KEY", ()),
+            ("intel Vulners", "VULNERS_API_KEY", ()),
+            ("intel urlscan.io", "URLSCAN_API_KEY", ()),
+            ("intel ThreatFox", "THREATFOX_AUTH_KEY", ()),
+            ("intel SecurityTrails", "SECURITYTRAILS_API_KEY", ()),
         }
 
     def test_canonical_entity_normalizes_supported_values(self):
@@ -406,6 +448,23 @@ class TestIntelServices:
         )
         assert cve["providers"]["nvd"]["severity"] == "HIGH"
         assert cve["summary"]["providers_with_data"] == ["nvd"]
+
+        url = schema.response_with_provider(
+            "url",
+            "urlhaus",
+            {
+                "query_status": "ok",
+                "status": "online",
+                "threat": "malware_download",
+                "host": "example.test",
+                "payloads": [],
+                "tags": ["elf"],
+            },
+        )
+        assert url["providers"]["urlhaus"]["threat"] == "malware_download"
+        assert url["providers"]["threatfox"]["ioc_count"] == 0
+        assert url["providers"]["urlscan"]["result_count"] == 0
+        assert url["summary"]["providers_with_data"] == ["urlhaus"]
 
     def test_cache_round_trips_normalized_payload_with_provider_ttl(self):
         from services.intel import cache
@@ -834,6 +893,110 @@ class TestIntelServices:
             "name": "GOOGLE, US",
         }
 
+    def test_new_intel_provider_modules_normalize_payloads(self):
+        from services.intel.routeviews import RouteViewsProvider
+        from services.intel.securitytrails import SecurityTrailsProvider
+        from services.intel.threatfox import ThreatFoxProvider
+        from services.intel.urlhaus import UrlhausProvider
+        from services.intel.urlscan import UrlscanProvider
+        from services.intel.vulners import VulnersProvider
+
+        secrets = {
+            ("session-1", "URLHAUS_AUTH_KEY"): "urlhaus-key",
+            ("session-1", "THREATFOX_AUTH_KEY"): "threatfox-key",
+            ("session-1", "URLSCAN_API_KEY"): "urlscan-key",
+            ("session-1", "VULNERS_API_KEY"): "vulners-key",
+            ("session-1", "SECURITYTRAILS_API_KEY"): "securitytrails-key",
+        }
+
+        def getter(session, env):
+            return secrets.get((session, env))
+
+        urlhaus_client = mock.Mock(
+            last_status=200,
+            lookup_url=mock.Mock(return_value={
+                "query_status": "ok",
+                "url_status": "online",
+                "threat": "malware_download",
+                "host": "example.test",
+                "payloads": [{"sha256_hash": "b" * 64, "signature": "Example"}],
+                "tags": ["elf"],
+            }),
+        )
+        urlhaus = UrlhausProvider(secret_getter=getter, client=urlhaus_client).lookup_url(
+            "https://Example.TEST/a b",
+            session_token="session-1",
+        )
+        threatfox = ThreatFoxProvider(secret_getter=getter, client=mock.Mock(
+            last_status=200,
+            search_ioc=mock.Mock(return_value={
+                "query_status": "ok",
+                "data": [{
+                    "ioc_value": "https://example.test/a",
+                    "ioc_type": "url",
+                    "threat_type": "payload_delivery",
+                    "malware_printable": "ExampleBot",
+                    "confidence_level": 80,
+                    "tags": ["botnet"],
+                }],
+            }),
+        )).lookup_url("https://example.test/a", session_token="session-1")
+        urlscan = UrlscanProvider(secret_getter=getter, client=mock.Mock(
+            last_status=200,
+            search=mock.Mock(return_value={
+                "total": 1,
+                "results": [{
+                    "page": {"url": "https://example.test/", "domain": "example.test", "ip": "8.8.8.8"},
+                    "task": {"uuid": "scan-1", "time": "2026-05-14T00:00:00Z"},
+                    "verdicts": {"overall": {"malicious": True, "score": 90}},
+                }],
+            }),
+        )).lookup_domain("example.test", session_token="session-1")
+        vulners = VulnersProvider(secret_getter=getter, client=mock.Mock(
+            last_status=200,
+            lookup_cve=mock.Mock(return_value={
+                "data": {"search": [{
+                    "id": "CVE-2026-12345",
+                    "title": "Example CVE",
+                    "cvss3Score": 9.8,
+                    "cvss3Severity": "CRITICAL",
+                    "published": "2026-01-01",
+                    "references": ["https://example.test/cve"],
+                }]},
+            }),
+            lookup_exploits=mock.Mock(return_value={
+                "data": {"search": [{"id": "EXPLOIT-1", "title": "Exploit", "href": "https://example.test/exploit"}]},
+            }),
+        )).lookup_cve("CVE-2026-12345", session_token="session-1")
+        securitytrails = SecurityTrailsProvider(secret_getter=getter, client=mock.Mock(
+            last_status=200,
+            lookup_domain=mock.Mock(return_value={
+                "subdomains": {"subdomains": ["www", "api"]},
+                "whois": {"current": {"registrar": {"name": "Registrar"}, "createdDate": "2020-01-01"}},
+                "domain": {"current_dns": {"a": [{"value": "8.8.8.8"}], "ns": [{"value": "ns1.example.test"}]}},
+            }),
+        )).lookup_domain("example.test", session_token="session-1")
+        routeviews = RouteViewsProvider(client=mock.Mock(
+            last_status=200,
+            lookup_ip=mock.Mock(return_value={
+                "prefixes": [{
+                    "prefix": "8.8.8.0/24",
+                    "rpki_state": "valid",
+                    "origin_asn": 15169,
+                    "reporting_peers": [{"collector": "route-views2"}],
+                }],
+            }),
+        )).lookup_ip("8.8.8.8", session_token="session-1")
+
+        assert urlhaus.payload["providers"]["urlhaus"]["threat"] == "malware_download"
+        urlhaus_client.lookup_url.assert_called_once_with("https://example.test/a%20b", api_key="urlhaus-key")
+        assert threatfox.payload["providers"]["threatfox"]["malware"] == ["ExampleBot"]
+        assert urlscan.payload["providers"]["urlscan"]["results"][0]["malicious"] is True
+        assert vulners.payload["providers"]["vulners"]["exploit_count"] == 1
+        assert securitytrails.payload["providers"]["securitytrails"]["subdomains"] == ["www", "api"]
+        assert routeviews.payload["providers"]["routeviews"]["origins"][0]["asn"] == "15169"
+        assert routeviews.payload["providers"]["routeviews"]["collector_count"] == 1
+
     def test_teamcymru_dns_client_fetches_origin_and_asn_description_records(self, monkeypatch):
         from services.intel import clients
 
@@ -946,8 +1109,8 @@ class TestIntelServices:
         sha1_names = [factory().name for factory in default_provider_factories("hash", f"sha1:{'a' * 40}")]
         sha256_names = [factory().name for factory in default_provider_factories("hash", f"sha256:{'a' * 64}")]
 
-        assert sha1_names == ["virustotal", "otx", "hibp"]
-        assert sha256_names == ["virustotal", "otx"]
+        assert sha1_names == ["virustotal", "otx", "hibp", "urlhaus", "threatfox"]
+        assert sha256_names == ["virustotal", "otx", "urlhaus", "threatfox"]
 
     def test_builtin_intel_ip_formats_partial_provider_results(self):
         from services.intel.base import IntelResult

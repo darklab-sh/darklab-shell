@@ -705,7 +705,38 @@ Workspace-aware validation also rewrites declared file and directory flags from 
 
 Registry-owned `requires_secrets` declarations use a separate launch path from runtime environment wrappers. `/runs` resolves the original command root's secret declarations against the current session vault before validation-owned runtime wrappers can change the executed shell text. Required missing secrets or missing session identity block the launch; optional missing secrets log a warning. Found values are decrypted in memory and passed through `subprocess.Popen(env=...)`, never inserted into the shell command text. A declaration can look up one or more vault names and inject the value under a different runtime env name, which is how the VirusTotal CLI accepts either `VT_API_KEY` or `VTCLI_APIKEY` while receiving `VTCLI_APIKEY` in the child process. Optional declarations cover tools such as `ipinfo`, where unauthenticated output can still work but `IPINFO_TOKEN` unlocks richer account-backed results. The urlscan and Chaos CLI wrappers use the same boundary for `URLSCAN_API_KEY` and `PDCP_API_KEY`, with setup/key-writing commands blocked by policy so keys stay in the app vault instead of vendor config files or argv. The command catalog exposes this metadata without values so the Options Secrets picker can suggest known tool keys before falling back to a custom name. In the container scanner path, sudo preserves only the declared secret env names so the scanner process receives them without exposing values in argv or preserving unrelated app env. Interactive PTY registry entries cannot also declare `requires_secrets`; registry loading rejects that combination because the PTY path does not inject secret environment variables. Successful secret use emits one `SECRET_INJECTED` audit event for the run with env names only.
 
-The app-native `intel` built-in uses the same encrypted-secret boundary without spawning a provider CLI. `app/services/intel/registry.py` owns provider metadata such as labels, supported entity types, secret env names and aliases, access notes, cache scopes, and rate-limit config keys. `app/services/intel/lookup.py` canonicalizes requested IP, domain, hash, and CVE values; verifies required provider secrets for the current session; checks Redis-backed cache and quota state; applies per-session provider token buckets; calls the app-native provider clients for Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, Team Cymru, crt.sh, HIBP Pwned Passwords, and NVD; stores normalized provider responses; and emits redacted `INTEL_LOOKUP` audit events. The HTTPS clients use the configured CA environment when present and otherwise prefer the system CA bundle, so container builds with source-built OpenSSL still verify provider certificates against the OS trust store. Missing keyed providers render as terminal placeholders beside configured provider results, while no-key providers still participate in fan-out with the same cache and rate-limit protections. The same provider metadata feeds the Options Secrets picker, the Options Provider Status modal, and `secret show-consumers`, so app-native HTTP providers appear beside CLI-backed command-registry consumers and users can see which providers are usable before running `intel`.
+The app-native `intel` built-in uses the same encrypted-secret boundary without spawning a provider CLI. `app/services/intel/registry.py` owns provider metadata such as labels, supported entity types, secret env names and aliases, access notes, cache scopes, and rate-limit config keys. `app/services/intel/lookup.py` canonicalizes requested IP, domain, URL, hash, and CVE values; verifies required provider secrets for the current session; checks Redis-backed cache and quota state; applies per-session provider token buckets; calls the app-native provider clients for Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, and RouteViews; stores normalized provider responses; and emits redacted `INTEL_LOOKUP` audit events. The HTTPS clients use the configured CA environment when present and otherwise prefer the system CA bundle, so container builds with source-built OpenSSL still verify provider certificates against the OS trust store. Missing keyed providers render as terminal placeholders beside configured provider results, while no-key providers still participate in fan-out with the same cache and rate-limit protections. The same provider metadata feeds the Options Secrets picker, the Options Provider Status modal, and `secret show-consumers`, so app-native HTTP providers appear beside CLI-backed command-registry consumers and users can see which providers are usable before running `intel`.
+
+The terminal command fans out by entity type. Private, loopback, and other non-public IPs are blocked before provider lookup unless the user passes `--include-private`.
+
+| Command | Providers |
+| --------- | --------- |
+| `intel ip <ip>` | Shodan, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, Team Cymru, URLhaus, ThreatFox, RouteViews |
+| `intel domain <domain>` | VirusTotal, AlienVault OTX, crt.sh, urlscan.io, URLhaus, ThreatFox, SecurityTrails |
+| `intel url <url>` | urlscan.io, URLhaus, ThreatFox |
+| `intel hash <md5\|sha1\|sha256>` | VirusTotal, AlienVault OTX, HIBP Pwned Passwords for SHA1 only, URLhaus, ThreatFox |
+| `intel cve <CVE-ID>` | NVD, Vulners |
+
+The provider table below is the source-of-truth shape exposed through the command catalog, Options Provider Status, Options Secrets suggestions, and `secret show-consumers`. "No" in the API key column means the provider works without a stored session secret, but the app still applies its own cache and per-session token bucket before calling the third-party service.
+
+| Provider | Used by | API key required | Accepted secret names | Access note | App-native use |
+| --------- | --------- | --------- | --------- | --------- | --------- |
+| Shodan | `ip` | Yes | `SHODAN_API_KEY` | Free signup; paid tiers | Host ports, banners, CVEs, tags, organization, and ISP context |
+| Censys | `ip` | Yes | `CENSYS_PAT` | Account-backed; paid tiers | Platform host services, protocols, location, names, ASN, and ownership context |
+| GreyNoise | `ip` | Yes | `GREYNOISE_API_KEY` | Free community key | Internet-noise classification, actor, tags, and last-seen context |
+| AlienVault OTX | `ip`, `domain`, `hash` | Yes | `OTX_API_KEY` | Free signup | Pulse counts, malware families, tags, and indicator metadata |
+| AbuseIPDB | `ip` | Yes | `ABUSEIPDB_API_KEY` | Free signup; paid tiers | Abuse confidence, report counts, usage type, ISP, and country context |
+| Team Cymru | `ip` | No | None | Free public lookup | DNS TXT origin and ASN-description lookups for IP-to-ASN ownership |
+| RouteViews | `ip` | No | None | Free public lookup | Prefix, origin ASN, collector, and RPKI-style BGP context |
+| VirusTotal | `domain`, `hash` | Yes | `VT_API_KEY`, `VTCLI_APIKEY` | Free signup; paid tiers | Domain reputation, analysis stats, recent URLs, WHOIS summary, and file/hash reputation |
+| crt.sh | `domain` | No | None | Free public lookup | Certificate Transparency certificate names, issuers, and first/last sightings |
+| urlscan.io | `domain`, `url` | Yes | `URLSCAN_API_KEY` | Free signup; paid tiers | Read-only search/result context for observed pages and verdicts; app-native scan submission is not enabled |
+| URLhaus | `ip`, `domain`, `url`, `hash` | Yes | `URLHAUS_AUTH_KEY` | Free abuse.ch Auth-Key | Malware URL, host, and payload-hash status from abuse.ch |
+| ThreatFox | `ip`, `domain`, `url`, `hash` | Yes | `THREATFOX_AUTH_KEY` | Free abuse.ch Auth-Key | IOC and malware context for hosts, URLs, IPs, and hashes |
+| SecurityTrails | `domain` | Yes | `SECURITYTRAILS_API_KEY` | Free signup; paid tiers | DNS records, WHOIS summary, and subdomain pivots |
+| HIBP Pwned Passwords | `hash` | No | None | Free public lookup | SHA1 k-anonymity range lookups; only the first five SHA1 characters are sent |
+| NVD | `cve` | No | None | Free public lookup | CVE severity, scores, summaries, dates, and references |
+| Vulners | `cve` | Yes | `VULNERS_API_KEY` | Free signup; paid tiers | CVE document and exploitability context beyond NVD |
 
 Workspace move and glob behavior stays app-mediated too. `move_workspace_path()` resolves both source and destination through the same session-root checks used by reads and deletes, rejects overwrites, rejects symlink escapes, prevents moving a folder into itself, and falls back to the scanner user for command-owned files that need group-write movement. Browser-side `file ls`, `file move` / `mv`, and confirmed `file delete` expand simple `*` patterns from the loaded session workspace cache for fast terminal feedback; backend built-ins use `expand_workspace_path_pattern()` so stale-browser or server-rendered paths follow the same one-segment matching rule. The shell never asks `/bin/sh` to expand workspace patterns. Before list/read-style operations, `normalize_session_workspace_permissions()` also repairs scanner-created child modes so tool config folders written under session-scoped `XDG_CONFIG_HOME` remain visible to the app without making the workspace world-readable.
 
@@ -1253,12 +1284,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,730
+- behavior tests: 2,731
 - docs/inventory meta-tests: 32
-- `pytest`: 1390 (1358 behavior + 32 meta)
+- `pytest`: 1391 (1359 behavior + 32 meta)
 - `vitest`: 1128
 - `playwright`: 249
-- total: 2,767
+- total: 2,768
 
 ### Testing Architecture
 

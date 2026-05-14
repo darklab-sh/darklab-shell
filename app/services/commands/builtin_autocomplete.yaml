@@ -245,6 +245,15 @@ commands:
             hint_only: true
             value_type: domain
             description: "Domain"
+        - value: url
+          description: "Look up a URL"
+          takes_value: true
+          insert: "url "
+          value_hint:
+            value: "<url>"
+            hint_only: true
+            value_type: url
+            description: "URL"
         - value: hash
           description: "Look up a file hash"
           takes_value: true

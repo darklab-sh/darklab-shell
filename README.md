@@ -39,7 +39,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Run comparison** — compare any two saved runs from History, Run Details, or Projects with responsive side-by-side/unified transcript views, folded unchanged context with lazy expansion, Prev/Next change navigation, copyable summaries, restore actions, and order-insensitive finding/artifact diffs
 - **Session command variables** — `var set HOST ip.darklab.sh`, `var list`, and `var unset HOST` define per-session values you can reuse as `$HOST` or `${HOST}`. Expansion happens before command validation, typed history stays readable, and the transcript shows the expanded command that actually ran
 - **Encrypted secrets** — per-session API keys for approved tools can be added, replaced, and deleted from Options or with `secret set NAME`. Options suggests the known tool keys from `commands.yaml` first, stored values are encrypted, and saved secrets are never revealed after save, printed in transcripts, or injected outside matching command environments
-- **External intel lookups** — `intel ip`, `intel domain`, `intel hash`, and `intel cve` query app-native providers such as Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, Team Cymru, crt.sh, HIBP Pwned Passwords, and NVD, then show normalized results in the terminal with cache-hit, quota, rate-limit, and setup status per provider
+- **External intel lookups** — `intel ip`, `intel domain`, `intel url`, `intel hash`, and `intel cve` query app-native providers such as Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, and RouteViews, then show normalized results in the terminal with cache-hit, quota, rate-limit, and setup status per provider
 - **Session files** — optional per-session Files support for tools that need small input/output files. Users can create, view, edit, move/rename, download, delete, label, and note files; drag files into folders; preview JSON, JSONL/NDJSON, CSV/TSV, XML, HTTP responses, and large text; see quota/usage; use cwd-aware `ls`, `cat`, `mv`, and confirmed `rm`; use simple `*` patterns for list/move/delete flows; and let selected command flags safely read/write session files without opening shell navigation or redirection
 - **Project workspaces** — lightweight case folders group related runs, run-owned workspace artifacts, targets, findings, labels, notes, and draft evidence packages without copying the source records. Active projects can auto-link completed runs, project views expose finding/artifact review and metadata editing, and package exports preserve the selected project evidence with raw/redacted modes
 - **Interactive PTY mode** — optional live terminal windows for registry-approved interactive tools such as `nc --interactive`, `telnet --interactive`, `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`, with guarded input/resize routes, bounded runtime/concurrency, Redis-backed reattach in multi-worker deployments, and completed transcripts saved back into normal history
@@ -219,7 +219,7 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `urlscan` | urlscan.io URL submission, result lookup, and search; requires `URLSCAN_API_KEY` in the encrypted secrets vault |
 | `chaos` | ProjectDiscovery Chaos subdomain lookups; requires `PDCP_API_KEY` in the encrypted secrets vault |
 
-The app-native `intel` command wraps provider lookups into one normalized terminal workflow. `intel ip <ip>` checks Shodan, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, and Team Cymru; `intel domain <domain>` checks VirusTotal, AlienVault OTX, and crt.sh; `intel hash <md5|sha1|sha256>` checks VirusTotal and AlienVault OTX, and safely queries HIBP Pwned Passwords for SHA1 hashes; and `intel cve <CVE-ID>` checks NVD. Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, and AbuseIPDB use encrypted session secrets; Team Cymru, crt.sh, HIBP Pwned Passwords, and NVD work without stored keys.
+The app-native `intel` command wraps provider lookups into one normalized terminal workflow. `intel ip <ip>` checks Shodan, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, Team Cymru, URLhaus, ThreatFox, and RouteViews; `intel domain <domain>` checks VirusTotal, AlienVault OTX, crt.sh, URLhaus, ThreatFox, urlscan.io, and SecurityTrails; `intel url <url>` checks URLhaus, ThreatFox, and urlscan.io; `intel hash <md5|sha1|sha256>` checks VirusTotal, AlienVault OTX, URLhaus, and ThreatFox, and safely queries HIBP Pwned Passwords for SHA1 hashes; and `intel cve <CVE-ID>` checks NVD and Vulners. Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, URLhaus, ThreatFox, Vulners, urlscan.io, and SecurityTrails use encrypted session secrets; Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, and RouteViews work without stored keys.
 
 ### Tool Notes
 
@@ -508,10 +508,16 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── otx.py          # AlienVault OTX provider normalization
 │   │   │   ├── rate_limiter.py # Per-session provider token-bucket helpers
 │   │   │   ├── registry.py     # App-native intel provider metadata and secret-consumer registry
+│   │   │   ├── routeviews.py   # RouteViews BGP/RPKI provider normalization
 │   │   │   ├── schema.py       # Normalized provider response shapes
+│   │   │   ├── securitytrails.py # SecurityTrails DNS/WHOIS/subdomain provider normalization
 │   │   │   ├── shodan.py       # Shodan provider normalization
 │   │   │   ├── teamcymru.py    # Team Cymru IP-to-ASN provider normalization
-│   │   │   └── virustotal.py   # VirusTotal provider normalization
+│   │   │   ├── threatfox.py    # ThreatFox IOC and hash provider normalization
+│   │   │   ├── urlhaus.py      # URLhaus URL/host/payload provider normalization
+│   │   │   ├── urlscan.py      # urlscan.io read/search provider normalization
+│   │   │   ├── virustotal.py   # VirusTotal provider normalization
+│   │   │   └── vulners.py      # Vulners CVE provider normalization
 │   │   ├── projects/
 │   │   │   ├── __init__.py     # Project service package marker
 │   │   │   ├── contracts.py    # Shared project workspace limits, allowed values, and exception classes

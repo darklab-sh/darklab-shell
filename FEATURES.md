@@ -655,17 +655,18 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Behavior:**
 
-- `intel ip <ip>` queries Shodan, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, and Team Cymru, then shows ports, CVEs, banner summaries, Censys services and ownership context, GreyNoise classification, OTX pulse context, AbuseIPDB report confidence, and IP-to-ASN ownership context when those providers return data.
-- `intel domain <domain>` queries VirusTotal, AlienVault OTX, and crt.sh, then shows reputation, analysis stats, recent URLs, WHOIS summary data, OTX pulse context, certificate counts, names, issuers, and first/last certificate sightings.
-- `intel hash <md5|sha1|sha256>` autodetects the hash type by length, queries VirusTotal and AlienVault OTX, and checks SHA1 hashes against HIBP Pwned Passwords by sending only the first five SHA1 characters.
-- `intel cve <CVE-ID>` queries NVD and shows severity, score, publish/modified dates, summary, and references.
+- `intel ip <ip>` queries Shodan, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, Team Cymru, URLhaus, ThreatFox, and RouteViews, then shows ports, CVEs, banner summaries, Censys services and ownership context, GreyNoise classification, OTX pulse context, AbuseIPDB report confidence, malware-distribution context, IOC matches, and IP-to-ASN/BGP ownership context when those providers return data.
+- `intel domain <domain>` queries VirusTotal, AlienVault OTX, crt.sh, URLhaus, ThreatFox, urlscan.io, and SecurityTrails, then shows reputation, analysis stats, recent URLs, WHOIS summary data, OTX pulse context, certificate counts, names, issuers, first/last certificate sightings, URLhaus host context, ThreatFox IOC matches, urlscan.io search hits, and SecurityTrails DNS/WHOIS/subdomain pivots.
+- `intel url <url>` queries URLhaus, ThreatFox, and urlscan.io, then shows malware-distribution status, IOC context, and matching urlscan.io search results without submitting a new scan.
+- `intel hash <md5|sha1|sha256>` autodetects the hash type by length, queries VirusTotal, AlienVault OTX, URLhaus, and ThreatFox, and checks SHA1 hashes against HIBP Pwned Passwords by sending only the first five SHA1 characters.
+- `intel cve <CVE-ID>` queries NVD and Vulners, then shows severity, score, publish/modified dates, summary, references, exploit counts, and exploitability context when provider data is available.
 - Each provider pane reports whether it came from cache, was rate-limited, hit quota backoff, or is missing a required encrypted secret.
 - Private, loopback, and other non-public IPs are blocked by default because vendor intel on those addresses is not useful. `--include-private` allows an explicit override.
 - The external `shodan`, `vt`, `greynoise`, `ipinfo`, `urlscan`, and `chaos` CLI wrappers remain available for users who want provider-native output.
 
-**Limits:** Shodan, Censys, VirusTotal, GreyNoise, AlienVault OTX, and AbuseIPDB require user-provided provider keys. Team Cymru, crt.sh, HIBP Pwned Passwords, and NVD work without saved keys but still use the app's per-session rate limiting and cache layer to avoid accidental bursts. Provider terms and quotas are still enforced by each vendor.
+**Limits:** Shodan, Censys, VirusTotal, GreyNoise, AlienVault OTX, AbuseIPDB, URLhaus, ThreatFox, Vulners, urlscan.io, and SecurityTrails require user-provided provider keys. Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, and RouteViews work without saved keys but still use the app's per-session rate limiting and cache layer to avoid accidental bursts. Provider terms and quotas are still enforced by each vendor.
 
-**Configuration:** users store `SHODAN_API_KEY`, `CENSYS_PAT`, `GREYNOISE_API_KEY`, `VT_API_KEY`, `OTX_API_KEY`, `ABUSEIPDB_API_KEY`, `URLSCAN_API_KEY`, or `PDCP_API_KEY` through Options → Secrets or `secret set NAME`. The Options picker suggests those known keys from the provider registry and command registry, while the terminal command still accepts explicit names such as the VirusTotal CLI's native `VTCLI_APIKEY`. Operators tune cache TTLs and rate-limit buckets in `conf/config.yaml`.
+**Configuration:** users store `SHODAN_API_KEY`, `CENSYS_PAT`, `GREYNOISE_API_KEY`, `VT_API_KEY`, `OTX_API_KEY`, `ABUSEIPDB_API_KEY`, `URLHAUS_AUTH_KEY`, `THREATFOX_AUTH_KEY`, `VULNERS_API_KEY`, `URLSCAN_API_KEY`, `SECURITYTRAILS_API_KEY`, or `PDCP_API_KEY` through Options → Secrets or `secret set NAME`. The Options picker suggests those known keys from the provider registry and command registry, while the terminal command still accepts explicit names such as the VirusTotal CLI's native `VTCLI_APIKEY`. Operators tune cache TTLs and rate-limit buckets in `conf/config.yaml`.
 
 **Related files:** `app/services/intel/`, `app/services/commands/builtins_intel.py`, `app/conf/commands.yaml`, `app/conf/config.yaml`.
 

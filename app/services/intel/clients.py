@@ -8,7 +8,7 @@ import os
 import ssl
 import subprocess
 from typing import Any
-from urllib.parse import quote, urlencode, urlsplit
+from urllib.parse import quote, urlencode, urljoin, urlsplit
 
 from services.intel.base import ProviderApiError
 
@@ -26,7 +26,15 @@ class JsonApiClient:
     def __init__(self):
         self.last_status: int | None = None
 
-    def _raw_request(self, url: str, *, headers: dict[str, str] | None = None) -> str:
+    def _raw_request(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        method: str = "GET",
+        body: str | bytes | None = None,
+        _redirects_remaining: int = 3,
+    ) -> str:
         parsed = urlsplit(url)
         if parsed.scheme != "https" or not parsed.netloc:
             raise ProviderApiError("provider URL must use HTTPS")
@@ -40,9 +48,24 @@ class JsonApiClient:
                 timeout=self.timeout_seconds,
                 context=_default_ssl_context(),
             )
-            conn.request("GET", path, headers=headers or {})
+            if body is None:
+                conn.request(method.upper(), path, headers=headers or {})
+            else:
+                conn.request(method.upper(), path, body=body, headers=headers or {})
             response = conn.getresponse()
             self.last_status = int(response.status)
+            location = response.getheader("location")
+            if response.status in {301, 302, 303, 307, 308} and location and _redirects_remaining > 0:
+                response.read()
+                redirected_method = "GET" if response.status == 303 else method
+                redirected_body = None if response.status == 303 else body
+                return self._raw_request(
+                    urljoin(url, location),
+                    headers=headers,
+                    method=redirected_method,
+                    body=redirected_body,
+                    _redirects_remaining=_redirects_remaining - 1,
+                )
             raw_bytes = response.read()
             raw = raw_bytes.decode("utf-8", errors="replace")
             reset_at = _header_float(response.getheader("x-ratelimit-reset"))
@@ -56,8 +79,15 @@ class JsonApiClient:
             if conn is not None:
                 conn.close()
 
-    def _json_request_any(self, url: str, *, headers: dict[str, str] | None = None) -> Any:
-        raw = self._raw_request(url, headers=headers)
+    def _json_request_any(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        method: str = "GET",
+        body: str | bytes | None = None,
+    ) -> Any:
+        raw = self._raw_request(url, headers=headers, method=method, body=body)
         try:
             loaded = json.loads(raw or "{}")
         except json.JSONDecodeError as exc:
@@ -66,6 +96,45 @@ class JsonApiClient:
 
     def _json_request(self, url: str, *, headers: dict[str, str] | None = None) -> dict[str, Any]:
         loaded = self._json_request_any(url, headers=headers)
+        if not isinstance(loaded, dict):
+            raise ProviderApiError("provider returned an unexpected JSON shape", status=self.last_status)
+        return loaded
+
+    def _json_post(
+        self,
+        url: str,
+        payload: dict[str, Any],
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        active_headers = {"Content-Type": "application/json", **(headers or {})}
+        loaded = self._json_request_any(
+            url,
+            headers=active_headers,
+            method="POST",
+            body=json.dumps(payload, separators=(",", ":")),
+        )
+        if not isinstance(loaded, dict):
+            raise ProviderApiError("provider returned an unexpected JSON shape", status=self.last_status)
+        return loaded
+
+    def _form_post(
+        self,
+        url: str,
+        payload: dict[str, str],
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        active_headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            **(headers or {}),
+        }
+        loaded = self._json_request_any(
+            url,
+            headers=active_headers,
+            method="POST",
+            body=urlencode(payload),
+        )
         if not isinstance(loaded, dict):
             raise ProviderApiError("provider returned an unexpected JSON shape", status=self.last_status)
         return loaded
@@ -183,6 +252,119 @@ class NvdApiClient(JsonApiClient):
     def lookup_cve(self, value: str) -> dict[str, Any]:
         query = urlencode({"cveId": value})
         return self._json_request(f"{self.base_url}?{query}")
+
+
+class VulnersApiClient(JsonApiClient):
+    base_url = "https://vulners.com/api/v3"
+
+    def _headers(self, api_key: str) -> dict[str, str]:
+        return {"X-Api-Key": api_key, "Accept": "application/json"}
+
+    def lookup_cve(self, value: str, *, api_key: str) -> dict[str, Any]:
+        return self._json_post(
+            f"{self.base_url}/search/id/",
+            {"id": value, "fields": ["*"]},
+            headers=self._headers(api_key),
+        )
+
+    def lookup_exploits(self, value: str, *, api_key: str, size: int = 5) -> dict[str, Any]:
+        return self._json_post(
+            f"{self.base_url}/search/lucene/",
+            {
+                "query": f"bulletinFamily:exploit AND {value}",
+                "skip": 0,
+                "size": size,
+                "fields": ["id", "title", "href", "published", "modified", "cvelist"],
+            },
+            headers=self._headers(api_key),
+        )
+
+
+class UrlscanApiClient(JsonApiClient):
+    base_url = "https://urlscan.io/api/v1"
+
+    def _headers(self, api_key: str) -> dict[str, str]:
+        return {"API-Key": api_key, "Accept": "application/json"}
+
+    def search(self, query: str, *, api_key: str, size: int = 5) -> dict[str, Any]:
+        params = urlencode({"q": query, "size": size})
+        return self._json_request(f"{self.base_url}/search/?{params}", headers=self._headers(api_key))
+
+    def lookup_result(self, scan_id: str, *, api_key: str) -> dict[str, Any]:
+        path = quote(scan_id, safe="")
+        return self._json_request(f"{self.base_url}/result/{path}/", headers=self._headers(api_key))
+
+
+class UrlhausApiClient(JsonApiClient):
+    base_url = "https://urlhaus-api.abuse.ch/v1"
+
+    def _headers(self, api_key: str) -> dict[str, str]:
+        return {"Auth-Key": api_key, "Accept": "application/json"}
+
+    def lookup_url(self, value: str, *, api_key: str) -> dict[str, Any]:
+        return self._form_post(f"{self.base_url}/url/", {"url": value}, headers=self._headers(api_key))
+
+    def lookup_host(self, value: str, *, api_key: str) -> dict[str, Any]:
+        return self._form_post(f"{self.base_url}/host/", {"host": value}, headers=self._headers(api_key))
+
+    def lookup_payload(self, value: str, *, api_key: str) -> dict[str, Any]:
+        key = "md5_hash" if len(str(value or "").strip()) == 32 else "sha256_hash"
+        return self._form_post(f"{self.base_url}/payload/", {key: value}, headers=self._headers(api_key))
+
+
+class ThreatFoxApiClient(JsonApiClient):
+    base_url = "https://threatfox-api.abuse.ch/api/v1/"
+
+    def _headers(self, api_key: str) -> dict[str, str]:
+        return {"Auth-Key": api_key, "Accept": "application/json"}
+
+    def search_ioc(self, value: str, *, api_key: str) -> dict[str, Any]:
+        return self._json_post(
+            self.base_url,
+            {"query": "search_ioc", "search_term": value, "exact_match": True},
+            headers=self._headers(api_key),
+        )
+
+    def search_hash(self, value: str, *, api_key: str) -> dict[str, Any]:
+        return self._json_post(
+            self.base_url,
+            {"query": "search_hash", "hash": value},
+            headers=self._headers(api_key),
+        )
+
+
+class SecurityTrailsApiClient(JsonApiClient):
+    base_url = "https://api.securitytrails.com/v1"
+
+    def _headers(self, api_key: str) -> dict[str, str]:
+        return {"APIKEY": api_key, "Accept": "application/json"}
+
+    def lookup_domain(self, value: str, *, api_key: str) -> dict[str, Any]:
+        path = quote(value, safe="")
+        domain = self._json_request(f"{self.base_url}/domain/{path}", headers=self._headers(api_key))
+        whois = self._json_request(f"{self.base_url}/domain/{path}/whois", headers=self._headers(api_key))
+        subdomains = self._json_request(f"{self.base_url}/domain/{path}/subdomains", headers=self._headers(api_key))
+        return {"domain": domain, "whois": whois, "subdomains": subdomains}
+
+
+class RouteViewsApiClient(JsonApiClient):
+    base_url = "https://api.routeviews.org"
+
+    def lookup_ip(self, value: str) -> dict[str, Any]:
+        prefix = _routeviews_host_prefix(value)
+        loaded = self._json_request_any(f"{self.base_url}/prefix/{quote(prefix, safe='/:')}")
+        if isinstance(loaded, list):
+            return {"prefixes": loaded}
+        if isinstance(loaded, dict):
+            return loaded
+        raise ProviderApiError("provider returned an unexpected JSON shape", status=self.last_status)
+
+
+def _routeviews_host_prefix(value: str) -> str:
+    text = str(value or "").strip()
+    if "/" in text:
+        return text
+    return f"{text}/128" if ":" in text else f"{text}/32"
 
 
 class TeamCymruDnsClient:

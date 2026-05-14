@@ -107,3 +107,7 @@ class Provider(ABC):
     def lookup_cve(self, value: str, *, session_token: str, run_id: str = "") -> IntelResult:
         del value, session_token, run_id
         raise ProviderUnsupportedLookup(f"{self.name} does not support CVE lookups")
+
+    def lookup_url(self, value: str, *, session_token: str, run_id: str = "") -> IntelResult:
+        del value, session_token, run_id
+        raise ProviderUnsupportedLookup(f"{self.name} does not support URL lookups")

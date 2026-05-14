@@ -3628,6 +3628,11 @@ class TestCommandCatalogRoute:
             ("intel GreyNoise", "GREYNOISE_API_KEY", ()),
             ("intel AlienVault OTX", "OTX_API_KEY", ()),
             ("intel AbuseIPDB", "ABUSEIPDB_API_KEY", ()),
+            ("intel URLhaus", "URLHAUS_AUTH_KEY", ()),
+            ("intel Vulners", "VULNERS_API_KEY", ()),
+            ("intel urlscan.io", "URLSCAN_API_KEY", ()),
+            ("intel ThreatFox", "THREATFOX_AUTH_KEY", ()),
+            ("intel SecurityTrails", "SECURITYTRAILS_API_KEY", ()),
         }
         assert resp.status_code == 200
         data = json.loads(resp.data)

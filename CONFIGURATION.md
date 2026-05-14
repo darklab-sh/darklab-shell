@@ -97,6 +97,16 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `intel_cache_ttl_crtsh_domain_seconds` | `86400` | Server-side only. Default cache lifetime for normalized crt.sh domain responses |
 | `intel_cache_ttl_hibp_password_seconds` | `604800` | Server-side only. Default cache lifetime for HIBP Pwned Passwords SHA1 range responses |
 | `intel_cache_ttl_nvd_cve_seconds` | `86400` | Server-side only. Default cache lifetime for normalized NVD CVE responses |
+| `intel_cache_ttl_vulners_cve_seconds` | `86400` | Server-side only. Default cache lifetime for normalized Vulners CVE responses |
+| `intel_cache_ttl_urlscan_search_seconds` | `21600` | Server-side only. Default cache lifetime for normalized urlscan.io search responses |
+| `intel_cache_ttl_urlscan_result_seconds` | `86400` | Server-side only. Default cache lifetime for normalized urlscan.io result responses |
+| `intel_cache_ttl_urlhaus_host_seconds` | `21600` | Server-side only. Default cache lifetime for normalized URLhaus host responses |
+| `intel_cache_ttl_urlhaus_payload_seconds` | `86400` | Server-side only. Default cache lifetime for normalized URLhaus payload hash responses |
+| `intel_cache_ttl_urlhaus_url_seconds` | `21600` | Server-side only. Default cache lifetime for normalized URLhaus URL responses |
+| `intel_cache_ttl_threatfox_ioc_seconds` | `21600` | Server-side only. Default cache lifetime for normalized ThreatFox IOC responses |
+| `intel_cache_ttl_threatfox_hash_seconds` | `86400` | Server-side only. Default cache lifetime for normalized ThreatFox hash responses |
+| `intel_cache_ttl_securitytrails_domain_seconds` | `86400` | Server-side only. Default cache lifetime for normalized SecurityTrails domain responses |
+| `intel_cache_ttl_routeviews_prefix_seconds` | `21600` | Server-side only. Default cache lifetime for normalized RouteViews prefix responses |
 | `intel_rate_limit_shodan_bucket` | `5` | Server-side only. Token-bucket size for Shodan lookups per session |
 | `intel_rate_limit_shodan_refill_seconds` | `1` | Server-side only. Seconds between Shodan token refills |
 | `intel_rate_limit_censys_bucket` | `10` | Server-side only. Token-bucket size for Censys lookups per session |
@@ -119,10 +129,27 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `intel_rate_limit_hibp_refill_seconds` | `2` | Server-side only. Seconds between HIBP Pwned Passwords token refills |
 | `intel_rate_limit_nvd_anonymous_bucket` | `5` | Server-side only. Token-bucket size for anonymous NVD lookups per session |
 | `intel_rate_limit_nvd_anonymous_refill_seconds` | `6` | Server-side only. Seconds between anonymous NVD token refills |
+| `intel_rate_limit_vulners_bucket` | `10` | Server-side only. Token-bucket size for Vulners lookups per session |
+| `intel_rate_limit_vulners_refill_seconds` | `6` | Server-side only. Seconds between Vulners token refills |
+| `intel_rate_limit_urlscan_bucket` | `10` | Server-side only. Token-bucket size for urlscan.io lookups per session |
+| `intel_rate_limit_urlscan_refill_seconds` | `6` | Server-side only. Seconds between urlscan.io token refills |
+| `intel_rate_limit_urlhaus_bucket` | `20` | Server-side only. Token-bucket size for URLhaus lookups per session |
+| `intel_rate_limit_urlhaus_refill_seconds` | `3` | Server-side only. Seconds between URLhaus token refills |
+| `intel_rate_limit_threatfox_bucket` | `20` | Server-side only. Token-bucket size for ThreatFox lookups per session |
+| `intel_rate_limit_threatfox_refill_seconds` | `3` | Server-side only. Seconds between ThreatFox token refills |
+| `intel_rate_limit_securitytrails_bucket` | `10` | Server-side only. Token-bucket size for SecurityTrails lookups per session |
+| `intel_rate_limit_securitytrails_refill_seconds` | `6` | Server-side only. Seconds between SecurityTrails token refills |
+| `intel_rate_limit_routeviews_bucket` | `20` | Server-side only. Token-bucket size for RouteViews lookups per session |
+| `intel_rate_limit_routeviews_refill_seconds` | `3` | Server-side only. Seconds between RouteViews token refills |
 | `intel_negative_cache_virustotal_quota_seconds` | `21600` | Server-side only. Fallback cache window for VirusTotal quota-exhausted responses when no reset time is available |
 | `intel_negative_cache_censys_quota_seconds` | `21600` | Server-side only. Fallback cache window for Censys quota-exhausted responses when no reset time is available |
 | `intel_negative_cache_otx_quota_seconds` | `21600` | Server-side only. Fallback cache window for AlienVault OTX quota-exhausted responses when no reset time is available |
 | `intel_negative_cache_abuseipdb_quota_seconds` | `21600` | Server-side only. Fallback cache window for AbuseIPDB quota-exhausted responses when no reset time is available |
+| `intel_negative_cache_urlhaus_quota_seconds` | `21600` | Server-side only. Fallback cache window for URLhaus quota-exhausted responses when no reset time is available |
+| `intel_negative_cache_vulners_quota_seconds` | `21600` | Server-side only. Fallback cache window for Vulners quota-exhausted responses when no reset time is available |
+| `intel_negative_cache_urlscan_quota_seconds` | `21600` | Server-side only. Fallback cache window for urlscan.io quota-exhausted responses when no reset time is available |
+| `intel_negative_cache_threatfox_quota_seconds` | `21600` | Server-side only. Fallback cache window for ThreatFox quota-exhausted responses when no reset time is available |
+| `intel_negative_cache_securitytrails_quota_seconds` | `21600` | Server-side only. Fallback cache window for SecurityTrails quota-exhausted responses when no reset time is available |
 | `interactive_pty_input_rate_limit_per_minute` | `500` | Max interactive PTY input requests per minute per IP. This is separate from `/runs` because normal terminal typing produces many small input requests |
 | `interactive_pty_input_rate_limit_per_second` | `10` | Max interactive PTY input request burst per second per IP |
 | `max_tabs` | `8` | Maximum number of tabs a user can have open at once. `0` means unlimited |

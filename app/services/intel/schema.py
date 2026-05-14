@@ -6,7 +6,7 @@ from copy import deepcopy
 from typing import Any
 
 
-ENTITY_TYPES = {"ip", "domain", "hash", "cve"}
+ENTITY_TYPES = {"ip", "domain", "hash", "cve", "url"}
 
 EMPTY_PROVIDER_SHAPES: dict[str, dict[str, Any]] = {
     "ip": {
@@ -33,16 +33,25 @@ EMPTY_PROVIDER_SHAPES: dict[str, dict[str, Any]] = {
             "last_reported_at": "",
         },
         "teamcymru": {"asn": "", "prefix": "", "cc": "", "registry": "", "allocated": "", "name": ""},
+        "urlhaus": {"query_status": "", "url_count": 0, "payload_count": 0, "urls": [], "payloads": []},
+        "threatfox": {"query_status": "", "ioc_count": 0, "iocs": [], "malware": [], "tags": []},
+        "routeviews": {"prefix": "", "origins": [], "rpki": "", "collector_count": 0},
     },
     "domain": {
         "virustotal": {"reputation": None, "last_analysis_stats": {}, "recent_urls": [], "whois": ""},
         "otx": {"pulse_count": 0, "reputation": None, "pulses": [], "tags": []},
         "crtsh": {"certificate_count": 0, "names": [], "issuers": [], "first_seen": "", "last_seen": ""},
+        "urlhaus": {"query_status": "", "url_count": 0, "payload_count": 0, "urls": [], "payloads": []},
+        "threatfox": {"query_status": "", "ioc_count": 0, "iocs": [], "malware": [], "tags": []},
+        "urlscan": {"result_count": 0, "results": [], "has_more": False},
+        "securitytrails": {"subdomain_count": 0, "subdomains": [], "whois": {}, "dns": {}},
     },
     "hash": {
         "virustotal": {"verdict": "", "last_analysis_stats": {}, "type_description": "", "tags": [], "names": []},
         "otx": {"pulse_count": 0, "reputation": None, "pulses": [], "tags": []},
         "hibp": {"pwned": False, "count": 0, "prefix": ""},
+        "urlhaus": {"query_status": "", "url_count": 0, "payloads": [], "signature": "", "file_type": ""},
+        "threatfox": {"query_status": "", "ioc_count": 0, "iocs": [], "malware": [], "tags": []},
     },
     "cve": {
         "nvd": {
@@ -53,6 +62,21 @@ EMPTY_PROVIDER_SHAPES: dict[str, dict[str, Any]] = {
             "description": "",
             "references": [],
         },
+        "vulners": {
+            "title": "",
+            "severity": "",
+            "score": None,
+            "published": "",
+            "modified": "",
+            "exploit_count": 0,
+            "exploits": [],
+            "references": [],
+        },
+    },
+    "url": {
+        "urlhaus": {"query_status": "", "status": "", "threat": "", "host": "", "payloads": [], "tags": []},
+        "threatfox": {"query_status": "", "ioc_count": 0, "iocs": [], "malware": [], "tags": []},
+        "urlscan": {"result_count": 0, "results": [], "has_more": False},
     },
 }
 

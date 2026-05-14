@@ -30,20 +30,14 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Surface the same summary through a terminal built-in later if it fits naturally with `stats`, `retention`, or `limits`.
 
 ### External intel provider enhancements
-- **Provider candidates**
-  - URLhaus for URL/host/hash malware-distribution context. It fits `intel url`, `intel domain`, `intel ip`, and `intel hash`, but it needs a clear `url` entity type before implementation.
-  - ThreatFox for IOC and hash context. It needs a free abuse.ch Auth-Key, maps well to IP/domain/URL/hash entities, and is likely more useful once Atlas can show an entity's threat context.
-  - Vulners for richer CVE context beyond NVD, including exploitability and active-exploitation signals. It requires `VULNERS_API_KEY` and should attach to `intel cve`.
-  - urlscan.io app-native search/result lookups. The CLI wrapper already exists, so app-native support should start with read/search/result flows; scan submission needs an explicit visibility/privacy decision.
-  - SecurityTrails for DNS, WHOIS, and subdomain/domain pivots. It is useful but overlaps with existing recon tools, so it should probably wait until Atlas can display domain relationships cleanly.
-  - RouteViews for no-key BGP/RPKI context if Team Cymru proves too thin. This is lower priority because Team Cymru already covers the main IP-to-ASN summary.
-  - MISP for operator-owned intel. Treat it as a self-hosted integration with `MISP_URL` plus `MISP_API_KEY`, not as a globally available default.
 - **Lower-priority candidates**
+  - **MISP** for operator-owned intel. Treat it as a self-hosted integration with `MISP_URL` plus `MISP_API_KEY`, not as a globally available default.
   - BuiltWith Pro and other commercial tech-fingerprint services until local/lightweight tech detection proves insufficient.
   - DeHashed, IntelligenceX, PassiveTotal/Defender TI, and DNSDB until entity storage, provider-status UI, and operator policy controls exist.
   - More vendor CLIs unless the CLI adds a materially better workflow than an app-native REST call.
 - **Provider management follow-up**
   - Add an optional operator provider denylist if deployments need to block outbound calls to specific vendors.
+  - Revisit mutating provider flows, such as urlscan.io scan submission, only after privacy, terms, visibility, and user-confirmation rules are explicit.
 
 ### Session Entity Atlas (entity-first triage surface)
 - **Scope**
