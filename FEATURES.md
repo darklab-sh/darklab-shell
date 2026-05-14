@@ -40,6 +40,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [Persistence & Retention](#persistence--retention)
 - [Session Tokens](#session-tokens)
 - [Encrypted Secrets](#encrypted-secrets)
+- [External Intel](#external-intel)
 - [Security and Process Isolation](#security-and-process-isolation)
 - [Structured Logging](#structured-logging)
 - [Operator Diagnostics](#operator-diagnostics)
@@ -642,6 +643,27 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 **Configuration:** operators provide the vault master key with `SECRETS_MASTER_KEY` or let the app create an app-owned key file under the data directory. Tool bindings live in `app/conf/commands.yaml` through `requires_secrets`.
 
 **Related files:** `app/blueprints/secrets.py`, `app/services/secrets/`, `app/services/commands/builtins_secrets.py`, `app/static/js/features/preferences/secrets_panel.js`, `app/conf/commands.yaml`.
+
+---
+
+## External Intel
+
+**Purpose:** query configured passive-intel providers without making users paste API keys into the terminal.
+
+**Behavior:**
+
+- `intel ip <ip>` queries Shodan and GreyNoise, then shows ports, CVEs, banner summaries, and GreyNoise classification when those providers are configured.
+- `intel domain <domain>` queries VirusTotal and shows reputation, analysis stats, recent URLs, and WHOIS summary data.
+- `intel hash <md5|sha1|sha256>` autodetects the hash type by length, queries VirusTotal, and shows verdict, analysis stats, file type, tags, and names.
+- Each provider pane reports whether it came from cache, was rate-limited, hit quota backoff, or is missing a required encrypted secret.
+- Private, loopback, and other non-public IPs are blocked by default because vendor intel on those addresses is not useful. `--include-private` allows an explicit override.
+- The external `shodan`, `vt`, and `greynoise` CLI wrappers remain available for users who want provider-native output.
+
+**Limits:** Shodan, VirusTotal, and GreyNoise require user-provided provider keys. Provider terms and quotas are enforced by the vendor; the app adds its own per-session rate limiting and cache layer to avoid accidental bursts.
+
+**Configuration:** users store `SHODAN_API_KEY`, `GREYNOISE_API_KEY`, `VT_API_KEY`, or the native `VTCLI_APIKEY` through Options → Secrets or `secret set NAME`. Operators tune cache TTLs and rate-limit buckets in `conf/config.yaml`.
+
+**Related files:** `app/services/intel/`, `app/services/commands/builtins_intel.py`, `app/conf/commands.yaml`, `app/conf/config.yaml`.
 
 ---
 

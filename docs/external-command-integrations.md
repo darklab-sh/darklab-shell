@@ -119,6 +119,20 @@ Creating resume file: /tools/katana/resume-abcd.cfg
 
 ---
 
+## App-Native Intel Lookups
+
+The `intel` built-in uses the same provider keys without launching the vendor CLI:
+
+- `intel ip <ip>` queries Shodan and GreyNoise.
+- `intel domain <domain>` queries VirusTotal.
+- `intel hash <md5|sha1|sha256>` queries VirusTotal after autodetecting the hash type by hex length.
+
+Provider responses are normalized through `app/services/intel/schema.py` before they are rendered, cached, or logged. Each provider pane reports whether the result came from cache, was blocked by rate limiting or quota backoff, or is missing the needed encrypted secret. If all providers for a lookup are missing, the built-in exits with setup guidance and does not make provider calls. If only some providers are missing, configured providers still render normally and the missing providers show placeholders.
+
+The built-in refuses private, loopback, and other non-public IP addresses by default because passive-intel providers cannot meaningfully classify them. Users can pass `--include-private` when they intentionally want to send that address to configured providers.
+
+---
+
 ## Interactive PTY Commands
 
 Interactive PTY support is declared in `app/conf/commands.yaml` with an `interactive` block per command. The currently shipped PTY commands are:

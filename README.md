@@ -39,6 +39,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Run comparison** — compare any two saved runs from History, Run Details, or Projects with responsive side-by-side/unified transcript views, folded unchanged context with lazy expansion, Prev/Next change navigation, copyable summaries, restore actions, and order-insensitive finding/artifact diffs
 - **Session command variables** — `var set HOST ip.darklab.sh`, `var list`, and `var unset HOST` define per-session values you can reuse as `$HOST` or `${HOST}`. Expansion happens before command validation, typed history stays readable, and the transcript shows the expanded command that actually ran
 - **Encrypted secrets** — per-session API keys for approved tools can be added, replaced, and deleted from Options or with `secret set NAME`. Stored values are encrypted, never revealed after save, never printed in transcripts, and injected only into matching command environments declared in `commands.yaml`
+- **External intel lookups** — `intel ip`, `intel domain`, and `intel hash` query configured Shodan, GreyNoise, and VirusTotal providers through the encrypted secrets vault, then show normalized results in the terminal with cache-hit, quota, and missing-key status per provider
 - **Session files** — optional per-session Files support for tools that need small input/output files. Users can create, view, edit, move/rename, download, delete, label, and note files; drag files into folders; preview JSON, JSONL/NDJSON, CSV/TSV, XML, HTTP responses, and large text; see quota/usage; use cwd-aware `ls`, `cat`, `mv`, and confirmed `rm`; use simple `*` patterns for list/move/delete flows; and let selected command flags safely read/write session files without opening shell navigation or redirection
 - **Project workspaces** — lightweight case folders group related runs, run-owned workspace artifacts, targets, findings, labels, notes, and draft evidence packages without copying the source records. Active projects can auto-link completed runs, project views expose finding/artifact review and metadata editing, and package exports preserve the selected project evidence with raw/redacted modes
 - **Interactive PTY mode** — optional live terminal windows for registry-approved interactive tools such as `nc --interactive`, `telnet --interactive`, `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`, with guarded input/resize routes, bounded runtime/concurrency, Redis-backed reattach in multi-worker deployments, and completed transcripts saved back into normal history
@@ -214,6 +215,8 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `shodan` | Shodan host and service intelligence; requires `SHODAN_API_KEY` in the encrypted secrets vault |
 | `vt` | VirusTotal IP, domain, URL, and file-hash reputation; accepts either `VT_API_KEY` or the native `VTCLI_APIKEY` secret name |
 | `greynoise` | GreyNoise IP classification and context; requires `GREYNOISE_API_KEY` in the encrypted secrets vault |
+
+The app-native `intel` command wraps those same providers into one normalized terminal workflow: `intel ip <ip>` checks Shodan and GreyNoise, while `intel domain <domain>` and `intel hash <md5|sha1|sha256>` use VirusTotal.
 
 ### Tool Notes
 
@@ -466,6 +469,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── builtins_catalog.py # Static built-in command help, shortcut, and special-command data
 │   │   │   ├── builtins_discovery.py # Help, FAQ, command catalog, man, type, and which built-in handlers
 │   │   │   ├── builtins_format.py # Shared formatting, ANSI styling, and output-line helpers for built-ins
+│   │   │   ├── builtins_intel.py # External intel lookup built-in command handler
 │   │   │   ├── builtins_misc.py # Miscellaneous and guardrail-flavored built-in command handlers
 │   │   │   ├── builtins_project.py # Project workspace built-in command family and project target helpers
 │   │   │   ├── builtins_runtime.py # Runtime/history/status built-in command handlers
@@ -490,7 +494,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── base.py         # Provider base classes, result objects, and provider exceptions
 │   │   │   ├── cache.py        # Redis-backed normalized intel response and quota backoff cache helpers
 │   │   │   ├── canonical.py    # Canonical IP, domain, URL, hash, and CVE key helpers
+│   │   │   ├── clients.py      # HTTP clients for Shodan, VirusTotal, and GreyNoise APIs
 │   │   │   ├── greynoise.py    # GreyNoise provider normalization
+│   │   │   ├── lookup.py       # Provider fan-out, cache, rate-limit, and lookup orchestration
 │   │   │   ├── rate_limiter.py # Per-session provider token-bucket helpers
 │   │   │   ├── schema.py       # Normalized provider response shapes
 │   │   │   ├── shodan.py       # Shodan provider normalization

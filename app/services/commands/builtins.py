@@ -27,6 +27,7 @@ from services.commands.builtins_catalog import (
     _WORKSPACE_BUILTIN_ROOTS,
 )
 from services.commands import builtins_discovery, builtins_misc, builtins_system, builtins_wordlist
+from services.commands.builtins_intel import run_builtin_intel as _run_builtin_intel
 from services.commands.builtins_misc import (
     run_builtin_banner as _run_builtin_banner,
     run_builtin_clear as _run_builtin_clear,
@@ -304,6 +305,7 @@ _BUILTIN_COMMAND_DISPATCH = {
     "hostname":  lambda cmd, sid: _run_builtin_hostname(),
     "id":        lambda cmd, sid: _run_builtin_id(),
     "ip_addr":   lambda cmd, sid: _run_builtin_ip_addr(),
+    "intel":     lambda cmd, sid: _run_builtin_intel(cmd, sid),
     "jobs":      lambda cmd, sid: _run_builtin_runs(cmd, sid),
     "last":      lambda cmd, sid: _run_builtin_last(sid),
     "limits":    lambda cmd, sid: _run_builtin_limits(),
@@ -364,4 +366,7 @@ def execute_builtin_command(command: str, session_id: str) -> tuple[list[dict[st
     handler = _BUILTIN_COMMAND_DISPATCH.get(root) if root is not None else None
     if handler is None:
         return [{"type": "output", "text": f"Unsupported built-in command: {command.strip()}"}], 1
-    return handler(command, session_id), 0
+    result = handler(command, session_id)
+    if isinstance(result, tuple):
+        return result
+    return result, 0

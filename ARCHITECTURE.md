@@ -705,6 +705,8 @@ Workspace-aware validation also rewrites declared file and directory flags from 
 
 Registry-owned `requires_secrets` declarations use a separate launch path from runtime environment wrappers. `/runs` resolves the original command root's secret declarations against the current session vault before validation-owned runtime wrappers can change the executed shell text. Required missing secrets or missing session identity block the launch; optional missing secrets log a warning. Found values are decrypted in memory and passed through `subprocess.Popen(env=...)`, never inserted into the shell command text. A declaration can look up one or more vault names and inject the value under a different runtime env name, which is how the VirusTotal CLI accepts either `VT_API_KEY` or `VTCLI_APIKEY` while receiving `VTCLI_APIKEY` in the child process. In the container scanner path, sudo preserves only the declared secret env names so the scanner process receives them without exposing values in argv or preserving unrelated app env. Interactive PTY registry entries cannot also declare `requires_secrets`; registry loading rejects that combination because the PTY path does not inject secret environment variables. Successful secret use emits one `SECRET_INJECTED` audit event for the run with env names only.
 
+The app-native `intel` built-in uses the same encrypted-secret boundary without spawning a provider CLI. `app/services/intel/lookup.py` canonicalizes the requested IP, domain, or hash, verifies each provider secret for the current session, checks Redis-backed cache and quota state, applies per-session provider token buckets, calls the Shodan, GreyNoise, or VirusTotal HTTP client, stores normalized provider responses, and emits redacted `INTEL_LOOKUP` audit events. Missing providers render as terminal placeholders beside configured provider results, while all-missing lookups exit with setup guidance instead of making network calls.
+
 Workspace move and glob behavior stays app-mediated too. `move_workspace_path()` resolves both source and destination through the same session-root checks used by reads and deletes, rejects overwrites, rejects symlink escapes, prevents moving a folder into itself, and falls back to the scanner user for command-owned files that need group-write movement. Browser-side `file ls`, `file move` / `mv`, and confirmed `file delete` expand simple `*` patterns from the loaded session workspace cache for fast terminal feedback; backend built-ins use `expand_workspace_path_pattern()` so stale-browser or server-rendered paths follow the same one-segment matching rule. The shell never asks `/bin/sh` to expand workspace patterns. Before list/read-style operations, `normalize_session_workspace_permissions()` also repairs scanner-created child modes so tool config folders written under session-scoped `XDG_CONFIG_HOME` remain visible to the app without making the workspace world-readable.
 
 Synthetic post-filters also sit on this run-lifecycle boundary rather than on the shell-parser path. `parse_synthetic_postfilter()` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the brokered stream applies the selected helper before lines are emitted or persisted.
@@ -1251,12 +1253,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,709
+- behavior tests: 2,714
 - docs/inventory meta-tests: 32
-- `pytest`: 1368 (1336 behavior + 32 meta)
+- `pytest`: 1373 (1341 behavior + 32 meta)
 - `vitest`: 1124
 - `playwright`: 249
-- total: 2,741
+- total: 2,746
 
 ### Testing Architecture
 

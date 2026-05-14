@@ -26,6 +26,10 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Why:** users can run provider CLIs through the normal terminal workflow before the app-native `intel` command lands, without pasting API keys into command text.
   - **What:** installed `shodan`, `vt-cli`, and `greynoise` in the container image; added `commands.yaml` entries for safe Shodan `host/search/count/myip`, VirusTotal `ip/domain/file/url`, and GreyNoise `ip/quick` usage; blocked setup/download/search-management paths, inline key flags, and loopback lookups; caught long denied flags passed as `--flag=value`; and taught registry secret declarations to inject under vendor-specific env names while accepting fallback vault names. VirusTotal accepts either `VT_API_KEY` or `VTCLI_APIKEY` from the vault and launches `vt` with `VTCLI_APIKEY`.
   - **Tests:** added coverage for required-secret alias lookup, vendor-env injection, missing-alias messaging, native `VTCLI_APIKEY` fallback support, provider fallback secret reads, registry merge normalization, `secret show-consumers` fallback names, long denied flags with attached values, and generic smoke-corpus skipping for required-secret examples.
+- **App-native `intel` lookups** — `intel ip`, `intel domain`, and `intel hash` provide a normalized terminal workflow across Shodan, GreyNoise, and VirusTotal.
+  - **Why:** provider CLIs are useful, but common triage should show consistent cache, quota, missing-key, and normalized result output without asking users to remember each vendor's syntax.
+  - **What:** added HTTP provider clients, provider fan-out orchestration, built-in autocomplete, and the `intel` built-in. IP lookups query Shodan and GreyNoise; domain and hash lookups query VirusTotal. The built-in verifies each provider secret before cache/rate-limit checks, refuses private or loopback IPs unless `--include-private` is passed, renders missing providers beside configured provider results, and exits with setup guidance when no provider is configured.
+  - **Tests:** added backend coverage for cache hits requiring a current provider secret, mixed provider rendering, all-missing provider setup guidance, private-IP rejection, and invalid hash rejection.
 - **Project workspace** — Runs, targets, findings, artifacts, notes, and evidence packages can now be organized around an active project from both the shell and the Projects modal.
   - **Why:** project/case work needs a shared relationship model so UI features can link runs and surface their artifacts, findings, and evidence packages consistently.
   - **What:**
@@ -187,6 +191,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **VirusTotal CLI Docker install now targets the command package** — the Docker build installs `github.com/VirusTotal/vt-cli/vt` instead of the module root, matching the current upstream Go package layout for the `vt` binary.
 - **The Files shortcut now toggles like the other modal shortcuts** — pressing `Option+Shift+F` while Files is already open closes it instead of relaunching the Files modal.
 - **Invalid workspace flag paths now name the bad path** — unsafe declared input/output paths such as `/../../scan.txt` now return `Invalid file path: /../../scan.txt` instead of falling through to a generic command-policy denial.
 - **Autocomplete no longer shows duplicate `file list` and `file ls` rows** — the YAML-owned grammar entries keep their `<folder>` guidance, and the runtime layer no longer adds bare duplicates.

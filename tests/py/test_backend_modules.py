@@ -510,6 +510,113 @@ class TestIntelServices:
 
         client.lookup_ip.assert_not_called()
 
+    def test_lookup_entity_requires_secret_before_cache_hit(self):
+        from services.intel import cache
+        from services.intel.lookup import lookup_entity
+        from services.intel.shodan import ShodanProvider
+
+        redis = process._FakeRedisClient()
+        cache.set_cached_response(
+            "shodan",
+            "ip",
+            "8.8.8.8",
+            {"providers": {"shodan": {"ports": [443]}}, "summary": {"has_intel": True}},
+            ttl_seconds=60,
+            redis_client=redis,
+        )
+        provider = ShodanProvider(secret_getter=lambda session, env: None, client=mock.Mock())
+
+        result = lookup_entity(
+            "ip",
+            "8.8.8.8",
+            session_id="session-1",
+            provider_factories=[lambda: provider],
+            redis_client=redis,
+        )
+
+        assert result.providers[0].status == "missing_secret"
+        assert result.providers[0].result is None
+        provider.client.lookup_ip.assert_not_called()
+
+    def test_builtin_intel_ip_formats_partial_provider_results(self):
+        from services.intel.base import IntelResult
+        from services.intel.lookup import IntelLookupResult, ProviderLookup
+
+        payload = {
+            "providers": {
+                "shodan": {
+                    "ports": [80, 443],
+                    "cves": ["CVE-2024-12345"],
+                    "banners": [{"port": 443, "transport": "tcp", "product": "nginx", "data": "HTTP"}],
+                    "last_update": "2026-05-14T00:00:00Z",
+                },
+            },
+            "summary": {"has_intel": True},
+        }
+        lookup = IntelLookupResult(
+            "ip",
+            "8.8.8.8",
+            [
+                ProviderLookup("shodan", result=IntelResult("shodan", "ip", "8.8.8.8", payload, cache_hit=True)),
+                ProviderLookup(
+                    "greynoise",
+                    status="missing_secret",
+                    message="GREYNOISE_API_KEY is not configured",
+                ),
+            ],
+        )
+
+        with mock.patch("services.commands.builtins_intel.lookup_entity", return_value=lookup):
+            lines, exit_code = builtin_commands.execute_builtin_command("intel ip 8.8.8.8", "intel-session")
+
+        text = "\n".join(str(line.get("text", "")) for line in lines)
+        assert exit_code == 0
+        assert "Intel lookup: ip 8.8.8.8" in text
+        assert "Shodan: cache hit" in text
+        assert "80, 443" in text
+        assert "CVE-2024-12345" in text
+        assert "GreyNoise: not configured - GREYNOISE_API_KEY is not configured" in text
+
+    def test_builtin_intel_reports_all_missing_provider_keys(self):
+        from services.intel.lookup import IntelLookupResult, ProviderLookup
+
+        lookup = IntelLookupResult(
+            "domain",
+            "example.test",
+            [
+                ProviderLookup(
+                    "virustotal",
+                    status="missing_secret",
+                    message="VT_API_KEY or VTCLI_APIKEY is not configured",
+                ),
+            ],
+        )
+
+        with mock.patch("services.commands.builtins_intel.lookup_entity", return_value=lookup):
+            lines, exit_code = builtin_commands.execute_builtin_command("intel domain example.test", "intel-session")
+
+        text = "\n".join(str(line.get("text", "")) for line in lines)
+        assert exit_code == 1
+        assert "VirusTotal: not configured - VT_API_KEY or VTCLI_APIKEY is not configured" in text
+        assert "No providers are configured for this lookup." in text
+        assert "secret show-consumers" in text
+
+    def test_builtin_intel_rejects_private_ip_without_override(self):
+        with mock.patch("services.commands.builtins_intel.lookup_entity") as lookup:
+            lines, exit_code = builtin_commands.execute_builtin_command("intel ip 127.0.0.1", "intel-session")
+
+        text = "\n".join(str(line.get("text", "")) for line in lines)
+        assert exit_code == 1
+        assert "IP 127.0.0.1 is in a private/loopback range" in text
+        lookup.assert_not_called()
+
+    def test_builtin_intel_hash_rejects_invalid_value(self):
+        lines, exit_code = builtin_commands.execute_builtin_command("intel hash not-hex", "intel-session")
+
+        text = "\n".join(str(line.get("text", "")) for line in lines)
+        assert exit_code == 1
+        assert "intel: Hash must be hex MD5/SHA1/SHA256" in text
+
 
 class TestSessionWorkspace:
     def _cfg(self, root, **overrides):

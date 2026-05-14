@@ -151,7 +151,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # Install external-intel CLIs. These are launched through the same command
 # allowlist and vault-backed environment injection path as other scanner tools.
 RUN pip install --no-cache-dir shodan greynoise
-RUN go install -v github.com/VirusTotal/vt-cli@${VT_CLI_VERSION}
+RUN go install -v github.com/VirusTotal/vt-cli/vt@${VT_CLI_VERSION}
 
 
 # Create two unprivileged users:

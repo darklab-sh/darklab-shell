@@ -140,19 +140,20 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - `vt` → `VT_API_KEY`, injected into the process as `VTCLI_APIKEY`; users may also store the native `VTCLI_APIKEY` name directly. Allows `ip`, `domain`, `file`, `url`; denies broad search/download/monitor/analyze paths, inline key flags, and loopback lookups.
     - `greynoise` → `GREYNOISE_API_KEY`. Allows `ip`, `quick`; denies `setup`, `query`, inline key flags, and loopback lookups.
   - CLI wrapper runs go through `/runs` like every other command and land in normal history. Generic container smoke loading now skips required-secret examples so CI does not fail on provider-key setup; these roots are covered by registry, policy, and secret-injection tests until a keyed smoke profile exists.
-- **Phase 3 - App-native `intel` built-in**
-  - New `app/services/commands/builtins_intel.py`:
-    - `intel ip <ip>` fans out to Shodan + GreyNoise; uniform card shows ports/banners/CVEs and classification/confidence. Private, loopback, and otherwise non-public IPs are refused by default with `IP <addr> is in a private/loopback range; intel providers cannot meaningfully classify it. Use --include-private if you really want to query.`
-    - `intel domain <domain>` uses VirusTotal; uniform card shows reputation, recent URLs, WHOIS summary.
-    - `intel hash <sha256|sha1|md5>` uses VirusTotal; uniform card shows verdict, scan engines, tags. Autodetect by hex length (`32` → MD5, `40` → SHA1, `64` → SHA256), validate hex, and reject anything else with `Hash must be hex MD5/SHA1/SHA256`. No algorithm flag in v1.
+- **Phase 3 - App-native `intel` built-in (complete)**
+  - Added `app/services/commands/builtins_intel.py` plus lookup orchestration in `app/services/intel/lookup.py`:
+    - `intel ip <ip>` fans out to Shodan + GreyNoise and shows ports, CVEs, banner summaries, and classification details when providers are configured. Private, loopback, and otherwise non-public IPs are refused by default with `IP <addr> is in a private/loopback range; intel providers cannot meaningfully classify it. Use --include-private if you really want to query.`
+    - `intel domain <domain>` uses VirusTotal and shows reputation, analysis stats, recent URLs, and WHOIS summary data.
+    - `intel hash <sha256|sha1|md5>` uses VirusTotal. Hash type is autodetected by hex length (`32` → MD5, `40` → SHA1, `64` → SHA256), validated as hex, and rejected with `Hash must be hex MD5/SHA1/SHA256` otherwise. No algorithm flag in v1.
     - `intel cve <id>` is deferred to the future provider list.
   - Missing-key behavior:
-    - If every provider needed for a subcommand is missing, block pre-launch with a clear message that includes both `secret set NAME` shell hints and an `(Options → Secrets)` link that opens the Options modal at the Secrets section with the env name pre-filled.
-    - If some providers are configured and others are missing, render configured provider panes normally and render placeholders for the missing panes, for example `GreyNoise: not configured — secret set GREYNOISE_API_KEY`.
-  - Quota-exhaustion behavior renders an inline provider pane error such as `VirusTotal quota exhausted for today — refresh after midnight UTC, or upgrade to Premium`, using the negative-cache state from Phase 1 so repeat runs do not keep calling the provider.
-  - Built-in output routes through the standard run-broker so it gets history persistence, autocomplete, and pipe support like any external command.
-  - Browser-side card module: `app/static/js/features/intel/intel_card.js` with a provider-uniform layout shared across `intel` subcommands and any future enrichment surfaces.
-  - Document the normalized response schemas and provider-pane behavior in `docs/external-command-integrations.md`.
+    - If every provider needed for a subcommand is missing, the built-in exits with setup guidance and points users to `secret show-consumers`.
+    - If some providers are configured and others are missing, configured provider output renders normally and missing providers render placeholders, for example `GreyNoise: not configured - GREYNOISE_API_KEY is not configured`.
+  - Quota-exhaustion and app-side rate-limit behavior render inline provider messages and use the negative-cache state from Phase 1 so repeat runs do not keep calling an exhausted provider.
+  - Built-in output routes through the standard built-in run path, so it gets normal history persistence, autocomplete, and exit-code handling.
+  - Added built-in autocomplete entries for `intel ip`, `intel domain`, `intel hash`, and `--include-private`.
+  - Documented the normalized response and provider-pane behavior in `docs/external-command-integrations.md`.
+  - Rich browser-card rendering remains deferred until the share/export raw-only marker work needs structured client rendering.
 - **Phase 4 - Entity-aware classifier hooks**
   - Extend `app/core/output_signals.py` to extract:
     - IPv4 and IPv6 (with configurable public-context filter that drops loopback/RFC1918 by default).

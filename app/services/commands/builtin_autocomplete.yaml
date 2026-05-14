@@ -223,6 +223,39 @@ commands:
     description: "built-in: show the shell identity"
     autocomplete:
       arguments: []
+  - root: intel
+    description: "built-in: query configured external intel providers"
+    autocomplete:
+      subcommands:
+        - value: ip
+          description: "Look up an IP address"
+          takes_value: true
+          insert: "ip "
+          value_hint:
+            value: "<ip>"
+            hint_only: true
+            value_type: ip
+            description: "IP address"
+        - value: domain
+          description: "Look up a domain"
+          takes_value: true
+          insert: "domain "
+          value_hint:
+            value: "<domain>"
+            hint_only: true
+            value_type: domain
+            description: "Domain"
+        - value: hash
+          description: "Look up a file hash"
+          takes_value: true
+          insert: "hash "
+          value_hint:
+            value: "<md5|sha1|sha256>"
+            hint_only: true
+            description: "File hash"
+      flags:
+        - value: --include-private
+          description: "Allow private or loopback IP lookups"
   - root: ip
     description: "built-in: show a minimal shell network interface view"
     autocomplete:

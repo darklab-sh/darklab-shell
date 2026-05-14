@@ -28,6 +28,15 @@ class ProviderClientUnavailable(IntelProviderError):
     """Raised when a live provider needs an HTTP/CLI client that is absent."""
 
 
+class ProviderApiError(IntelProviderError):
+    """Raised when a provider API returns an error response."""
+
+    def __init__(self, message: str, *, status: int | None = None, reset_at: float | None = None):
+        super().__init__(message)
+        self.status = status
+        self.reset_at = reset_at
+
+
 @dataclass(frozen=True)
 class IntelResult:
     provider: str
