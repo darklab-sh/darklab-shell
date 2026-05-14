@@ -1243,10 +1243,17 @@ describe('history panel actions', () => {
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(document.querySelector('.history-bulk-count').textContent).toBe('1 selected')
 
-    document.querySelector('[data-action="bulk-add-active-project"]')
-      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    const bulkAddActiveDocumentClick = vi.fn()
+    document.addEventListener('click', bulkAddActiveDocumentClick)
+    try {
+      document.querySelector('[data-action="bulk-add-active-project"]')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    } finally {
+      document.removeEventListener('click', bulkAddActiveDocumentClick)
+    }
     await Promise.resolve()
 
+    expect(bulkAddActiveDocumentClick).not.toHaveBeenCalled()
     expect(document.querySelector('.history-bulk-toggle input').disabled).toBe(true)
     expect(document.querySelector('[data-action="history-bulk-menu"]').disabled).toBe(true)
     expect(document.querySelector('[data-action="select-run"]').disabled).toBe(true)
@@ -1321,6 +1328,7 @@ describe('history panel actions', () => {
     const confirmOptions = showConfirm.mock.calls[0][0]
     const pickerOptions = [...confirmOptions.content.querySelectorAll('option')].map(option => option.textContent)
     expect(confirmOptions.body).toBe('Add 1 selected run to project')
+    expect(confirmOptions.refocusOnResolve).toBe(false)
     expect(pickerOptions).toEqual(['Active scope', 'Alpha', 'Zulu'])
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-active/links', expect.objectContaining({
       method: 'POST',
@@ -1328,7 +1336,7 @@ describe('history panel actions', () => {
     }))
   })
 
-  it('bulk remove picker only lists projects linked to selected runs', async () => {
+  it('bulk remove unlinks selected runs from every linked project without a picker', async () => {
     const showConfirm = vi.fn(() => Promise.resolve('remove'))
     const apiFetch = vi.fn((url, options = {}) => {
       if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
@@ -1343,10 +1351,16 @@ describe('history panel actions', () => {
                 command: 'nmap one',
                 started: '2026-01-01T00:00:00Z',
                 exit_code: 0,
-                project_links: [{
-                  project_id: 'project-z',
-                  project: { id: 'project-z', name: 'Zulu', status: 'active' },
-                }],
+                project_links: [
+                  {
+                    project_id: 'project-z',
+                    project: { id: 'project-z', name: 'Zulu', status: 'active' },
+                  },
+                  {
+                    project_id: 'project-a',
+                    project: { id: 'project-a', name: 'Alpha', status: 'active' },
+                  },
+                ],
               },
               {
                 id: 'run-2',
@@ -1364,7 +1378,18 @@ describe('history panel actions', () => {
           }),
         })
       }
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, counts: { removed: 2 }, results: [] }) })
+      if (typeof url === 'string' && url.startsWith('/projects/')) {
+        const body = JSON.parse(options.body)
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            counts: { removed: body.entity_ids.length },
+            results: body.entity_ids.map(runId => ({ run_id: runId, status: 'removed' })),
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
     })
     const { refreshHistoryPanel } = loadHistoryPanel({
       apiFetchImpl: apiFetch,
@@ -1380,18 +1405,33 @@ describe('history panel actions', () => {
     document.querySelectorAll('#history-list .history-entry').forEach((row) => {
       row.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
-    document.querySelector('[data-action="bulk-remove-project"]')
-      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    const bulkRemoveDocumentClick = vi.fn()
+    document.addEventListener('click', bulkRemoveDocumentClick)
+    try {
+      document.querySelector('[data-action="bulk-remove-project"]')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    } finally {
+      document.removeEventListener('click', bulkRemoveDocumentClick)
+    }
     await new Promise((resolve) => setImmediate(resolve))
     await new Promise((resolve) => setImmediate(resolve))
 
-    const confirmOptions = showConfirm.mock.calls[0][0]
-    const pickerOptions = [...confirmOptions.content.querySelectorAll('option')].map(option => option.textContent)
-    expect(confirmOptions.body).toBe('Remove 2 selected runs from project')
-    expect(pickerOptions).toEqual(['Alpha', 'Zulu'])
+    expect(bulkRemoveDocumentClick).not.toHaveBeenCalled()
+    expect(showConfirm).toHaveBeenCalled()
+    expect(showConfirm.mock.calls[0][0]).toEqual(expect.objectContaining({
+      body: expect.objectContaining({
+        text: 'Remove 2 selected runs from all linked projects?',
+        note: 'This removes 3 project links and leaves the run history intact.',
+      }),
+      refocusOnResolve: false,
+    }))
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-a/links', expect.objectContaining({
       method: 'DELETE',
       body: JSON.stringify({ entity_type: 'run', entity_ids: ['run-1', 'run-2'], source: 'manual' }),
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-z/links', expect.objectContaining({
+      method: 'DELETE',
+      body: JSON.stringify({ entity_type: 'run', entity_ids: ['run-1'], source: 'manual' }),
     }))
   })
 
@@ -1469,6 +1509,7 @@ describe('history panel actions', () => {
     await Promise.resolve()
 
     expect(showConfirm).toHaveBeenCalled()
+    expect(showConfirm.mock.calls[0][0].refocusOnResolve).toBe(false)
     expect(apiFetch).toHaveBeenCalledWith('/history/bulk-delete', expect.objectContaining({
       method: 'POST',
     }))
@@ -1568,10 +1609,17 @@ describe('history panel actions', () => {
     await Promise.resolve()
     expect(clipboard.writeText).toHaveBeenCalledWith('run-1')
 
-    entry.querySelector('[data-action="add-active-project"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    const documentClick = vi.fn()
+    document.addEventListener('click', documentClick)
+    try {
+      entry.querySelector('[data-action="add-active-project"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    } finally {
+      document.removeEventListener('click', documentClick)
+    }
     await Promise.resolve()
     await Promise.resolve()
     await new Promise((resolve) => setImmediate(resolve))
+    expect(documentClick).not.toHaveBeenCalled()
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-active/links', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ entity_type: 'run', entity_id: 'run-1', source: 'manual' }),
@@ -1579,11 +1627,20 @@ describe('history panel actions', () => {
     expect(document.querySelector('#history-list .history-entry [data-action="remove-project"]').textContent).toBe('remove from project')
 
     apiFetch.mockClear()
-    document.querySelector('#history-list .history-entry [data-action="remove-project"]')
-      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    showConfirm.mockImplementationOnce(() => Promise.resolve('remove'))
+    const removeDocumentClick = vi.fn()
+    document.addEventListener('click', removeDocumentClick)
+    try {
+      document.querySelector('#history-list .history-entry [data-action="remove-project"]')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    } finally {
+      document.removeEventListener('click', removeDocumentClick)
+    }
     await Promise.resolve()
     await Promise.resolve()
     await new Promise((resolve) => setImmediate(resolve))
+    expect(removeDocumentClick).not.toHaveBeenCalled()
+    expect(showConfirm.mock.calls.at(-1)[0].refocusOnResolve).toBe(false)
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-active/links', expect.objectContaining({
       method: 'DELETE',
       body: JSON.stringify({ entity_type: 'run', entity_id: 'run-1' }),
@@ -1592,12 +1649,20 @@ describe('history panel actions', () => {
       .toBe('add to active project')
 
     apiFetch.mockClear()
-    document.querySelector('#history-list .history-entry [data-action="add-project"]')
-      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    const addProjectDocumentClick = vi.fn()
+    document.addEventListener('click', addProjectDocumentClick)
+    try {
+      document.querySelector('#history-list .history-entry [data-action="add-project"]')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    } finally {
+      document.removeEventListener('click', addProjectDocumentClick)
+    }
     await Promise.resolve()
     await Promise.resolve()
     await new Promise((resolve) => setImmediate(resolve))
+    expect(addProjectDocumentClick).not.toHaveBeenCalled()
     expect(showConfirm).toHaveBeenCalled()
+    expect(showConfirm.mock.calls.at(-1)[0].refocusOnResolve).toBe(false)
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-active/links', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ entity_type: 'run', entity_id: 'run-1', source: 'manual' }),
@@ -1638,7 +1703,11 @@ describe('history panel actions', () => {
         json: () => Promise.resolve({ ok: true }),
       })
     })
-    const { refreshHistoryPanel: refreshLinkedHistoryPanel } = loadHistoryPanel({ apiFetchImpl: linkedApiFetch })
+    const linkedRemoveConfirm = vi.fn(() => Promise.resolve('remove'))
+    const { refreshHistoryPanel: refreshLinkedHistoryPanel } = loadHistoryPanel({
+      apiFetchImpl: linkedApiFetch,
+      showConfirmImpl: linkedRemoveConfirm,
+    })
 
     refreshLinkedHistoryPanel()
     await new Promise((resolve) => setImmediate(resolve))
@@ -1661,12 +1730,87 @@ describe('history panel actions', () => {
     await Promise.resolve()
     await Promise.resolve()
     await new Promise((resolve) => setImmediate(resolve))
+    expect(linkedRemoveConfirm).toHaveBeenCalled()
+    expect(linkedRemoveConfirm.mock.calls[0][0].refocusOnResolve).toBe(false)
     expect(linkedApiFetch).toHaveBeenCalledWith('/projects/project-1/links', expect.objectContaining({
       method: 'DELETE',
       body: JSON.stringify({ entity_type: 'run', entity_id: 'run-1' }),
     }))
     expect(document.querySelector('#history-list .history-entry [data-action="add-project"]').textContent)
       .toBe('add to project')
+
+    let multiLinked = true
+    const removeConfirm = vi.fn(() => Promise.resolve('remove'))
+    const multiLinkedApiFetch = vi.fn((url) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              roots: ['ping'],
+              items: [{
+                id: 'run-1',
+                type: 'run',
+                command: 'ping darklab.sh',
+                label: 'ping darklab.sh',
+                started: '2026-01-01T00:00:00Z',
+                created: '2026-01-01T00:00:00Z',
+                exit_code: 0,
+                project_links: multiLinked ? [
+                  {
+                    id: 'link-a',
+                    project_id: 'project-a',
+                    entity_type: 'run',
+                    entity_id: 'run-1',
+                    project: { id: 'project-a', name: 'Alpha Project', status: 'active' },
+                  },
+                  {
+                    id: 'link-z',
+                    project_id: 'project-z',
+                    entity_type: 'run',
+                    entity_id: 'run-1',
+                    project: { id: 'project-z', name: 'Zulu Project', status: 'active' },
+                  },
+                ] : [],
+              }],
+              runs: [],
+            }),
+        })
+      }
+      if (url === '/projects/project-a/links') {
+        multiLinked = false
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ ok: true }),
+      })
+    })
+    const { refreshHistoryPanel: refreshMultiLinkedHistoryPanel } = loadHistoryPanel({
+      apiFetchImpl: multiLinkedApiFetch,
+      showConfirmImpl: removeConfirm,
+    })
+
+    refreshMultiLinkedHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const multiLinkedEntry = document.querySelector('#history-list .history-entry')
+    const removeConfirmDocumentClick = vi.fn()
+    document.addEventListener('click', removeConfirmDocumentClick)
+    try {
+      multiLinkedEntry.querySelector('[data-action="remove-project"]')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    } finally {
+      document.removeEventListener('click', removeConfirmDocumentClick)
+    }
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(removeConfirmDocumentClick).not.toHaveBeenCalled()
+    expect(removeConfirm).toHaveBeenCalled()
+    expect(removeConfirm.mock.calls[0][0].refocusOnResolve).toBe(false)
+    expect(multiLinkedApiFetch).toHaveBeenCalledWith('/projects/project-a/links', expect.objectContaining({
+      method: 'DELETE',
+      body: JSON.stringify({ entity_type: 'run', entity_id: 'run-1' }),
+    }))
   })
 
   it('renders SIGTERM-terminated runs as neutral history rows instead of failures', async () => {
@@ -2440,6 +2584,7 @@ describe('history panel actions', () => {
       body: expect.objectContaining({
         text: 'Delete 1 selected snapshot?',
       }),
+      refocusOnResolve: false,
     }))
     expect(apiFetch).toHaveBeenCalledWith('/share/bulk-delete', expect.objectContaining({
       method: 'POST',
@@ -2962,38 +3107,38 @@ describe('history panel actions', () => {
     expect(historyPanel.classList.contains('open')).toBe(true)
   })
 
-  it('toggles the mobile advanced history filters section', () => {
+  it('toggles the mobile history tools section', () => {
     const { toggleHistoryMobileFilters } = loadHistoryPanel()
     const historyPanel = document.getElementById('history-panel')
     const toggleBtn = document.getElementById('history-mobile-filters-toggle')
 
-    expect(historyPanel.classList.contains('mobile-history-filters-open')).toBe(false)
+    expect(historyPanel.classList.contains('mobile-history-tools-open')).toBe(false)
     expect(toggleBtn.getAttribute('aria-expanded')).toBe('false')
 
     toggleHistoryMobileFilters(true)
-    expect(historyPanel.classList.contains('mobile-history-filters-open')).toBe(true)
-    expect(toggleBtn.textContent).toBe('hide filters')
+    expect(historyPanel.classList.contains('mobile-history-tools-open')).toBe(true)
+    expect(toggleBtn.textContent).toBe('hide history tools')
     expect(toggleBtn.getAttribute('aria-expanded')).toBe('true')
 
     toggleHistoryMobileFilters(false)
-    expect(historyPanel.classList.contains('mobile-history-filters-open')).toBe(false)
-    expect(toggleBtn.textContent).toBe('filters')
+    expect(historyPanel.classList.contains('mobile-history-tools-open')).toBe(false)
+    expect(toggleBtn.textContent).toBe('history tools')
     expect(toggleBtn.getAttribute('aria-expanded')).toBe('false')
   })
 
-  it('resetHistoryMobileFilters collapses the advanced mobile history filters', () => {
+  it('resetHistoryMobileFilters collapses the mobile history tools', () => {
     const { toggleHistoryMobileFilters, resetHistoryMobileFilters } = loadHistoryPanel()
     const historyPanel = document.getElementById('history-panel')
 
     toggleHistoryMobileFilters(true)
-    expect(historyPanel.classList.contains('mobile-history-filters-open')).toBe(true)
+    expect(historyPanel.classList.contains('mobile-history-tools-open')).toBe(true)
 
     resetHistoryMobileFilters()
-    expect(historyPanel.classList.contains('mobile-history-filters-open')).toBe(false)
-    expect(document.getElementById('history-mobile-filters-toggle').textContent).toBe('filters')
+    expect(historyPanel.classList.contains('mobile-history-tools-open')).toBe(false)
+    expect(document.getElementById('history-mobile-filters-toggle').textContent).toBe('history tools')
   })
 
-  it('shows the active filter count in the mobile filters button label', async () => {
+  it('shows the active filter count in the mobile history tools button label', async () => {
     const { _setHistoryFilter } = loadHistoryPanel()
     const toggleBtn = document.getElementById('history-mobile-filters-toggle')
 
@@ -3002,7 +3147,7 @@ describe('history panel actions', () => {
     _setHistoryFilter('starredOnly', true)
     await new Promise((resolve) => setImmediate(resolve))
 
-    expect(toggleBtn.textContent).toBe('filters (3)')
+    expect(toggleBtn.textContent).toBe('history tools (3 filters)')
   })
 
   it('refreshHistoryPanel sends starred-only as a server-side filter', async () => {

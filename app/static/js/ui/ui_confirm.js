@@ -165,7 +165,7 @@
     try {
       _cleanup(state);
     } finally {
-      if (typeof global.refocusComposerAfterAction === 'function') {
+      if (state.refocusOnResolve !== false && typeof global.refocusComposerAfterAction === 'function') {
         global.refocusComposerAfterAction({ defer: true });
       }
       state.resolve(value);
@@ -201,7 +201,9 @@
       btn.textContent = action.label || '';
       btn.dataset.confirmActionId = action.id;
       if (action.role === 'cancel') btn.dataset.confirmRole = 'cancel';
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
         if (typeof action.onActivate === 'function') {
           let result;
           try { result = action.onActivate(); }
@@ -237,6 +239,7 @@
       dismissibleHandle: null,
       focusTrapHandle: null,
       mqList: null,
+      refocusOnResolve: opts.refocusOnResolve !== false,
     };
     _activeState = state;
 

@@ -76,14 +76,14 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - Desktop rail's `Recent` section renders clickable chips that load a command into the prompt when tapped.
 - Mobile shows a persistent `Recent` peek row between the transcript and the composer with a count plus a one-line preview.
 - Prompt Up/Down history, desktop rail recents, and the mobile recent peek load from the same newest-distinct command list and include known commands regardless of exit code.
-- Tapping the mobile recent peek opens a full recents sheet backed by persisted history rows. Tapping a row opens Run Details, the primary row actions keep **copy command** and **restore** one tap away, and secondary actions such as permalink, delete, compare, project linking, metadata editing, and copy run id live in the row/details action menus. Select mode supports visible-page bulk actions for completed runs and saved snapshots, including project add/remove for runs and delete for selected history items. Search, filter chips (root / exit / date / starred), and a clear-all control round out the sheet.
+- Tapping the mobile recent peek opens the same History panel as the mobile menu. Search, filters, and bulk actions live behind a collapsible **history tools** row so the list stays clean until you need the extra controls. Tapping a row opens Run Details, the primary row actions keep **copy command** and **restore** one tap away, and secondary actions such as permalink, delete, compare, project linking, metadata editing, and copy run id live in the row/details action menus. Select mode supports visible-page bulk actions for completed runs and saved snapshots, including project add/remove for runs and delete for selected history items.
 - Both views update live as commands are run.
 
-**Limits:** compact recents and Up/Down history use only the newest distinct commands. They stay hidden until history exists and are capped by `recent_commands_limit`. The full desktop drawer and mobile recents sheet are paginated by `history_panel_limit`.
+**Limits:** compact recents and Up/Down history use only the newest distinct commands. They stay hidden until history exists and are capped by `recent_commands_limit`. The full desktop and mobile History panel is paginated by `history_panel_limit`.
 
 **Configuration:** `recent_commands_limit` in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/static/js/shell_chrome.js` (desktop rail), `app/static/js/mobile_chrome.js` (mobile peek + sheet), `app/conf/config.yaml`.
+**Related files:** `app/static/js/shell_chrome.js` (desktop rail), `app/static/js/mobile_chrome.js` (mobile peek + menu), `app/conf/config.yaml`.
 
 ---
 
@@ -414,7 +414,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 - Select mode adds checkboxes for completed runs and saved snapshots on the visible page. **Select all**, **Clear**, and the top-level **Actions** menu let you add selected runs to the active project, add them to a chosen project, remove them from a linked project, or delete selected history items in one pass. Bulk project actions skip runs that are already in the requested state instead of failing the whole request, and running rows are not selectable for bulk delete.
 - The History row **more** menu is project-aware: unlinked runs offer **add to active project** and **add to project**, while runs that are already linked to one or more projects show **remove from project** instead.
 - When full-output persistence is enabled, the history drawer's permalink points at the complete saved artifact; loading into a tab still uses the capped preview and shows a notice linking to the permalink if truncated. The active tab's **share snapshot** action creates a separate `/share/<id>` snapshot and can optionally redact before saving.
-- The **delete all** button (history drawer + mobile recents sheet) prompts **Delete all** / **Delete Non-Favorites** / **Cancel** to separate destructive deletion from starred-only cleanup.
+- The **delete all** button in History prompts **Delete all** / **Delete Non-Favorites** / **Cancel** to separate destructive deletion from starred-only cleanup.
 - If the page reloads mid-run, the shell restores a running placeholder tab with the kill action available and subscribes back to the brokered `/runs/<run_id>/stream` for replay plus live output when events are still retained. Active-run recovery is client-aware: another browser using the same session token can see the live run in Status Monitor without automatically creating a terminal tab or taking over the stream. Non-running tabs restore separately from `sessionStorage` with labels, transcript previews, statuses, and draft input preserved; restored completed tabs remount a live prompt immediately.
 
 **Limits:** tab count capped by `max_tabs`; history surfaces paginate stored items rather than showing one unbounded list; brokered live replay is bounded by configured replay retention and `max_output_lines`, after which completed-run restore relies on persisted history/output artifacts. Snapshot search in the first pass matches the snapshot label, not the full snapshot body content.
@@ -423,7 +423,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 
 **Related files:** `app/static/js/tabs.js` (tab lifecycle + drag + rename), `app/static/js/history.js` (history drawer + search UI), `app/blueprints/history.py` (history API + FTS queries), `app/core/database.py` (SQLite schema + FTS5 trigger wiring).
 
-**Full-text search:** the history surfaces support a shared `type` filter, run-subtype filters, project filters for linked runs, and full-text search across command text and stored run output for run rows, with additional filters for command name, exit status, recent date range, and starred-only. The search field placeholder reads "search history". Search is backed by a SQLite FTS5 virtual table (`runs_fts`) indexed on `command` and `output_search_text`. When full-output persistence is enabled, `output_search_text` is populated from the complete gzip artifact so early lines of long runs stay reachable; otherwise it falls back to the capped preview window. Snapshot search in the first pass matches the snapshot label only, and snapshots remain share/history records rather than project-linked records. On mobile, advanced filters stay behind a dedicated `filters` toggle to preserve result space, the command-name field uses app-owned autocomplete, and row actions keep the sheet open where that matches the desktop action contract.
+**Full-text search:** the history surfaces support a shared `type` filter, run-subtype filters, project filters for linked runs, and full-text search across command text and stored run output for run rows, with additional filters for command name, exit status, recent date range, and starred-only. The search field placeholder reads "search history". Search is backed by a SQLite FTS5 virtual table (`runs_fts`) indexed on `command` and `output_search_text`. When full-output persistence is enabled, `output_search_text` is populated from the complete gzip artifact so early lines of long runs stay reachable; otherwise it falls back to the capped preview window. Snapshot search in the first pass matches the snapshot label only, and snapshots remain share/history records rather than project-linked records. On mobile, search, advanced filters, and bulk actions stay behind the dedicated **history tools** toggle to preserve result space; the command-name field uses app-owned autocomplete, and row actions keep the sheet open where that matches the desktop action contract.
 
 On mobile, the **☰** menu in the top-right header opens a bottom-sheet that groups session-scoped actions (search, clear, line numbers, timestamps) and overlays (options, history, status, commands, workflows, files, theme, FAQ, diag) — see the Mobile Shell section below for the full layout.
 
@@ -435,7 +435,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Behavior:**
 
-- Run comparison can launch from the History drawer, Run Details modal, mobile history sheet, and Projects modal. Project-scoped comparison uses the same canonical compare flow as History after resolving the selected linked runs or baseline label.
+- Run comparison can launch from the History drawer, Run Details modal, mobile History panel, and Projects modal. Project-scoped comparison uses the same canonical compare flow as History after resolving the selected linked runs or baseline label.
 - Transcript comparison strips app chrome lines before diffing, keeps each run's original output order, and aligns changed hunks across Run A and Run B. Unchanged context is folded by default with **Show unchanged lines** controls and lazy expansion for large equal regions.
 - Users can switch between responsive view modes: automatic for the current screen, side-by-side where space allows, unified, changes-only, and findings-only. Context controls expose compact, expanded, and all-context views for the current comparison without changing the user's saved default options.
 - **Prev change** and **Next change** navigate between changed transcript regions. Restore actions can load Run A, Run B, or both runs back into terminal tabs, and **Copy summary** creates a concise text summary of the comparison.
@@ -541,17 +541,17 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 ## Mobile Shell
 
-**Purpose:** a dedicated touch layout with its own composer, keyboard helper row, pull-up recents sheet, and bottom-sheet menu, so the shell remains usable on phones without inheriting desktop chrome patterns that don't translate.
+**Purpose:** a dedicated touch layout with its own composer, keyboard helper row, recent-run peek, and bottom-sheet menu, so the shell remains usable on phones without inheriting desktop chrome patterns that don't translate.
 
 **Behavior:**
 
 - **Mobile composer dock** — a visible composer with its own Run button replaces the desktop inline input.
 - **Keyboard helper row** — touch targets above the keyboard provide `Home`, `End`, single-character left/right moves, word-left / word-right jumps, delete-word, and delete-line without needing a hardware keyboard.
-- **Recent peek + pull-up sheet** — an idle peek row between transcript and composer shows the recent-run count plus a one-line preview; tapping it opens a full-height recents sheet with search, filter chips (root / exit / date / starred), per-row **restore** / **permalink** / **delete** actions, and a clear-all control. Tapping a row itself injects the command into the composer for re-run.
+- **Recent peek + History panel** — an idle peek row between transcript and composer shows the recent-run count plus a one-line preview; tapping it opens the same History panel as the mobile menu. Search, filters, and bulk actions stay collapsed behind **history tools** until needed.
 - **Output follow** — when the keyboard opens, the active output re-sticks to the bottom so the last line stays visible.
 - **Stable layout** — the mobile shell uses a normal-flow layout that avoids Firefox keyboard flash, gap, and floating-composer regressions.
 - **Shared state** — desktop and mobile Run buttons stay in sync: both disable together for blank prompts and running tabs.
-- The **☰** menu in the top-right header opens a bottom-sheet with two grouped sections: a **session** group (search, clear, line numbers toggle, timestamps picker) that affects the current terminal in place, and an **overlays** group (options, history, status, commands, workflows, files, theme, FAQ, diag). The sheet closes through the backdrop, Escape, or the shared grab/drag contract rather than a visible `X` button. `clear` wipes the active tab's output while preserving its run state; `line numbers` is a single on/off row; `timestamps` expands inline into a three-mode picker (off / elapsed / clock). The history drawer's advanced filters stay behind a dedicated `filters` toggle to preserve result space.
+- The **☰** menu in the top-right header opens a bottom-sheet with two grouped sections: a **session** group (search, clear, line numbers toggle, timestamps picker) that affects the current terminal in place, and an **overlays** group (options, history, status, commands, workflows, files, theme, FAQ, diag). The sheet closes through the backdrop, Escape, or the shared grab/drag contract rather than a visible `X` button. `clear` wipes the active tab's output while preserving its run state; `line numbers` is a single on/off row; `timestamps` expands inline into a three-mode picker (off / elapsed / clock). The History panel's search, filters, and bulk controls stay behind a dedicated **history tools** toggle to preserve result space.
 
 **Limits:** the diag entry appears only for clients whose IP matches `diagnostics_allowed_cidrs`. The mobile layout activates on touch-sized viewports — desktop browsers at narrow widths keep the desktop chrome.
 

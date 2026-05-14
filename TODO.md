@@ -536,8 +536,8 @@ These are product ideas and possible enhancements, not committed TODOs or planne
     - Broaden Playwright coverage for edge/mobile layout paths after the UI settles.
     - Add focused large/noisy comparison regression coverage if real-world outputs expose performance issues beyond current backend and unit coverage.
 
-- **Bulk history operations**
-  - The history drawer can delete all or delete non-favorites. Adding multi-select (checkbox mode) with bulk delete, bulk export to JSONL/txt, and bulk share would close a real gap when clearing out a session after an engagement or exporting selected findings.
+- **Bulk history export and share**
+  - The history drawer can delete all, delete non-favorites, and use visible-page multi-select for bulk project add/remove plus selected-item delete. Bulk export to JSONL/txt and bulk share would close the remaining gap when packaging selected history items after an engagement.
 
 - **Autocomplete suggestions from output context**
   - When a previous command's output is in the active tab, `| grep` completions could suggest patterns already present in that output — IP addresses, hostnames, status codes, CVE strings — as candidates alongside the generic flag list.

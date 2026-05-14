@@ -211,6 +211,17 @@ async function ensureHistoryBulkSelectMode(page) {
   }
 }
 
+async function selectVisibleHistoryRuns(page, commands) {
+  for (const command of commands) {
+    await page
+      .locator('#history-list .history-entry')
+      .filter({ hasText: command })
+      .first()
+      .locator('[data-action="select-run"]')
+      .check()
+  }
+}
+
 async function forceComparePaneOverflow(page) {
   await page.locator('.history-compare-pane').evaluateAll((panes) => {
     panes.forEach((pane) => {
@@ -514,8 +525,7 @@ test.describe('history drawer', () => {
     const bulkToolbar = page.locator('#history-bulk-toolbar')
     await bulkToolbar.locator('.history-bulk-toggle input').check()
     await expect(page.locator('#history-list [data-action="select-run"]')).toHaveCount(2)
-    await page.locator('#history-list .history-entry').filter({ hasText: CMD_A }).click()
-    await page.locator('#history-list .history-entry').filter({ hasText: CMD_B }).click()
+    await selectVisibleHistoryRuns(page, [CMD_A, CMD_B])
     await expect(bulkToolbar.locator('.history-bulk-count')).toHaveText('2 selected')
 
     await bulkToolbar.locator('[data-action="history-bulk-menu"]').click()
@@ -525,19 +535,20 @@ test.describe('history drawer', () => {
 
     await ensureHistoryBulkSelectMode(page)
     await expect(bulkToolbar.locator('.history-bulk-count')).toHaveText('0 selected')
-    await page.locator('#history-list .history-entry').filter({ hasText: CMD_A }).click()
-    await page.locator('#history-list .history-entry').filter({ hasText: CMD_B }).click()
+    await selectVisibleHistoryRuns(page, [CMD_A, CMD_B])
+    await expect(bulkToolbar.locator('.history-bulk-count')).toHaveText('2 selected')
     await bulkToolbar.locator('[data-action="history-bulk-menu"]').click()
     await activateHistoryBulkMenuItem(page, 'bulk-remove-project')
     await expect(page.locator('#confirm-host')).toBeVisible()
-    await expect(page.locator('#confirm-host')).toContainText('Remove 2 selected runs from project')
+    await expect(page.locator('#confirm-host')).toContainText('Remove 2 selected runs from all linked projects?')
+    await expect(page.locator('#confirm-host')).toContainText('This removes 2 project links and leaves the run history intact.')
     await page.locator('#confirm-host [data-confirm-action-id="remove"]').click()
-    await expect(page.locator('#permalink-toast')).toContainText('Removed 2 runs')
+    await expect(page.locator('#permalink-toast')).toContainText('Removed 2 project links')
     await expect.poll(() => projectRunLinkIds(page, project.id)).toEqual([])
 
     await ensureHistoryBulkSelectMode(page)
-    await page.locator('#history-list .history-entry').filter({ hasText: CMD_A }).click()
-    await page.locator('#history-list .history-entry').filter({ hasText: CMD_B }).click()
+    await selectVisibleHistoryRuns(page, [CMD_A, CMD_B])
+    await expect(bulkToolbar.locator('.history-bulk-count')).toHaveText('2 selected')
     await bulkToolbar.locator('[data-action="history-bulk-menu"]').click()
     await activateHistoryBulkMenuItem(page, 'bulk-delete')
     await expect(page.locator('#confirm-host')).toContainText('Delete 2 selected runs?')

@@ -146,7 +146,11 @@ function mountHistoryHarness() {
   return { ...fns, historyPaginationControls }
 }
 
-function mountMobileHarness() {
+function mountMobileHarness({
+  openHistoryWithFilters = undefined,
+  resetHistoryMobileFilters = undefined,
+  dispatchMobileMenuAction = undefined,
+} = {}) {
   document.body.className = 'mobile-terminal-mode'
   document.body.innerHTML = `
     <div id="mobile-shell">
@@ -228,6 +232,9 @@ function mountMobileHarness() {
     showToast: vi.fn(),
     _toggleStar: vi.fn(),
     copyTextToClipboard: vi.fn(() => Promise.resolve()),
+    openHistoryWithFilters,
+    resetHistoryMobileFilters,
+    dispatchMobileMenuAction,
     openHistoryRunDetails: vi.fn(),
   }
 
@@ -243,6 +250,9 @@ function mountMobileHarness() {
   window.activateTab = globals.activateTab
   window.setComposerValue = globals.setComposerValue
   window._toggleStar = globals._toggleStar
+  window.openHistoryWithFilters = openHistoryWithFilters
+  window.resetHistoryMobileFilters = resetHistoryMobileFilters
+  window.dispatchMobileMenuAction = dispatchMobileMenuAction
 
   fromDomScripts(
     ['app/static/js/mobile_chrome.js'],
@@ -250,7 +260,11 @@ function mountMobileHarness() {
     '{}',
   )
 
-  return { ...globals, apiFetch, mobileMenuHistoryBtn: document.querySelector('[data-menu-action="history"]') }
+  return {
+    ...globals,
+    apiFetch,
+    mobileRecentPeek: document.getElementById('mobile-recent-peek'),
+  }
 }
 
 describe('runtime button primitive contract', () => {
@@ -270,41 +284,55 @@ describe('runtime button primitive contract', () => {
   })
 
   it('mobile recents pagination buttons render with allowed primitives', async () => {
-    const { apiFetch, mobileMenuHistoryBtn } = mountMobileHarness()
+    const { apiFetch, mobileRecentPeek } = mountMobileHarness()
 
-  mobileMenuHistoryBtn.click()
-  await new Promise((resolve) => setImmediate(resolve))
-  await new Promise((resolve) => setImmediate(resolve))
+    mobileRecentPeek.click()
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
-  expect(apiFetch).toHaveBeenCalled()
-  expect(document.getElementById('mobile-recents-search')?.getAttribute('autocomplete')).toBe('off')
-  expect(document.getElementById('mobile-recents-search')?.getAttribute('autocapitalize')).toBe('none')
-  expect(document.getElementById('mobile-recents-search')?.getAttribute('autocorrect')).toBe('off')
-  expect(document.getElementById('mobile-recents-search')?.getAttribute('spellcheck')).toBe('false')
-  expect(document.getElementById('mobile-recents-search')?.getAttribute('inputmode')).toBe('text')
-  expect(document.getElementById('mobile-recents-filter-root')?.getAttribute('autocomplete')).toBe('off')
-  expect(document.getElementById('mobile-recents-filter-root')?.getAttribute('autocapitalize')).toBe('none')
-  expect(document.getElementById('mobile-recents-filter-root')?.getAttribute('autocorrect')).toBe('off')
-  expect(document.getElementById('mobile-recents-filter-root')?.getAttribute('spellcheck')).toBe('false')
-  expect(document.getElementById('mobile-recents-filter-root')?.getAttribute('inputmode')).toBe('text')
-  const exitEl = document.querySelector('#mobile-recents-list .sheet-item-exit')
-  expect(exitEl?.textContent).toBe('terminated')
-  expect(exitEl?.classList.contains('nonzero')).toBe(false)
-  const firstItem = document.querySelector('#mobile-recents-list .sheet-item')
-  expect([...firstItem.querySelectorAll('.sheet-item-actions > *')].map(el => el.textContent)).toEqual([
-    'copy command',
-    'restore',
-    'morepermalinkcompareeditadd to active projectadd to projectcopy run iddelete',
-  ])
-  firstItem.click()
-  expect(document.getElementById('mobile-cmd').value).toBe('')
-  expect(window.openHistoryRunDetails).toHaveBeenCalledWith(expect.objectContaining({
-    id: 'run-1',
-    command: 'ping darklab.sh',
-  }))
-  expectButtonPrimitives(
-    document.getElementById('mobile-recents-pagination-controls'),
-    'mobile recents pagination',
-  )
+    expect(apiFetch).toHaveBeenCalled()
+    expect(document.getElementById('mobile-recents-search')?.getAttribute('autocomplete')).toBe('off')
+    expect(document.getElementById('mobile-recents-search')?.getAttribute('autocapitalize')).toBe('none')
+    expect(document.getElementById('mobile-recents-search')?.getAttribute('autocorrect')).toBe('off')
+    expect(document.getElementById('mobile-recents-search')?.getAttribute('spellcheck')).toBe('false')
+    expect(document.getElementById('mobile-recents-search')?.getAttribute('inputmode')).toBe('text')
+    expect(document.getElementById('mobile-recents-filter-root')?.getAttribute('autocomplete')).toBe('off')
+    expect(document.getElementById('mobile-recents-filter-root')?.getAttribute('autocapitalize')).toBe('none')
+    expect(document.getElementById('mobile-recents-filter-root')?.getAttribute('autocorrect')).toBe('off')
+    expect(document.getElementById('mobile-recents-filter-root')?.getAttribute('spellcheck')).toBe('false')
+    expect(document.getElementById('mobile-recents-filter-root')?.getAttribute('inputmode')).toBe('text')
+    const exitEl = document.querySelector('#mobile-recents-list .sheet-item-exit')
+    expect(exitEl?.textContent).toBe('terminated')
+    expect(exitEl?.classList.contains('nonzero')).toBe(false)
+    const firstItem = document.querySelector('#mobile-recents-list .sheet-item')
+    expect([...firstItem.querySelectorAll('.sheet-item-actions > *')].map(el => el.textContent)).toEqual([
+      'copy command',
+      'restore',
+      'morepermalinkcompareeditadd to active projectadd to projectcopy run iddelete',
+    ])
+    firstItem.click()
+    expect(document.getElementById('mobile-cmd').value).toBe('')
+    expect(window.openHistoryRunDetails).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'run-1',
+      command: 'ping darklab.sh',
+    }))
+    expectButtonPrimitives(
+      document.getElementById('mobile-recents-pagination-controls'),
+      'mobile recents pagination',
+    )
+  })
+
+  it('mobile history surface opens without forcing a run-only type filter', () => {
+    const openHistoryWithFilters = vi.fn()
+    const resetHistoryMobileFilters = vi.fn()
+    const { mobileRecentPeek } = mountMobileHarness({
+      openHistoryWithFilters,
+      resetHistoryMobileFilters,
+    })
+
+    mobileRecentPeek.click()
+
+    expect(resetHistoryMobileFilters).toHaveBeenCalled()
+    expect(openHistoryWithFilters).toHaveBeenCalledWith()
   })
 })

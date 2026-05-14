@@ -708,17 +708,28 @@ body.mobile-terminal-mode .sheet-filter-menu.dropdown-surface .dropdown-item {
     font-size: 14px;
     flex: 1 1 100%;
   }
+  body.mobile-terminal-mode #history-panel:not(.mobile-history-tools-open) #history-search-input,
+  body.mobile-terminal-mode #history-panel:not(.mobile-history-tools-open) .history-bulk-toolbar {
+    display: none;
+  }
   body.mobile-terminal-mode .history-advanced-filters {
     display: none;
     width: 100%;
     flex-wrap: wrap;
     gap: 10px;
   }
-  body.mobile-terminal-mode #history-panel.mobile-history-filters-open .history-advanced-filters {
+  body.mobile-terminal-mode #history-panel.mobile-history-tools-open .history-advanced-filters {
     display: flex;
   }
   body.mobile-terminal-mode .history-active-filters {
     padding: 10px 14px;
+  }
+  body.mobile-terminal-mode .history-bulk-toolbar {
+    padding: 10px 14px;
+  }
+  body.mobile-terminal-mode .history-bulk-toggle {
+    min-height: 40px;
+    font-size: 16px;
   }
   body.mobile-terminal-mode .history-pagination {
     padding: 10px 14px;

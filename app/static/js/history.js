@@ -156,12 +156,17 @@ function _syncHistoryFilterControls() {
   if (typeof historySearchInput !== 'undefined' && historySearchInput) historySearchInput.value = _historyFilters.q;
   if (typeof historyMobileFiltersToggle !== 'undefined' && historyMobileFiltersToggle) {
     const activeCount = _historyActiveFilterItems().length;
-    const baseLabel = _historyMobileAdvancedOpen ? 'hide filters' : 'filters';
-    historyMobileFiltersToggle.textContent = activeCount > 0 ? `${baseLabel} (${activeCount})` : baseLabel;
+    const selectedCount = _historySelection?.selected?.size || 0;
+    const status = [];
+    if (activeCount > 0) status.push(`${activeCount} ${activeCount === 1 ? 'filter' : 'filters'}`);
+    if (selectedCount > 0) status.push(`${selectedCount} selected`);
+    const baseLabel = _historyMobileAdvancedOpen ? 'hide history tools' : 'history tools';
+    historyMobileFiltersToggle.textContent = status.length ? `${baseLabel} (${status.join(' · ')})` : baseLabel;
     historyMobileFiltersToggle.setAttribute('aria-expanded', _historyMobileAdvancedOpen ? 'true' : 'false');
   }
   if (typeof historyPanel !== 'undefined' && historyPanel) {
     historyPanel.classList.toggle('mobile-history-filters-open', !!_historyMobileAdvancedOpen);
+    historyPanel.classList.toggle('mobile-history-tools-open', !!_historyMobileAdvancedOpen);
   }
   if (typeof historyTypeFilter !== 'undefined' && historyTypeFilter) historyTypeFilter.value = _historyFilters.type;
   if (typeof historyRootInput !== 'undefined' && historyRootInput) historyRootInput.value = _historyFilters.commandRoot;
@@ -596,20 +601,37 @@ function _closeHistoryBulkActionMenu() {
   wrap.querySelector('[data-action="history-bulk-menu"]')?.setAttribute('aria-expanded', 'false');
 }
 
-function _historyProjectOptionsForSelectedLinks() {
+function _historyProjectsForSelectedLinks() {
   const projectsById = new Map();
   _historySelectedRuns().forEach((run) => {
+    const runId = String(run && run.id || '');
+    if (!runId) return;
     const links = Array.isArray(run.project_links) ? run.project_links : [];
     links.forEach((link) => {
       const project = typeof _historyProjectFromLink === 'function' ? _historyProjectFromLink(link) : null;
-      if (project && project.id) projectsById.set(String(project.id), project);
+      if (!project || !project.id) return;
+      const projectId = String(project.id);
+      if (!projectsById.has(projectId)) projectsById.set(projectId, { project, runIds: new Set() });
+      projectsById.get(projectId).runIds.add(runId);
     });
   });
-  return Array.from(projectsById.values()).sort((a, b) => _historyProjectDisplayName(a).localeCompare(
-    _historyProjectDisplayName(b),
-    undefined,
-    { sensitivity: 'base', numeric: true },
-  ));
+  return Array.from(projectsById.values())
+    .map(item => ({ project: item.project, runIds: Array.from(item.runIds) }))
+    .filter(item => item.project && item.project.id && item.runIds.length);
+}
+
+function _historyMergeBulkProjectResponses(responses) {
+  return responses.reduce((acc, data) => {
+    const counts = _historyBulkCountsFromResponse(data);
+    ['added', 'already_linked', 'removed', 'not_linked', 'not_found', 'rejected'].forEach((key) => {
+      acc.counts[key] = Number(acc.counts[key] || 0) + Number(counts[key] || 0);
+    });
+    if (Array.isArray(data?.results)) acc.results.push(...data.results);
+    return acc;
+  }, {
+    counts: { added: 0, already_linked: 0, removed: 0, not_linked: 0, not_found: 0, rejected: 0 },
+    results: [],
+  });
 }
 
 async function _historyBulkPostProject(project, action) {
@@ -641,6 +663,61 @@ async function _historyBulkPostProject(project, action) {
   }
 }
 
+async function _historyBulkRemoveFromAllProjects() {
+  const projectGroups = _historyProjectsForSelectedLinks();
+  if (!projectGroups.length) {
+    showToast('Selected runs are not linked to any project', 'error');
+    return;
+  }
+  const selectedCount = _historySelectedRunIds().length;
+  const linkCount = projectGroups.reduce((total, item) => total + item.runIds.length, 0);
+  const choice = await showConfirm({
+    body: {
+      text: `Remove ${selectedCount} selected ${selectedCount === 1 ? 'run' : 'runs'} from all linked projects?`,
+      note: `This removes ${linkCount} project ${linkCount === 1 ? 'link' : 'links'} and leaves the run history intact.`,
+    },
+    tone: 'warning',
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'remove', label: 'Remove from projects', role: 'destructive', tone: 'warning' },
+    ],
+    refocusOnResolve: false,
+  });
+  if (choice !== 'remove') return;
+  _historySetBulkBusy(true);
+  try {
+    const responses = await Promise.all(projectGroups.map(async ({ project, runIds }) => {
+      const resp = await apiFetch(`/projects/${encodeURIComponent(project.id)}/links`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entity_type: 'run', entity_ids: runIds, source: 'manual' }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return resp.json();
+    }));
+    const data = _historyMergeBulkProjectResponses(responses);
+    const counts = _historyBulkCountsFromResponse(data);
+    _historySelection.selected.clear();
+    const reasonSummary = _historyBulkReasonSummary(data.results);
+    const removed = Number(counts.removed || 0);
+    const notLinked = Number(counts.not_linked || 0);
+    const rejected = Number(counts.rejected || 0) + Number(counts.not_found || 0);
+    const pieces = [`Removed ${removed} project ${removed === 1 ? 'link' : 'links'}`];
+    if (notLinked) pieces.push(`${notLinked} not linked`);
+    if (rejected) pieces.push(`${rejected} skipped`);
+    const message = [pieces.join(' - '), reasonSummary].filter(Boolean).join(' - ');
+    _historyBulkToast(message, counts);
+    if (typeof refreshProjectWorkspace === 'function') {
+      try { await refreshProjectWorkspace(); } catch (_) {}
+    }
+    await _historyRefreshAfterBulk();
+  } catch (_) {
+    showToast('Failed to remove selected runs from projects', 'error');
+  } finally {
+    _historySetBulkBusy(false);
+  }
+}
+
 async function _historyBulkAddToActiveProject() {
   const project = await _historyLoadActiveProject();
   if (!project || !project.id) {
@@ -653,42 +730,35 @@ async function _historyBulkAddToActiveProject() {
 async function _historyBulkChooseProject(action) {
   const selectedCount = _historySelection.selected.size;
   let projects;
-  if (action === 'remove') {
-    projects = _historyProjectOptionsForSelectedLinks();
-  } else {
-    try {
-      const [loadedProjects, activeProject] = await Promise.all([
-        _historyLoadProjects(),
-        _historyLoadActiveProject().catch(() => null),
-      ]);
-      projects = _historyOrderProjectsForPicker(loadedProjects, activeProject);
-    } catch (_) {
-      showToast('Failed to load projects', 'error');
-      return;
-    }
+  try {
+    const [loadedProjects, activeProject] = await Promise.all([
+      _historyLoadProjects(),
+      _historyLoadActiveProject().catch(() => null),
+    ]);
+    projects = _historyOrderProjectsForPicker(loadedProjects, activeProject);
+  } catch (_) {
+    showToast('Failed to load projects', 'error');
+    return;
   }
   if (!projects.length) {
-    showToast(action === 'remove' ? 'Selected runs are not linked to any project' : 'No projects available', 'error');
+    showToast('No projects available', 'error');
     return;
   }
   const { wrap, select } = _historyProjectPickerContent(projects);
   const help = wrap.querySelector('.history-project-picker-help');
   if (help) {
-    help.textContent = action === 'remove'
-      ? 'Choose the project to remove selected runs from.'
-      : 'Choose a project to link selected runs.';
+    help.textContent = 'Choose a project to link selected runs.';
   }
   const choicePromise = showConfirm({
-    body: action === 'remove'
-      ? `Remove ${selectedCount} selected ${selectedCount === 1 ? 'run' : 'runs'} from project`
-      : `Add ${selectedCount} selected ${selectedCount === 1 ? 'run' : 'runs'} to project`,
+    body: `Add ${selectedCount} selected ${selectedCount === 1 ? 'run' : 'runs'} to project`,
     content: wrap,
     tone: null,
     defaultFocus: select,
     actions: [
       { id: 'cancel', label: 'Cancel', role: 'cancel' },
-      { id: action, label: action === 'remove' ? 'Remove from project' : 'Add to project', role: action === 'remove' ? 'secondary' : 'primary' },
+      { id: action, label: 'Add to project', role: 'primary' },
     ],
+    refocusOnResolve: false,
   });
   if (typeof enhanceAppSelects === 'function') {
     enhanceAppSelects(wrap);
@@ -754,6 +824,7 @@ async function _historyBulkDeleteSelectedItems() {
       { id: 'cancel', label: 'Cancel', role: 'cancel' },
       { id: 'delete', label: 'Delete', role: 'destructive', tone: 'warning' },
     ],
+    refocusOnResolve: false,
   });
   if (choice !== 'delete') return;
   _historySetBulkBusy(true);
@@ -826,10 +897,13 @@ function _renderHistoryBulkToolbar() {
   const visibleSelectable = _historySelection.visibleItems.filter(_historyIsSelectableItem);
   const shouldShow = _historySelection.selectMode || visibleSelectable.length > 0;
   historyBulkToolbar.classList.toggle('u-hidden', !shouldShow);
+  _syncHistoryFilterControls();
   if (!shouldShow) return;
 
+  const selectRow = document.createElement('div');
+  selectRow.className = 'history-bulk-select-row';
   const toggleLabel = document.createElement('label');
-  toggleLabel.className = 'history-filter-toggle history-bulk-toggle control-row form-control-compact';
+  toggleLabel.className = 'history-bulk-toggle control-row';
   const toggle = document.createElement('input');
   toggle.type = 'checkbox';
   toggle.checked = !!_historySelection.selectMode;
@@ -838,14 +912,18 @@ function _renderHistoryBulkToolbar() {
   toggleText.textContent = 'select';
   toggleLabel.append(toggle, toggleText);
   toggle.addEventListener('change', () => _historySetSelectMode(toggle.checked));
-  historyBulkToolbar.appendChild(toggleLabel);
+  selectRow.appendChild(toggleLabel);
+  historyBulkToolbar.appendChild(selectRow);
 
   const count = document.createElement('span');
   count.className = 'history-bulk-count';
   const selectedCount = _historySelection.selected.size;
   count.textContent = `${selectedCount} selected`;
   count.setAttribute('aria-live', 'polite');
-  historyBulkToolbar.appendChild(count);
+  selectRow.appendChild(count);
+
+  const actionRow = document.createElement('div');
+  actionRow.className = 'history-bulk-action-row';
 
   const allSelected = visibleSelectable.length > 0
     && visibleSelectable.every(item => _historySelection.selected.has(_historySelectionKey(item)));
@@ -857,7 +935,7 @@ function _renderHistoryBulkToolbar() {
   selectAll.disabled = !_historySelection.selectMode || !visibleSelectable.length || _historySelection.bulkInFlight;
   selectAll.setAttribute('aria-pressed', allSelected && someSelected ? 'true' : someSelected ? 'mixed' : 'false');
   selectAll.addEventListener('click', () => _historySelectAllVisibleItems());
-  historyBulkToolbar.appendChild(selectAll);
+  actionRow.appendChild(selectAll);
 
   const clear = document.createElement('button');
   clear.className = 'history-action-btn btn btn-secondary btn-compact';
@@ -868,10 +946,11 @@ function _renderHistoryBulkToolbar() {
     _historyClearSelection({ render: false });
     refreshHistoryPanel();
   });
-  historyBulkToolbar.appendChild(clear);
+  actionRow.appendChild(clear);
 
   const actions = _historyBuildBulkActionMenu(selectedCount === 0 || _historySelection.bulkInFlight);
-  historyBulkToolbar.appendChild(actions);
+  actionRow.appendChild(actions);
+  historyBulkToolbar.appendChild(actionRow);
   bindPressable(actions.querySelector('[data-action="history-bulk-menu"]'), {
     refocusComposer: false,
     onActivate: (event) => {
@@ -884,28 +963,36 @@ function _renderHistoryBulkToolbar() {
   });
   bindPressable(actions.querySelector('[data-action="bulk-add-active-project"]'), {
     refocusComposer: false,
-    onActivate: () => {
+    onActivate: (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       _closeHistoryBulkActionMenu();
       _historyBulkAddToActiveProject();
     },
   });
   bindPressable(actions.querySelector('[data-action="bulk-add-project"]'), {
     refocusComposer: false,
-    onActivate: () => {
+    onActivate: (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       _closeHistoryBulkActionMenu();
       _historyBulkChooseProject('add');
     },
   });
   bindPressable(actions.querySelector('[data-action="bulk-remove-project"]'), {
     refocusComposer: false,
-    onActivate: () => {
+    onActivate: (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       _closeHistoryBulkActionMenu();
-      _historyBulkChooseProject('remove');
+      _historyBulkRemoveFromAllProjects();
     },
   });
   bindPressable(actions.querySelector('[data-action="bulk-delete"]'), {
     refocusComposer: false,
-    onActivate: () => {
+    onActivate: (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       _closeHistoryBulkActionMenu();
       _historyBulkDeleteSelectedItems();
     },
@@ -1379,21 +1466,28 @@ function refreshHistoryPanel() {
         },
       });
       bindPressable(entry.querySelector('[data-action="add-active-project"]'), {
-        onActivate: () => {
+        refocusComposer: false,
+        onActivate: (event) => {
+          event.preventDefault();
+          event.stopPropagation();
           _closeHistoryActionMenus();
           _historyAddRunToActiveProject(run).catch(() => showToast('Failed to add run to active project', 'error'));
         },
       });
       bindPressable(entry.querySelector('[data-action="add-project"]'), {
         refocusComposer: false,
-        onActivate: () => {
+        onActivate: (event) => {
+          event.preventDefault();
+          event.stopPropagation();
           _closeHistoryActionMenus();
           _historyAddRunToProject(run).catch(() => showToast('Failed to add run to project', 'error'));
         },
       });
       bindPressable(entry.querySelector('[data-action="remove-project"]'), {
         refocusComposer: false,
-        onActivate: () => {
+        onActivate: (event) => {
+          event.preventDefault();
+          event.stopPropagation();
           _closeHistoryActionMenus();
           _historyRemoveRunFromProject(run).catch(() => showToast('Failed to remove run from project', 'error'));
         },

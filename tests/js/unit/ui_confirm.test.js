@@ -165,6 +165,20 @@ describe('showConfirm', () => {
       await promise
       expect(g.refocusComposerAfterAction).toHaveBeenCalledWith({ defer: true })
     })
+
+    it('can resolve without refocusing the composer', async () => {
+      const documentClick = vi.fn()
+      document.addEventListener('click', documentClick)
+      const promise = g.showConfirm({ actions: KILL_ACTIONS, refocusOnResolve: false })
+      try {
+        document.querySelector('[data-confirm-action-id="cancel"]').click()
+        await promise
+        expect(g.refocusComposerAfterAction).not.toHaveBeenCalled()
+        expect(documentClick).not.toHaveBeenCalled()
+      } finally {
+        document.removeEventListener('click', documentClick)
+      }
+    })
   })
 
   describe('body rendering', () => {

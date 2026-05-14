@@ -239,15 +239,28 @@
   global.hideMobileMenu = closeMenuSheet;
   global.isMobileMenuOpen = isMenuSheetOpen;
 
-  // Mobile re-routes the 'history' action to the recents pull-up sheet rather
-  // than the desktop history side panel. controller.js owns the rest of the dispatch.
+  function openMobileHistorySurface() {
+    if (typeof global.resetHistoryMobileFilters === 'function') {
+      global.resetHistoryMobileFilters();
+    }
+    if (typeof global.openHistoryWithFilters === 'function') {
+      global.openHistoryWithFilters();
+    } else if (typeof global.dispatchMobileMenuAction === 'function') {
+      global.dispatchMobileMenuAction('history', null);
+    } else {
+      showRecentsSheet();
+    }
+  }
+
+  // Mobile routes both History entry points to the full History panel so the
+  // quick path and menu path expose the same filtering and bulk controls.
   menuSheet?.querySelectorAll('button[data-menu-action]').forEach(btn => {
     btn.addEventListener('click', (e) => {
       const action = btn.dataset.menuAction;
       if (action === 'history') {
         e.stopImmediatePropagation();
         closeMenuSheet();
-        showRecentsSheet();
+        openMobileHistorySurface();
       }
     }, true);
   });
@@ -1176,12 +1189,13 @@
   // other surface.
 
   // Peek: tap opens the sheet; vertical swipe-up also opens it.
-  function openPeekSurface() {
+  function openPeekSurface(event) {
+    if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
     if (recentPeek && recentPeek.dataset.peekMode === 'status-monitor') {
       if (typeof global.openStatusMonitor === 'function') void global.openStatusMonitor({ source: 'mobile-peek' });
       return;
     }
-    showRecentsSheet();
+    openMobileHistorySurface();
   }
   if (recentPeek) {
     // role="button" div — Enter/Space handled by bindPressable; opt into

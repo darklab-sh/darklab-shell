@@ -73,13 +73,8 @@ async function createMobileProject(page, name) {
 }
 
 async function openFullMobileHistoryPanel(page) {
-  await page.evaluate(() => {
-    if (typeof openHistoryWithFilters === 'function') {
-      openHistoryWithFilters({ type: 'runs' })
-    } else if (typeof toggleHistoryPanelSurface === 'function') {
-      toggleHistoryPanelSurface(true)
-    }
-  })
+  await page.locator('#hamburger-btn').click()
+  await page.locator('#mobile-menu-sheet [data-menu-action="history"]').click()
   const panel = page.locator('#history-panel')
   await expect(panel).toHaveClass(/\bopen\b/)
   await page.evaluate(async () => {
@@ -885,7 +880,7 @@ test.beforeEach(async ({ page }) => {
     expect(overflowingChipCount).toBe(0)
   })
 
-  test('mobile recent peek summarizes recent runs and opens the recents sheet on tap', async ({
+  test('mobile recent peek summarizes recent runs and opens the full history panel on tap', async ({
     page,
   }) => {
     const commands = [
@@ -903,15 +898,23 @@ test.beforeEach(async ({ page }) => {
     const peek = page.locator('#mobile-recent-peek')
     await expect(peek).toBeVisible()
     await expect(page.locator('#mobile-recent-peek-count')).toHaveText(`${commands.length}`)
+    await expect(peek).toHaveAttribute('data-peek-mode', 'recents', { timeout: 5_000 })
 
     await peek.click()
-    await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
-    const items = page.locator('#mobile-recents-list .sheet-item')
+    await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#mobile-recents-sheet')).not.toBeVisible()
+    await expect(page.locator('#history-mobile-filters-toggle')).toBeVisible()
+    await expect(page.locator('#history-search-input')).toBeHidden()
+    await expect(page.locator('#history-bulk-toolbar')).toBeHidden()
+    await page.locator('#history-mobile-filters-toggle').click()
+    await expect(page.locator('#history-search-input')).toBeVisible()
+    await expect(page.locator('#history-bulk-toolbar')).toBeVisible()
+    const items = page.locator('#history-list .history-entry')
     await expect(items.first()).toBeVisible()
     await expect(items).toHaveCount(commands.length)
   })
 
-  test('mobile recents sheet opens run details from row tap', async ({ page }) => {
+  test('mobile full history opens run details from row tap', async ({ page }) => {
     const commands = ['hostname', 'date', 'uptime']
 
     for (const command of commands) {
@@ -919,22 +922,20 @@ test.beforeEach(async ({ page }) => {
     }
     await waitForHistoryRuns(page, commands.length)
     await expect(page.locator('#mobile-recent-peek')).toHaveAttribute('data-peek-mode', 'recents', { timeout: 5_000 })
-
     await page.locator('#mobile-recent-peek').click()
-    await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
+    await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
 
     await page
-      .locator('#mobile-recents-list .sheet-item')
+      .locator('#history-list .history-entry')
       .filter({ hasText: 'hostname' })
       .first()
       .click()
-    await expect(page.locator('#mobile-recents-sheet')).not.toBeVisible()
     await expect(page.locator('#history-run-overlay')).toHaveClass(/open/)
     await expect(page.locator('#history-run-subtitle')).toContainText('hostname')
     await expect(page.locator('#mobile-cmd')).toHaveValue('')
   })
 
-  test('mobile recents sheet restore action loads the run into the active tab', async ({
+  test('mobile full history restore action loads the run into the active tab', async ({
     page,
   }) => {
     const commands = ['hostname', 'date']
@@ -947,48 +948,48 @@ test.beforeEach(async ({ page }) => {
     await page.locator('#new-tab-btn').click()
     await expect(page.locator('#cmd')).toHaveValue('')
 
-    await page.locator('#hamburger-btn').click()
-    await page.locator('#mobile-menu-sheet [data-menu-action="history"]').click()
-    await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
+    await expect(page.locator('#mobile-recent-peek')).toHaveAttribute('data-peek-mode', 'recents', { timeout: 5_000 })
+    await page.locator('#mobile-recent-peek').click()
+    await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
 
     await page
-      .locator('#mobile-recents-list .sheet-item')
+      .locator('#history-list .history-entry')
       .filter({ hasText: 'date' })
       .first()
-      .locator('.sheet-item-action', { hasText: 'restore' })
+      .locator('[data-action="restore"]')
       .click()
     await expect(page.locator('.tab-panel.active .output')).toContainText('date')
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
-  test('mobile history rows render relative time with absolute time in the tooltip', async ({ page }) => {
+  test('mobile full history rows render absolute time in the tooltip', async ({ page }) => {
     await runCommandMobile(page, 'hostname')
     await waitForHistoryRuns(page, 1)
 
-    await page.locator('#hamburger-btn').click()
-    await page.locator('#mobile-menu-sheet [data-menu-action="history"]').click()
-    await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
+    await expect(page.locator('#mobile-recent-peek')).toHaveAttribute('data-peek-mode', 'recents', { timeout: 5_000 })
+    await page.locator('#mobile-recent-peek').click()
+    await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
 
-    const timeEl = page.locator('#mobile-recents-list .sheet-item').first().locator('.sheet-item-time')
-    await expect(timeEl).toHaveText(/just now|\d+m ago|\d+h ago/)
-    // Absolute time is surfaced via the title attribute for precise lookups on long-press.
+    const timeEl = page.locator('#history-list .history-entry').first().locator('.history-entry-meta span').nth(1)
+    await expect(timeEl).not.toHaveText('')
+    // Absolute time is surfaced via the title attribute for precise lookups on touch devices.
     const title = await timeEl.getAttribute('title')
     expect(title).toBeTruthy()
     expect(title.length).toBeGreaterThan(0)
   })
 
-  test('mobile history permalink action keeps the drawer open', async ({ page }) => {
+  test('mobile full history permalink action keeps the drawer open', async ({ page }) => {
     await runCommandMobile(page, 'hostname')
     await waitForHistoryRuns(page, 1)
 
-    await page.locator('#hamburger-btn').click()
-    await page.locator('#mobile-menu-sheet [data-menu-action="history"]').click()
-    await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
+    await expect(page.locator('#mobile-recent-peek')).toHaveAttribute('data-peek-mode', 'recents', { timeout: 5_000 })
+    await page.locator('#mobile-recent-peek').click()
+    await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
 
-    const firstEntry = page.locator('#mobile-recents-list .sheet-item').first()
-    await firstEntry.locator('.sheet-item-action-menu-trigger').click()
-    await firstEntry.locator('.sheet-item-action-menu .dropdown-item', { hasText: 'permalink' }).click()
-    await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
+    const firstEntry = page.locator('#history-list .history-entry').first()
+    await firstEntry.locator('[data-action="history-menu"]').click()
+    await firstEntry.locator('.history-action-menu .dropdown-item', { hasText: 'permalink' }).click()
+    await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
     await expect(page.locator('#permalink-toast')).toContainText('Link copied to clipboard')
   })
 
@@ -1000,8 +1001,12 @@ test.beforeEach(async ({ page }) => {
 
     await openFullMobileHistoryPanel(page)
     const toolbar = page.locator('#history-bulk-toolbar')
+    await expect(page.locator('#mobile-recents-sheet')).not.toBeVisible()
+    await expect(toolbar).toBeHidden()
+    await page.locator('#history-mobile-filters-toggle').click()
     await expect(toolbar).toBeVisible()
     await expect(toolbar.locator('.history-bulk-toggle')).toBeVisible()
+    await expect(toolbar.locator('.history-bulk-select-row')).toBeVisible()
     await toolbar.locator('.history-bulk-toggle').tap()
     await expect(page.locator('#history-list [data-action="select-run"]')).toHaveCount(2)
     await expect(page.locator('#history-list .history-entry').first()).toHaveClass(/\bhistory-entry-selecting\b/)
@@ -1015,15 +1020,15 @@ test.beforeEach(async ({ page }) => {
           return childBox.left < box.left - 1 || childBox.right > box.right + 1
         })
         return {
-          flexWrap: getComputedStyle(node).flexWrap,
+          flexDirection: getComputedStyle(node).flexDirection,
           overflow,
           height: Math.round(box.height),
         }
       }))
-      .toEqual(expect.objectContaining({ flexWrap: 'wrap', overflow: false }))
+      .toEqual(expect.objectContaining({ flexDirection: 'column', overflow: false }))
 
     const firstRow = page.locator('#history-list .history-entry').filter({ hasText: 'hostname' }).first()
-    await firstRow.locator('.history-entry-cmd').tap()
+    await firstRow.locator('.history-entry-header').tap()
     await expect(toolbar.locator('.history-bulk-count')).toHaveText('1 selected')
     await expect(page.locator('#history-run-overlay.open')).toHaveCount(0)
 

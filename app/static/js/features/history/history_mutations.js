@@ -20,7 +20,7 @@ function confirmHistAction(type, id, command, itemType = 'run') {
         { id: 'cancel', label: 'Cancel', role: 'cancel' },
         { id: 'one',    label: 'Delete', role: 'destructive', tone: 'warning' },
       ];
-  showConfirm({ body, tone: 'warning', actions }).then((choice) => {
+  showConfirm({ body, tone: 'warning', actions, refocusOnResolve: false }).then((choice) => {
     if (!choice || choice === 'cancel') {
       pendingHistAction = null;
       return;

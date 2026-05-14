@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,658
+- behavior tests: 2,660
 - docs/inventory meta-tests: 32
 - `pytest`: 1330 (1298 behavior + 32 meta)
-- `vitest`: 1114
+- `vitest`: 1116
 - `playwright`: 249
-- total: 2,693
+- total: 2,695
 
 This document is organized in two parts:
 
@@ -1833,6 +1833,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | --- | --- |
 | `history pagination buttons render with allowed primitives` | Verifies that the desktop history pager renders its Prev / page / Next controls with the shared `.btn` primitive classes. |
 | `mobile recents pagination buttons render with allowed primitives` | Verifies that the mobile recents sheet pager renders its Prev / page / Next controls with the shared `.btn` primitive classes. |
+| `mobile history surface opens without forcing a run-only type filter` | Verifies that the mobile History entry point opens the shared History panel without overriding the current `type` filter. |
 
 #### `config.test.js`
 
@@ -1905,7 +1906,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `keeps row actions from toggling selection while select mode is enabled` | Verifies row-level action controls do not toggle selection or open Run Details while select mode is active. |
 | `locks the bulk toolbar and selected rows while a bulk action is in flight` | Verifies bulk requests disable select-mode controls and keep row selection stable until the request finishes. |
 | `bulk add uses the project picker with the active project first` | Verifies the bulk add-to-project picker lists the active project first and posts selected run ids in one batch. |
-| `bulk remove picker only lists projects linked to selected runs` | Verifies bulk remove offers only projects linked to the selected runs and posts a batch unlink request. |
+| `bulk remove unlinks selected runs from every linked project without a picker` | Verifies bulk remove confirms once, skips the project picker, and posts batch unlink requests for every linked project represented by the selected runs. |
 | `bulk delete result messages include known reasons and generic fallback for unknown rejected reasons` | Verifies bulk delete feedback explains known rejection reasons while keeping a generic fallback for unknown future reasons. |
 | `copies the run id and links runs to active or selected projects from the history menu` | Verifies that the history drawer row menu can copy a run id and link a run to either the active project or a selected project. |
 | `renders SIGTERM-terminated runs as neutral history rows instead of failures` | Verifies that SIGTERM-terminated history rows render as neutral terminated entries instead of failed runs. |
@@ -1933,9 +1934,9 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `renders active filter chips for the current history filters` | Verifies that active history filters render as removable chips. |
 | `removes an individual filter when its active filter chip is cleared` | Verifies that removing a single history filter chip updates the request state and control value. |
 | `keeps the history drawer open when removing an active filter chip` | Verifies that clearing a filter chip does not trip the global outside-click handler and close the drawer. |
-| `toggles the mobile advanced history filters section` | Verifies that the mobile-only advanced history filter block expands and collapses correctly. |
-| `resetHistoryMobileFilters collapses the advanced mobile history filters` | Verifies that reopening or closing the mobile history drawer resets the advanced filter block to the collapsed state. |
-| `shows the active filter count in the mobile filters button label` | Verifies that the mobile filters button shows the current active-filter count. |
+| `toggles the mobile history tools section` | Verifies that the mobile-only history tools section expands and collapses correctly. |
+| `resetHistoryMobileFilters collapses the mobile history tools` | Verifies that reopening or closing the mobile history drawer resets the tools section to the collapsed state. |
+| `shows the active filter count in the mobile history tools button label` | Verifies that the mobile history tools button shows the current active-filter count. |
 | `refreshHistoryPanel sends starred-only as a server-side filter` | Verifies that starred-only history filtering is passed to `/history` and rendered from the server response. |
 | `clearHistoryFilters resets the drawer controls and the request URL` | Verifies that clearing all history filters resets both control values and the generated `/history` query string. |
 | `shows a filtered empty state when no runs match the active filters` | Verifies that the drawer distinguishes “no matching runs” from “no runs yet”. |
@@ -2507,6 +2508,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `resolves null via cancelConfirm()` | Verifies the imperative cancel entrypoint resolves with null. |
 | `hides the host and clears action markup after resolve` | Verifies cleanup hides the host, re-applies u-hidden, and clears rendered buttons. |
 | `refocuses the composer on resolve` | Verifies resolution triggers refocusComposerAfterAction with defer:true. |
+| `can resolve without refocusing the composer` | Verifies drawer-owned confirmations can resolve without returning focus to the terminal composer. |
 | `renders a plain string body` | Verifies string bodies are set as textContent on the body slot. |
 | `renders {text, note} as text + <br> + .modal-copy-note span` | Verifies the {text, note} shape renders primary copy plus a styled secondary note. |
 | `renders a Node body directly` | Verifies a DOM Node body is appended without re-wrapping. |
@@ -2952,11 +2954,11 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `mobile Projects can launch run comparison from the runs tab` | Verifies that the mobile Projects compare stepper hands off to the shared run comparison overlay, closes the Projects sheet, and avoids the generic compare failure toast. |
 | `mobile Projects shows retryable project summary errors` | Verifies that mobile Projects renders a retryable inline error when a project summary fetch fails and recovers after tapping Retry. |
 | `workflows sheet starts collapsed and wraps commands inside cards` | Verifies that mobile workflow cards start collapsed, expand on tap, and keep wrapped command chips inside the sheet width. |
-| `mobile recent peek summarizes recent runs and opens the recents sheet on tap` | Verifies that the idle peek row between the transcript and the composer shows the recent-command count plus a one-line preview, and that tapping it opens the full mobile recents pull-up sheet. |
-| `mobile recents sheet opens run details from row tap` | Verifies that tapping a row in the mobile recents sheet opens Run Details and leaves the mobile composer untouched. |
-| `mobile recents sheet restore action loads the run into the active tab` | Verifies that the per-row `restore` action button in the mobile recents sheet loads the corresponding run into the active tab — the pre-swap row-tap behavior now lives on an explicit button. |
-| `mobile history rows render relative time with absolute time in the tooltip` | Verifies that the mobile recents sheet shows relative timestamps ("just now", "3m ago", ...) and surfaces the absolute time through the span's title attribute. |
-| `mobile history permalink action keeps the drawer open` | Verifies that the permalink action in the mobile recents sheet does not dismiss the drawer after tap, reducing repeated reopen churn. |
+| `mobile recent peek summarizes recent runs and opens the full history panel on tap` | Verifies that the idle peek row between the transcript and the composer shows the recent-command count plus a one-line preview, and that tapping it opens the full mobile History panel with tools collapsed. |
+| `mobile full history opens run details from row tap` | Verifies that tapping a row in the mobile History panel opens Run Details and leaves the mobile composer untouched. |
+| `mobile full history restore action loads the run into the active tab` | Verifies that the per-row `restore` action button in the mobile History panel loads the corresponding run into the active tab. |
+| `mobile full history rows render absolute time in the tooltip` | Verifies that mobile History rows surface precise run time through the span's title attribute. |
+| `mobile full history permalink action keeps the drawer open` | Verifies that the permalink action in the mobile History panel does not dismiss the drawer after tap, reducing repeated reopen churn. |
 | `mobile full history select mode wraps toolbar and row tap selects without long-press side effects` | Verifies that the full mobile History sheet keeps the bulk toolbar wrapped inside the viewport, lets row-body taps select runs in select mode, and ignores long-press-style pointer holds. |
 | `mobile run button disables while a command is running` | Verifies that the mobile Run button follows the same running-state guard as desktop. |
 | `mobile permalink copies via the fallback path when clipboard writeText is unavailable` | Verifies that the mobile permalink flow still succeeds when the Clipboard API fallback path is required. |

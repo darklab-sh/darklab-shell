@@ -222,28 +222,35 @@ async function _historyRemoveRunFromProject(run) {
     return;
   }
   let project = links[0].project;
+  let content = null;
+  let defaultFocus = null;
   if (links.length > 1) {
     const { wrap, select, projects } = _historyProjectPickerContentForLinks(links);
-    const choicePromise = showConfirm({
-      body: 'Remove this run from a project',
-      content: wrap,
-      tone: null,
-      defaultFocus: select,
-      actions: [
-        { id: 'cancel', label: 'Cancel', role: 'cancel' },
-        { id: 'remove', label: 'Remove from project', role: 'destructive' },
-      ],
-    });
+    content = wrap;
+    defaultFocus = select;
     if (typeof enhanceAppSelects === 'function') {
       enhanceAppSelects(wrap);
       if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) {
         wrap.querySelector('.app-select-menu')?.classList.add('dropdown-up');
       }
     }
-    const choice = await choicePromise;
-    if (choice !== 'remove') return;
-    project = projects.find(item => String(item.id || '') === select.value);
+    project = () => projects.find(item => String(item.id || '') === select.value);
   }
+  const choice = await showConfirm({
+    body: links.length > 1
+      ? 'Remove this run from a project'
+      : `Remove this run from ${_historyProjectDisplayName(project) || 'this project'}?`,
+    content,
+    tone: 'warning',
+    defaultFocus,
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'remove', label: 'Remove from project', role: 'destructive', tone: 'warning' },
+    ],
+    refocusOnResolve: false,
+  });
+  if (choice !== 'remove') return;
+  if (typeof project === 'function') project = project();
   try {
     await _historyUnlinkRunFromProject(run, project);
   } catch (_) {
@@ -297,6 +304,7 @@ async function _historyAddRunToProject(run) {
       { id: 'cancel', label: 'Cancel', role: 'cancel' },
       { id: 'add', label: 'Add to project', role: 'primary' },
     ],
+    refocusOnResolve: false,
   });
   if (typeof enhanceAppSelects === 'function') {
     enhanceAppSelects(wrap);

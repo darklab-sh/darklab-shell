@@ -179,6 +179,7 @@ function _createHistoryEntry(run, isStarred, options = {}) {
   _appendHistoryMetadataBadges(meta, run);
   const timeEl = document.createElement('span');
   timeEl.textContent = time;
+  if (validDate) timeEl.title = startedAt.toLocaleString();
   meta.appendChild(timeEl);
   if (showDate) {
     const dateEl = document.createElement('span');

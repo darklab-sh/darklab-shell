@@ -442,10 +442,9 @@
     <button class="close-btn history-panel-close" id="history-close" type="button" aria-label="Close history panel">✕</button>
   </div>
   <div class="history-panel-body surface-body nice-scroll">
-    <div id="history-bulk-toolbar" class="history-bulk-toolbar u-hidden" aria-live="polite"></div>
     <div class="history-panel-filters">
+      <button id="history-mobile-filters-toggle" class="history-action-btn history-mobile-filters-toggle btn btn-secondary btn-compact" type="button" aria-expanded="false" aria-controls="history-search-input history-advanced-filters history-bulk-toolbar">history tools</button>
       <input id="history-search-input" class="form-control form-control-compact" type="text" placeholder="search history" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search history">
-      <button id="history-mobile-filters-toggle" class="history-action-btn history-mobile-filters-toggle btn btn-secondary btn-compact" type="button" aria-expanded="false">filters</button>
       <div id="history-advanced-filters" class="history-advanced-filters">
         <select id="history-type-filter" aria-label="Filter by history item type">
           <option value="all">type: all</option>
@@ -482,6 +481,7 @@
       </div>
     </div>
     <div id="history-active-filters" class="history-active-filters u-hidden" aria-live="polite"></div>
+    <div id="history-bulk-toolbar" class="history-bulk-toolbar u-hidden" aria-live="polite"></div>
     <div id="history-pagination" class="history-pagination u-hidden" aria-live="polite">
       <div id="history-pagination-summary" class="history-pagination-summary"></div>
       <div id="history-pagination-controls" class="history-pagination-controls"></div>
