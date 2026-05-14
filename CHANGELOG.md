@@ -51,6 +51,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Command registry secrets declarations are normalized** — `commands.yaml` entries can now carry inert `requires_secrets` metadata so the upcoming encrypted secrets vault can declare which environment variables a tool needs without changing the command schema again.
+  - **Tests:** extended command-registry loader coverage for env-name normalization, invalid declaration filtering, dedupe behavior, and local-overlay merging.
 - **Saved runs now carry an explicit built-in/external kind** — run history stores whether a row came from the built-in command layer or an external command, so History filters, project links, and finding capture no longer need to infer that from command text. Built-in runs stay in History without project-link actions or project-derived findings, even if legacy data contains an old project link.
   - **Tests:** added and updated route and migration coverage for built-in run kind persistence, history subtype filters, project-link rejection, bulk project-link rejection feedback, and the defensive finding-capture guard.
 - **Terminal `history` output now matches shell-style history** — the built-in `history` command prints the full session command history instead of stopping at the recent-command cache limit. Prompt Up/Down history, desktop rail recents, and the mobile recent peek still use `recent_commands_limit`.

@@ -665,6 +665,12 @@ class TestDerivedCommandRegistry:
                     - name: XDG_CONFIG_HOME
                       value: "{managed_workspace_parent}"
                       managed_directory_flag: -dir
+                requires_secrets:
+                  - env: shodan_api_key
+                  - env: VT_API_KEY
+                    optional: true
+                  - env: ""
+                  - env: bad-name
                 interactive:
                   mode: pty
                   trigger_flag: --live
@@ -751,6 +757,10 @@ class TestDerivedCommandRegistry:
             "value": "{managed_workspace_parent}",
             "managed_directory_flag": "-dir",
         }]
+        assert ping["requires_secrets"] == [
+            {"env": "SHODAN_API_KEY", "optional": False},
+            {"env": "VT_API_KEY", "optional": True},
+        ]
         assert ping["interactive"] == {
             "mode": "pty",
             "trigger_flag": "--live",
@@ -880,6 +890,9 @@ class TestDerivedCommandRegistry:
                   - flag: -iL
                     mode: read
                     value: separate
+                requires_secrets:
+                  - env: SHODAN_API_KEY
+                    optional: true
                 autocomplete:
                   flags:
                     - value: -c
@@ -904,6 +917,10 @@ class TestDerivedCommandRegistry:
                   - flag: -oN
                     mode: write
                     value: separate_or_attached
+                requires_secrets:
+                  - env: shodan_api_key
+                  - env: WPSCAN_API_TOKEN
+                    optional: true
                 autocomplete:
                   examples:
                     - value: ping -c 4 darklab.sh
@@ -943,6 +960,10 @@ class TestDerivedCommandRegistry:
         assert by_root["ping"]["workspace_flags"] == [
             {"flag": "-iL", "mode": "read", "value": "separate"},
             {"flag": "-oN", "mode": "write", "value": "separate_or_attached"},
+        ]
+        assert by_root["ping"]["requires_secrets"] == [
+            {"env": "SHODAN_API_KEY", "optional": False},
+            {"env": "WPSCAN_API_TOKEN", "optional": True},
         ]
         assert by_root["ping"]["autocomplete"]["flags"][0]["value"] == "-c"
         assert by_root["ping"]["autocomplete"]["examples"][0]["value"] == "ping -c 4 darklab.sh"

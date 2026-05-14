@@ -9,6 +9,9 @@ import re
 import yaml
 
 
+SECRET_ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+
+
 def dedupe_preserve_order(values):
     return list(dict.fromkeys(values))
 
@@ -206,6 +209,26 @@ def normalize_runtime_adaptations(raw_value) -> dict[str, object]:
     return adaptations
 
 
+def normalize_required_secrets(items) -> list[dict[str, object]]:
+    result: list[dict[str, object]] = []
+    by_env: dict[str, dict[str, object]] = {}
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        env = str(item.get("env") or "").strip().upper()
+        if not SECRET_ENV_RE.fullmatch(env):
+            continue
+        optional = bool(item.get("optional", False))
+        if env in by_env:
+            # If any declaration requires the secret, keep the merged entry required.
+            by_env[env]["optional"] = bool(by_env[env].get("optional")) and optional
+            continue
+        normalized: dict[str, object] = {"env": env, "optional": optional}
+        by_env[env] = normalized
+        result.append(normalized)
+    return result
+
+
 def coerce_positive_int(value: object, default: int) -> int:
     if isinstance(value, bool):
         return default
@@ -295,6 +318,7 @@ def normalize_commands_registry_entry(
     entry["workspace_flags"] = normalize_workspace_flags(raw_entry.get("workspace_flags"))
     entry["allow_grouping_flags"] = normalize_allow_grouping_flags(raw_entry)
     entry["runtime_adaptations"] = normalize_runtime_adaptations(raw_entry.get("runtime_adaptations"))
+    entry["requires_secrets"] = normalize_required_secrets(raw_entry.get("requires_secrets"))
     interactive = normalize_interactive_spec(raw_entry.get("interactive"))
     if interactive:
         entry["interactive"] = interactive
@@ -410,6 +434,24 @@ def merge_command_registry_entries(
         if overlay_entry.get("interactive"):
             interactive = merged.setdefault("interactive", {})
             interactive.update(deepcopy(overlay_entry["interactive"]))
+        if overlay_entry.get("requires_secrets"):
+            existing_secrets = {
+                item.get("env"): item
+                for item in merged.setdefault("requires_secrets", [])
+                if isinstance(item, dict) and item.get("env")
+            }
+            for secret in overlay_entry.get("requires_secrets", []) or []:
+                env = secret.get("env") if isinstance(secret, dict) else None
+                if not env:
+                    continue
+                if env in existing_secrets:
+                    existing_secrets[env]["optional"] = bool(existing_secrets[env].get("optional")) and bool(
+                        secret.get("optional")
+                    )
+                    continue
+                copied = deepcopy(secret)
+                merged.setdefault("requires_secrets", []).append(copied)
+                existing_secrets[env] = copied
 
     base_autocomplete = merged.get("autocomplete") or empty_autocomplete_entry()
     overlay_autocomplete = overlay_entry.get("autocomplete") or {}

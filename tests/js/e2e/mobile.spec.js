@@ -210,25 +210,21 @@ test.beforeEach(async ({ page }) => {
       .poll(async () => output.evaluate((el) => el.scrollHeight > el.clientHeight))
       .toBe(true)
 
-    await page.evaluate(async () => {
-      const activeId = window.activeTabId
-      const activeTab = Array.isArray(window.tabs)
-        ? window.tabs.find((tab) => tab && tab.id === activeId)
-        : null
-      if (activeTab) {
-        activeTab.followOutput = false
-        activeTab.suppressOutputScrollTracking = false
-      }
-      await new Promise((resolve) => setTimeout(resolve, 32))
-      const out = document.querySelector('.tab-panel.active .output')
-      if (!out) return
-      out.scrollTop = 0
-      out.dispatchEvent(new Event('scroll'))
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-    })
     await expect
       .poll(async () =>
         output.evaluate((el) => {
+          const activeId = window.activeTabId
+          const activeTab = Array.isArray(window.tabs)
+            ? window.tabs.find((tab) => tab && tab.id === activeId)
+            : null
+          if (activeTab) {
+            activeTab.followOutput = false
+            activeTab.suppressOutputScrollTracking = false
+            activeTab.outputUserScrollUntil = Date.now() + 1000
+            activeTab._outputFollowToken = (activeTab._outputFollowToken || 0) + 1
+          }
+          el.scrollTop = 0
+          el.dispatchEvent(new Event('scroll'))
           const remaining = el.scrollHeight - (el.scrollTop + el.clientHeight)
           return Math.max(0, Math.round(remaining))
         }),

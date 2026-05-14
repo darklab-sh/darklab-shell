@@ -42,6 +42,11 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Confirm the runtime env-build path in `app/services/commands/registry.py` (where `XDG_CONFIG_HOME` is injected for ProjectDiscovery tools) is the right hook for secret injection. If not, identify the cleanest seam.
   - Decide whether `commands.yaml` gets a new additive `requires_secrets` field or extends an existing block; design the schema and normalization in `app/services/commands/registry_loader.py`.
   - Decide the bootstrap rule for the non-Docker dev path where `SECRETS_MASTER_KEY` is unset.
+  - **Phase 0 findings:**
+    - Session migration is centralized in `/session/migrate`; add a `migrate_session_secrets(conn, from_session_id, to_session_id)` helper beside the existing project/recent-domain migration calls. Session-token rotate already uses the same route, so no separate rotate-specific path is needed.
+    - Secret injection should not reuse the current `env NAME=value ...` command wrapper used for workspace-owned runtime state because decrypted values could appear in shell argv. Add a prepared-command env override and pass merged environment values through `subprocess.Popen(env=...)`.
+    - `commands.yaml` gets an additive top-level command field: `requires_secrets: [{env: SHODAN_API_KEY, optional: false}]`. `app/services/commands/registry_loader.py` now normalizes that field, uppercases env names, rejects invalid names, dedupes envs, and lets required declarations override optional duplicates.
+    - Non-Docker dev bootstrap uses the same app-owned key-file path as Docker: when `SECRETS_MASTER_KEY` is unset, `app/services/secrets/vault.py` creates `<data_dir>/.secrets_master_key` with mode `0600` on first use and logs `MASTER_KEY_GENERATED`.
 - **Phase 1 - Backend contracts**
   - New `app/services/secrets/` service: `vault.py` (wrap/unwrap with AES-GCM + per-secret nonce), `storage.py` (SQLite `secrets` table `(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at)`), `audit.py` (emits structured events without value content).
   - Master key sourced from `SECRETS_MASTER_KEY` env. Reject startup if shorter than 32 bytes (base64-decoded). HKDF-SHA256 with a fixed application salt derives the wrapping key.
@@ -55,12 +60,12 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Rate-limit secrets routes with a dedicated limit so brute-force scanning of secret names is blocked.
 - **Phase 2 - Storage and master key bootstrap**
   - Add the `secrets` table migration in `app/core/database.py` with a unique index on `(session_token, name)`.
-  - Docker entrypoint generates `/data/.secrets_master_key` (mode `0600`, owner `appuser`) on first start if `SECRETS_MASTER_KEY` is unset; emits a one-time `MASTER_KEY_GENERATED` log line.
+  - `app/services/secrets/vault.py` generates `<data_dir>/.secrets_master_key` (mode `0600`) on first use if `SECRETS_MASTER_KEY` is unset; emits a one-time `MASTER_KEY_GENERATED` log line. Docker uses the same app-owned bootstrap path rather than a parallel entrypoint-only flow.
   - Operator can override via `SECRETS_MASTER_KEY` env to use an externally managed key (KMS, Vault, manual operator key).
   - Session-token rotate/migrate re-keys secret rows to the new session token but does not change ciphertext (only the row key); migration is idempotent.
 - **Phase 3 - Registry injection and pre-launch guardrail**
   - Extend `commands.yaml` schema with `requires_secrets: [{env: SHODAN_API_KEY, optional: false}]` (backwards compatible — absence means no injection).
-  - At command launch, `app/services/commands/registry.py` looks up matching vault rows by session token, decrypts in-memory, injects into the subprocess env alongside the existing `XDG_CONFIG_HOME` redirect. Decrypted values are zeroed after subprocess spawn.
+  - At command launch, a registry helper resolves the command root's normalized `requires_secrets` declarations. The run blueprint looks up matching vault rows by session token, decrypts in memory, and injects values through `subprocess.Popen(env=...)` rather than an `env NAME=value ...` shell wrapper. Decrypted values are cleared after subprocess spawn.
   - If a required secret is missing, block launch with a clear error: `Run requires secret SHODAN_API_KEY which is not set. Set it via "secret set SHODAN_API_KEY" or the Options → Secrets panel.`
   - Optional secrets log a `SECRET_OPTIONAL_MISSING` warning but do not block.
 - **Phase 4 - Browser surface**
