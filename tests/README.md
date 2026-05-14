@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,706
+- behavior tests: 2,709
 - docs/inventory meta-tests: 32
-- `pytest`: 1365 (1333 behavior + 32 meta)
+- `pytest`: 1368 (1336 behavior + 32 meta)
 - `vitest`: 1124
 - `playwright`: 249
-- total: 2,738
+- total: 2,741
 
 This document is organized in two parts:
 
@@ -257,7 +257,7 @@ Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py
 
 ### Container Smoke Test
 
-`scripts/container_smoke_test.sh` reuses the stable `darklab_shell-test:cache` image when it exists, runs every user-facing command from the shared smoke corpus through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. Pass `--build` to force a cache-image rebuild after Dockerfile, base-image, or packaged-tool changes. The shared corpus includes both `app/conf/commands.yaml` examples and workflow step commands, so the smoke suite covers the commands the shell suggests directly plus the guided playbooks exposed through the workflows UI. It also enables Files in the smoke container and runs the workspace-required command examples from `app/conf/commands.yaml` against `tests/py/fixtures/container_smoke_test-workspace-expectations.json`, covering session-file reads, writes, managed Amass database directories, and generated output files. Interactive PTY examples marked with `interactive: true` run through `/pty/runs` against `tests/py/fixtures/container_smoke_test-interactive-expectations.json`, so the smoke pass can catch missing PTY-only tools and broken trigger-flag wiring separately from regular `/runs` commands. The fixture removes stale `darklab_shell-test-*` Compose containers/networks/volumes before startup and after teardown so interrupted local runs do not leave Redis or shell containers behind. It catches drift between those surfaced commands and actual tool behavior — renamed flags, changed output, missing tools, or broken workspace path rewriting. Not part of the default fast loop; run after Dockerfile, packaged-tool, base-image, command-registry example changes, workspace file-flag changes, interactive PTY example changes, or workflow command changes.
+`scripts/container_smoke_test.sh` reuses the stable `darklab_shell-test:cache` image when it exists, runs every user-facing command from the shared smoke corpus through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. Pass `--build` to force a cache-image rebuild after Dockerfile, base-image, or packaged-tool changes. The shared corpus includes `app/conf/commands.yaml` examples that do not require workspace setup or encrypted provider secrets, plus workflow step commands, so the smoke suite covers the commands the shell suggests directly plus the guided playbooks exposed through the workflows UI. It also enables Files in the smoke container and runs the workspace-required command examples from `app/conf/commands.yaml` against `tests/py/fixtures/container_smoke_test-workspace-expectations.json`, covering session-file reads, writes, managed Amass database directories, and generated output files. Interactive PTY examples marked with `interactive: true` run through `/pty/runs` against `tests/py/fixtures/container_smoke_test-interactive-expectations.json`, so the smoke pass can catch missing PTY-only tools and broken trigger-flag wiring separately from regular `/runs` commands. The fixture removes stale `darklab_shell-test-*` Compose containers/networks/volumes before startup and after teardown so interrupted local runs do not leave Redis or shell containers behind. It catches drift between those surfaced commands and actual tool behavior — renamed flags, changed output, missing tools, or broken workspace path rewriting. Not part of the default fast loop; run after Dockerfile, packaged-tool, base-image, command-registry example changes, workspace file-flag changes, interactive PTY example changes, or workflow command changes.
 
 ```bash
 ./scripts/container_smoke_test.sh                           # full run
@@ -396,7 +396,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestIntelServices.test_cache_round_trips_normalized_payload_with_provider_ttl` | Verifies normalized intel cache storage, provider TTL overrides, and quota-exhausted backoff state. |
 | `TestIntelServices.test_rate_limiter_consumes_bucket_and_reports_retry` | Verifies per-session provider token buckets consume quota and report retry timing. |
 | `TestIntelServices.test_audit_event_omits_sensitive_provider_fields` | Verifies intel audit events include lookup metadata without API keys or raw provider bodies. |
-| `TestIntelServices.test_provider_modules_read_secret_at_call_time_and_normalize_payloads` | Verifies provider modules read vault-backed secrets at lookup time and return normalized payloads. |
+| `TestIntelServices.test_provider_modules_read_secret_at_call_time_and_normalize_payloads` | Verifies provider modules read vault-backed secrets, including VirusTotal's native `VTCLI_APIKEY` alias, at lookup time and return normalized payloads. |
 | `TestIntelServices.test_provider_missing_secret_blocks_lookup_before_client_call` | Verifies provider calls stop before client access when the required secret is missing. |
 | `TestSessionWorkspace.test_disabled_workspace_rejects_operations` | Verifies that workspace helpers reject operations while the feature is disabled. |
 | `TestSessionWorkspace.test_session_workspace_uses_hashed_session_directory` | Verifies that session workspace directories use hashed session names instead of raw session identifiers. |
@@ -1372,6 +1372,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunStreaming.test_run_injects_projectdiscovery_workspace_state_and_surfaces_paths` | Verifies that ProjectDiscovery tools receive session-scoped runtime state and display generated workspace paths as user-facing paths. |
 | `TestRunStreaming.test_run_injects_required_secrets_through_process_environment` | Verifies registry-required secrets are decrypted into the subprocess environment without appearing in command text or streamed output. |
 | `TestRunStreaming.test_run_preserves_secret_environment_through_scanner_sudo_prefix` | Verifies scanner-user sudo launches preserve only declared secret env names while keeping secret values out of argv and output. |
+| `TestRunStreaming.test_run_injects_secret_under_vendor_env_name` | Verifies registry-required secrets can be looked up by one vault name and injected under the vendor-required process env name. |
+| `TestRunStreaming.test_run_accepts_vendor_native_fallback_secret_name` | Verifies commands can use a declared fallback vault name such as `VTCLI_APIKEY` when the app-facing secret name is absent. |
+| `TestRunStreaming.test_run_missing_alias_secret_message_lists_supported_names` | Verifies missing required-secret messages list all supported vault names for alias-backed declarations. |
 | `TestRunStreaming.test_run_resolves_required_secrets_before_runtime_command_rewrites` | Verifies secret declarations are resolved from the original registry command root even when validation rewrites the runtime command. |
 | `TestRunStreaming.test_run_requires_valid_session_before_secret_injection` | Verifies commands that require encrypted secrets fail before spawn when no valid session is available. |
 | `TestRunStreaming.test_run_blocks_when_required_secret_is_missing` | Verifies a command with a missing required registry secret is rejected before subprocess spawn. |

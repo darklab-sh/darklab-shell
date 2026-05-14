@@ -394,6 +394,8 @@ class TestDenyPrefix:
         # Flag should be denied even when other flags precede it
         ok, _ = _check("curl -s -o /tmp/out https://darklab.sh", allow=["curl"], deny=["curl -o"])
         assert not ok
+        ok, _ = _check("curl --config=/tmp/curlrc https://darklab.sh", allow=["curl"], deny=["curl --config"])
+        assert not ok
 
     def test_deny_flag_at_end(self):
         ok, _ = _check("nmap -sT 10.0.0.1 --script", allow=["nmap"], deny=["nmap --script"])

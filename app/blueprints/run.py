@@ -946,28 +946,45 @@ def _resolve_secret_environment(command: str, session_id: str) -> tuple[dict[str
     env_overrides: dict[str, str] = {}
     missing_required: list[str] = []
     missing_optional: list[str] = []
+    missing_labels: dict[str, str] = {}
     for declaration in declarations:
         env_name = str(declaration.get("env") or "").strip().upper()
         if not env_name:
             continue
+        inject_env_name = str(declaration.get("inject_env") or env_name).strip().upper()
+        if not inject_env_name:
+            continue
+        raw_fallback_envs = declaration.get("fallback_envs")
+        fallback_envs = [
+            str(item or "").strip().upper()
+            for item in (raw_fallback_envs if isinstance(raw_fallback_envs, list) else [])
+            if str(item or "").strip()
+        ]
+        lookup_env_names = [env_name, *[item for item in fallback_envs if item != env_name]]
         try:
-            value = get_secret_value_for_env(session_id, env_name)
+            value = None
+            for lookup_env_name in lookup_env_names:
+                value = get_secret_value_for_env(session_id, lookup_env_name)
+                if value is not None:
+                    break
         except (InvalidSecretName, MasterKeyError, SecretDecryptError) as exc:
             raise _RunPreparationError("Secrets vault unavailable. Check server logs.", status_code=503) from exc
         if value is None:
+            missing_label = " or ".join(lookup_env_names)
             if bool(declaration.get("optional", False)):
                 missing_optional.append(env_name)
             else:
                 missing_required.append(env_name)
+                missing_labels[env_name] = missing_label
             continue
-        env_overrides[env_name] = value
+        env_overrides[inject_env_name] = value
 
     if missing_required:
         if len(missing_required) == 1:
-            subject = f"secret {missing_required[0]}"
+            subject = f"secret {missing_labels.get(missing_required[0], missing_required[0])}"
             setup_hint = "Set it via \"secret set NAME\" or the Options > Secrets panel."
         else:
-            subject = "secrets " + ", ".join(missing_required)
+            subject = "secrets " + ", ".join(missing_labels.get(env_name, env_name) for env_name in missing_required)
             setup_hint = "Set each one via \"secret set NAME\" or the Options > Secrets panel."
         raise _RunPreparationError(
             f"Run requires {subject} which is not set. " +

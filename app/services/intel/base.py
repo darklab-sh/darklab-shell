@@ -42,15 +42,18 @@ class IntelResult:
 class Provider(ABC):
     name: str
     secret_env: str
+    secret_env_aliases: tuple[str, ...] = ()
     secret_getter: SecretGetter = get_secret_value_for_env
     client: Any = None
     cache_scopes: dict[str, str] = field(default_factory=dict)
 
     def secret_value(self, session_token: str) -> str:
-        value = self.secret_getter(session_token, self.secret_env)
-        if not value:
-            raise ProviderMissingSecret(f"{self.secret_env} is not configured")
-        return value
+        env_names = (self.secret_env, *self.secret_env_aliases)
+        for env_name in env_names:
+            value = self.secret_getter(session_token, env_name)
+            if value:
+                return value
+        raise ProviderMissingSecret(f"{' or '.join(env_names)} is not configured")
 
     def rate_limit(
         self,

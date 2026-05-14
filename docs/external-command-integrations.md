@@ -97,7 +97,13 @@ Encrypted credentials use a separate `requires_secrets` declaration instead of t
 requires_secrets:
   - env: SHODAN_API_KEY
     optional: false
+  - env: VT_API_KEY
+    inject_env: VTCLI_APIKEY
+    fallback_envs:
+      - VTCLI_APIKEY
 ```
+
+`inject_env` is for tools whose runtime variable name differs from the app-facing secret name. `fallback_envs` lets users store an accepted vendor-native name too. The shipped VirusTotal CLI entry accepts `VT_API_KEY` or `VTCLI_APIKEY` from the encrypted vault and always launches `vt` with `VTCLI_APIKEY` in its environment.
 
 Run output is also filtered before it is captured or streamed: absolute paths under the current session workspace are displayed as user-facing workspace paths. For example:
 
@@ -310,5 +316,5 @@ Before merging a new external-command adaptation:
 - Keep user-facing examples aligned with the app-owned rewrite behavior.
 - Add backend tests for validation, rewrite, and workspace path handling.
 - Add autocomplete tests if examples, flags, or positional hints change.
-- Add or update container smoke expectations when the change affects visible examples or workflow steps.
+- Add or update container smoke expectations when the change affects visible examples or workflow steps. The generic smoke corpus skips examples for commands with required encrypted secrets; cover those roots with registry, policy, and secret-injection tests unless you are adding a keyed smoke profile.
 - Document tool-specific behavior here when the app does more than simple allowlist metadata.

@@ -3223,6 +3223,144 @@ class TestRunStreaming:
         assert "shodan-secret" not in body
         assert popen.call_args.kwargs["env"]["SHODAN_API_KEY"] == ""
 
+    def test_run_injects_secret_under_vendor_env_name(self, monkeypatch, tmp_path):
+        client = get_client()
+        session_id = "sess-secret-alias"
+        monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+        monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path))
+        secrets_vault.reset_master_key_cache_for_tests()
+        secrets_storage.upsert_secret(session_id, "VT_API_KEY", "vt-secret")
+        fake_proc = _FakeProc(lines=["lookup complete\n", ""])
+        captured_env = {}
+
+        def _fake_popen(*args, **kwargs):
+            captured_env.update(kwargs.get("env") or {})
+            return fake_proc
+
+        registry = {
+            "commands": [
+                {
+                    "root": "vt",
+                    "category": "External Intel",
+                    "policy": {"allow": ["vt ip"], "deny": []},
+                    "requires_secrets": [
+                        {
+                            "env": "VT_API_KEY",
+                            "inject_env": "VTCLI_APIKEY",
+                            "fallback_envs": ["VTCLI_APIKEY"],
+                        },
+                    ],
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", side_effect=_fake_popen) as popen, \
+             mock.patch("blueprints.run.emit_secret_event") as secret_event, \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            resp = _post_run(
+                client,
+                json={"command": "vt ip 8.8.8.8"},
+                headers={"X-Session-ID": session_id},
+            )
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert captured_env["VTCLI_APIKEY"] == "vt-secret"
+        assert "VT_API_KEY" not in captured_env
+        assert "vt-secret" not in popen.call_args.args[0][-1]
+        assert "vt-secret" not in body
+        assert popen.call_args.kwargs["env"]["VTCLI_APIKEY"] == ""
+        secret_event.assert_called_once()
+        assert secret_event.call_args.kwargs["consumer_envs"] == ["VTCLI_APIKEY"]
+
+    def test_run_accepts_vendor_native_fallback_secret_name(self, monkeypatch, tmp_path):
+        client = get_client()
+        session_id = "sess-secret-native-alias"
+        monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+        monkeypatch.setattr(secrets_vault, "resolve_data_dir", lambda: str(tmp_path))
+        secrets_vault.reset_master_key_cache_for_tests()
+        secrets_storage.upsert_secret(session_id, "VTCLI_APIKEY", "vtcli-secret")
+        fake_proc = _FakeProc(lines=["lookup complete\n", ""])
+        captured_env = {}
+
+        def _fake_popen(*args, **kwargs):
+            captured_env.update(kwargs.get("env") or {})
+            return fake_proc
+
+        registry = {
+            "commands": [
+                {
+                    "root": "vt",
+                    "category": "External Intel",
+                    "policy": {"allow": ["vt ip"], "deny": []},
+                    "requires_secrets": [
+                        {
+                            "env": "VT_API_KEY",
+                            "inject_env": "VTCLI_APIKEY",
+                            "fallback_envs": ["VTCLI_APIKEY"],
+                        },
+                    ],
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", side_effect=_fake_popen), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            resp = _post_run(
+                client,
+                json={"command": "vt ip 8.8.8.8"},
+                headers={"X-Session-ID": session_id},
+            )
+
+        assert resp.status_code == 200
+        assert captured_env["VTCLI_APIKEY"] == "vtcli-secret"
+        assert "VT_API_KEY" not in captured_env
+
+    def test_run_missing_alias_secret_message_lists_supported_names(self):
+        client = get_client()
+        registry = {
+            "commands": [
+                {
+                    "root": "vt",
+                    "category": "External Intel",
+                    "policy": {"allow": ["vt ip"], "deny": []},
+                    "requires_secrets": [
+                        {
+                            "env": "VT_API_KEY",
+                            "inject_env": "VTCLI_APIKEY",
+                            "fallback_envs": ["VTCLI_APIKEY"],
+                        },
+                    ],
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.run.subprocess.Popen") as popen:
+            resp = _post_run(
+                client,
+                json={"command": "vt ip 8.8.8.8"},
+                headers={"X-Session-ID": "sess-missing-vt-secret"},
+            )
+
+        assert resp.status_code == 403
+        assert resp.get_json()["error"] == (
+            "Run requires secret VT_API_KEY or VTCLI_APIKEY which is not set. "
+            "Set it via \"secret set NAME\" or the Options > Secrets panel."
+        )
+        popen.assert_not_called()
+
     def test_run_resolves_required_secrets_before_runtime_command_rewrites(self, monkeypatch, tmp_path):
         client = get_client()
         session_id = "sess-secret-rewrite"

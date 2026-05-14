@@ -133,15 +133,13 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Added the `app/services/intel/` service with provider base classes, canonical entity helpers, normalized response schemas, per-session token buckets, normalized-response cache helpers, quota-exhausted backoff state, and structured `INTEL_LOOKUP` audit events.
   - Added Shodan, VirusTotal, and GreyNoise provider modules that read vault-backed keys at lookup time and return provider-normalized payloads without caching secrets.
   - Added backend coverage for canonicalization, schema shape, cache TTLs, quota backoff, token-bucket behavior, audit redaction, provider normalization, and missing-secret blocking.
-- **Phase 2 - CLI wrapper pass**
-  - Install `shodan`, `vt-cli`, `greynoise` CLIs in the Dockerfile under the scanner-user PATH.
-  - Register `commands.yaml` entries with allowed subcommands, allowed flags, and `requires_secrets`:
-    - `shodan` → `SHODAN_API_KEY`. Allow `host`, `search`, `count`, `myip`. Deny `init` so keys never persist outside the vault, and deny `download`, `parse`, `convert`, `domain`, `data` in v1.
-    - `vt` → `VT_API_KEY`. Allow `ip`, `domain`, `file`, `url`. Deny `search` in v1 because broad search can burn quota quickly or require higher-tier access; deny `download`, `monitor`, `analyze`.
-    - `greynoise` → `GREYNOISE_API_KEY`. Allow `ip`, `quick`. Deny `setup` so keys never persist outside the vault, and deny `query` until paid Enterprise plumbing is justified.
-  - Verify deny-prefix coverage so these CLIs cannot reach loopback or escape the allowlist.
-  - CLI wrapper runs go through `/runs` like every other command and land in normal history. Their raw response bodies are visible in the transcript, while share/permalink/export redaction drops those bodies.
-  - Add smoke-test fixtures for each CLI to the container smoke test corpus.
+- **Phase 2 - CLI wrapper pass (complete)**
+  - Installed `shodan`, `vt-cli`, and `greynoise` CLIs in the Dockerfile under the scanner-user PATH.
+  - Registered `commands.yaml` entries with allowed subcommands, denied setup/download/search escape paths, and vault-backed `requires_secrets` declarations:
+    - `shodan` → `SHODAN_API_KEY`. Allows `host`, `search`, `count`, `myip`; denies `init`, broad export/management subcommands, inline key flags, and loopback lookups.
+    - `vt` → `VT_API_KEY`, injected into the process as `VTCLI_APIKEY`; users may also store the native `VTCLI_APIKEY` name directly. Allows `ip`, `domain`, `file`, `url`; denies broad search/download/monitor/analyze paths, inline key flags, and loopback lookups.
+    - `greynoise` → `GREYNOISE_API_KEY`. Allows `ip`, `quick`; denies `setup`, `query`, inline key flags, and loopback lookups.
+  - CLI wrapper runs go through `/runs` like every other command and land in normal history. Generic container smoke loading now skips required-secret examples so CI does not fail on provider-key setup; these roots are covered by registry, policy, and secret-injection tests until a keyed smoke profile exists.
 - **Phase 3 - App-native `intel` built-in**
   - New `app/services/commands/builtins_intel.py`:
     - `intel ip <ip>` fans out to Shodan + GreyNoise; uniform card shows ports/banners/CVEs and classification/confidence. Private, loopback, and otherwise non-public IPs are refused by default with `IP <addr> is in a private/loopback range; intel providers cannot meaningfully classify it. Use --include-private if you really want to query.`
@@ -687,7 +685,7 @@ These are product ideas and possible enhancements, not committed TODOs or planne
     - GreyNoise classifies whether an IP is internet background noise or targeted.
     - Together they answer most "should I care about this host?" triage questions.
   - Ship in two passes:
-    - Pass 1 (CLI wrapper): install `shodan`, `vt-cli`, and a `greynoise` CLI in the Dockerfile and register allowed subcommands/flags in `commands.yaml` with declared env-consumer slots (`SHODAN_API_KEY`, `VT_API_KEY`, `GREYNOISE_API_KEY`). Users get the same allowlist, autocomplete, history, Files, and rate-limit behavior as every other tool.
+    - Pass 1 (CLI wrapper): install `shodan`, `vt-cli`, and a `greynoise` CLI in the Dockerfile and register allowed subcommands/flags in `commands.yaml` with declared env-consumer slots (`SHODAN_API_KEY`, `VT_API_KEY`/`VTCLI_APIKEY`, `GREYNOISE_API_KEY`). Users get the same allowlist, autocomplete, history, Files, and rate-limit behavior as every other tool.
     - Pass 2 (app-native built-in): add an `intel ip|domain|hash` built-in backed by Python provider modules so users have one uniform output card across all three providers.
   - Hard dependencies:
     - Encrypted secrets vault — every provider needs an API key, and a parallel per-integration ciphertext path should not exist.

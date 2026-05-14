@@ -450,6 +450,7 @@ class TestIntelServices:
         secrets = {
             ("session-1", "SHODAN_API_KEY"): "shodan-key",
             ("session-1", "VT_API_KEY"): "vt-key",
+            ("session-2", "VTCLI_APIKEY"): "vtcli-key",
             ("session-1", "GREYNOISE_API_KEY"): "greynoise-key",
         }
 
@@ -474,6 +475,10 @@ class TestIntelServices:
             session_token="session-1",
         )
         vt_hash = VirusTotalProvider(secret_getter=getter, client=client).lookup_hash("A" * 64, session_token="session-1")
+        vt_alias = VirusTotalProvider(secret_getter=getter, client=client).lookup_domain(
+            "alias.example.test",
+            session_token="session-2",
+        )
         greynoise_result = GreyNoiseProvider(secret_getter=getter, client=client).lookup_ip(
             "8.8.4.4",
             session_token="session-1",
@@ -485,10 +490,12 @@ class TestIntelServices:
         assert vt_domain.payload["providers"]["virustotal"]["reputation"] == 5
         assert vt_hash.canonical_value == f"sha256:{'a' * 64}"
         assert vt_hash.payload["providers"]["virustotal"]["verdict"] == "malicious"
+        assert vt_alias.canonical_value == "alias.example.test"
         assert greynoise_result.payload["providers"]["greynoise"]["classification"] == "benign"
         assert ("ip", "8.8.8.8", "shodan-key") in client.calls
         assert ("domain", "example.test", "vt-key") in client.calls
         assert ("hash", "a" * 64, "vt-key") in client.calls
+        assert ("domain", "alias.example.test", "vtcli-key") in client.calls
         assert ("ip", "8.8.4.4", "greynoise-key") in client.calls
 
     def test_provider_missing_secret_blocks_lookup_before_client_call(self):
@@ -914,6 +921,9 @@ class TestDerivedCommandRegistry:
                   - env: shodan_api_key
                   - env: VT_API_KEY
                     optional: true
+                    inject_env: VTCLI_APIKEY
+                    fallback_envs:
+                      - VTCLI_APIKEY
                   - env: ""
                   - env: bad-name
                 autocomplete:
@@ -1010,7 +1020,12 @@ class TestDerivedCommandRegistry:
         }]
         assert ping["requires_secrets"] == [
             {"env": "SHODAN_API_KEY", "optional": False},
-            {"env": "VT_API_KEY", "optional": True},
+            {
+                "env": "VT_API_KEY",
+                "optional": True,
+                "inject_env": "VTCLI_APIKEY",
+                "fallback_envs": ["VTCLI_APIKEY"],
+            },
         ]
         mtr = registry["commands"][1]
         assert mtr["root"] == "mtr"
@@ -1146,6 +1161,10 @@ class TestDerivedCommandRegistry:
                 requires_secrets:
                   - env: SHODAN_API_KEY
                     optional: true
+                  - env: VT_API_KEY
+                    inject_env: VTCLI_APIKEY
+                    fallback_envs:
+                      - VTCLI_APIKEY
                 autocomplete:
                   flags:
                     - value: -c
@@ -1174,6 +1193,11 @@ class TestDerivedCommandRegistry:
                   - env: shodan_api_key
                   - env: WPSCAN_API_TOKEN
                     optional: true
+                  - env: vt_api_key
+                    inject_env: vtcli_apikey
+                    fallback_envs:
+                      - VTCLI_APIKEY
+                      - VIRUSTOTAL_TOKEN
                 autocomplete:
                   examples:
                     - value: ping -c 4 darklab.sh
@@ -1216,6 +1240,12 @@ class TestDerivedCommandRegistry:
         ]
         assert by_root["ping"]["requires_secrets"] == [
             {"env": "SHODAN_API_KEY", "optional": False},
+            {
+                "env": "VT_API_KEY",
+                "optional": False,
+                "inject_env": "VTCLI_APIKEY",
+                "fallback_envs": ["VTCLI_APIKEY", "VIRUSTOTAL_TOKEN"],
+            },
             {"env": "WPSCAN_API_TOKEN", "optional": True},
         ]
         assert by_root["ping"]["autocomplete"]["flags"][0]["value"] == "-c"
@@ -1261,6 +1291,16 @@ class TestDerivedCommandRegistry:
                     "root": "nuclei",
                     "requires_secrets": [{"env": "NUCLEI_TOKEN", "optional": True}],
                 },
+                {
+                    "root": "vt",
+                    "requires_secrets": [
+                        {
+                            "env": "VT_API_KEY",
+                            "inject_env": "VTCLI_APIKEY",
+                            "fallback_envs": ["VTCLI_APIKEY"],
+                        },
+                    ],
+                },
             ],
             "pipe_helpers": [],
         }
@@ -1274,6 +1314,9 @@ class TestDerivedCommandRegistry:
         assert "shodan (required)" in text
         assert "NUCLEI_TOKEN" in text
         assert "nuclei (optional)" in text
+        assert "VT_API_KEY" in text
+        assert "VTCLI_APIKEY" in text
+        assert "vt (required)" in text
 
     def test_real_registry_amass_uses_subcommand_scoped_autocomplete(self):
         context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
@@ -4738,6 +4781,12 @@ class TestAutocompleteContextLoading:
                         "description": "Workspace targets",
                         "feature_required": "workspace",
                     },
+                ],
+            },
+            "shodan": {
+                "requires_secrets": [{"env": "SHODAN_API_KEY", "optional": False}],
+                "examples": [
+                    {"value": "shodan host 8.8.8.8", "description": "Secret-required lookup"},
                 ],
             },
         }

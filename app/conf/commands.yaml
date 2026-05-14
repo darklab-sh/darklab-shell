@@ -3235,6 +3235,222 @@ commands:
           hint_only: true
           value_type: target
           description: Hostname, IP, or CIDR
+  - root: shodan
+    description: Queries Shodan for internet-exposed host and service intelligence.
+    category: External Intelligence
+    policy:
+      allow:
+        - shodan --help
+        - shodan host
+        - shodan search
+        - shodan count
+        - shodan myip
+      deny:
+        - shodan init
+        - shodan download
+        - shodan parse
+        - shodan convert
+        - shodan domain
+        - shodan data
+        - shodan alert
+        - shodan scan
+        - shodan --api-key
+        - shodan -k
+        - shodan host 127.0.0.1
+        - shodan host 0.0.0.0
+        - shodan host localhost
+        - shodan host ::1
+    requires_secrets:
+      - env: SHODAN_API_KEY
+    autocomplete:
+      examples:
+        - value: shodan --help
+          description: Show help and usage
+        - value: shodan host 8.8.8.8
+          description: Look up exposed services for a public IP
+        - value: shodan count apache
+          description: Count matching internet-exposed services
+        - value: shodan myip
+          description: Show the scanner container's public IP according to Shodan
+      subcommands:
+        host:
+          description: Look up one public IP
+          examples:
+            - value: shodan host 8.8.8.8
+              description: Look up exposed services for a public IP
+          arguments:
+            - placeholder: <ip>
+              hint_only: true
+              value_type: ip
+              description: Public IP address to query
+        search:
+          description: Search Shodan query syntax
+          examples:
+            - value: shodan search apache
+              description: Search exposed service banners
+          flags:
+            - value: --fields
+              description: Restrict returned fields
+              takes_value: true
+              suggest:
+                - value: ip_str,port,hostnames,org
+                  description: Compact host summary fields
+            - value: --limit
+              description: Limit returned matches
+              takes_value: true
+              suggest:
+                - value: '10'
+                  description: Keep output short
+          arguments:
+            - placeholder: <query>
+              hint_only: true
+              description: Shodan search query
+        count:
+          description: Count matches for a Shodan query
+          examples:
+            - value: shodan count apache
+              description: Count matching internet-exposed services
+          arguments:
+            - placeholder: <query>
+              hint_only: true
+              description: Shodan search query
+        myip:
+          description: Show the scanner container's public IP
+          examples:
+            - value: shodan myip
+              description: Show the public source IP
+  - root: vt
+    description: Queries VirusTotal for IP, domain, URL, and file-hash reputation.
+    category: External Intelligence
+    policy:
+      allow:
+        - vt --help
+        - vt ip
+        - vt domain
+        - vt file
+        - vt url
+      deny:
+        - vt search
+        - vt download
+        - vt monitor
+        - vt analyze
+        - vt analysis
+        - vt scan
+        - vt init
+        - vt --apikey
+        - vt --api-key
+        - vt -k
+        - vt ip 127.0.0.1
+        - vt ip 0.0.0.0
+        - vt ip localhost
+        - vt ip ::1
+    requires_secrets:
+      - env: VT_API_KEY
+        inject_env: VTCLI_APIKEY
+        fallback_envs:
+          - VTCLI_APIKEY
+    autocomplete:
+      examples:
+        - value: vt --help
+          description: Show help and usage
+        - value: vt ip 8.8.8.8
+          description: Look up an IP address
+        - value: vt domain darklab.sh
+          description: Look up a domain
+        - value: vt file d41d8cd98f00b204e9800998ecf8427e
+          description: Look up a file hash
+      subcommands:
+        ip:
+          description: Look up an IP address
+          examples:
+            - value: vt ip 8.8.8.8
+              description: Look up an IP address
+          arguments:
+            - placeholder: <ip>
+              hint_only: true
+              value_type: ip
+              description: Public IP address to query
+        domain:
+          description: Look up a domain
+          examples:
+            - value: vt domain darklab.sh
+              description: Look up a domain
+          arguments:
+            - placeholder: <domain>
+              hint_only: true
+              value_type: domain
+              description: Domain to query
+        file:
+          description: Look up a file hash
+          examples:
+            - value: vt file d41d8cd98f00b204e9800998ecf8427e
+              description: Look up a file hash
+          arguments:
+            - placeholder: <hash>
+              hint_only: true
+              description: MD5, SHA1, or SHA256 hash
+        url:
+          description: Look up a URL
+          examples:
+            - value: vt url https://darklab.sh/
+              description: Look up a URL
+          arguments:
+            - placeholder: <url>
+              hint_only: true
+              value_type: url
+              description: URL to query
+  - root: greynoise
+    description: Queries GreyNoise for internet scanner classification on public IPs.
+    category: External Intelligence
+    policy:
+      allow:
+        - greynoise --help
+        - greynoise ip
+        - greynoise quick
+      deny:
+        - greynoise setup
+        - greynoise query
+        - greynoise --api-key
+        - greynoise -k
+        - greynoise ip 127.0.0.1
+        - greynoise ip 0.0.0.0
+        - greynoise ip localhost
+        - greynoise ip ::1
+        - greynoise quick 127.0.0.1
+        - greynoise quick 0.0.0.0
+        - greynoise quick localhost
+        - greynoise quick ::1
+    requires_secrets:
+      - env: GREYNOISE_API_KEY
+    autocomplete:
+      examples:
+        - value: greynoise --help
+          description: Show help and usage
+        - value: greynoise ip 8.8.8.8
+          description: Look up full GreyNoise context for a public IP
+        - value: greynoise quick 8.8.8.8
+          description: Quick GreyNoise classification for a public IP
+      subcommands:
+        ip:
+          description: Look up full IP context
+          examples:
+            - value: greynoise ip 8.8.8.8
+              description: Look up full GreyNoise context for a public IP
+          arguments:
+            - placeholder: <ip>
+              hint_only: true
+              value_type: ip
+              description: Public IP address to query
+        quick:
+          description: Quick IP classification
+          examples:
+            - value: greynoise quick 8.8.8.8
+              description: Quick GreyNoise classification for a public IP
+          arguments:
+            - placeholder: <ip>
+              hint_only: true
+              value_type: ip
+              description: Public IP address to query
   - root: testssl
     description: Tests TLS services for protocol support, cipher choices, certificate issues, and known weaknesses.
     category: Vulnerability Scanning

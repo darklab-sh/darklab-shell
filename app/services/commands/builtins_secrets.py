@@ -30,9 +30,15 @@ def _secret_consumer_map() -> dict[str, list[str]]:
             continue
         for item in command.get("requires_secrets") or []:
             env = str(item.get("env") or "").strip().upper()
-            if env:
-                requirement = "optional" if bool(item.get("optional", False)) else "required"
-                consumers[env].append(f"{root} ({requirement})")
+            fallback_envs = [
+                str(fallback or "").strip().upper()
+                for fallback in item.get("fallback_envs", []) or []
+                if str(fallback or "").strip()
+            ]
+            requirement = "optional" if bool(item.get("optional", False)) else "required"
+            for env_name in [env, *fallback_envs]:
+                if env_name:
+                    consumers[env_name].append(f"{root} ({requirement})")
     return {env: sorted(set(roots)) for env, roots in consumers.items()}
 
 

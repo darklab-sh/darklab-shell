@@ -109,7 +109,7 @@ def _flag_matches_token(flag: str, token: str) -> bool:
     if not flag:
         return False
     if flag.startswith("--"):
-        return token == flag
+        return token == flag or token.startswith(f"{flag}=")
     if len(flag) == 2 and flag[0] == '-' and flag[1].isalpha():
         if token == flag:
             return True

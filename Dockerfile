@@ -23,6 +23,7 @@ ARG SSLYZE_VERSION=6.3.1
 ARG WAFW00F_VERSION=2.4.2
 ARG RUSTSCAN_VERSION=2.4.1
 ARG WPSCAN_VERSION=3.8.28
+ARG VT_CLI_VERSION=latest
 
 # Remove dpkg config that prevents man pages from being installed
 RUN rm -f /etc/dpkg/dpkg.cfg.d/docker
@@ -146,6 +147,11 @@ ENV PYTHONPATH=/app
 
 COPY app/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+# Install external-intel CLIs. These are launched through the same command
+# allowlist and vault-backed environment injection path as other scanner tools.
+RUN pip install --no-cache-dir shodan greynoise
+RUN go install -v github.com/VirusTotal/vt-cli@${VT_CLI_VERSION}
 
 
 # Create two unprivileged users:

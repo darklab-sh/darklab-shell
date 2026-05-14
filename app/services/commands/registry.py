@@ -931,6 +931,13 @@ def autocomplete_context_from_commands_registry(registry: dict, cfg=None) -> dic
                     spec["description"] = entry["description"]
                 if entry.get("feature_required"):
                     spec["feature_required"] = entry["feature_required"]
+                required_secrets = [
+                    dict(item)
+                    for item in entry.get("requires_secrets") or []
+                    if isinstance(item, dict)
+                ]
+                if required_secrets:
+                    spec["requires_secrets"] = required_secrets
                 context[root] = spec
     return _filter_autocomplete_context_by_features(context, app_config.CFG if cfg is None else cfg)
 
@@ -2029,9 +2036,16 @@ def load_container_smoke_test_commands():
                 yield from _example_sources(sub_spec)
 
     # The generic smoke corpus has no per-command file setup. Workspace-only
-    # examples are covered by dedicated workspace smoke fixtures instead.
+    # examples and secret-required examples are covered by dedicated fixtures
+    # instead.
     for spec in load_autocomplete_context_from_commands_registry({"workspace_enabled": False}).values():
         if not isinstance(spec, dict):
+            continue
+        required_secrets = [
+            item for item in spec.get("requires_secrets") or []
+            if isinstance(item, dict) and not bool(item.get("optional"))
+        ]
+        if required_secrets:
             continue
         for example in _example_sources(spec):
             if not isinstance(example, dict):

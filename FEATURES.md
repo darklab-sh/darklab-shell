@@ -635,6 +635,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - `secret list` shows stored names and their consumer environment bindings. It never prints values.
 - `secret unset NAME` deletes one stored secret, and `secret show-consumers` lists command-registry env vars that tools declare.
 - Command registry entries can declare `requires_secrets`. When a matching command runs, the backend decrypts the needed value in memory and passes it to the subprocess environment. Missing required secrets stop the run before launch with a clear message.
+- Secret declarations can also map a user-friendly secret name to a vendor-required environment name. For example, VirusTotal CLI runs accept either `VT_API_KEY` or the native `VTCLI_APIKEY` stored secret, and the app passes the value to `vt` as `VTCLI_APIKEY`.
 
 **Limits:** stored values are replace-only. The app does not reveal or copy a saved secret back out of the vault.
 
@@ -760,7 +761,7 @@ commands:
 
 Deny matching has a few extra rules worth calling out:
 
-- Denies match a flag anywhere in the command, not just immediately after the tool (`nmap -sT -sU 10.0.0.1` is still caught by `!nmap -sU`).
+- Denies match a flag anywhere in the command, not just immediately after the tool (`nmap -sT -sU 10.0.0.1` is still caught by `!nmap -sU`). Long flags also match attached values, so `!tool --api-key` catches `tool --api-key=value`.
 - Flag names are case-sensitive so you can deny `-K` without also denying `-k`.
 - The `/dev/null` exception applies to common metadata-capture patterns:
 

@@ -48,6 +48,7 @@ class VirusTotalProvider(Provider):
         super().__init__(
             name="virustotal",
             secret_env="VT_API_KEY",
+            secret_env_aliases=("VTCLI_APIKEY",),
             cache_scopes={"domain": "domain", "hash": "file"},
             **kwargs,
         )
