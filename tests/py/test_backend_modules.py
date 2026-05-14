@@ -64,6 +64,7 @@ from services.history.permalinks import (
     _prompt_echo_text,
 )
 from core.output_signals import OutputSignalClassifier, classify_line, command_root, extract_entities, extract_target
+from core.redaction import RAW_ONLY_INTEL_PLACEHOLDER, omit_raw_only_line_entries
 from services.runs.output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_entries, load_full_output_lines
 from services.workspace.files import (
     InvalidWorkspacePath, WorkspaceDisabled, WorkspacePermissionDenied, WorkspaceQuotaExceeded,
@@ -3875,6 +3876,39 @@ class TestPtyTerminalCapture:
         assert pty_service._terminal_history_line_limit(0) == 10000
         assert pty_service._terminal_history_line_limit(10) == 2000
         assert pty_service._terminal_history_line_limit(100000) == 10000
+
+
+# ── raw-only share/export redaction ───────────────────────────────────────────
+
+class TestRawOnlyRedaction:
+    def test_omits_intel_line_groups_with_placeholder(self):
+        lines = [
+            {"text": "Shodan", "cls": "", "command_root": "intel", "tsC": "10:00:01", "tsE": "+0.1s"},
+            {"text": "ports: 80, 443", "cls": "", "command_root": "intel", "tsC": "10:00:02", "tsE": "+0.2s"},
+            {"text": "[process exited with code 0]", "cls": "exit-ok"},
+        ]
+
+        omitted = omit_raw_only_line_entries(lines)
+
+        assert omitted == [
+            {
+                "text": RAW_ONLY_INTEL_PLACEHOLDER,
+                "cls": "notice",
+                "raw_only": True,
+                "command_root": "intel",
+                "tsC": "10:00:01",
+                "tsE": "+0.1s",
+            },
+            {"text": "[process exited with code 0]", "cls": "exit-ok"},
+        ]
+
+    def test_preserves_non_intel_entries(self):
+        lines = [
+            {"text": "host darklab.sh has address 104.21.4.35", "cls": "", "command_root": "host"},
+            "plain legacy line",
+        ]
+
+        assert omit_raw_only_line_entries(lines) == lines
 
 
 # ── _format_retention ─────────────────────────────────────────────────────────

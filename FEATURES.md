@@ -398,7 +398,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 - The same `save ▾` dropdown is available on the desktop HUD bar, the permalink page header, and the mobile menu, so the export experience is consistent across all surfaces.
 - The browser-rendered parity target is permalink/share page ↔ saved HTML. PDF is intentionally treated as a best-effort renderer against that same browser baseline rather than a separately styled surface.
 
-**Limits:** local exports (txt, html, pdf) produce unredacted output — they show the true command output as it appeared in the terminal. Redaction is scoped exclusively to the permalink share flow.
+**Limits:** local text exports produce unredacted output. Local HTML/PDF exports also stay unredacted, except for raw-only app-native intel response bodies, which are replaced with an omission notice so provider data does not leave the browser as styled share/export content.
 
 **Configuration:** none — export formats and filename shape are not user-tunable.
 
@@ -531,10 +531,11 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 - When creating a share snapshot, the shell can prompt whether to share raw or redacted output.
 - A built-in redaction baseline masks common secrets and infrastructure details; operators can append custom regex rules on top.
+- App-native `intel` response bodies are raw-only for sharing: snapshot payloads replace those lines with `Intel data omitted from share` even when the user chooses raw sharing.
 - Once a raw/redacted choice is saved as the persistent default in the [Options modal](#options-modal), subsequent share actions skip the prompt and reuse that choice — whether sharing is triggered from the prompt flow or directly from the Options modal.
 - Redaction applies only to the snapshot payload; the stored run history is never modified.
 
-**Limits:** local exports (txt, html, pdf) from a tab are not redacted — redaction is scoped exclusively to the share-permalink flow.
+**Limits:** local text exports from a tab are not redacted. Local HTML/PDF exports follow the same raw-only intel omission rule as share pages, but ordinary regex redaction is scoped exclusively to the share-permalink flow.
 
 **Configuration:** baseline rules are built in; custom regex rules extend them. The raw-vs-redacted default is stored in the Options modal.
 

@@ -34,6 +34,10 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Why:** the upcoming entity-first triage surfaces need reliable public IP, hostname, hash, and CVE hints without asking the browser or later jobs to re-parse raw transcripts.
   - **What:** extended the backend output classifier to extract public IPs, hostnames, MD5/SHA1/SHA256 hashes, and CVE IDs with basic false-positive guardrails, then persisted those `entities` records through live SSE payloads, history previews, full-output artifacts, restored tabs, and tab-session snapshots.
   - **Tests:** added backend coverage for entity extraction, private-IP handling, built-in exclusion, and artifact round trips with entity metadata.
+- **Raw-only intel share/export handling** — app-native intel response bodies are now omitted from share snapshots and styled local exports.
+  - **Why:** provider intel can include third-party data that is useful in the live terminal but should not accidentally leave the session in share pages or styled exports.
+  - **What:** added a shared raw-only omission helper that replaces `intel` output groups with `Intel data omitted from share` in snapshot payloads, public non-owner run permalink views, local HTML exports, and local PDF exports while leaving stored run history and text export output intact.
+  - **Tests:** added backend and browser coverage for raw-share snapshots, public non-owner run permalinks, redaction helper grouping, HTML export omission, and PDF export omission.
 - **Project workspace** — Runs, targets, findings, artifacts, notes, and evidence packages can now be organized around an active project from both the shell and the Projects modal.
   - **Why:** project/case work needs a shared relationship model so UI features can link runs and surface their artifacts, findings, and evidence packages consistently.
   - **What:**

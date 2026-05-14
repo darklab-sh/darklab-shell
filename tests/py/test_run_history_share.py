@@ -3772,6 +3772,53 @@ class TestHistoryIsolation:
                 conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
                 conn.commit()
 
+    def test_public_run_permalink_omits_intel_output_for_non_owner(self):
+        client = get_client()
+        run_id = f"intel-run-{uuid.uuid4()}"
+        output_entries = [
+            {"text": "Shodan", "cls": "", "command_root": "intel"},
+            {"text": "ports: 53, 443", "cls": "", "command_root": "intel"},
+            {"text": "[process exited with code 0]", "cls": "exit-ok"},
+        ]
+
+        try:
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, command, started, finished, exit_code, output, output_preview, output_line_count) "
+                    "VALUES (?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?)",
+                    (
+                        run_id,
+                        "owner-session",
+                        "intel ip 8.8.8.8",
+                        0,
+                        json.dumps(output_entries),
+                        json.dumps(output_entries),
+                        len(output_entries),
+                    ),
+                )
+                conn.commit()
+
+            owner_resp = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": "owner-session"})
+            owner_data = json.loads(owner_resp.data)
+            assert [entry["text"] for entry in owner_data["output_entries"]] == [
+                "Shodan",
+                "ports: 53, 443",
+                "[process exited with code 0]",
+            ]
+
+            public_resp = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": "other-session"})
+            public_data = json.loads(public_resp.data)
+            assert [entry["text"] for entry in public_data["output_entries"]] == [
+                "Intel data omitted from share",
+                "[process exited with code 0]",
+            ]
+            assert "ports: 53, 443" not in json.dumps(public_data)
+        finally:
+            with db_connect() as conn:
+                conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+                conn.commit()
+
 
 # ── /share ────────────────────────────────────────────────────────────────────
 
@@ -3806,3 +3853,35 @@ class TestShareRoundTrip:
         assert data["label"] == "test snapshot"
         assert data["content"] == payload["content"]
         assert data["session_id"] == "share-session"
+
+    def test_share_omits_intel_output_even_when_raw_requested(self):
+        client = get_client()
+        payload = {
+            "label": "intel snapshot",
+            "apply_redaction": False,
+            "content": [
+                {"text": "anon@darklab.sh:/ $ intel ip 8.8.8.8", "cls": "prompt-echo"},
+                {"text": "Shodan", "cls": "", "command_root": "intel", "tsC": "10:00:01", "tsE": "+0.1s"},
+                {"text": "ports: 53, 443", "cls": "", "command_root": "intel", "tsC": "10:00:02", "tsE": "+0.2s"},
+                {"text": "[process exited with code 0]", "cls": "exit-ok"},
+            ],
+        }
+
+        resp = client.post("/share", json=payload, headers={"X-Session-ID": "share-session"})
+        assert resp.status_code == 200
+        created = json.loads(resp.data)
+
+        fetch = client.get(f"/share/{created['id']}?json")
+        assert fetch.status_code == 200
+        data = json.loads(fetch.data)
+
+        content = data["content"]
+        assert content[0]["cls"] == "prompt-echo"
+        assert content[1]["text"] == "Intel data omitted from share"
+        assert content[1]["raw_only"] is True
+        assert content[2]["cls"] == "exit-ok"
+        assert "ports: 53, 443" not in json.dumps(content)
+
+        html = client.get(f"/share/{created['id']}").get_data(as_text=True)
+        assert "Intel data omitted from share" in html
+        assert "ports: 53, 443" not in html

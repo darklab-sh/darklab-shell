@@ -78,6 +78,7 @@ def normalize_redaction_rules(raw_rules):
         })
     return normalized
 
+
 def _python_re_flags(flags: str) -> int:
     compiled = 0
     if "i" in flags:
@@ -88,6 +89,46 @@ def _python_re_flags(flags: str) -> int:
 
 
 BUILTIN_SHARE_REDACTION_RULES = normalize_redaction_rules(_RAW_BUILTIN_SHARE_REDACTION_RULES)
+RAW_ONLY_INTEL_PLACEHOLDER = "Intel data omitted from share"
+
+
+def _is_intel_output_entry(item) -> bool:
+    return isinstance(item, dict) and str(item.get("command_root", "")).strip().lower() == "intel"
+
+
+def _raw_only_placeholder_entry(source: dict | None = None) -> dict[str, object]:
+    source = source or {}
+    entry: dict[str, object] = {
+        "text": RAW_ONLY_INTEL_PLACEHOLDER,
+        "cls": "notice",
+        "raw_only": True,
+        "command_root": "intel",
+    }
+    if isinstance(source.get("tsC"), str):
+        entry["tsC"] = source["tsC"]
+    if isinstance(source.get("tsE"), str):
+        entry["tsE"] = source["tsE"]
+    if isinstance(source.get("line_number"), int):
+        entry["line_number"] = source["line_number"]
+    return entry
+
+
+def omit_raw_only_line_entries(entries):
+    """Replace share/export-only-sensitive transcript groups with placeholders."""
+    omitted = []
+    in_intel_group = False
+    for item in entries or ():
+        if _is_intel_output_entry(item):
+            if not in_intel_group:
+                omitted.append(_raw_only_placeholder_entry(item))
+                in_intel_group = True
+            continue
+        in_intel_group = False
+        if isinstance(item, str):
+            omitted.append(item)
+        elif isinstance(item, dict):
+            omitted.append(dict(item))
+    return omitted
 
 
 def apply_redaction_rules(text, rules):

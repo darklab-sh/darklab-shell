@@ -131,6 +131,8 @@ Provider responses are normalized through `app/services/intel/schema.py` before 
 
 The built-in refuses private, loopback, and other non-public IP addresses by default because passive-intel providers cannot meaningfully classify them. Users can pass `--include-private` when they intentionally want to send that address to configured providers.
 
+Intel response bodies are raw-only outside the live terminal. Snapshot shares, public non-owner run permalinks, and local HTML/PDF exports replace app-native `intel` output groups with `Intel data omitted from share`; saved text exports and owner history restores keep the original transcript.
+
 External command output is also scanned for reusable entity hints as it streams. Public IPs, hostnames, MD5/SHA1/SHA256 hashes, and CVE IDs are attached to the same per-line metadata record as findings/warnings/errors/summaries. The metadata is stored with history previews and full-output artifacts so later triage surfaces can use those entities without making the browser re-parse raw transcripts.
 
 ---

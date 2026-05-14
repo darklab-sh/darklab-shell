@@ -1326,6 +1326,50 @@ describe('tabs helpers', () => {
     delete window.ExportHtmlUtils
   })
 
+  it('exportTabHtml omits raw-only intel output', async () => {
+    window.ExportHtmlUtils = {
+      escapeExportHtml: (s) => s,
+      renderExportPromptEcho: (s) => s,
+      normalizeExportTranscriptLines: (lines) => lines,
+      buildExportDocumentModel: ({ appName, title, label, createdText, runMeta, rawLines }) => ({
+        appName,
+        title,
+        metaLine: `${label} · ${createdText}`,
+        runMeta,
+        rawLines,
+      }),
+      buildExportMetaLine: ({ label, createdText }) => `${label} · ${createdText}`,
+      fetchVendorFontFacesCss: () => Promise.resolve(''),
+      fetchTerminalExportCss: () => Promise.resolve(''),
+      buildExportLinesHtml: (lines) => ({ linesHtml: lines.map(l => l.text).join('\n'), prefixWidth: 0 }),
+      buildTerminalExportHtml: ({ linesHtml }) => linesHtml,
+      exportTimestamp: () => '2026-01-01-00-00-00',
+    }
+    let savedBlob = null
+    const { createTab, exportTabHtml, _getTabs } = loadTabsFns({
+      urlImpl: {
+        createObjectURL: (blob) => {
+          savedBlob = blob
+          return 'blob:mock'
+        },
+        revokeObjectURL: () => {},
+      },
+    })
+    const id = createTab('intel ip 8.8.8.8')
+    _getTabs()[0].rawLines.push(
+      { text: 'Shodan', cls: '', command_root: 'intel', tsC: '', tsE: '' },
+      { text: 'ports: 53, 443', cls: '', command_root: 'intel', tsC: '', tsE: '' },
+      { text: '[process exited with code 0]', cls: 'exit-ok', tsC: '', tsE: '' },
+    )
+
+    await exportTabHtml(id)
+
+    const html = await savedBlob.text()
+    expect(html).toContain('Intel data omitted from share')
+    expect(html).not.toContain('ports: 53, 443')
+    delete window.ExportHtmlUtils
+  })
+
   it('exportTabHtml shows a toast when the tab has no lines', async () => {
     window.ExportHtmlUtils = {
       buildExportDocumentModel: ({ appName, title, label, createdText, runMeta, rawLines }) => ({
@@ -1380,6 +1424,44 @@ describe('tabs helpers', () => {
     exportTabPdf(id)
 
     expect(document.getElementById('permalink-toast').textContent).toBe('PDF library not loaded')
+  })
+
+  it('exportTabPdf omits raw-only intel output', async () => {
+    const captured = {}
+    window.ExportHtmlUtils = {
+      normalizeExportTranscriptLines: (lines) => lines,
+      buildExportDocumentModel: ({ appName, title, label, createdText, runMeta, rawLines }) => ({
+        appName,
+        title,
+        metaLine: `${label} · ${createdText}`,
+        runMeta,
+        rawLines,
+      }),
+    }
+    window.ExportPdfUtils = {
+      buildTerminalExportPdf: vi.fn((args) => {
+        captured.rawLines = args.rawLines
+        return Promise.resolve({ save: vi.fn() })
+      }),
+    }
+    window.jspdf = { jsPDF: vi.fn() }
+    const { createTab, exportTabPdf, _getTabs } = loadTabsFns()
+    const id = createTab('intel ip 8.8.8.8')
+    _getTabs()[0].rawLines.push(
+      { text: 'GreyNoise', cls: '', command_root: 'intel', tsC: '', tsE: '' },
+      { text: 'classification: benign', cls: '', command_root: 'intel', tsC: '', tsE: '' },
+      { text: '[process exited with code 0]', cls: 'exit-ok', tsC: '', tsE: '' },
+    )
+
+    await exportTabPdf(id)
+
+    expect(captured.rawLines.map(line => line.text)).toEqual([
+      'Intel data omitted from share',
+      '[process exited with code 0]',
+    ])
+    delete window.ExportHtmlUtils
+    delete window.ExportPdfUtils
+    delete window.jspdf
   })
 
   it('permalinkTab applies configured redaction rules before creating a snapshot', async () => {

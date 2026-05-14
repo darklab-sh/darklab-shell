@@ -55,6 +55,43 @@ function redactLineEntries(entries, rules) {
     .filter(Boolean);
 }
 
+const RAW_ONLY_INTEL_PLACEHOLDER = 'Intel data omitted from share';
+
+function _isRawOnlyIntelEntry(item) {
+  return !!(item && typeof item === 'object' && String(item.command_root || '').trim().toLowerCase() === 'intel');
+}
+
+function _rawOnlyPlaceholderEntry(source = {}) {
+  const entry = {
+    text: RAW_ONLY_INTEL_PLACEHOLDER,
+    cls: 'notice',
+    raw_only: true,
+    command_root: 'intel',
+  };
+  if (typeof source.tsC === 'string') entry.tsC = source.tsC;
+  if (typeof source.tsE === 'string') entry.tsE = source.tsE;
+  if (Number.isInteger(source.line_number)) entry.line_number = source.line_number;
+  return entry;
+}
+
+function omitRawOnlyLineEntries(entries) {
+  const omitted = [];
+  let inIntelGroup = false;
+  for (const item of Array.isArray(entries) ? entries : []) {
+    if (_isRawOnlyIntelEntry(item)) {
+      if (!inIntelGroup) {
+        omitted.push(_rawOnlyPlaceholderEntry(item));
+        inIntelGroup = true;
+      }
+      continue;
+    }
+    inIntelGroup = false;
+    if (typeof item === 'string') omitted.push(item);
+    else if (item && typeof item === 'object') omitted.push({ ...item });
+  }
+  return omitted;
+}
+
 // Render a small Markdown subset for MOTD: **bold**, `code`, [text](url), newlines.
 // escapeHtml is applied first to prevent XSS, then patterns are applied so the
 // operator notice stays useful without needing a full Markdown parser.

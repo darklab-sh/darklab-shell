@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,717
+- behavior tests: 2,723
 - docs/inventory meta-tests: 32
-- `pytest`: 1376 (1344 behavior + 32 meta)
-- `vitest`: 1124
+- `pytest`: 1380 (1348 behavior + 32 meta)
+- `vitest`: 1126
 - `playwright`: 249
-- total: 2,749
+- total: 2,755
 
 This document is organized in two parts:
 
@@ -548,6 +548,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPtyTerminalCapture.test_terminal_capture_falls_back_after_first_feed_error` | Verifies that PTY capture logs one pyte feed failure and falls back to plain-text capture for later chunks. |
 | `TestPtyTerminalCapture.test_terminal_capture_fallback_treats_carriage_return_as_overwrite` | Verifies that fallback PTY capture treats carriage-return progress updates as overwrites instead of appending duplicate status lines. |
 | `TestPtyTerminalCapture.test_terminal_history_line_limit_is_bounded` | Verifies that PTY capture history uses a sensible default, floor, and ceiling around `max_output_lines`. |
+| `TestRawOnlyRedaction.test_omits_intel_line_groups_with_placeholder` | Verifies that raw-only intel output groups are replaced by one share/export placeholder. |
+| `TestRawOnlyRedaction.test_preserves_non_intel_entries` | Verifies that non-intel lines are not changed by raw-only omission. |
 | `TestFormatRetention.test_zero_returns_unlimited` | Checks zero returns unlimited handling. |
 | `TestFormatRetention.test_365_returns_one_year` | Checks that 365 returns one year. |
 | `TestFormatRetention.test_730_returns_two_years` | Checks that 730 returns two years. |
@@ -1394,7 +1396,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunOutputArtifacts.test_clear_history_removes_output_artifacts_for_session` | Checks that clear history removes output artifacts for session. |
 | `TestHistoryIsolation.test_history_only_returns_runs_for_current_session` | Checks that history only returns runs for current session. |
 | `TestHistoryIsolation.test_delete_run_only_deletes_for_matching_session` | Checks that delete run only deletes for matching session. |
+| `TestHistoryIsolation.test_public_run_permalink_omits_intel_output_for_non_owner` | Verifies that public non-owner run permalink JSON omits app-native intel response bodies. |
 | `TestShareRoundTrip.test_share_json_roundtrip_preserves_structured_content` | Checks that share JSON roundtrip preserves structured content. |
+| `TestShareRoundTrip.test_share_omits_intel_output_even_when_raw_requested` | Verifies that raw snapshot sharing omits app-native intel response bodies from JSON and HTML. |
 
 #### `test_session_routes.py`
 
@@ -2524,10 +2528,12 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `saveTab shows a toast when there is only welcome output` | Verifies that saveTab shows a toast when there is only welcome output. |
 | `saveTab does not apply redaction rules to exported text` | Verifies that saveTab does not apply redaction rules to exported text. |
 | `exportTabHtml does not apply redaction rules to rendered HTML output` | Verifies that exportTabHtml does not apply redaction rules to rendered HTML output. |
+| `exportTabHtml omits raw-only intel output` | Verifies that styled HTML export replaces app-native intel body lines with the raw-only placeholder. |
 | `exportTabHtml shows a toast when the tab has no lines` | Verifies that exportTabHtml shows a toast when the tab has no lines. |
 | `exportTabHtml shows a toast when ExportHtmlUtils is not loaded` | Verifies that exportTabHtml shows a toast when ExportHtmlUtils is not loaded. |
 | `exportTabPdf shows a toast when the tab has no lines` | Verifies that exportTabPdf shows a toast when the tab has no lines. |
 | `exportTabPdf shows a toast when jsPDF is not loaded` | Verifies that exportTabPdf shows a toast when jsPDF is not loaded. |
+| `exportTabPdf omits raw-only intel output` | Verifies that PDF export receives the raw-only placeholder instead of app-native intel body lines. |
 | `permalinkTab applies configured redaction rules before creating a snapshot` | Verifies that permalinkTab applies configured redaction rules before creating a snapshot. |
 | `startTabRename updates scroll buttons when the strip begins overflowing during edit` | Verifies that startTabRename updates scroll buttons when the strip begins overflowing during edit. |
 | `refocuses the terminal input after clicking the left tab scroll button` | Verifies that refocuses the terminal input after clicking the left tab scroll button. |

@@ -28,7 +28,7 @@ from services.history.permalinks import _format_duration, _permalink_error_page,
 from core.process import active_runs_for_session
 from services.projects.contracts import BULK_AUDIT_FAILURE_LIMIT, MAX_BULK_RUN_ACTION_ITEMS, MAX_ENTITY_ID_LEN
 from services.projects.workspace import ProjectWorkspaceError, compare_project_runs
-from core.redaction import redact_line_entries
+from core.redaction import omit_raw_only_line_entries, redact_line_entries
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, builtin_command_roots_for_storage
 from services.runs.output_store import load_full_output_entries
 
@@ -1437,6 +1437,14 @@ def get_run(run_id):
         findings_by_run = _run_findings_by_run(conn, [run_id]) if include_private_metadata else {}
         labels_by_run = _run_labels_by_run(conn, [run_id]) if include_private_metadata else {}
         notes_by_run = _run_notes_by_run(conn, [run_id]) if include_private_metadata else {}
+    if not include_private_metadata:
+        run["output_entries"] = omit_raw_only_line_entries(run["output_entries"])
+        run["output"] = [
+            str(entry.get("text", "")) if isinstance(entry, dict) else str(entry)
+            for entry in run["output_entries"]
+        ]
+        run["output_preview"] = json.dumps(run["output_entries"])
+        run["output_search_text"] = "\n".join(run["output"])
     run["artifacts"] = artifacts_by_run.get(str(run_id), [])
     run["artifact_count"] = len(run["artifacts"])
     run["findings"] = findings_by_run.get(str(run_id), [])
@@ -1681,6 +1689,7 @@ def save_share():
         if "cls" in item and not isinstance(item["cls"], str):
             return jsonify({"error": "Content objects must use string cls values"}), 400
     label = label.strip()
+    content = omit_raw_only_line_entries(content)
     if CFG.get("share_redaction_enabled") and apply_redaction:
         content = redact_line_entries(content, _config.get_share_redaction_rules(CFG))
     share_id = str(uuid.uuid4())

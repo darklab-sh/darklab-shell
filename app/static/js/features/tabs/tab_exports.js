@@ -115,8 +115,15 @@ function _normalizeTabTranscriptLines(lines, { stripTruncationNotices = false } 
     });
 }
 
-function _buildTabExportModel(tab, { createdText = null } = {}) {
+function _omitRawOnlyExportLines(lines) {
+  return typeof omitRawOnlyLineEntries === 'function'
+    ? omitRawOnlyLineEntries(lines)
+    : (Array.isArray(lines) ? lines : []);
+}
+
+function _buildTabExportModel(tab, { createdText = null, omitRawOnly = false } = {}) {
   const normalizedCreatedText = String(createdText || new Date().toLocaleString());
+  const rawLines = omitRawOnly ? _omitRawOnlyExportLines(tab && tab.rawLines) : (tab && tab.rawLines);
   if (window.ExportHtmlUtils && typeof ExportHtmlUtils.buildExportDocumentModel === 'function') {
     return ExportHtmlUtils.buildExportDocumentModel({
       appName: APP_CONFIG.app_name || 'darklab_shell',
@@ -126,13 +133,13 @@ function _buildTabExportModel(tab, { createdText = null } = {}) {
       runMeta: {
         exitCode: tab ? tab.exitCode : null,
         duration: null,
-        lines: `${_normalizeTabTranscriptLines(tab && tab.rawLines).length} lines`,
+        lines: `${_normalizeTabTranscriptLines(rawLines).length} lines`,
         version: APP_CONFIG.version || null,
       },
-      rawLines: tab && tab.rawLines,
+      rawLines,
     });
   }
-  const rawLines = _normalizeTabTranscriptLines(tab && tab.rawLines);
+  const normalizedRawLines = _normalizeTabTranscriptLines(rawLines);
   const appName = APP_CONFIG.app_name || 'darklab_shell';
   return {
     appName,
@@ -144,10 +151,10 @@ function _buildTabExportModel(tab, { createdText = null } = {}) {
     runMeta: {
       exitCode: tab ? tab.exitCode : null,
       duration: null,
-      lines: `${rawLines.length} lines`,
+      lines: `${normalizedRawLines.length} lines`,
       version: APP_CONFIG.version || null,
     },
-    rawLines,
+    rawLines: normalizedRawLines,
   };
 }
 
@@ -164,7 +171,7 @@ async function exportTabHtml(id) {
     return;
   }
   try {
-    const exportModel = _buildTabExportModel(t);
+    const exportModel = _buildTabExportModel(t, { omitRawOnly: true });
     const ansiRenderer = typeof createAnsiUpRenderer === 'function' ? createAnsiUpRenderer() : null;
     const { linesHtml, prefixWidth } = ExportHtmlUtils.buildExportLinesHtml(exportModel.rawLines, {
       getPrefix: (line, i) => _exportPrefix(line, i),
@@ -207,7 +214,7 @@ async function exportTabPdf(id) {
   }
   try {
     const { jsPDF } = window.jspdf;
-    const exportModel = _buildTabExportModel(t);
+    const exportModel = _buildTabExportModel(t, { omitRawOnly: true });
     const ansiRenderer = typeof createAnsiUpRenderer === 'function' ? createAnsiUpRenderer() : null;
     const doc = await ExportPdfUtils.buildTerminalExportPdf({
       jsPDF,

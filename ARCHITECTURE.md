@@ -229,7 +229,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/history/compare/lines` | Returns bounded filtered-output slices for lazy expansion of folded comparison hunks, using `left`/`right` run ids, `side`, `start`/`end`, and optional `project_id` scoping. |
 | `GET` | `/history/<run_id>` | Serves an implicit-bearer styled run permalink, or raw JSON with `?json`; uses full-output artifacts when available unless `?preview=1` is set. |
 | `DELETE` | `/history/<run_id>` | Deletes one current-session run and its matching full-output artifact. |
-| `POST` | `/share` | Saves a tab snapshot, optionally applies share redaction, and returns a snapshot permalink URL. |
+| `POST` | `/share` | Saves a tab snapshot, omits raw-only intel response bodies, optionally applies share redaction, and returns a snapshot permalink URL. |
 | `POST` | `/share/bulk-delete` | Deletes selected current-session snapshot permalinks, returning per-snapshot results without failing the whole request. |
 | `GET` | `/share/<share_id>` | Serves a styled snapshot permalink, or raw JSON with `?json`. |
 | `DELETE` | `/share/<share_id>` | Deletes one current-session snapshot permalink. |
@@ -1253,12 +1253,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,717
+- behavior tests: 2,723
 - docs/inventory meta-tests: 32
-- `pytest`: 1376 (1344 behavior + 32 meta)
-- `vitest`: 1124
+- `pytest`: 1380 (1348 behavior + 32 meta)
+- `vitest`: 1126
 - `playwright`: 249
-- total: 2,749
+- total: 2,755
 
 ### Testing Architecture
 
