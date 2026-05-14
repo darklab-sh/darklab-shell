@@ -481,6 +481,17 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── history/
 │   │   │   ├── __init__.py     # History service package marker
 │   │   │   └── permalinks.py   # Flask context/render helpers for /history/<id> and /share/<id>
+│   │   ├── intel/
+│   │   │   ├── __init__.py     # External intel service package marker
+│   │   │   ├── audit.py        # Structured audit events for external intel provider lookups
+│   │   │   ├── base.py         # Provider base classes, result objects, and provider exceptions
+│   │   │   ├── cache.py        # Redis-backed normalized intel response and quota backoff cache helpers
+│   │   │   ├── canonical.py    # Canonical IP, domain, URL, hash, and CVE key helpers
+│   │   │   ├── greynoise.py    # GreyNoise provider normalization
+│   │   │   ├── rate_limiter.py # Per-session provider token-bucket helpers
+│   │   │   ├── schema.py       # Normalized provider response shapes
+│   │   │   ├── shodan.py       # Shodan provider normalization
+│   │   │   └── virustotal.py   # VirusTotal provider normalization
 │   │   ├── projects/
 │   │   │   ├── __init__.py     # Project service package marker
 │   │   │   ├── contracts.py    # Shared project workspace limits, allowed values, and exception classes

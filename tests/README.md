@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,698
+- behavior tests: 2,706
 - docs/inventory meta-tests: 32
-- `pytest`: 1357 (1325 behavior + 32 meta)
+- `pytest`: 1365 (1333 behavior + 32 meta)
 - `vitest`: 1124
 - `playwright`: 249
-- total: 2,730
+- total: 2,738
 
 This document is organized in two parts:
 
@@ -390,6 +390,14 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestLoadConfig.test_resolve_data_dir_falls_back_to_tmp_when_data_is_not_writable` | Verifies that auto-detection falls back to `/tmp` when image-created `/data` is not writable. |
 | `TestLoadConfig.test_resolve_data_dir_rejects_unwritable_configured_data_dir` | Verifies that an explicit but unwritable `data_dir` fails loudly instead of silently falling back. |
 | `TestLoadConfig.test_workspace_root_env_warning_only_logs_on_mismatch` | Verifies that startup warns when `WORKSPACE_ROOT` and configured `workspace_root` diverge, without warning for matching paths. |
+| `TestIntelServices.test_canonical_entity_normalizes_supported_values` | Verifies canonical IP, domain, URL, hash, and CVE values for external intel lookups. |
+| `TestIntelServices.test_canonical_entity_rejects_invalid_values` | Verifies unsupported or malformed intel entities fail before provider lookup. |
+| `TestIntelServices.test_schema_response_tracks_provider_data_and_cache_state` | Verifies normalized provider responses include empty peers, data flags, and cache-hit state. |
+| `TestIntelServices.test_cache_round_trips_normalized_payload_with_provider_ttl` | Verifies normalized intel cache storage, provider TTL overrides, and quota-exhausted backoff state. |
+| `TestIntelServices.test_rate_limiter_consumes_bucket_and_reports_retry` | Verifies per-session provider token buckets consume quota and report retry timing. |
+| `TestIntelServices.test_audit_event_omits_sensitive_provider_fields` | Verifies intel audit events include lookup metadata without API keys or raw provider bodies. |
+| `TestIntelServices.test_provider_modules_read_secret_at_call_time_and_normalize_payloads` | Verifies provider modules read vault-backed secrets at lookup time and return normalized payloads. |
+| `TestIntelServices.test_provider_missing_secret_blocks_lookup_before_client_call` | Verifies provider calls stop before client access when the required secret is missing. |
 | `TestSessionWorkspace.test_disabled_workspace_rejects_operations` | Verifies that workspace helpers reject operations while the feature is disabled. |
 | `TestSessionWorkspace.test_session_workspace_uses_hashed_session_directory` | Verifies that session workspace directories use hashed session names instead of raw session identifiers. |
 | `TestSessionWorkspace.test_session_workspace_logs_chmod_failures_without_blocking_creation` | Verifies that workspace chmod repair failures are logged while keeping best-effort workspace creation available. |

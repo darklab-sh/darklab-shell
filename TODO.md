@@ -129,19 +129,10 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Dockerfile CLI installation should happen after the existing Python requirements install and before user creation/capability setup, so vendor CLIs land in `/usr/local/bin` and are visible to the scanner-user PATH.
   - `app/core/redaction.py` currently redacts line text for share/export flows only. Phase 5 should extend the line-entry model with an intel raw-only marker so shares can replace whole intel response sections with an omission placeholder rather than trying to regex-redact provider JSON.
   - Config defaults are in place for provider cache TTLs, rate-limit buckets, and VirusTotal quota negative caching. Phase 1 should consume the checked-in keys instead of hardcoding vendor limits in provider modules.
-- **Phase 1 - Provider abstraction**
-  - New `app/services/intel/` service:
-    - `base.py` — `Provider` ABC with `lookup_ip`, `lookup_domain`, `lookup_hash`, `lookup_cve`, `rate_limit`, `cache_ttl`.
-    - `canonical.py` — canonical entity keys if the Atlas canonicalizer is not available yet: lowercase IPv4/IPv6, IDN-normalized lowercase domains, lowercase algorithm-tagged hashes, and uppercase `CVE-YYYY-NNNNN`.
-    - `schema.py` — per-entity normalized response schemas:
-      - `ip`: `{providers: {shodan: {ports[], banners[], cves[], last_update}, greynoise: {classification, name, last_seen}}, summary: {has_intel, providers_with_data, cache_status}}`.
-      - `domain`: `{providers: {virustotal: {reputation, last_analysis_stats, recent_urls[], whois}}, summary: ...}`.
-      - `hash`: `{providers: {virustotal: {verdict, last_analysis_stats, type_description, tags[], names[]}}, summary: ...}`.
-    - `rate_limiter.py` — Redis token-bucket keyed by `(session_token, provider)`. Defaults: Shodan bucket 5/refill 1 per second; VirusTotal Public bucket 4/refill 1 every 15 seconds; GreyNoise Community bucket 50/refill 1 every 12,096 seconds. Keep the source-limit note beside each default in code, and allow all buckets/refills to be overridden from config. Include an optional stricter GreyNoise unauthenticated profile of 10/day.
-    - `cache.py` — Redis-backed `(provider, entity_type, canonical_entity_value)` cache. Results are normalized before caching so cache hits cannot leak raw response shapes. Default TTLs: Shodan IP 24h, Shodan host search 6h, VirusTotal domain 6h, VirusTotal file 24h, GreyNoise IP 1h; all overridable through `intel_cache_ttl_<provider>_<scope>` config keys.
-    - `audit.py` — emits one `INTEL_LOOKUP` per provider call, including cache hits, with `(session, run_id?, provider, entity_type, cache_hit, http_status)`. Never logs response bodies, API keys, or full entity lists. Future sidecar enrichment can batch audit rows if lookup volume becomes noisy.
-  - Provider modules `shodan.py`, `virustotal.py`, `greynoise.py`. Each reads its key from the vault at call time, never caches keys beyond the rate-limit window, and returns a provider-normalized payload.
-  - VirusTotal HTTP 429 handling stores a quota-exhausted provider state. If the provider exposes a reset time, negative-cache until the next UTC quota window; otherwise cache for several hours so repeated probes do not hammer the provider. Raw 429 bodies stay out of transcripts.
+- **Phase 1 - Provider abstraction (complete)**
+  - Added the `app/services/intel/` service with provider base classes, canonical entity helpers, normalized response schemas, per-session token buckets, normalized-response cache helpers, quota-exhausted backoff state, and structured `INTEL_LOOKUP` audit events.
+  - Added Shodan, VirusTotal, and GreyNoise provider modules that read vault-backed keys at lookup time and return provider-normalized payloads without caching secrets.
+  - Added backend coverage for canonicalization, schema shape, cache TTLs, quota backoff, token-bucket behavior, audit redaction, provider normalization, and missing-secret blocking.
 - **Phase 2 - CLI wrapper pass**
   - Install `shodan`, `vt-cli`, `greynoise` CLIs in the Dockerfile under the scanner-user PATH.
   - Register `commands.yaml` entries with allowed subcommands, allowed flags, and `requires_secrets`:

@@ -18,6 +18,10 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Why:** API-backed intel providers need tunable quota and cache behavior, especially because free/public tiers have different limits.
   - **What:** added server-side defaults and `config.yaml` documentation for Shodan, VirusTotal Public, and GreyNoise Community cache and rate-limit settings, plus a fallback negative-cache window for VirusTotal quota-exhausted responses.
   - **Tests:** extended config-loading coverage so the intel defaults stay present when local config overlays override unrelated settings.
+- **External intel provider foundation** — Shodan, VirusTotal, and GreyNoise now share a backend service layer for future API-backed intel commands.
+  - **Why:** provider lookups need consistent entity keys, caching, quota handling, audit behavior, and response shapes before the app adds user-facing intel commands.
+  - **What:** added `app/services/intel/` with provider base classes, IP/domain/URL/hash/CVE canonicalization, normalized response schemas, Redis-backed normalized-response cache helpers, per-session token buckets, VirusTotal quota backoff state, redacted `INTEL_LOOKUP` audit events, and provider-normalization modules that read vault-backed keys at lookup time without caching secret values.
+  - **Tests:** added backend coverage for canonicalization, schema shape, cache TTLs, quota backoff, token-bucket behavior, audit redaction, provider normalization, and missing-secret blocking.
 - **Project workspace** — Runs, targets, findings, artifacts, notes, and evidence packages can now be organized around an active project from both the shell and the Projects modal.
   - **Why:** project/case work needs a shared relationship model so UI features can link runs and surface their artifacts, findings, and evidence packages consistently.
   - **What:**

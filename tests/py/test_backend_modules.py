@@ -276,6 +276,234 @@ class TestLoadConfig:
         assert kwargs["extra"]["workspace_root_config"].endswith("/tmp/app-workspaces")
 
 
+class TestIntelServices:
+    def test_canonical_entity_normalizes_supported_values(self):
+        from services.intel import canonical
+
+        assert canonical.canonical_entity("ip", "2001:0db8::0001") == "2001:db8::1"
+        assert canonical.canonical_entity("domain", "BÜCHER.Example.") == "xn--bcher-kva.example"
+        assert canonical.canonical_entity("hash", "A" * 64) == f"sha256:{'a' * 64}"
+        assert canonical.canonical_entity("cve", "cve-2024-12345") == "CVE-2024-12345"
+        assert canonical.canonical_entity("url", "HTTPS://BÜCHER.Example/a b?q=one two") == (
+            "https://xn--bcher-kva.example/a%20b?q=one%20two"
+        )
+
+    def test_canonical_entity_rejects_invalid_values(self):
+        from services.intel import canonical
+
+        for entity_type, value in [
+            ("ip", "not-an-ip"),
+            ("domain", "not a domain"),
+            ("hash", "not-hex"),
+            ("cve", "2024-1234"),
+            ("url", "ftp://example.test/file"),
+        ]:
+            with pytest.raises(canonical.CanonicalizationError):
+                canonical.canonical_entity(entity_type, value)
+
+    def test_schema_response_tracks_provider_data_and_cache_state(self):
+        from services.intel import schema
+
+        empty = schema.empty_response("ip")
+        assert empty["summary"] == {
+            "has_intel": False,
+            "providers_with_data": [],
+            "cache_status": {},
+        }
+
+        enriched = schema.response_with_provider(
+            "ip",
+            "shodan",
+            {"ports": [443], "banners": [], "cves": [], "last_update": "2026-05-14"},
+            cache_hit=True,
+        )
+        assert enriched["providers"]["shodan"]["ports"] == [443]
+        assert enriched["providers"]["greynoise"] == {"classification": "", "name": "", "last_seen": ""}
+        assert enriched["summary"]["has_intel"] is True
+        assert enriched["summary"]["providers_with_data"] == ["shodan"]
+        assert enriched["summary"]["cache_status"] == {"shodan": "hit"}
+
+    def test_cache_round_trips_normalized_payload_with_provider_ttl(self):
+        from services.intel import cache
+
+        redis = process._FakeRedisClient()
+        payload = {"providers": {"shodan": {"ports": [80]}}, "summary": {"cache_status": {"shodan": "miss"}}}
+
+        assert cache.cache_ttl("shodan", "ip", cfg={"intel_cache_ttl_shodan_ip_seconds": 12}) == 12
+        cache.set_cached_response("shodan", "ip", "8.8.8.8", payload, ttl_seconds=12, redis_client=redis)
+
+        cached = cache.get_cached_response("SHODAN", "IP", "8.8.8.8", redis_client=redis)
+        assert cached == payload
+        assert cache.quota_negative_cache_ttl("virustotal", cfg={"intel_negative_cache_virustotal_quota_seconds": 44}) == 44
+
+        quota = cache.set_quota_exhausted("session-1", "virustotal", reset_at=200.0, redis_client=redis, now=100.0)
+        assert quota["expires_at"] == 200.0
+        cached_quota = cache.get_quota_exhausted("session-1", "VirusTotal", redis_client=redis)
+        assert cached_quota is not None
+        assert cached_quota["provider"] == "virustotal"
+
+    def test_rate_limiter_consumes_bucket_and_reports_retry(self):
+        from services.intel import rate_limiter
+
+        redis = process._FakeRedisClient()
+        cfg = {
+            "intel_rate_limit_shodan_bucket": 2,
+            "intel_rate_limit_shodan_refill_seconds": 10,
+        }
+
+        first = rate_limiter.check_rate_limit("session-1", "shodan", cfg=cfg, redis_client=redis, now=100.0)
+        second = rate_limiter.check_rate_limit("session-1", "shodan", cfg=cfg, redis_client=redis, now=100.0)
+        third = rate_limiter.check_rate_limit("session-1", "shodan", cfg=cfg, redis_client=redis, now=100.0)
+        refilled = rate_limiter.check_rate_limit("session-1", "shodan", cfg=cfg, redis_client=redis, now=110.0)
+
+        assert first.allowed is True
+        assert second.allowed is True
+        assert third.allowed is False
+        assert third.retry_after_seconds == 10
+        assert refilled.allowed is True
+        assert rate_limiter.check_rate_limit(
+            "session-1",
+            "greynoise",
+            profile="unauthenticated",
+            cfg={"intel_rate_limit_greynoise_unauthenticated_bucket": 1},
+            redis_client=process._FakeRedisClient(),
+            now=1.0,
+        ).allowed is True
+
+    def test_audit_event_omits_sensitive_provider_fields(self):
+        from services.intel import audit
+
+        with mock.patch.object(audit.log, "info") as info:
+            audit.emit_intel_lookup(
+                "tok_sensitive_session",
+                "Shodan",
+                "IP",
+                run_id="run-1",
+                cache_hit=True,
+                http_status=200,
+                api_key="secret",
+                response_body={"raw": "provider body"},
+                entity_count=1,
+            )
+
+        info.assert_called_once()
+        message, = info.call_args.args
+        payload = info.call_args.kwargs["extra"]
+        assert message == "INTEL_LOOKUP"
+        assert payload["session"] == "tok_sens********"
+        assert payload["provider"] == "shodan"
+        assert payload["entity_type"] == "ip"
+        assert payload["run_id"] == "run-1"
+        assert payload["http_status"] == 200
+        assert payload["cache_hit"] is True
+        assert payload["entity_count"] == 1
+        assert "api_key" not in payload
+        assert "response_body" not in payload
+
+    def test_provider_modules_read_secret_at_call_time_and_normalize_payloads(self):
+        from services.intel.greynoise import GreyNoiseProvider
+        from services.intel.shodan import ShodanProvider
+        from services.intel.virustotal import VirusTotalProvider
+
+        class FakeIntelClient:
+            last_status = 200
+
+            def __init__(self):
+                self.calls = []
+
+            def lookup_ip(self, value, *, api_key):
+                self.calls.append(("ip", value, api_key))
+                if api_key == "greynoise-key":
+                    return {"classification": "benign", "name": "resolver", "last_seen": "2026-05-14"}
+                return {
+                    "data": [{"port": 443, "transport": "tcp", "product": "nginx", "data": "HTTP"}],
+                    "vulns": {"cve-2024-12345": {}},
+                    "last_update": "2026-05-14T00:00:00Z",
+                }
+
+            def lookup_domain(self, value, *, api_key):
+                self.calls.append(("domain", value, api_key))
+                return {
+                    "data": {
+                        "attributes": {
+                            "reputation": 5,
+                            "last_analysis_stats": {"malicious": 0},
+                            "recent_urls": ["https://example.test/"],
+                            "whois": "registrar",
+                        },
+                    },
+                }
+
+            def lookup_hash(self, value, *, api_key):
+                self.calls.append(("hash", value, api_key))
+                return {
+                    "data": {
+                        "attributes": {
+                            "last_analysis_stats": {"malicious": 1},
+                            "type_description": "text",
+                            "tags": ["sample"],
+                            "names": ["payload.txt"],
+                        },
+                    },
+                }
+
+        secrets = {
+            ("session-1", "SHODAN_API_KEY"): "shodan-key",
+            ("session-1", "VT_API_KEY"): "vt-key",
+            ("session-1", "GREYNOISE_API_KEY"): "greynoise-key",
+        }
+
+        def getter(session, env):
+            return secrets.get((session, env))
+
+        client = FakeIntelClient()
+        shodan_provider = ShodanProvider(secret_getter=getter, client=client)
+
+        assert shodan_provider.cache_ttl("ip", cfg={"intel_cache_ttl_shodan_ip_seconds": 9}) == 9
+        assert shodan_provider.rate_limit(
+            "session-1",
+            cfg={"intel_rate_limit_shodan_bucket": 1},
+            redis_client=process._FakeRedisClient(),
+        ).allowed is True
+        shodan_result = shodan_provider.lookup_ip(
+            "8.8.8.8",
+            session_token="session-1",
+        )
+        vt_domain = VirusTotalProvider(secret_getter=getter, client=client).lookup_domain(
+            "Example.TEST.",
+            session_token="session-1",
+        )
+        vt_hash = VirusTotalProvider(secret_getter=getter, client=client).lookup_hash("A" * 64, session_token="session-1")
+        greynoise_result = GreyNoiseProvider(secret_getter=getter, client=client).lookup_ip(
+            "8.8.4.4",
+            session_token="session-1",
+        )
+
+        assert shodan_result.payload["providers"]["shodan"]["ports"] == [443]
+        assert shodan_result.payload["providers"]["shodan"]["cves"] == ["CVE-2024-12345"]
+        assert vt_domain.canonical_value == "example.test"
+        assert vt_domain.payload["providers"]["virustotal"]["reputation"] == 5
+        assert vt_hash.canonical_value == f"sha256:{'a' * 64}"
+        assert vt_hash.payload["providers"]["virustotal"]["verdict"] == "malicious"
+        assert greynoise_result.payload["providers"]["greynoise"]["classification"] == "benign"
+        assert ("ip", "8.8.8.8", "shodan-key") in client.calls
+        assert ("domain", "example.test", "vt-key") in client.calls
+        assert ("hash", "a" * 64, "vt-key") in client.calls
+        assert ("ip", "8.8.4.4", "greynoise-key") in client.calls
+
+    def test_provider_missing_secret_blocks_lookup_before_client_call(self):
+        from services.intel.base import ProviderMissingSecret
+        from services.intel.shodan import ShodanProvider
+
+        client = mock.Mock()
+        provider = ShodanProvider(secret_getter=lambda session, env: None, client=client)
+
+        with pytest.raises(ProviderMissingSecret):
+            provider.lookup_ip("8.8.8.8", session_token="session-1")
+
+        client.lookup_ip.assert_not_called()
+
+
 class TestSessionWorkspace:
     def _cfg(self, root, **overrides):
         cfg = {
