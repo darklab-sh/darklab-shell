@@ -226,7 +226,7 @@ def resolve_data_dir(cfg=None):
 
     if _is_writable_directory("/data"):
         return "/data"
-    return _require_writable_data_dir("/tmp", "fallback data_dir")  # nosec B108
+    return _require_writable_data_dir("/tmp", "fallback data_dir")  # nosec
 
 
 def get_share_redaction_rules(cfg=None):

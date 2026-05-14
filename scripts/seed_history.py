@@ -80,7 +80,7 @@ def _resolve_db_path() -> str:
         data_dir = resolve_data_dir()
     except Exception:  # noqa: BLE001
         data_dir = os.environ.get("APP_DATA_DIR") or (
-            "/data" if os.path.isdir("/data") else "/tmp"  # nosec B108
+            "/data" if os.path.isdir("/data") else "/tmp"
         )
     return os.path.join(data_dir, "history.db")
 

@@ -453,18 +453,18 @@ def _finding_target_ids_by_finding(conn, session_id, finding_ids, project_id=Non
     params = [session_id, *ids]
     if project_id:
         rows = conn.execute(
-            "SELECT ft.finding_id, ft.target_id "
+            "SELECT ft.finding_id, ft.target_id "  # nosec
             "FROM finding_targets ft "
             "JOIN project_targets t ON t.id = ft.target_id "
-            f"WHERE ft.session_id = ? AND ft.finding_id IN ({placeholders}) "  # nosec B608
+            f"WHERE ft.session_id = ? AND ft.finding_id IN ({placeholders}) "
             "AND t.project_id = ? "
             "ORDER BY ft.created ASC, ft.id ASC",
             [*params, project_id],
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT finding_id, target_id FROM finding_targets "
-            f"WHERE session_id = ? AND finding_id IN ({placeholders}) "  # nosec B608
+            "SELECT finding_id, target_id FROM finding_targets "  # nosec
+            f"WHERE session_id = ? AND finding_id IN ({placeholders}) "
             "ORDER BY created ASC, id ASC",
             params,
         ).fetchall()
@@ -923,9 +923,9 @@ def _package_run_rows(conn, session_id, run_ids):
         return []
     placeholders = ",".join("?" for _ in ids)
     rows = conn.execute(
-        "SELECT r.*, art.rel_path "
+        "SELECT r.*, art.rel_path "  # nosec
         "FROM runs r LEFT JOIN run_output_artifacts art ON art.run_id = r.id "
-        f"WHERE r.session_id = ? AND r.id IN ({placeholders})",  # nosec B608
+        f"WHERE r.session_id = ? AND r.id IN ({placeholders})",
         [session_id, *ids],
     ).fetchall()
     by_id = {str(row["id"]): dict(row) for row in rows}
@@ -1902,15 +1902,15 @@ def _package_metadata_rows(conn, session_id, table, targets):
         placeholders = ",".join("?" for _ in entity_ids)
         if table == "entity_labels":
             rows.extend(conn.execute(
-                "SELECT id, entity_type, entity_id, label, source, created "
-                f"FROM entity_labels WHERE session_id = ? AND entity_type = ? "  # nosec B608
+                "SELECT id, entity_type, entity_id, label, source, created "  # nosec
+                f"FROM entity_labels WHERE session_id = ? AND entity_type = ? "
                 f"AND entity_id IN ({placeholders}) ORDER BY entity_type ASC, entity_id ASC, label ASC",
                 [session_id, entity_type, *entity_ids],
             ).fetchall())
         elif table == "entity_notes":
             rows.extend(conn.execute(
-                "SELECT id, entity_type, entity_id, body, created, updated "
-                f"FROM entity_notes WHERE session_id = ? AND entity_type = ? "  # nosec B608
+                "SELECT id, entity_type, entity_id, body, created, updated "  # nosec
+                f"FROM entity_notes WHERE session_id = ? AND entity_type = ? "
                 f"AND entity_id IN ({placeholders}) ORDER BY entity_type ASC, entity_id ASC, updated ASC, id ASC",
                 [session_id, entity_type, *entity_ids],
             ).fetchall())
@@ -2127,7 +2127,7 @@ def _count_rows_for_ids(conn, table, column, ids):
         return 0
     placeholders = ",".join("?" for _ in values)
     row = conn.execute(
-        f"SELECT COUNT(*) AS count FROM {table} WHERE {column} IN ({placeholders})",  # nosec B608
+        f"SELECT COUNT(*) AS count FROM {table} WHERE {column} IN ({placeholders})",  # nosec
         values,
     ).fetchone()
     return int(row["count"] or 0) if row else 0
@@ -2154,7 +2154,7 @@ def get_project_summary(session_id, project_id):
             (project_id, session_id, RUN_KIND_EXTERNAL),
         ).fetchall()
         target_rows = conn.execute(
-            f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec B608
+            f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec
             "FROM project_targets WHERE project_id = ? AND review_state != 'dismissed' "
             "ORDER BY type ASC, value COLLATE NOCASE ASC",
             (project_id,),
@@ -2175,14 +2175,14 @@ def get_project_summary(session_id, project_id):
                 (project_id, session_id, RUN_KIND_EXTERNAL),
             ).fetchall()
             artifact_rows = conn.execute(
-                "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+                "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "  # nosec
                 "detected_by, content_type, preview_type, content_sha256, created "
-                f"FROM run_file_artifacts WHERE run_id IN ({placeholders}) "  # nosec B608
+                f"FROM run_file_artifacts WHERE run_id IN ({placeholders}) "
                 "ORDER BY created DESC, id DESC",
                 run_ids,
             ).fetchall()
             finding_rows = conn.execute(
-                f"SELECT id FROM findings WHERE run_id IN ({placeholders})",  # nosec B608
+                f"SELECT id FROM findings WHERE run_id IN ({placeholders})",  # nosec
                 run_ids,
             ).fetchall()
         artifact_ids = [row["id"] for row in artifact_rows]
@@ -2397,31 +2397,31 @@ def delete_project(session_id, project_id):
         if target_ids:
             placeholders = ",".join("?" for _ in target_ids)
             conn.execute(
-                "DELETE FROM finding_targets WHERE session_id = ? "
-                f"AND target_id IN ({placeholders})",  # nosec B608
+                "DELETE FROM finding_targets WHERE session_id = ? "  # nosec
+                f"AND target_id IN ({placeholders})",
                 [session_id, *target_ids],
             )
             _repair_primary_finding_targets(conn, session_id, target_ids)
             conn.execute(
-                "DELETE FROM entity_labels WHERE entity_type = 'target' "
-                f"AND entity_id IN ({placeholders})",  # nosec B608
+                "DELETE FROM entity_labels WHERE entity_type = 'target' "  # nosec
+                f"AND entity_id IN ({placeholders})",
                 target_ids,
             )
             conn.execute(
-                "DELETE FROM entity_notes WHERE entity_type = 'target' "
-                f"AND entity_id IN ({placeholders})",  # nosec B608
+                "DELETE FROM entity_notes WHERE entity_type = 'target' "  # nosec
+                f"AND entity_id IN ({placeholders})",
                 target_ids,
             )
         if package_ids:
             placeholders = ",".join("?" for _ in package_ids)
             conn.execute(
-                "DELETE FROM entity_labels WHERE entity_type = 'package' "
-                f"AND entity_id IN ({placeholders})",  # nosec B608
+                "DELETE FROM entity_labels WHERE entity_type = 'package' "  # nosec
+                f"AND entity_id IN ({placeholders})",
                 package_ids,
             )
             conn.execute(
-                "DELETE FROM entity_notes WHERE entity_type = 'package' "
-                f"AND entity_id IN ({placeholders})",  # nosec B608
+                "DELETE FROM entity_notes WHERE entity_type = 'package' "  # nosec
+                f"AND entity_id IN ({placeholders})",
                 package_ids,
             )
         conn.execute("DELETE FROM project_links WHERE project_id = ?", (project_id,))
@@ -3085,23 +3085,23 @@ def list_project_findings(session_id, project_id, filters=None):
         run_ids = _metadata_filter_values(filters, "run_id", MAX_ENTITY_ID_LEN)
         if run_ids:
             placeholders = ",".join("?" for _ in run_ids)
-            clauses.append(f"f.run_id IN ({placeholders})")  # nosec B608
+            clauses.append(f"f.run_id IN ({placeholders})")
             params.extend(run_ids)
         target_ids = _metadata_filter_values(filters, "target_id", MAX_ENTITY_ID_LEN)
         if target_ids:
             placeholders = ",".join("?" for _ in target_ids)
             target_count = conn.execute(
-                f"SELECT COUNT(*) AS count FROM project_targets WHERE project_id = ? AND id IN ({placeholders})",  # nosec B608
+                f"SELECT COUNT(*) AS count FROM project_targets WHERE project_id = ? AND id IN ({placeholders})",  # nosec
                 (project_id, *target_ids),
             ).fetchone()
             if not target_count or int(target_count["count"] or 0) != len(target_ids):
                 return []
             clauses.append(
-                "("
-                f"f.target_id IN ({placeholders}) OR EXISTS ("  # nosec B608
+                "("  # nosec
+                f"f.target_id IN ({placeholders}) OR EXISTS ("
                 "SELECT 1 FROM finding_targets ft "
                 "WHERE ft.session_id = f.session_id AND ft.finding_id = f.id "
-                f"AND ft.target_id IN ({placeholders})"  # nosec B608
+                f"AND ft.target_id IN ({placeholders})"
                 ")"
                 ")"
             )
@@ -3113,7 +3113,7 @@ def list_project_findings(session_id, project_id, filters=None):
                     "finding review_state must be new, reviewed, important, false_positive, or needs_followup"
                 )
             placeholders = ",".join("?" for _ in review_states)
-            clauses.append(f"f.review_state IN ({placeholders})")  # nosec B608
+            clauses.append(f"f.review_state IN ({placeholders})")
             params.extend(review_states)
         scope = _trim_text(filters.get("scope"), 64)
         if scope:
@@ -3127,10 +3127,10 @@ def list_project_findings(session_id, project_id, filters=None):
         if labels:
             placeholders = ",".join("?" for _ in labels)
             clauses.append(
-                "EXISTS ("
+                "EXISTS ("  # nosec
                 "SELECT 1 FROM entity_labels el "
                 "WHERE el.session_id = ? AND el.entity_type = 'finding' "
-                f"AND el.entity_id = f.id AND el.label IN ({placeholders})"  # nosec B608
+                f"AND el.entity_id = f.id AND el.label IN ({placeholders})"
                 ")"
             )
             params.extend([session_id, *labels])
@@ -3140,7 +3140,7 @@ def list_project_findings(session_id, project_id, filters=None):
                 raise ProjectWorkspaceError("note_state must be noted or unnoted")
             operator = "EXISTS" if note_state == "noted" else "NOT EXISTS"
             clauses.append(
-                f"{operator} ("  # nosec B608
+                f"{operator} ("  # nosec
                 "SELECT 1 FROM entity_notes note "
                 "WHERE note.session_id = ? AND note.entity_type = 'finding' "
                 "AND note.entity_id = f.id"
@@ -3148,13 +3148,13 @@ def list_project_findings(session_id, project_id, filters=None):
             )
             params.append(session_id)
         rows = conn.execute(
-            "SELECT f.id, f.session_id, f.run_id, f.target_id, f.scope, f.title, f.raw_line, "
+            "SELECT f.id, f.session_id, f.run_id, f.target_id, f.scope, f.title, f.raw_line, "  # nosec
             "f.line_number, f.severity, f.fingerprint, f.review_state, f.created, "
             "r.command AS run_command "
             "FROM project_links l "
             "JOIN runs r ON r.id = l.entity_id "
             "JOIN findings f ON f.run_id = r.id AND f.session_id = r.session_id "
-            f"WHERE {' AND '.join(clauses)} "  # nosec B608
+            f"WHERE {' AND '.join(clauses)} "
             "ORDER BY f.created DESC, f.id DESC",
             params,
         ).fetchall()
@@ -3207,16 +3207,16 @@ def _project_labeled_run_id(conn, session_id, project_id, label, excluded_run_id
     excluded_sql = ""
     if excluded:
         placeholders = ",".join("?" for _ in excluded)
-        excluded_sql = f"AND r.id NOT IN ({placeholders}) "  # nosec B608
+        excluded_sql = f"AND r.id NOT IN ({placeholders}) "
         params.extend(excluded)
     row = conn.execute(
-        "SELECT r.id "
+        "SELECT r.id "  # nosec
         "FROM project_links l "
         "JOIN runs r ON r.id = l.entity_id "
         "JOIN entity_labels el ON el.entity_type = 'run' AND el.entity_id = r.id "
         "WHERE l.project_id = ? AND l.entity_type = 'run' AND r.session_id = ? "
         "AND el.session_id = r.session_id AND el.label = ? "
-        f"{excluded_sql}"  # nosec B608
+        f"{excluded_sql}"
         "ORDER BY r.started DESC, l.created DESC LIMIT 1",
         params,
     ).fetchone()
@@ -4270,7 +4270,7 @@ def _project_bulk_result(statuses, run_id, status, *, reason=None):
 def _bulk_project_run_maps(conn, session_id, run_ids):
     placeholders = ",".join("?" for _ in run_ids)
     owned_rows = conn.execute(
-        f"SELECT id, command, run_kind FROM runs WHERE session_id = ? AND id IN ({placeholders})",  # nosec B608
+        f"SELECT id, command, run_kind FROM runs WHERE session_id = ? AND id IN ({placeholders})",  # nosec
         [session_id, *run_ids],
     ).fetchall()
     owned = {str(row["id"]) for row in owned_rows}
@@ -4307,9 +4307,9 @@ def link_project_entities(session_id, project_id, data):
         run_maps = _bulk_project_run_maps(conn, session_id, entity_ids)
         placeholders = ",".join("?" for _ in entity_ids)
         link_rows = conn.execute(
-            "SELECT id, project_id, entity_type, entity_id, source, created "
+            "SELECT id, project_id, entity_type, entity_id, source, created "  # nosec
             "FROM project_links WHERE project_id = ? AND entity_type = ? "
-            f"AND entity_id IN ({placeholders})",  # nosec B608
+            f"AND entity_id IN ({placeholders})",
             [project_id, entity_type, *entity_ids],
         ).fetchall()
         linked_by_id = {str(row["entity_id"]): _row_to_link(row) for row in link_rows}
@@ -4382,8 +4382,8 @@ def unlink_project_entities(session_id, project_id, data):
         run_maps = _bulk_project_run_maps(conn, session_id, entity_ids)
         placeholders = ",".join("?" for _ in entity_ids)
         link_rows = conn.execute(
-            "SELECT entity_id FROM project_links WHERE project_id = ? AND entity_type = ? "
-            f"AND entity_id IN ({placeholders})",  # nosec B608
+            "SELECT entity_id FROM project_links WHERE project_id = ? AND entity_type = ? "  # nosec
+            f"AND entity_id IN ({placeholders})",
             [project_id, entity_type, *entity_ids],
         ).fetchall()
         linked_ids = {str(row["entity_id"]) for row in link_rows}
@@ -4400,8 +4400,8 @@ def unlink_project_entities(session_id, project_id, data):
         if removable_ids:
             remove_placeholders = ",".join("?" for _ in removable_ids)
             conn.execute(
-                "DELETE FROM project_links WHERE project_id = ? AND entity_type = ? "
-                f"AND entity_id IN ({remove_placeholders})",  # nosec B608
+                "DELETE FROM project_links WHERE project_id = ? AND entity_type = ? "  # nosec
+                f"AND entity_id IN ({remove_placeholders})",
                 [project_id, entity_type, *removable_ids],
             )
         conn.commit()
@@ -4417,7 +4417,7 @@ def list_project_targets(session_id, project_id):
         if not project:
             return None
         rows = conn.execute(
-            f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec B608
+            f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec
             "FROM project_targets WHERE project_id = ? AND review_state != 'dismissed' "
             "ORDER BY type ASC, value COLLATE NOCASE ASC",
             (project_id,),
@@ -4441,7 +4441,7 @@ def add_project_target(session_id, project_id, data):
         if payload["source_run_id"] and not _entity_belongs_to_session(conn, session_id, "run", payload["source_run_id"]):
             raise ProjectWorkspaceError("source_run_id not found for this session")
         row = conn.execute(
-            f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec B608
+            f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec
             "FROM project_targets WHERE project_id = ? AND type = ? AND value = ?",
             (project_id, payload["type"], payload["value"]),
         ).fetchone()
@@ -4464,7 +4464,7 @@ def add_project_target(session_id, project_id, data):
                 )
                 conn.commit()
                 row = conn.execute(
-                    f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec B608
+                    f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec
                     "FROM project_targets WHERE project_id = ? AND id = ?",
                     (project_id, row["id"]),
                 ).fetchone()
@@ -4501,7 +4501,7 @@ def add_project_target(session_id, project_id, data):
                 ),
             )
             row = conn.execute(
-                f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec B608
+                f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec
                 "FROM project_targets WHERE project_id = ? AND type = ? AND value = ?",
                 (project_id, payload["type"], payload["value"]),
             ).fetchone()
@@ -4561,7 +4561,7 @@ def record_project_target_discoveries(conn, session_id, project_id, run_id, comm
             seen_values.add(key)
             source_detail_json = json.dumps(detail, sort_keys=True)
             row = conn.execute(
-                f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec B608
+                f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec
                 "FROM project_targets WHERE project_id = ? AND type = ? AND value = ?",
                 (project_id, payload["type"], payload["value"]),
             ).fetchone()
@@ -4604,7 +4604,7 @@ def record_project_target_discoveries(conn, session_id, project_id, run_id, comm
                     ),
                 )
                 row = conn.execute(
-                    f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec B608
+                    f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec
                     "FROM project_targets WHERE project_id = ? AND type = ? AND value = ?",
                     (project_id, payload["type"], payload["value"]),
                 ).fetchone()
@@ -4676,7 +4676,7 @@ def update_project_target(session_id, project_id, target_id, data):
         except sqlite3.IntegrityError:
             raise ProjectWorkspaceError("target already exists for this project") from None
         row = conn.execute(
-            f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec B608
+            f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec
             "FROM project_targets WHERE project_id = ? AND id = ?",
             (project_id, target_id),
         ).fetchone()
@@ -4692,14 +4692,14 @@ def _repair_primary_finding_targets(conn, session_id, removed_target_ids):
         return
     placeholders = ",".join("?" for _ in target_ids)
     conn.execute(
-        "UPDATE findings SET target_id = COALESCE(("
+        "UPDATE findings SET target_id = COALESCE(("  # nosec
         "SELECT ft.target_id FROM finding_targets ft "
         "JOIN project_targets t ON t.id = ft.target_id "
         "WHERE ft.session_id = findings.session_id AND ft.finding_id = findings.id "
         "ORDER BY ft.created ASC, ft.id ASC LIMIT 1"
         "), '') "
         "WHERE session_id = ? "
-        f"AND target_id IN ({placeholders})",  # nosec B608
+        f"AND target_id IN ({placeholders})",
         [session_id, *target_ids],
     )
 

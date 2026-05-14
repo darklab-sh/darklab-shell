@@ -150,7 +150,7 @@ def _history_table_exists(conn, table_name):
 
 def _history_column_exists(conn, table_name, column_name):
     try:
-        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()  # nosec B608
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
     except sqlite3.OperationalError:
         return False
     return any(str(row["name"] if isinstance(row, sqlite3.Row) else row[1]) == column_name for row in rows)
@@ -206,15 +206,15 @@ def _history_base_clause(
     params: list[Any] = [session_id]
     if run_kind in {RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL}:
         run_kind_expr = "r.run_kind" if has_run_kind_column else _history_run_kind_sql("r.command")
-        sql += f" AND {run_kind_expr} = ?"  # nosec B608
+        sql += f" AND {run_kind_expr} = ?"
         params.append(run_kind)
     if project_id:
         sql += (
-            " AND EXISTS (SELECT 1 FROM project_links pl "
+            " AND EXISTS (SELECT 1 FROM project_links pl "  # nosec
             "JOIN projects p ON p.id = pl.project_id "
             "WHERE p.session_id = ? AND p.id = ? "
             "AND pl.entity_type = 'run' AND pl.entity_id = r.id) "
-            f"AND {'r.run_kind' if has_run_kind_column else _history_run_kind_sql('r.command')} = ?"  # nosec B608
+            f"AND {'r.run_kind' if has_run_kind_column else _history_run_kind_sql('r.command')} = ?"
         )
         params.extend([session_id, project_id, RUN_KIND_EXTERNAL])
     if starred_only:
@@ -584,9 +584,9 @@ def _run_file_artifacts_by_run(conn, run_ids):
         return {run_id: [] for run_id in ids}
     placeholders = ",".join("?" for _ in ids)
     rows = conn.execute(
-        "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+        "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "  # nosec
         "detected_by, content_type, preview_type, created "
-        f"FROM run_file_artifacts WHERE run_id IN ({placeholders}) "  # nosec B608
+        f"FROM run_file_artifacts WHERE run_id IN ({placeholders}) "
         "ORDER BY created ASC, workspace_path ASC",
         ids,
     ).fetchall()
@@ -618,7 +618,7 @@ def _project_links_by_run(conn, session_id, run_ids):
         return {run_id: [] for run_id in ids}
     placeholders = ",".join("?" for _ in ids)
     rows = conn.execute(
-        "SELECT l.id, l.project_id, l.entity_id AS run_id, l.source, l.created, "
+        "SELECT l.id, l.project_id, l.entity_id AS run_id, l.source, l.created, "  # nosec
         "p.name AS project_name, p.slug AS project_slug, p.status AS project_status "
         "FROM project_links l "
         "JOIN projects p ON p.id = l.project_id "
@@ -626,7 +626,7 @@ def _project_links_by_run(conn, session_id, run_ids):
         "WHERE p.session_id = ? "
         "AND l.entity_type = 'run' "
         "AND r.session_id = ? AND r.run_kind = ? "
-        f"AND l.entity_id IN ({placeholders}) "  # nosec B608
+        f"AND l.entity_id IN ({placeholders}) "
         "ORDER BY p.name COLLATE NOCASE ASC, l.created ASC",
         [session_id, session_id, RUN_KIND_EXTERNAL, *ids],
     ).fetchall()
@@ -660,23 +660,23 @@ def _run_metadata_counts_by_run(conn, run_ids):
     placeholders = ",".join("?" for _ in ids)
     if _history_table_exists(conn, "findings"):
         for row in conn.execute(
-            f"SELECT run_id, COUNT(*) AS count FROM findings WHERE run_id IN ({placeholders}) GROUP BY run_id",  # nosec B608
+            f"SELECT run_id, COUNT(*) AS count FROM findings WHERE run_id IN ({placeholders}) GROUP BY run_id",  # nosec
             ids,
         ).fetchall():
             counts.setdefault(str(row["run_id"]), {"finding_count": 0, "label_count": 0, "note_count": 0})
             counts[str(row["run_id"])]["finding_count"] = int(row["count"] or 0)
     if _history_table_exists(conn, "entity_labels"):
         for row in conn.execute(
-            "SELECT entity_id, COUNT(*) AS count FROM entity_labels WHERE entity_type = 'run' "
-            f"AND entity_id IN ({placeholders}) GROUP BY entity_id",  # nosec B608
+            "SELECT entity_id, COUNT(*) AS count FROM entity_labels WHERE entity_type = 'run' "  # nosec
+            f"AND entity_id IN ({placeholders}) GROUP BY entity_id",
             ids,
         ).fetchall():
             counts.setdefault(str(row["entity_id"]), {"finding_count": 0, "label_count": 0, "note_count": 0})
             counts[str(row["entity_id"])]["label_count"] = int(row["count"] or 0)
     if _history_table_exists(conn, "entity_notes"):
         for row in conn.execute(
-            "SELECT entity_id, COUNT(*) AS count FROM entity_notes WHERE entity_type = 'run' "
-            f"AND entity_id IN ({placeholders}) GROUP BY entity_id",  # nosec B608
+            "SELECT entity_id, COUNT(*) AS count FROM entity_notes WHERE entity_type = 'run' "  # nosec
+            f"AND entity_id IN ({placeholders}) GROUP BY entity_id",
             ids,
         ).fetchall():
             counts.setdefault(str(row["entity_id"]), {"finding_count": 0, "label_count": 0, "note_count": 0})
@@ -692,9 +692,9 @@ def _entity_labels_by_entity_ids(conn, entity_type, entity_ids):
         return {entity_id: [] for entity_id in ids}
     placeholders = ",".join("?" for _ in ids)
     rows = conn.execute(
-        "SELECT id, session_id, entity_type, entity_id, label, source, created FROM entity_labels "
+        "SELECT id, session_id, entity_type, entity_id, label, source, created FROM entity_labels "  # nosec
         "WHERE entity_type = ? "
-        f"AND entity_id IN ({placeholders}) "  # nosec B608
+        f"AND entity_id IN ({placeholders}) "
         "ORDER BY label COLLATE NOCASE ASC, created ASC",
         [entity_type, *ids],
     ).fetchall()
@@ -720,9 +720,9 @@ def _entity_notes_by_entity_ids(conn, entity_type, entity_ids):
         return {entity_id: [] for entity_id in ids}
     placeholders = ",".join("?" for _ in ids)
     rows = conn.execute(
-        "SELECT id, session_id, entity_type, entity_id, body, created, updated FROM entity_notes "
+        "SELECT id, session_id, entity_type, entity_id, body, created, updated FROM entity_notes "  # nosec
         "WHERE entity_type = ? "
-        f"AND entity_id IN ({placeholders}) "  # nosec B608
+        f"AND entity_id IN ({placeholders}) "
         "ORDER BY updated ASC, id ASC",
         [entity_type, *ids],
     ).fetchall()
@@ -754,9 +754,9 @@ def _run_findings_by_run(conn, run_ids):
         return {}
     placeholders = ",".join("?" for _ in ids)
     rows = conn.execute(
-        "SELECT id, session_id, run_id, target_id, scope, title, raw_line, line_number, "
+        "SELECT id, session_id, run_id, target_id, scope, title, raw_line, line_number, "  # nosec
         "severity, fingerprint, review_state, created "
-        f"FROM findings WHERE run_id IN ({placeholders}) "  # nosec B608
+        f"FROM findings WHERE run_id IN ({placeholders}) "
         "ORDER BY line_number ASC, created ASC, id ASC",
         ids,
     ).fetchall()
@@ -765,8 +765,8 @@ def _run_findings_by_run(conn, run_ids):
         finding_ids = [str(row["id"]) for row in rows if row["id"]]
         finding_placeholders = ",".join("?" for _ in finding_ids)
         for target_row in conn.execute(
-            "SELECT finding_id, target_id FROM finding_targets "
-            f"WHERE finding_id IN ({finding_placeholders}) "  # nosec B608
+            "SELECT finding_id, target_id FROM finding_targets "  # nosec
+            f"WHERE finding_id IN ({finding_placeholders}) "
             "ORDER BY created ASC, id ASC",
             finding_ids,
         ).fetchall():
@@ -1598,7 +1598,7 @@ def bulk_delete_history():
     with db_connect() as conn:
         placeholders = ",".join("?" for _ in run_ids)
         rows = conn.execute(
-            f"SELECT id, finished, exit_code FROM runs WHERE session_id = ? AND id IN ({placeholders})",  # nosec B608
+            f"SELECT id, finished, exit_code FROM runs WHERE session_id = ? AND id IN ({placeholders})",  # nosec
             [session_id, *run_ids],
         ).fetchall()
         owned_by_id = {str(row["id"]): row for row in rows}
@@ -1619,7 +1619,7 @@ def bulk_delete_history():
             delete_run_artifacts(conn, deletable_ids)
             delete_placeholders = ",".join("?" for _ in deletable_ids)
             conn.execute(
-                f"DELETE FROM runs WHERE session_id = ? AND id IN ({delete_placeholders})",  # nosec B608
+                f"DELETE FROM runs WHERE session_id = ? AND id IN ({delete_placeholders})",  # nosec
                 [session_id, *deletable_ids],
             )
         conn.commit()
@@ -1712,7 +1712,7 @@ def bulk_delete_shares():
     with db_connect() as conn:
         placeholders = ",".join("?" for _ in snapshot_ids)
         rows = conn.execute(
-            f"SELECT id FROM snapshots WHERE session_id = ? AND id IN ({placeholders})",  # nosec B608
+            f"SELECT id FROM snapshots WHERE session_id = ? AND id IN ({placeholders})",  # nosec
             [session_id, *snapshot_ids],
         ).fetchall()
         owned_ids = {str(row["id"]) for row in rows}
@@ -1726,7 +1726,7 @@ def bulk_delete_shares():
             delete_snapshot_metadata(conn, deletable_ids)
             delete_placeholders = ",".join("?" for _ in deletable_ids)
             conn.execute(
-                f"DELETE FROM snapshots WHERE session_id = ? AND id IN ({delete_placeholders})",  # nosec B608
+                f"DELETE FROM snapshots WHERE session_id = ? AND id IN ({delete_placeholders})",  # nosec
                 [session_id, *deletable_ids],
             )
         conn.commit()

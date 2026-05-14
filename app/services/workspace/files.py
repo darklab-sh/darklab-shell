@@ -19,7 +19,7 @@ from pathlib import Path, PurePosixPath
 import pwd
 import shutil
 import stat
-import subprocess  # nosec B404
+import subprocess
 import tempfile
 from typing import Any, BinaryIO
 
@@ -323,7 +323,7 @@ def _sudo_chmod_workspace_path(path: Path, mode: int) -> bool:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=5,
-        )  # nosec B603
+        )
         return True
     except (subprocess.SubprocessError, OSError) as exc:
         log.warning("WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s", path, mode, exc)
@@ -482,7 +482,7 @@ def prepare_workspace_directory_for_command(path: Path, *, mode: str) -> None:
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     timeout=5,
-                )  # nosec B603
+                )
                 return
             except (subprocess.SubprocessError, OSError):
                 try:
@@ -501,14 +501,14 @@ def prepare_workspace_directory_for_command(path: Path, *, mode: str) -> None:
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     timeout=5,
-                )  # nosec B603
+                )
                 subprocess.run(
                     [sudo_bin, "-u", "scanner", "-g", "appuser", "chmod", f"{WORKSPACE_COMMAND_DIR_MODE:o}", str(path)],
                     check=True,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     timeout=5,
-                )  # nosec B603
+                )
                 return
             except (subprocess.SubprocessError, OSError) as exc:
                 raise InvalidWorkspacePath("failed to prepare session directory for command") from exc
@@ -692,7 +692,7 @@ def delete_workspace_file(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=5,
-        )  # nosec B603
+        )
 
 
 def _workspace_directory_file_count(path: Path) -> int:
@@ -718,7 +718,7 @@ def _remove_workspace_directory(path: Path) -> None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=5,
-        )  # nosec B603
+        )
 
 
 def _workspace_path_kind_and_count(path: Path) -> tuple[str, int]:
@@ -836,7 +836,7 @@ def _move_workspace_path_direct(source: Path, destination: Path) -> None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=5,
-        )  # nosec B603
+        )
 
 
 def move_workspace_path(

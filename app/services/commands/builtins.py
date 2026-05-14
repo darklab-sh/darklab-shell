@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import random
 import re
-import subprocess  # nosec B404
+import subprocess
 
 from services.commands.registry import (
     command_root,

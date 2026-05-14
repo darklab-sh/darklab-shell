@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import os
 import re
-import subprocess  # nosec B404
+import subprocess
 from typing import cast
 
 from config import CFG, PROJECT_README
@@ -317,7 +317,7 @@ def run_builtin_man(
             env={**os.environ, "MANPAGER": "cat", "PAGER": "cat", "MANWIDTH": "100"},
             timeout=8,
             check=False,
-        )  # nosec B603
+        )
     except Exception as exc:
         return [{"type": "output", "text": f"Failed to render man page for {topic}: {exc}"}]
 

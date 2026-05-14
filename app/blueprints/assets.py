@@ -432,7 +432,7 @@ def _diag_db_stats() -> dict:
                     # SQLite does not bind table identifiers; names come from
                     # sqlite_master and are quoted/escaped before interpolation.
                     n = conn.execute(
-                        "SELECT COUNT(*) FROM " + table_identifier  # nosec B608
+                        "SELECT COUNT(*) FROM " + table_identifier  # nosec
                     ).fetchone()[0]
                     tables.append({"name": name, "rows": int(n)})
                 except Exception:

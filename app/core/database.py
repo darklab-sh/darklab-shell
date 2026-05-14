@@ -512,11 +512,11 @@ def _migrate_schema(conn):
         if builtin_roots:
             placeholders = ",".join("?" for _ in builtin_roots)
             conn.execute(
-                "UPDATE runs SET run_kind = ? "
+                "UPDATE runs SET run_kind = ? "  # nosec
                 "WHERE lower(CASE "
                 "WHEN instr(trim(command), ' ') > 0 THEN substr(trim(command), 1, instr(trim(command), ' ') - 1) "
                 "ELSE trim(command) END) "
-                f"IN ({placeholders})",  # nosec B608
+                f"IN ({placeholders})",
                 [RUN_KIND_BUILTIN, *builtin_roots],
             )
     except sqlite3.OperationalError:
@@ -667,72 +667,72 @@ def delete_run_artifacts(conn, run_ids):
 
     placeholders = ",".join("?" for _ in ids)
     rows = conn.execute(
-        f"SELECT rel_path FROM run_output_artifacts WHERE run_id IN ({placeholders})",  # nosec B608
+        f"SELECT rel_path FROM run_output_artifacts WHERE run_id IN ({placeholders})",  # nosec
         ids,
     ).fetchall()
     file_artifact_rows = conn.execute(
-        f"SELECT id FROM run_file_artifacts WHERE run_id IN ({placeholders})",  # nosec B608
+        f"SELECT id FROM run_file_artifacts WHERE run_id IN ({placeholders})",  # nosec
         ids,
     ).fetchall()
     finding_rows = conn.execute(
-        f"SELECT id FROM findings WHERE run_id IN ({placeholders})",  # nosec B608
+        f"SELECT id FROM findings WHERE run_id IN ({placeholders})",  # nosec
         ids,
     ).fetchall()
     file_artifact_ids = [row["id"] for row in file_artifact_rows if row["id"]]
     finding_ids = [row["id"] for row in finding_rows if row["id"]]
     conn.execute(
-        "DELETE FROM project_links WHERE entity_type = 'run' "
-        f"AND entity_id IN ({placeholders})",  # nosec B608
+        "DELETE FROM project_links WHERE entity_type = 'run' "  # nosec
+        f"AND entity_id IN ({placeholders})",
         ids,
     )
     conn.execute(
-        "DELETE FROM entity_labels WHERE entity_type = 'run' "
-        f"AND entity_id IN ({placeholders})",  # nosec B608
+        "DELETE FROM entity_labels WHERE entity_type = 'run' "  # nosec
+        f"AND entity_id IN ({placeholders})",
         ids,
     )
     conn.execute(
-        "DELETE FROM entity_notes WHERE entity_type = 'run' "
-        f"AND entity_id IN ({placeholders})",  # nosec B608
+        "DELETE FROM entity_notes WHERE entity_type = 'run' "  # nosec
+        f"AND entity_id IN ({placeholders})",
         ids,
     )
     if file_artifact_ids:
         artifact_placeholders = ",".join("?" for _ in file_artifact_ids)
         conn.execute(
-            "DELETE FROM entity_labels WHERE entity_type = 'run_file_artifact' "
-            f"AND entity_id IN ({artifact_placeholders})",  # nosec B608
+            "DELETE FROM entity_labels WHERE entity_type = 'run_file_artifact' "  # nosec
+            f"AND entity_id IN ({artifact_placeholders})",
             file_artifact_ids,
         )
         conn.execute(
-            "DELETE FROM entity_notes WHERE entity_type = 'run_file_artifact' "
-            f"AND entity_id IN ({artifact_placeholders})",  # nosec B608
+            "DELETE FROM entity_notes WHERE entity_type = 'run_file_artifact' "  # nosec
+            f"AND entity_id IN ({artifact_placeholders})",
             file_artifact_ids,
         )
     if finding_ids:
         finding_placeholders = ",".join("?" for _ in finding_ids)
         conn.execute(
-            f"DELETE FROM finding_targets WHERE finding_id IN ({finding_placeholders})",  # nosec B608
+            f"DELETE FROM finding_targets WHERE finding_id IN ({finding_placeholders})",  # nosec
             finding_ids,
         )
         conn.execute(
-            "DELETE FROM entity_labels WHERE entity_type = 'finding' "
-            f"AND entity_id IN ({finding_placeholders})",  # nosec B608
+            "DELETE FROM entity_labels WHERE entity_type = 'finding' "  # nosec
+            f"AND entity_id IN ({finding_placeholders})",
             finding_ids,
         )
         conn.execute(
-            "DELETE FROM entity_notes WHERE entity_type = 'finding' "
-            f"AND entity_id IN ({finding_placeholders})",  # nosec B608
+            "DELETE FROM entity_notes WHERE entity_type = 'finding' "  # nosec
+            f"AND entity_id IN ({finding_placeholders})",
             finding_ids,
         )
         conn.execute(
-            f"DELETE FROM findings WHERE id IN ({finding_placeholders})",  # nosec B608
+            f"DELETE FROM findings WHERE id IN ({finding_placeholders})",  # nosec
             finding_ids,
         )
     conn.execute(
-        f"DELETE FROM run_file_artifacts WHERE run_id IN ({placeholders})",  # nosec B608
+        f"DELETE FROM run_file_artifacts WHERE run_id IN ({placeholders})",  # nosec
         ids,
     )
     conn.execute(
-        f"DELETE FROM run_output_artifacts WHERE run_id IN ({placeholders})",  # nosec B608
+        f"DELETE FROM run_output_artifacts WHERE run_id IN ({placeholders})",  # nosec
         ids,
     )
     for row in rows:
@@ -746,18 +746,18 @@ def delete_snapshot_metadata(conn, snapshot_ids):
 
     placeholders = ",".join("?" for _ in ids)
     conn.execute(
-        "DELETE FROM project_links WHERE entity_type = 'snapshot' "
-        f"AND entity_id IN ({placeholders})",  # nosec B608
+        "DELETE FROM project_links WHERE entity_type = 'snapshot' "  # nosec
+        f"AND entity_id IN ({placeholders})",
         ids,
     )
     conn.execute(
-        "DELETE FROM entity_labels WHERE entity_type = 'snapshot' "
-        f"AND entity_id IN ({placeholders})",  # nosec B608
+        "DELETE FROM entity_labels WHERE entity_type = 'snapshot' "  # nosec
+        f"AND entity_id IN ({placeholders})",
         ids,
     )
     conn.execute(
-        "DELETE FROM entity_notes WHERE entity_type = 'snapshot' "
-        f"AND entity_id IN ({placeholders})",  # nosec B608
+        "DELETE FROM entity_notes WHERE entity_type = 'snapshot' "  # nosec
+        f"AND entity_id IN ({placeholders})",
         ids,
     )
 

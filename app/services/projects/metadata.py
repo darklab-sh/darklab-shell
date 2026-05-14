@@ -91,7 +91,7 @@ def _count_entity_metadata_for_ids(conn, table, entity_type, entity_ids):
         return 0
     placeholders = ",".join("?" for _ in values)
     row = conn.execute(
-        f"SELECT COUNT(*) AS count FROM {table} WHERE entity_type = ? AND entity_id IN ({placeholders})",  # nosec B608
+        f"SELECT COUNT(*) AS count FROM {table} WHERE entity_type = ? AND entity_id IN ({placeholders})",  # nosec
         [entity_type, *values],
     ).fetchone()
     return int(row["count"] or 0) if row else 0
@@ -103,9 +103,9 @@ def _entity_labels_by_id(conn, session_id, entity_type, entity_ids):
         return {}
     placeholders = ",".join("?" for _ in values)
     rows = conn.execute(
-        "SELECT id, session_id, entity_type, entity_id, label, source, created "
+        "SELECT id, session_id, entity_type, entity_id, label, source, created "  # nosec
         "FROM entity_labels WHERE session_id = ? AND entity_type = ? "
-        f"AND entity_id IN ({placeholders}) "  # nosec B608
+        f"AND entity_id IN ({placeholders}) "
         "ORDER BY label COLLATE NOCASE ASC, created ASC",
         [session_id, entity_type, *values],
     ).fetchall()
@@ -121,9 +121,9 @@ def _entity_notes_by_id(conn, session_id, entity_type, entity_ids):
         return {}
     placeholders = ",".join("?" for _ in values)
     rows = conn.execute(
-        "SELECT id, session_id, entity_type, entity_id, body, created, updated "
+        "SELECT id, session_id, entity_type, entity_id, body, created, updated "  # nosec
         "FROM entity_notes WHERE session_id = ? AND entity_type = ? "
-        f"AND entity_id IN ({placeholders})",  # nosec B608
+        f"AND entity_id IN ({placeholders})",
         [session_id, entity_type, *values],
     ).fetchall()
     return {str(row["entity_id"]): _row_to_entity_note(row) for row in rows}

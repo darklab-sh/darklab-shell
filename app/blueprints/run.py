@@ -11,7 +11,7 @@ import re
 import shlex
 import shutil
 import signal
-import subprocess  # nosec B404
+import subprocess
 import threading
 import uuid
 from collections import deque
@@ -194,7 +194,7 @@ def _terminate_process_group(proc) -> None:
         subprocess.run(
             [SUDO_BIN, "-u", "scanner", KILL_BIN, "-TERM", f"-{pgid}"],
             timeout=5
-        )  # nosec B603
+        )
     else:
         os.killpg(pgid, signal.SIGTERM)
 
@@ -989,7 +989,7 @@ def _start_real_command_process(
             bufsize=1,
             universal_newlines=True,
             preexec_fn=_prepare_run_child,
-        )  # nosec B603
+        )
     except Exception as exc:
         log.error("RUN_SPAWN_ERROR", exc_info=True, extra={
             "ip": client_ip, "session": get_log_session_id(session_id), "cmd": original_command,
@@ -1693,7 +1693,7 @@ def kill_command():
             subprocess.run(
                 [SUDO_BIN, "-u", "scanner", KILL_BIN, "-TERM", f"-{pgid}"],
                 timeout=5
-            )  # nosec B603
+            )
         else:
             # Local dev — same user, can kill directly
             os.killpg(pgid, signal.SIGTERM)

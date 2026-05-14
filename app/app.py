@@ -138,4 +138,4 @@ if __name__ == "__main__":
     # For local development only. In production, Gunicorn is used as the WSGI server
     # via the Dockerfile CMD. Run locally with: python3 app.py
     print("darklab_shell running at http://localhost:8888")
-    app.run(host="0.0.0.0", port=8888, threaded=True)  # nosec B104
+    app.run(host="0.0.0.0", port=8888, threaded=True)  # nosec

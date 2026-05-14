@@ -74,7 +74,7 @@ def _workspace_file_metadata_by_path(session_id: str, paths: list[Any]) -> dict[
     placeholders = ",".join("?" for _ in clean_paths)
     with db_connect() as conn:
         rows = conn.execute(
-            "SELECT rfa.workspace_path, COUNT(DISTINCT rfa.id) AS artifact_count, "
+            "SELECT rfa.workspace_path, COUNT(DISTINCT rfa.id) AS artifact_count, "  # nosec
             "COUNT(DISTINCT rfa.run_id) AS run_count, MAX(r.started) AS last_seen, "
             "GROUP_CONCAT(DISTINCT p.name) AS project_names "
             "FROM run_file_artifacts rfa "
@@ -82,21 +82,21 @@ def _workspace_file_metadata_by_path(session_id: str, paths: list[Any]) -> dict[
             "LEFT JOIN project_links pl ON pl.entity_type = 'run' AND pl.entity_id = rfa.run_id "
             "LEFT JOIN projects p ON p.id = pl.project_id AND p.session_id = rfa.session_id "
             "WHERE rfa.session_id = ? "
-            f"AND rfa.workspace_path IN ({placeholders}) "  # nosec B608
+            f"AND rfa.workspace_path IN ({placeholders}) "
             "GROUP BY rfa.workspace_path",
             [session_id, *clean_paths],
         ).fetchall()
         label_rows = conn.execute(
-            "SELECT id, session_id, entity_type, entity_id, label, source, created "
+            "SELECT id, session_id, entity_type, entity_id, label, source, created "  # nosec
             "FROM entity_labels WHERE session_id = ? AND entity_type = 'workspace_file' "
-            f"AND entity_id IN ({placeholders}) "  # nosec B608
+            f"AND entity_id IN ({placeholders}) "
             "ORDER BY label COLLATE NOCASE ASC, created ASC",
             [session_id, *clean_paths],
         ).fetchall()
         note_rows = conn.execute(
-            "SELECT id, session_id, entity_type, entity_id, body, created, updated "
+            "SELECT id, session_id, entity_type, entity_id, body, created, updated "  # nosec
             "FROM entity_notes WHERE session_id = ? AND entity_type = 'workspace_file' "
-            f"AND entity_id IN ({placeholders})",  # nosec B608
+            f"AND entity_id IN ({placeholders})",
             [session_id, *clean_paths],
         ).fetchall()
     metadata = {}
@@ -164,13 +164,13 @@ def _delete_workspace_file_metadata(session_id: str, paths: list[str]) -> None:
     placeholders = ",".join("?" for _ in clean_paths)
     with db_connect() as conn:
         conn.execute(
-            "DELETE FROM entity_labels WHERE session_id = ? AND entity_type = 'workspace_file' "
-            f"AND entity_id IN ({placeholders})",  # nosec B608
+            "DELETE FROM entity_labels WHERE session_id = ? AND entity_type = 'workspace_file' "  # nosec
+            f"AND entity_id IN ({placeholders})",
             [session_id, *clean_paths],
         )
         conn.execute(
-            "DELETE FROM entity_notes WHERE session_id = ? AND entity_type = 'workspace_file' "
-            f"AND entity_id IN ({placeholders})",  # nosec B608
+            "DELETE FROM entity_notes WHERE session_id = ? AND entity_type = 'workspace_file' "  # nosec
+            f"AND entity_id IN ({placeholders})",
             [session_id, *clean_paths],
         )
         conn.commit()
@@ -188,13 +188,13 @@ def _move_workspace_file_metadata(session_id: str, path_map: dict[str, str]) -> 
     placeholders = ",".join("?" for _ in destinations)
     with db_connect() as conn:
         conn.execute(
-            "DELETE FROM entity_labels WHERE session_id = ? AND entity_type = 'workspace_file' "
-            f"AND entity_id IN ({placeholders})",  # nosec B608
+            "DELETE FROM entity_labels WHERE session_id = ? AND entity_type = 'workspace_file' "  # nosec
+            f"AND entity_id IN ({placeholders})",
             [session_id, *destinations],
         )
         conn.execute(
-            "DELETE FROM entity_notes WHERE session_id = ? AND entity_type = 'workspace_file' "
-            f"AND entity_id IN ({placeholders})",  # nosec B608
+            "DELETE FROM entity_notes WHERE session_id = ? AND entity_type = 'workspace_file' "  # nosec
+            f"AND entity_id IN ({placeholders})",
             [session_id, *destinations],
         )
         for source, destination in clean_map.items():

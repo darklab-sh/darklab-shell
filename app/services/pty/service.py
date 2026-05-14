@@ -10,7 +10,7 @@ import pty
 import select
 import signal
 import struct
-import subprocess  # nosec B404
+import subprocess
 import tempfile
 import termios
 import threading
@@ -302,7 +302,7 @@ def _terminate_run(run: PtyRun) -> None:
             subprocess.run(
                 [SUDO_BIN, "-u", "scanner", KILL_BIN, "-TERM", f"-{pgid}"],
                 timeout=5,
-            )  # nosec B603
+            )
         else:
             os.killpg(pgid, signal.SIGTERM)
     except (ProcessLookupError, subprocess.TimeoutExpired, OSError):
@@ -747,7 +747,7 @@ def start_pty_run(
             close_fds=True,
             preexec_fn=_prepare_child,
             env=_command_env(),
-        )  # nosec B603
+        )
         try:
             os.close(slave_fd)
         except OSError:
@@ -812,7 +812,7 @@ def start_pty_run(
                     subprocess.run(
                         [SUDO_BIN, "-u", "scanner", KILL_BIN, "-TERM", f"-{pgid}"],
                         timeout=5,
-                    )  # nosec B603
+                    )
                 else:
                     os.killpg(pgid, signal.SIGTERM)
             except (ProcessLookupError, subprocess.TimeoutExpired, OSError):

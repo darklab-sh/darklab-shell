@@ -126,7 +126,7 @@ class TestSessionMigrate:
     def _count_rows(self, table, session_id):
         with sqlite3.connect(DB_PATH) as conn:
             return conn.execute(
-                f"SELECT COUNT(*) FROM {table} WHERE session_id = ?",  # nosec B608
+                f"SELECT COUNT(*) FROM {table} WHERE session_id = ?",
                 (session_id,),
             ).fetchone()[0]
 
