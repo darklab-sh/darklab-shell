@@ -813,6 +813,56 @@ class TestIntelServices:
         assert ("nvd", "CVE-2026-12345") in client.calls
         assert ("ip", "8.8.4.4", "greynoise-key") in client.calls
 
+    def test_teamcymru_dns_origin_records_and_asn_description_records_are_normalized(self):
+        from services.intel.teamcymru import TeamCymruProvider
+
+        result = TeamCymruProvider(client=mock.Mock(
+            last_status=200,
+            lookup_ip=mock.Mock(return_value={
+                "records": ['"15169 | 8.8.8.0/24 | US | arin | 1992-12-01"'],
+                "asn_records": ['"15169 | US | arin | 2000-03-30 | GOOGLE, US"'],
+            }),
+        )).lookup_ip("8.8.8.8", session_token="session-1")
+        payload = result.payload["providers"]["teamcymru"]
+
+        assert payload == {
+            "asn": "15169",
+            "prefix": "8.8.8.0/24",
+            "cc": "US",
+            "registry": "arin",
+            "allocated": "1992-12-01",
+            "name": "GOOGLE, US",
+        }
+
+    def test_teamcymru_dns_client_fetches_origin_and_asn_description_records(self, monkeypatch):
+        from services.intel import clients
+
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            del kwargs
+            calls.append(argv)
+            query = argv[-1]
+            stdout = (
+                '"15169 | 8.8.8.0/24 | US | arin | 1992-12-01"\n'
+                if query == "8.8.8.8.origin.asn.cymru.com"
+                else '"15169 | US | arin | 2000-03-30 | GOOGLE, US"\n'
+            )
+            return mock.Mock(returncode=0, stdout=stdout, stderr="")
+
+        monkeypatch.setattr(clients.subprocess, "run", fake_run)
+
+        result = clients.TeamCymruDnsClient().lookup_ip("8.8.8.8")
+
+        assert result == {
+            "records": ['"15169 | 8.8.8.0/24 | US | arin | 1992-12-01"'],
+            "asn_records": ['"15169 | US | arin | 2000-03-30 | GOOGLE, US"'],
+        }
+        assert calls == [
+            ["dig", "+short", "TXT", "8.8.8.8.origin.asn.cymru.com"],
+            ["dig", "+short", "TXT", "AS15169.asn.cymru.com"],
+        ]
+
     def test_provider_missing_secret_blocks_lookup_before_client_call(self):
         from services.intel.base import ProviderMissingSecret
         from services.intel.shodan import ShodanProvider
@@ -2162,6 +2212,35 @@ class TestDerivedCommandRegistry:
         assert is_command_allowed("chaos -d darklab.sh -silent")[0]
         assert not is_command_allowed("chaos -d darklab.sh -key secret")[0]
         assert not is_command_allowed("chaos -dL domains.txt")[0]
+        shodan = by_root["shodan"]
+        assert {
+            "shodan version",
+            "shodan info",
+            "shodan honeyscore",
+            "shodan domain",
+            "shodan stats",
+            "shodan download",
+            "shodan scan",
+        }.issubset(set(shodan["policy"]["allow"]))
+        assert "shodan download" in shodan["policy"]["deny"]
+        shodan_subcommands = shodan["autocomplete"]["subcommands"]
+        assert {
+            "version",
+            "info",
+            "host",
+            "honeyscore",
+            "domain",
+            "search",
+            "stats",
+            "count",
+            "download",
+            "scan",
+            "myip",
+        }.issubset(set(shodan_subcommands))
+        assert is_command_allowed("shodan domain darklab.sh")[0]
+        assert is_command_allowed("shodan honeyscore 8.8.8.8")[0]
+        assert is_command_allowed("shodan stats apache")[0]
+        assert is_command_allowed("shodan scan 8.8.8.8")[0]
 
     def test_real_registry_workspace_file_flags_cover_supported_file_io_tools(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2276,6 +2355,7 @@ class TestDerivedCommandRegistry:
                 "nmap --script http-headers --script-args-file nmap-script-args.txt ip.darklab.sh": (
                     ["nmap-script-args.txt"], [],
                 ),
+                "shodan download shodan-apache apache": ([], ["shodan-apache"]),
             }
 
             registry = commands.load_commands_registry()

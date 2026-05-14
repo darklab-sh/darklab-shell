@@ -212,7 +212,7 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `sslscan` | TLS/SSL cipher and certificate scanner — reports supported ciphers, protocol versions, and cert details |
 | `sslyze` | Fast TLS configuration analyser — Heartbleed, ROBOT, CRIME, renegotiation, and certificate chain checks |
 | `rustscan` | High-speed port discovery; optionally pipes results into nmap for service detection |
-| `shodan` | Shodan host and service intelligence; requires `SHODAN_API_KEY` in the encrypted secrets vault |
+| `shodan` | Shodan host, domain, query, download, scan, account, and honeyscore tools; requires `SHODAN_API_KEY` in the encrypted secrets vault |
 | `vt` | VirusTotal IP, domain, URL, and file-hash reputation; accepts either `VT_API_KEY` or the native `VTCLI_APIKEY` secret name |
 | `greynoise` | GreyNoise IP classification and context; requires `GREYNOISE_API_KEY` in the encrypted secrets vault |
 | `ipinfo` | IP geolocation, ASN, and ownership context; uses `IPINFO_TOKEN` from the encrypted secrets vault when available |

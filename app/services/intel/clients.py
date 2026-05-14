@@ -190,6 +190,17 @@ class TeamCymruDnsClient:
 
     def lookup_ip(self, value: str) -> dict[str, Any]:
         query = _teamcymru_query(value)
+        records = self._lookup_txt(query)
+        asn_records = []
+        for asn in _teamcymru_asns_from_origin_records(records):
+            try:
+                asn_records.extend(self._lookup_txt(_teamcymru_asn_query(asn)))
+            except ProviderApiError:
+                continue
+        self.last_status = 200
+        return {"records": records, "asn_records": asn_records}
+
+    def _lookup_txt(self, query: str) -> list[str]:
         try:
             proc = subprocess.run(
                 ["dig", "+short", "TXT", query],
@@ -202,8 +213,7 @@ class TeamCymruDnsClient:
             raise ProviderApiError(str(exc)) from exc
         if proc.returncode != 0:
             raise ProviderApiError((proc.stderr or "Team Cymru DNS lookup failed").strip())
-        self.last_status = 200
-        return {"records": [line for line in proc.stdout.splitlines() if line.strip()]}
+        return [line for line in proc.stdout.splitlines() if line.strip()]
 
 
 def _header_float(value: str | None) -> float | None:
@@ -240,3 +250,21 @@ def _teamcymru_query(value: str) -> str:
     nibbles = ip.exploded.replace(":", "")
     reversed_nibbles = ".".join(reversed(nibbles))
     return f"{reversed_nibbles}.origin6.asn.cymru.com"
+
+
+def _teamcymru_asn_query(asn: str) -> str:
+    return f"AS{str(asn).strip().upper().removeprefix('AS')}.asn.cymru.com"
+
+
+def _teamcymru_asns_from_origin_records(records: list[str]) -> list[str]:
+    asns = []
+    seen = set()
+    for record in records:
+        cleaned = str(record or "").strip().strip('"')
+        asn_field = cleaned.split("|", 1)[0]
+        for token in asn_field.replace(",", " ").split():
+            normalized = token.strip().upper().removeprefix("AS")
+            if normalized.isdigit() and normalized not in seen:
+                seen.add(normalized)
+                asns.append(normalized)
+    return asns

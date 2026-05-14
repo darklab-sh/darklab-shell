@@ -3241,38 +3241,83 @@ commands:
     policy:
       allow:
         - shodan --help
+        - shodan version
+        - shodan info
         - shodan host
+        - shodan honeyscore
+        - shodan domain
         - shodan search
+        - shodan stats
         - shodan count
+        - shodan download
+        - shodan scan
         - shodan myip
       deny:
         - shodan init
         - shodan download
         - shodan parse
         - shodan convert
-        - shodan domain
         - shodan data
         - shodan alert
-        - shodan scan
         - shodan --api-key
         - shodan -k
         - shodan host 127.0.0.1
         - shodan host 0.0.0.0
         - shodan host localhost
         - shodan host ::1
+        - shodan honeyscore 127.0.0.1
+        - shodan honeyscore 0.0.0.0
+        - shodan honeyscore localhost
+        - shodan honeyscore ::1
+        - shodan scan 127.0.0.1
+        - shodan scan 0.0.0.0
+        - shodan scan localhost
+        - shodan scan ::1
     requires_secrets:
       - env: SHODAN_API_KEY
+    workspace_flags:
+      - flag: download
+        mode: write
+        value: separate
+        format: gzip-json
+        subcommands:
+          - download
     autocomplete:
       examples:
         - value: shodan --help
           description: Show help and usage
+        - value: shodan version
+          description: Show the Shodan CLI version
+        - value: shodan info
+          description: Show account plan and usage information
         - value: shodan host 8.8.8.8
           description: Look up exposed services for a public IP
+        - value: shodan honeyscore 8.8.8.8
+          description: Check whether a public IP looks like a honeypot
+        - value: shodan domain darklab.sh
+          description: Show Shodan domain intelligence
         - value: shodan count apache
           description: Count matching internet-exposed services
+        - value: shodan stats apache
+          description: Summarize matches for a Shodan search query
+        - value: shodan download shodan-apache apache
+          description: Save Shodan search results into a session file
+          feature_required: workspace
+        - value: shodan scan 8.8.8.8
+          description: Ask Shodan to scan a public IP
         - value: shodan myip
           description: Show the scanner container's public IP according to Shodan
       subcommands:
+        version:
+          description: Print the Shodan CLI version
+          examples:
+            - value: shodan version
+              description: Show the installed CLI version
+        info:
+          description: Show Shodan account information
+          examples:
+            - value: shodan info
+              description: Show account plan and usage details
         host:
           description: Look up one public IP
           examples:
@@ -3283,6 +3328,26 @@ commands:
               hint_only: true
               value_type: ip
               description: Public IP address to query
+        honeyscore:
+          description: Check whether a public IP looks like a honeypot
+          examples:
+            - value: shodan honeyscore 8.8.8.8
+              description: Check Shodan's honeypot score
+          arguments:
+            - placeholder: <ip>
+              hint_only: true
+              value_type: ip
+              description: Public IP address to score
+        domain:
+          description: Show Shodan domain intelligence
+          examples:
+            - value: shodan domain darklab.sh
+              description: Show available domain details
+          arguments:
+            - placeholder: <domain>
+              hint_only: true
+              value_type: domain
+              description: Domain to query
         search:
           description: Search Shodan query syntax
           examples:
@@ -3305,6 +3370,15 @@ commands:
             - placeholder: <query>
               hint_only: true
               description: Shodan search query
+        stats:
+          description: Summarize matches for a Shodan query
+          examples:
+            - value: shodan stats apache
+              description: Show top-level summary statistics
+          arguments:
+            - placeholder: <query>
+              hint_only: true
+              description: Shodan search query
         count:
           description: Count matches for a Shodan query
           examples:
@@ -3314,6 +3388,29 @@ commands:
             - placeholder: <query>
               hint_only: true
               description: Shodan search query
+        download:
+          description: Save Shodan search results into a session file
+          examples:
+            - value: shodan download shodan-apache apache
+              description: Save search results into the session workspace
+              feature_required: workspace
+          arguments:
+            - placeholder: <filename>
+              hint_only: true
+              description: Session output filename
+            - placeholder: <query>
+              hint_only: true
+              description: Shodan search query
+        scan:
+          description: Ask Shodan to scan a public IP or netblock
+          examples:
+            - value: shodan scan 8.8.8.8
+              description: Request a Shodan scan
+          arguments:
+            - placeholder: <ip-or-cidr>
+              hint_only: true
+              value_type: target
+              description: Public IP address or CIDR to scan
         myip:
           description: Show the scanner container's public IP
           examples:
