@@ -89,6 +89,12 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Edit modal supports Replace and Delete only. Stored values are never revealed or copied back out of the vault in v1.
   - Mobile parity: Options sheet gets the same Secrets section, reusing `mobile_sheet` placement helpers.
   - Reuse `ui_confirm`, `ui_disclosure`, `ui_focus_trap`, `ui_outside_click`, `ui_pressable` helpers.
+  - **Phase 4 findings:**
+    - The Secrets surface lives in the shared Options modal/sheet, so desktop and mobile use the same markup and behavior instead of separate screens.
+    - Add/Edit/Delete reuse the app's existing `showConfirm` modal primitive; there is no bespoke secrets modal.
+    - Stored values remain replace-only. The UI can submit a new value or delete a secret, but list and edit flows never reveal, copy, or prefill the stored value.
+    - `secret set NAME` is browser-owned and opens the same value prompt as the Options panel, keeping the typed command free of the value. `secret list`, `secret unset NAME`, and `secret show-consumers` remain backend terminal built-ins.
+    - Options reloads secret metadata when opened and invalidates the panel after session-token changes so the visible list follows the active session.
 - **Phase 5 - Feedback and tests**
   - Pre-launch missing-secret error UX matches the registry rewrite/denial messages already in use.
   - Backend coverage: round-trip encrypt/decrypt, nonce uniqueness, master-key-missing/short rejects, session-token rotate re-keys all rows, migration moves rows without re-encrypting, `requires_secrets` validation, audit log shape (never contains values), missing-required-secret pre-launch error, injection only on matching envs, rate-limit on secrets routes, transcript suppression on `secret set`.

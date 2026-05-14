@@ -208,6 +208,8 @@ commands:
 
 `requires_secrets` names encrypted session secrets that should be passed to the subprocess environment for that command root. Required missing secrets block launch before the process starts. Optional missing secrets log a warning and let the command run without that env var. Secret values are never rendered into command text.
 
+Users manage matching values from **Options → Secrets** or with `secret set NAME` in the terminal. The browser prompt collects the value; the terminal command line contains only the secret name. Stored values are replace-only: list routes and the Options panel return names, consumer env bindings, and update times, never the saved value.
+
 Inside each command's `autocomplete` block, a root can define:
 
 ```yaml

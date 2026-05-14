@@ -1000,6 +1000,20 @@
           <div id="options-session-token-msg" class="options-session-token-msg" style="display:none"></div>
         </div>
       </div>
+      <div class="faq-item">
+        <div class="faq-q options-field-heading">
+          <span>Secrets</span>
+          <button id="options-secrets-refresh-btn" class="btn btn-ghost btn-icon-only btn-compact" type="button" aria-label="Refresh secrets" title="Refresh secrets">⟳</button>
+        </div>
+        <div class="faq-a form-fieldset">
+          <div class="options-session-token-desc">Store per-session API keys for tools that need them. Values are encrypted, passed to matching commands as environment variables, and never shown again.</div>
+          <div class="options-session-token-actions">
+            <button id="options-secret-new-btn" class="btn btn-secondary btn-compact" type="button">Add secret</button>
+          </div>
+          <div id="options-secrets-msg" class="options-session-token-msg" role="status" aria-live="polite" style="display:none"></div>
+          <div id="options-secrets-list" class="options-secrets-list" aria-live="polite"></div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -1069,6 +1083,7 @@
 <script src="/static/js/features/mobile/mobile_shell_layout.js"></script>
 <script src="/static/js/features/tabs/tab_session_state.js"></script>
 <script src="/static/js/features/preferences/preferences.js"></script>
+<script src="/static/js/features/preferences/secrets_panel.js"></script>
 <script src="/static/js/features/preferences/session_token_controls.js"></script>
 <script src="/static/js/features/command-registry/command_registry.js"></script>
 <script src="/static/js/features/theme/theme.js"></script>

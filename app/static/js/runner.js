@@ -1177,6 +1177,11 @@ function _isClientSideUiCommand(cmd) {
   return root === 'theme' || root === 'config' || root === 'tour';
 }
 
+function _isClientSideSecretSetCommand(cmd) {
+  const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
+  return parts[0]?.toLowerCase() === 'secret' && parts[1]?.toLowerCase() === 'set';
+}
+
 function _isTabCloseCommand(cmd) {
   return /^(exit|quit)$/i.test(String(cmd || '').trim());
 }
@@ -2624,6 +2629,18 @@ function submitCommand(rawCmd) {
     void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
       _handleSessionTokenCommand(baseCommand, activeTabId)
     ));
+    return true;
+  }
+
+  if (_isClientSideSecretSetCommand(cmd)) {
+    void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => {
+      if (typeof handleSecretCommand === 'function') {
+        return handleSecretCommand(baseCommand, activeTabId);
+      }
+      appendLine('[error] secret prompt is not ready — reload the page and try again', 'exit-fail', activeTabId);
+      setStatus('fail');
+      return true;
+    });
     return true;
   }
 

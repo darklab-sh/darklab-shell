@@ -32,6 +32,12 @@ function updateSessionId(newId) {
   if (typeof window.refreshActiveProjectContext === 'function') {
     window.refreshActiveProjectContext().catch(() => {});
   }
+  if (typeof invalidateOptionsSecrets === 'function') {
+    invalidateOptionsSecrets();
+  }
+  if (typeof refreshOptionsSecrets === 'function' && typeof isOptionsOverlayOpen === 'function' && isOptionsOverlayOpen()) {
+    refreshOptionsSecrets({ force: true }).catch(() => {});
+  }
 }
 
 // Keep SESSION_ID current in other open tabs when session_token changes in
@@ -48,6 +54,10 @@ window.addEventListener('storage', (e) => {
     if (typeof loadRecentDomains === 'function') loadRecentDomains().catch(() => {});
     if (typeof window.refreshActiveProjectContext === 'function') window.refreshActiveProjectContext().catch(() => {});
     if (typeof _updateOptionsSessionTokenStatus === 'function') _updateOptionsSessionTokenStatus();
+    if (typeof invalidateOptionsSecrets === 'function') invalidateOptionsSecrets();
+    if (typeof refreshOptionsSecrets === 'function' && typeof isOptionsOverlayOpen === 'function' && isOptionsOverlayOpen()) {
+      refreshOptionsSecrets({ force: true }).catch(() => {});
+    }
   }
 });
 

@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,681
+- behavior tests: 2,685
 - docs/inventory meta-tests: 32
 - `pytest`: 1346 (1314 behavior + 32 meta)
-- `vitest`: 1118
+- `vitest`: 1122
 - `playwright`: 249
-- total: 2,713
+- total: 2,717
 
 This document is organized in two parts:
 
@@ -1710,6 +1710,10 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `opens a destructive confirm before clearing the active session token` | Verifies that clearing an active session token first opens the shared destructive confirm with copy and clear actions. |
 | `lets the user copy the session token from the clear confirm without clearing it` | Verifies that the clear confirm can copy the active token while leaving the session unchanged. |
 | `clears the session token only after confirming the destructive action` | Verifies that the active session token is only removed after the destructive clear action is explicitly confirmed. |
+| `loads encrypted secrets metadata in options without revealing values` | Verifies that the Options Secrets section loads names, consumer envs, and timestamps without rendering stored secret values. |
+| `adds encrypted secrets through the replace-only options prompt` | Verifies that the Options Secrets prompt stores a value and consumer env bindings while keeping the value out of the rendered panel. |
+| `opens the encrypted secret prompt for terminal secret set without echoing the value` | Verifies that `secret set NAME` opens the browser-owned value prompt and does not echo the typed value into visible UI. |
+| `deletes encrypted secrets from the options panel only after confirming` | Verifies that deleting a secret uses the shared destructive confirm before calling the delete route and refreshing the list. |
 | `persists options changes through cookies and syncs quick-toggle state` | Verifies that option changes update cookies, quick-toggle UI, and the persisted `/session/preferences` snapshot together. |
 | `renders backend-driven FAQ items with HTML answers and dynamic sections` | Verifies that renders backend-driven FAQ items with HTML answers and dynamic sections. |
 | `renders the FAQ visual tour re-entry link and opens the tour modal` | Verifies that the FAQ renders the desktop visual tour re-entry link, opens the tour modal, and closes FAQ so tour actions return to the terminal. |

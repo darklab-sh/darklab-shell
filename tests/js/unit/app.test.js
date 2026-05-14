@@ -4642,6 +4642,143 @@ describe('app helpers', () => {
     expect(showToast).toHaveBeenCalledWith('Session token cleared')
   })
 
+  it('loads encrypted secrets metadata in options without revealing values', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/session/secrets') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            secrets: [{
+              name: 'SHODAN_API_KEY',
+              consumer_envs: ['SHODAN_API_KEY'],
+              updated_at: '2026-05-14T10:00:00+00:00',
+            }],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { openOptions } = await loadAppFns({ apiFetch })
+
+    openOptions()
+    await vi.waitFor(() => expect(document.getElementById('options-secrets-list').textContent).toContain('SHODAN_API_KEY'))
+
+    expect(document.getElementById('options-secrets-list').textContent).not.toContain('super-secret-value')
+    expect(apiFetch).toHaveBeenCalledWith('/session/secrets', { cache: 'no-store' })
+  })
+
+  it('adds encrypted secrets through the replace-only options prompt', async () => {
+    let secrets = []
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/session/secrets' && opts.method === 'POST') {
+        const body = JSON.parse(opts.body)
+        secrets = [{
+          name: body.name,
+          consumer_envs: body.consumer_envs,
+          updated_at: '2026-05-14T10:00:00+00:00',
+        }]
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(secrets[0]) })
+      }
+      if (url === '/session/secrets') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ secrets }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const showConfirm = vi.fn().mockImplementation(async (opts) => {
+      const inputs = opts.content.flatMap(node => Array.from(node.querySelectorAll('input')))
+      inputs[0].value = 'vt_api_key'
+      inputs[1].value = 'value-that-must-not-render'
+      inputs[2].value = 'VT_API_KEY, VIRUSTOTAL_TOKEN'
+      const ok = await opts.actions.find(action => action.id === 'save').onActivate()
+      return ok ? 'save' : null
+    })
+    await loadAppFns({ apiFetch, showConfirm })
+
+    document.getElementById('options-secret-new-btn').click()
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/session/secrets', expect.objectContaining({
+      method: 'POST',
+    })))
+
+    const postBody = JSON.parse(apiFetch.mock.calls.find(([url, opts]) => url === '/session/secrets' && opts?.method === 'POST')[1].body)
+    expect(postBody).toEqual({
+      name: 'VT_API_KEY',
+      value: 'value-that-must-not-render',
+      consumer_envs: ['VT_API_KEY', 'VIRUSTOTAL_TOKEN'],
+    })
+    await vi.waitFor(() => expect(document.getElementById('options-secrets-list').textContent).toContain('VT_API_KEY'))
+    expect(document.getElementById('options-secrets-list').textContent).not.toContain('value-that-must-not-render')
+  })
+
+  it('opens the encrypted secret prompt for terminal secret set without echoing the value', async () => {
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/session/secrets' && opts.method === 'POST') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ name: 'SHODAN_API_KEY', consumer_envs: ['SHODAN_API_KEY'] }) })
+      }
+      if (url === '/session/secrets') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            secrets: [{ name: 'SHODAN_API_KEY', consumer_envs: ['SHODAN_API_KEY'], updated_at: '2026-05-14T10:00:00+00:00' }],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const showConfirm = vi.fn().mockImplementation(async (opts) => {
+      const inputs = opts.content.flatMap(node => Array.from(node.querySelectorAll('input')))
+      expect(inputs[0].value).toBe('SHODAN_API_KEY')
+      inputs[1].value = 'terminal-secret-value'
+      const ok = await opts.actions.find(action => action.id === 'save').onActivate()
+      return ok ? 'save' : null
+    })
+    const { handleSecretCommand, setStatus } = await loadAppFns({ apiFetch, showConfirm })
+
+    await handleSecretCommand('secret set shodan_api_key', 'tab-1')
+
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.objectContaining({
+        note: expect.stringContaining('never returned by list routes'),
+      }),
+    }))
+    const postBody = JSON.parse(apiFetch.mock.calls.find(([url, opts]) => url === '/session/secrets' && opts?.method === 'POST')[1].body)
+    expect(postBody).toEqual({
+      name: 'SHODAN_API_KEY',
+      value: 'terminal-secret-value',
+      consumer_envs: undefined,
+    })
+    expect(JSON.stringify(apiFetch.mock.calls)).toContain('terminal-secret-value')
+    expect(document.body.textContent).not.toContain('terminal-secret-value')
+    expect(setStatus).toHaveBeenCalledWith('ok')
+  })
+
+  it('deletes encrypted secrets from the options panel only after confirming', async () => {
+    let secrets = [{ name: 'VT_API_KEY', consumer_envs: ['VT_API_KEY'], updated_at: '2026-05-14T10:00:00+00:00' }]
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/session/secrets/VT_API_KEY' && opts.method === 'DELETE') {
+        secrets = []
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ removed: true }) })
+      }
+      if (url === '/session/secrets') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ secrets }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const showConfirm = vi.fn().mockResolvedValue('delete')
+    const { openOptions } = await loadAppFns({ apiFetch, showConfirm })
+    openOptions()
+    await vi.waitFor(() => expect(document.getElementById('options-secrets-list').textContent).toContain('VT_API_KEY'))
+
+    document.querySelector('#options-secrets-list .options-secret-actions button:last-child').click()
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/session/secrets/VT_API_KEY', {
+      method: 'DELETE',
+    }))
+
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      tone: 'danger',
+    }))
+    await vi.waitFor(() => expect(document.getElementById('options-secrets-list').textContent).toContain('No secrets stored'))
+  })
+
   it('persists options changes through cookies and syncs quick-toggle state', async () => {
     const apiFetch = vi.fn((url, opts = {}) => {
       if (url === '/config') {

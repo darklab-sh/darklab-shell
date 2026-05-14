@@ -216,6 +216,9 @@ function openOptions() {
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   syncOptionsControls();
   if (typeof _updateOptionsSessionTokenStatus === 'function') _updateOptionsSessionTokenStatus();
+  if (typeof refreshOptionsSecrets === 'function') {
+    refreshOptionsSecrets().catch((err) => logClientError('failed to load options secrets', err));
+  }
   showOptionsOverlay();
   if (typeof markInteractionSurfaceReady === 'function') {
     markInteractionSurfaceReady('options', optionsOverlay, document.getElementById('options-modal'));

@@ -220,6 +220,10 @@ export async function loadAppFns({
     <button id="options-session-token-clear-btn"></button>
     <button id="options-session-token-copy-btn"></button>
     <div id="options-session-token-msg"></div>
+    <button id="options-secret-new-btn"></button>
+    <button id="options-secrets-refresh-btn"></button>
+    <div id="options-secrets-msg"></div>
+    <div id="options-secrets-list"></div>
     <div id="workflows-overlay"></div>
     <button class="workflows-close"></button>
     <select id="options-ts-select">
@@ -312,6 +316,9 @@ export async function loadAppFns({
       }
       if (url === '/faq') {
         return Promise.resolve({ json: () => Promise.resolve({ items: [] }) })
+      }
+      if (url === '/session/secrets') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ secrets: [] }) })
       }
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
@@ -482,6 +489,7 @@ export async function loadAppFns({
       'app/static/js/features/mobile/mobile_shell_layout.js',
       'app/static/js/features/tabs/tab_session_state.js',
       'app/static/js/features/preferences/preferences.js',
+      'app/static/js/features/preferences/secrets_panel.js',
       'app/static/js/features/preferences/session_token_controls.js',
       'app/static/js/features/command-registry/command_registry.js',
       'app/static/js/features/theme/theme.js',
@@ -671,6 +679,11 @@ export async function loadAppFns({
     applyCompareContextPreference,
     applyPromptUsernamePreference,
     syncOptionsControls,
+    refreshOptionsSecrets,
+    invalidateOptionsSecrets,
+    openSecretEditor,
+    deleteOptionsSecret,
+    handleSecretCommand,
     handleThemeCommand,
     handleConfigCommand,
     handleTourCommand,

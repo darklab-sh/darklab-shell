@@ -39,6 +39,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [Options Modal](#options-modal)
 - [Persistence & Retention](#persistence--retention)
 - [Session Tokens](#session-tokens)
+- [Encrypted Secrets](#encrypted-secrets)
 - [Security and Process Isolation](#security-and-process-isolation)
 - [Structured Logging](#structured-logging)
 - [Operator Diagnostics](#operator-diagnostics)
@@ -623,6 +624,26 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 ---
 
+## Encrypted Secrets
+
+**Purpose:** store per-session API keys for approved tools without putting those values in terminal commands, transcripts, history, snapshots, or logs.
+
+**Behavior:**
+
+- The Options modal includes a **Secrets** section where users can add, replace, and delete secret values for the active session.
+- `secret set NAME` opens the same browser-owned value prompt from the terminal. The command line contains only the name; the value is entered in the modal and is not echoed.
+- `secret list` shows stored names and their consumer environment bindings. It never prints values.
+- `secret unset NAME` deletes one stored secret, and `secret show-consumers` lists command-registry env vars that tools declare.
+- Command registry entries can declare `requires_secrets`. When a matching command runs, the backend decrypts the needed value in memory and passes it to the subprocess environment. Missing required secrets stop the run before launch with a clear message.
+
+**Limits:** stored values are replace-only. The app does not reveal or copy a saved secret back out of the vault.
+
+**Configuration:** operators provide the vault master key with `SECRETS_MASTER_KEY` or let the app create an app-owned key file under the data directory. Tool bindings live in `app/conf/commands.yaml` through `requires_secrets`.
+
+**Related files:** `app/blueprints/secrets.py`, `app/services/secrets/`, `app/services/commands/builtins_secrets.py`, `app/static/js/features/preferences/secrets_panel.js`, `app/conf/commands.yaml`.
+
+---
+
 ## Session Files
 
 **Purpose:** optional app-managed per-session file access for commands that need small input or output files, without turning the app into a general-purpose shell filesystem.
@@ -946,6 +967,7 @@ wget -q -O /dev/null --server-response https://example.com
 - The share-snapshot redaction setting selects the default redaction choice (prompt / redacted / raw) so the share prompt is skipped once a preference is saved.
 - Run notifications fire a browser desktop notification each time a run exits or is killed; the title shows only the command root (`$ curl`) and the body shows exit code and elapsed time. Enabling triggers the native permission prompt; if notifications are blocked, the toggle reverts with a toast. This toggle is intentionally hidden from the mobile Options sheet because the feature is treated as desktop-oriented chrome behavior.
 - Preferences are stored server-side per session and mirrored into browser cookies/local storage for reload continuity, so a named session token restores the same option set across browsers and devices.
+- The same Options surface includes session-token shortcuts and encrypted secret management so mobile and desktop have one place for session-owned controls.
 
 **Limits:** anonymous UUID sessions remain browser-local by design, so only named session tokens carry preferences across devices. Blocked notification permission cannot be re-prompted by the toggle — it must be re-enabled in browser settings.
 
@@ -962,7 +984,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Terminal option keys:** `line-numbers`, `timestamps`, `welcome`, `share-redaction`, `run-notifications`, `hud-clock`.
 
-**Related files:** `app/static/js/app.js` (Options modal state, terminal command, notification preference, and session preference persistence), `app/static/js/runner.js` (run-completion notification dispatch), `app/static/js/shell_chrome.js` (desktop options navigation), `app/static/js/mobile_chrome.js` (mobile menu wiring).
+**Related files:** `app/static/js/app.js` (Options modal state, terminal command, notification preference, and session preference persistence), `app/static/js/features/preferences/secrets_panel.js` (encrypted secret rows and value prompt), `app/static/js/runner.js` (run-completion notification dispatch and browser-owned terminal command routing), `app/static/js/shell_chrome.js` (desktop options navigation), `app/static/js/mobile_chrome.js` (mobile menu wiring).
 
 ---
 
