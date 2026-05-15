@@ -7,20 +7,26 @@
 
   const overlay = document.getElementById('atlas-overlay');
   const surface = document.getElementById('atlas-surface');
+  const shell = surface?.querySelector?.('.atlas-shell') || document.querySelector('.atlas-shell');
   const closeBtn = document.querySelector('.atlas-close');
   const tabsHost = document.getElementById('atlas-tabs');
   const subtitle = document.getElementById('atlas-subtitle');
   const searchInput = document.getElementById('atlas-search');
   const findingStatusFilter = document.getElementById('atlas-finding-status-filter');
+  const orphanFilter = document.getElementById('atlas-orphan-filter');
+  const exportWrap = document.getElementById('atlas-export-wrap');
+  const exportMenuBtn = document.getElementById('atlas-export-menu-btn');
   const exportCsvBtn = document.getElementById('atlas-export-csv-btn');
   const exportJsonlBtn = document.getElementById('atlas-export-jsonl-btn');
   const refreshBtn = document.getElementById('atlas-refresh-btn');
   const findingBulkRow = document.getElementById('atlas-finding-bulk-row');
+  const selectToggle = document.getElementById('atlas-select-toggle');
   const findingSelectionSummary = document.getElementById('atlas-finding-selection-summary');
   const findingSelectAllBtn = document.getElementById('atlas-finding-select-all');
   const findingClearSelectionBtn = document.getElementById('atlas-finding-clear-selection');
   const findingBulkStatus = document.getElementById('atlas-finding-bulk-status');
   const findingBulkApplyBtn = document.getElementById('atlas-finding-bulk-apply');
+  const bulkDeleteBtn = document.getElementById('atlas-bulk-delete');
   const listHost = document.getElementById('atlas-list');
   const detailHost = document.getElementById('atlas-detail');
   const pagination = document.getElementById('atlas-pagination');
@@ -29,14 +35,18 @@
   const nextBtn = document.getElementById('atlas-next-btn');
 
   const state = {
-    activeTab: 'ip',
+    activeTab: 'findings',
     summary: null,
     entities: [],
     findings: [],
     findingCounts: {},
     selectedFindingId: '',
     selectedFindingIds: new Set(),
+    selectedEntityIds: new Set(),
+    selectMode: false,
+    bulkInFlight: false,
     findingStatus: '',
+    orphanFilter: 'hide',
     total: 0,
     limit: 50,
     offset: 0,
@@ -51,6 +61,7 @@
     detail: null,
     detailLoading: false,
     searchTimer: null,
+    refreshSeq: 0,
   };
 
   function api() {
@@ -86,6 +97,11 @@
     return detailApi.text ? detailApi.text(value, fallback) : (String(value ?? '').trim() || fallback);
   }
 
+  function countLabel(count, singular, plural) {
+    const numeric = Number(count || 0);
+    return `${numeric.toLocaleString()} ${numeric === 1 ? singular : plural}`;
+  }
+
   const findingStates = [
     ['new', 'New'],
     ['reviewed', 'Reviewed'],
@@ -107,6 +123,7 @@
 
   function hide({ refocus = true } = {}) {
     if (!overlay) return;
+    resetSelection({ selectMode: false, render: false });
     overlay.classList.add('u-hidden');
     overlay.classList.remove('open');
     overlay.setAttribute('aria-hidden', 'true');
@@ -133,7 +150,7 @@
     }
     state.selectedId = '';
     state.selectedFindingId = '';
-    state.selectedFindingIds.clear();
+    resetSelection({ selectMode: false, render: false });
     state.detail = null;
     show();
     if (typeof global.markInteractionSurfaceReady === 'function') {
@@ -148,7 +165,55 @@
   }
 
   function currentTab() {
-    return tabsApi.tabById ? tabsApi.tabById(state.activeTab) : { id: 'ip', type: 'ip', label: 'Hosts/IPs' };
+    return tabsApi.tabById ? tabsApi.tabById(state.activeTab) : { id: 'findings', type: '', label: 'Findings' };
+  }
+
+  function activeSelectionSet(tab = currentTab()) {
+    return tab.id === 'findings' ? state.selectedFindingIds : state.selectedEntityIds;
+  }
+
+  function visibleSelectableItems(tab = currentTab()) {
+    return tab.id === 'findings' ? state.findings : state.entities;
+  }
+
+  function resetSelection({ selectMode = state.selectMode, render = true } = {}) {
+    state.selectMode = !!selectMode;
+    state.bulkInFlight = false;
+    state.selectedFindingIds.clear();
+    state.selectedEntityIds.clear();
+    if (render) render();
+  }
+
+  function setSelectMode(enabled) {
+    state.selectMode = !!enabled;
+    if (!state.selectMode) {
+      state.selectedFindingIds.clear();
+      state.selectedEntityIds.clear();
+    }
+    render();
+  }
+
+  function toggleItemSelection(item, checked = null) {
+    if (!item || !item.id || state.bulkInFlight) return;
+    const selected = activeSelectionSet();
+    const id = String(item.id);
+    const shouldSelect = checked === null ? !selected.has(id) : !!checked;
+    if (shouldSelect) selected.add(id);
+    else selected.delete(id);
+    render();
+  }
+
+  function selectAllVisibleItems() {
+    if (!state.selectMode || state.bulkInFlight) return;
+    const selected = activeSelectionSet();
+    const items = visibleSelectableItems().filter(item => item && item.id);
+    const allSelected = items.length > 0 && items.every(item => selected.has(String(item.id)));
+    items.forEach((item) => {
+      const id = String(item.id);
+      if (allSelected) selected.delete(id);
+      else selected.add(id);
+    });
+    render();
   }
 
   function renderTabs() {
@@ -157,11 +222,13 @@
     (tabsApi.tabs || []).forEach(tab => {
       const button = document.createElement('button');
       button.type = 'button';
-      button.className = 'toggle-btn atlas-tab';
+      button.className = 'toggle-btn history-run-tab atlas-tab';
       button.dataset.atlasTab = tab.id;
       button.setAttribute('role', 'tab');
       button.setAttribute('aria-selected', tab.id === state.activeTab ? 'true' : 'false');
+      button.setAttribute('aria-pressed', tab.id === state.activeTab ? 'true' : 'false');
       button.classList.toggle('active', tab.id === state.activeTab);
+      button.classList.toggle('is-active', tab.id === state.activeTab);
       const label = document.createElement('span');
       label.textContent = tab.label;
       const count = document.createElement('span');
@@ -174,7 +241,7 @@
         state.offset = 0;
         state.selectedId = '';
         state.selectedFindingId = '';
-        state.selectedFindingIds.clear();
+        resetSelection({ selectMode: state.selectMode, render: false });
         state.requestedEntityValue = '';
         state.refreshIntelOnSelect = false;
         state.addActiveProjectOnSelect = false;
@@ -212,24 +279,80 @@
       findingBulkStatus.value = 'reviewed';
       findingBulkStatus.dataset.populated = '1';
     }
+    if (orphanFilter && !orphanFilter.dataset.populated) {
+      orphanFilter.appendChild(option('Hide orphaned', 'hide'));
+      orphanFilter.appendChild(option('Show all', 'all'));
+      orphanFilter.appendChild(option('Only orphaned', 'only'));
+      orphanFilter.value = state.orphanFilter;
+      orphanFilter.dataset.populated = '1';
+    }
+    syncSelectDisplay(findingStatusFilter);
+    syncSelectDisplay(findingBulkStatus);
+    syncSelectDisplay(orphanFilter);
+  }
+
+  function syncSelectDisplay(select) {
+    if (!select) return;
+    if (typeof global.syncAppSelect === 'function') {
+      global.syncAppSelect(select);
+    }
+  }
+
+  function setSelectVisibility(select, hidden) {
+    if (!select) return;
+    select.classList.toggle('u-hidden', hidden);
+    const enhancedWrap = select.nextElementSibling;
+    if (enhancedWrap && enhancedWrap.classList?.contains('app-select')) {
+      enhancedWrap.classList.toggle('u-hidden', hidden);
+    }
   }
 
   function renderFindingControls() {
     populateFindingControls();
-    const active = currentTab().id === 'findings';
-    findingStatusFilter?.classList.toggle('u-hidden', !active);
-    findingBulkRow?.classList.toggle('u-hidden', !active);
-    exportCsvBtn?.classList.toggle('u-hidden', active);
-    exportJsonlBtn?.classList.toggle('u-hidden', active);
-    if (!active) return;
-    if (findingStatusFilter) findingStatusFilter.value = state.findingStatus;
-    const selectedCount = state.selectedFindingIds.size;
+    const tab = currentTab();
+    const findingsActive = tab.id === 'findings';
+    const visibleItems = visibleSelectableItems(tab).filter(item => item && item.id);
+    const selected = activeSelectionSet(tab);
+    const selectedCount = selected.size;
+    const allSelected = visibleItems.length > 0 && visibleItems.every(item => selected.has(String(item.id)));
+    const someSelected = visibleItems.some(item => selected.has(String(item.id)));
+    setSelectVisibility(findingStatusFilter, !findingsActive);
+    setSelectVisibility(findingBulkStatus, !findingsActive || !state.selectMode);
+    findingBulkApplyBtn?.classList.toggle('u-hidden', !findingsActive || !state.selectMode);
+    exportWrap?.classList.toggle('u-hidden', findingsActive);
+    findingBulkRow?.classList.toggle('u-hidden', !state.selectMode && !visibleItems.length);
+    if (selectToggle) {
+      selectToggle.checked = !!state.selectMode;
+      selectToggle.disabled = state.bulkInFlight;
+    }
+    if (findingStatusFilter) {
+      findingStatusFilter.value = state.findingStatus;
+      syncSelectDisplay(findingStatusFilter);
+    }
+    syncSelectDisplay(findingBulkStatus);
+    if (orphanFilter) {
+      orphanFilter.value = state.orphanFilter;
+      syncSelectDisplay(orphanFilter);
+    }
     if (findingSelectionSummary) {
       findingSelectionSummary.textContent = `${selectedCount.toLocaleString()} selected`;
+      findingSelectionSummary.setAttribute('aria-live', 'polite');
     }
-    if (findingBulkApplyBtn) findingBulkApplyBtn.disabled = !selectedCount || state.loading;
-    if (findingClearSelectionBtn) findingClearSelectionBtn.disabled = !selectedCount || state.loading;
-    if (findingSelectAllBtn) findingSelectAllBtn.disabled = !state.findings.length || state.loading;
+    if (findingSelectAllBtn) {
+      findingSelectAllBtn.classList.toggle('u-hidden', !state.selectMode);
+      findingSelectAllBtn.textContent = allSelected && someSelected ? 'Deselect all' : 'Select all';
+      findingSelectAllBtn.disabled = !state.selectMode || !visibleItems.length || state.loading || state.bulkInFlight;
+      findingSelectAllBtn.setAttribute('aria-pressed', allSelected && someSelected ? 'true' : someSelected ? 'mixed' : 'false');
+    }
+    if (findingClearSelectionBtn) {
+      findingClearSelectionBtn.classList.toggle('u-hidden', !state.selectMode);
+      findingClearSelectionBtn.disabled = !selectedCount || state.loading || state.bulkInFlight;
+    }
+    if (findingBulkApplyBtn) findingBulkApplyBtn.disabled = !selectedCount || state.loading || state.bulkInFlight;
+    if (bulkDeleteBtn) {
+      bulkDeleteBtn.classList.toggle('u-hidden', !state.selectMode);
+      bulkDeleteBtn.disabled = !selectedCount || state.loading || state.bulkInFlight;
+    }
   }
 
   function findingStatusLabel(value) {
@@ -241,18 +364,14 @@
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'chrome-row chrome-row-clickable atlas-finding-queue-row';
-    row.classList.toggle('is-selected', finding.id === state.selectedFindingId);
+    row.classList.toggle('is-selecting', state.selectMode);
+    row.classList.toggle(
+      'is-selected',
+      state.selectMode
+        ? state.selectedFindingIds.has(String(finding.id || ''))
+        : finding.id === state.selectedFindingId,
+    );
     row.dataset.findingId = finding.id;
-
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.className = 'atlas-finding-select';
-    checkbox.checked = state.selectedFindingIds.has(String(finding.id || ''));
-    checkbox.setAttribute('aria-label', `Select finding: ${finding.title || finding.id}`);
-    checkbox.addEventListener('click', (event) => {
-      event.stopPropagation();
-      toggleFindingSelection(finding.id, checkbox.checked);
-    });
 
     const main = document.createElement('span');
     main.className = 'atlas-entity-main';
@@ -272,9 +391,27 @@
     const badges = document.createElement('span');
     badges.className = 'atlas-entity-badges';
     badges.appendChild(badge(findingStatusLabel(finding.review_state || finding.status), 'green'));
-    if (finding.occurrence_count) badges.appendChild(badge(`${finding.occurrence_count} hits`, 'muted'));
-    row.append(checkbox, main, badges);
-    row.addEventListener('click', () => selectFinding(finding.id));
+    if (finding.occurrence_count) badges.appendChild(badge(countLabel(finding.occurrence_count, 'hit', 'hits'), 'muted'));
+    if (state.selectMode) {
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'atlas-finding-select atlas-row-select';
+      checkbox.checked = state.selectedFindingIds.has(String(finding.id || ''));
+      checkbox.setAttribute('aria-label', `Select finding: ${finding.title || finding.id}`);
+      checkbox.addEventListener('click', (event) => {
+        event.stopPropagation();
+        toggleItemSelection(finding, checkbox.checked);
+      });
+      row.appendChild(checkbox);
+    }
+    row.append(main, badges);
+    row.addEventListener('click', () => {
+      if (state.selectMode) {
+        toggleItemSelection(finding);
+        return;
+      }
+      selectFinding(finding.id);
+    });
     return row;
   }
 
@@ -302,7 +439,13 @@
       const row = document.createElement('button');
       row.type = 'button';
       row.className = 'chrome-row chrome-row-clickable atlas-entity-row';
-      row.classList.toggle('is-selected', entity.id === state.selectedId);
+      row.classList.toggle('is-selecting', state.selectMode);
+      row.classList.toggle(
+        'is-selected',
+        state.selectMode
+          ? state.selectedEntityIds.has(String(entity.id || ''))
+          : entity.id === state.selectedId,
+      );
       row.dataset.entityId = entity.id;
 
       const main = document.createElement('span');
@@ -314,7 +457,7 @@
       meta.className = 'atlas-muted';
       const runCount = Number(entity.run_count || 0);
       const occurrenceCount = Number(entity.occurrence_count || 0);
-      meta.textContent = `${occurrenceCount.toLocaleString()} hits · ${runCount.toLocaleString()} runs`;
+      meta.textContent = `${countLabel(occurrenceCount, 'hit', 'hits')} · ${countLabel(runCount, 'run', 'runs')}`;
       main.append(value, meta);
 
       const badges = document.createElement('span');
@@ -323,8 +466,26 @@
       const labels = Array.isArray(entity.labels) ? entity.labels : [];
       labels.slice(0, 2).forEach(label => badges.appendChild(badge(text(label.label || label), 'muted')));
 
+      if (state.selectMode) {
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'atlas-row-select';
+        checkbox.checked = state.selectedEntityIds.has(String(entity.id || ''));
+        checkbox.setAttribute('aria-label', `Select entity: ${entity.canonical_value || entity.id}`);
+        checkbox.addEventListener('click', (event) => {
+          event.stopPropagation();
+          toggleItemSelection(entity, checkbox.checked);
+        });
+        row.appendChild(checkbox);
+      }
       row.append(main, badges);
-      row.addEventListener('click', () => selectEntity(entity.id));
+      row.addEventListener('click', () => {
+        if (state.selectMode) {
+          toggleItemSelection(entity);
+          return;
+        }
+        selectEntity(entity.id);
+      });
       listHost.appendChild(row);
     });
   }
@@ -347,7 +508,12 @@
     if (!pagination || !paginationSummary || !prevBtn || !nextBtn) return;
     const showPager = state.total > state.limit || state.offset > 0;
     pagination.classList.toggle('u-hidden', !showPager);
-    if (!showPager) return;
+    if (!showPager) {
+      paginationSummary.textContent = '';
+      prevBtn.disabled = true;
+      nextBtn.disabled = true;
+      return;
+    }
     const start = state.total ? state.offset + 1 : 0;
     const end = Math.min(state.offset + state.limit, state.total);
     paginationSummary.textContent = `${start}-${end} of ${state.total.toLocaleString()}`;
@@ -372,6 +538,7 @@
           run_kind: item.run_kind,
         }),
         onOpenEntity: (item) => openEntityFromFinding(item),
+        onDeleteFinding: (item) => confirmDeleteFinding(item),
       });
       return;
     }
@@ -390,10 +557,12 @@
       onRemoveProjectLink: (link) => removeProjectLink(link),
       onSaveMetadata: (payload) => saveMetadata(payload),
       onSeeRun: (run) => openSourceRun(run),
+      onDeleteEntity: () => confirmDeleteEntity(),
     });
   }
 
   function render() {
+    renderShellMode();
     renderSubtitle();
     renderFindingControls();
     renderTabs();
@@ -402,16 +571,31 @@
     renderDetail();
   }
 
+  function renderShellMode() {
+    shell?.setAttribute('data-atlas-mode', currentTab().id === 'findings' ? 'findings' : 'entity');
+  }
+
   async function refreshAtlas({ resetOffset = false } = {}) {
     if (!overlay || !isOpen()) return;
     if (resetOffset) state.offset = 0;
+    const requestId = state.refreshSeq + 1;
+    state.refreshSeq = requestId;
+    const requestedTab = currentTab();
+    const isStale = () => (
+      requestId !== state.refreshSeq
+      || !isOpen()
+      || currentTab().id !== requestedTab.id
+    );
     state.loading = true;
     render();
     try {
-      const summaryResp = await api()('/atlas', { cache: 'no-store' });
+      const summaryParams = new URLSearchParams({ orphan_filter: state.orphanFilter });
+      const summaryResp = await api()(`/atlas?${summaryParams.toString()}`, { cache: 'no-store' });
       if (!summaryResp.ok) throw new Error(`HTTP ${summaryResp.status}`);
+      if (isStale()) return;
       state.summary = await summaryResp.json();
-      const tab = currentTab();
+      if (isStale()) return;
+      const tab = requestedTab;
       if (tab.id === 'findings') {
         const params = new URLSearchParams({
           limit: String(state.limit),
@@ -420,9 +604,12 @@
         if (state.query) params.set('q', state.query);
         if (state.projectId) params.set('project_id', state.projectId);
         if (state.findingStatus) params.append('review_state', state.findingStatus);
+        params.set('orphan_filter', state.orphanFilter);
         const listResp = await api()(`/atlas/findings?${params.toString()}`, { cache: 'no-store' });
         if (!listResp.ok) throw new Error(`HTTP ${listResp.status}`);
+        if (isStale()) return;
         const data = await listResp.json();
+        if (isStale()) return;
         state.entities = [];
         state.findings = Array.isArray(data.findings) ? data.findings : [];
         state.findingCounts = data.counts && typeof data.counts === 'object' ? data.counts : {};
@@ -432,6 +619,7 @@
             state.selectedFindingIds.delete(findingId);
           }
         });
+        state.selectedEntityIds.clear();
         if (!state.selectedFindingId && state.findings[0]) state.selectedFindingId = state.findings[0].id;
         if (state.selectedFindingId && !state.findings.some(item => String(item.id || '') === state.selectedFindingId)) {
           state.selectedFindingId = state.findings[0]?.id || '';
@@ -440,6 +628,7 @@
       } else {
         state.findings = [];
         state.selectedFindingId = '';
+        state.selectedFindingIds.clear();
         const params = new URLSearchParams({
           type: tab.type,
           limit: String(state.limit),
@@ -447,9 +636,12 @@
         });
         if (state.query) params.set('q', state.query);
         if (state.projectId) params.set('project_id', state.projectId);
+        params.set('orphan_filter', state.orphanFilter);
         const listResp = await api()(`/atlas/entities?${params.toString()}`, { cache: 'no-store' });
         if (!listResp.ok) throw new Error(`HTTP ${listResp.status}`);
+        if (isStale()) return;
         const data = await listResp.json();
+        if (isStale()) return;
         state.entities = Array.isArray(data.entities) ? data.entities : [];
         state.total = Number(data.total || 0);
         if (!state.selectedId && state.requestedEntityValue) {
@@ -464,7 +656,15 @@
           }
         }
         if (!state.selectedId && !state.requestedEntityValue && state.entities[0]) state.selectedId = state.entities[0].id;
+        state.selectedEntityIds.forEach((entityId) => {
+          if (!state.entities.some(entity => String(entity.id || '') === entityId)) {
+            state.selectedEntityIds.delete(entityId);
+          }
+        });
       }
+      if (isStale()) return;
+      state.loading = false;
+      render();
       if (state.selectedId) await loadDetail(state.selectedId, { renderLoading: false });
       else state.detail = null;
       if (state.selectedId && state.refreshIntelOnSelect) {
@@ -479,8 +679,10 @@
       if (typeof global.logClientError === 'function') global.logClientError('failed to load /atlas', err);
       showToastSafe('Failed to load Atlas', 'error');
     } finally {
-      state.loading = false;
-      render();
+      if (!isStale()) {
+        state.loading = false;
+        render();
+      }
     }
   }
 
@@ -494,14 +696,6 @@
     state.selectedFindingId = String(findingId || '');
     renderList();
     renderDetail();
-  }
-
-  function toggleFindingSelection(findingId, selected) {
-    const normalized = String(findingId || '');
-    if (!normalized) return;
-    if (selected) state.selectedFindingIds.add(normalized);
-    else state.selectedFindingIds.delete(normalized);
-    renderFindingControls();
   }
 
   async function updateFindingReviewState(finding, reviewState) {
@@ -548,6 +742,77 @@
     }
   }
 
+  function bulkDeleteNoun(tab, count) {
+    if (tab.id === 'findings') return count === 1 ? 'finding' : 'findings';
+    return count === 1 ? 'entity' : 'entities';
+  }
+
+  function bulkDeleteMessage(tab, counts = {}) {
+    const deleted = Number(counts.deleted || 0);
+    const notFound = Number(counts.not_found || 0);
+    const findingsDeleted = Number(counts.findings_deleted || 0);
+    const parts = [`Deleted ${deleted.toLocaleString()} ${bulkDeleteNoun(tab, deleted)}`];
+    if (findingsDeleted) {
+      parts.push(`${findingsDeleted.toLocaleString()} attached ${findingsDeleted === 1 ? 'finding' : 'findings'} removed`);
+    }
+    if (notFound) parts.push(`${notFound.toLocaleString()} not found`);
+    return parts.join(' - ');
+  }
+
+  function setBulkBusy(busy) {
+    state.bulkInFlight = !!busy;
+    render();
+  }
+
+  async function bulkDeleteSelectedItems() {
+    const tab = currentTab();
+    const isFindings = tab.id === 'findings';
+    const selected = activeSelectionSet(tab);
+    const ids = [...selected];
+    if (!ids.length || typeof global.showConfirm !== 'function') return;
+    const noun = bulkDeleteNoun(tab, ids.length);
+    const note = isFindings
+      ? 'This removes the selected findings and cannot be undone.'
+      : 'This removes the selected entities and any findings attached to them. This cannot be undone.';
+    const choice = await global.showConfirm({
+      body: {
+        text: `Delete ${ids.length.toLocaleString()} Atlas ${noun}?`,
+        note,
+      },
+      tone: 'warning',
+      actions: [
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+        { id: 'delete', label: 'Delete', role: 'destructive', tone: 'warning' },
+      ],
+      refocusOnResolve: false,
+    });
+    if (choice !== 'delete') return;
+    setBulkBusy(true);
+    try {
+      const url = isFindings ? '/atlas/findings/bulk-delete' : '/atlas/entities/bulk-delete';
+      const body = isFindings ? { finding_ids: ids } : { entity_ids: ids };
+      const resp = await api()(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json().catch(() => ({}));
+      selected.clear();
+      const counts = data && typeof data === 'object' && data.counts ? data.counts : {};
+      showToastSafe(bulkDeleteMessage(tab, counts), Number(counts.not_found || 0) ? 'warning' : 'success');
+      state.selectedId = '';
+      state.selectedFindingId = '';
+      state.detail = null;
+      await refreshAtlas({ resetOffset: state.offset >= state.total - ids.length });
+    } catch (err) {
+      if (typeof global.logClientError === 'function') global.logClientError('failed to bulk delete atlas rows', err);
+      showToastSafe('Failed to delete selected Atlas rows', 'error');
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   function openEntityFromFinding(finding) {
     const entityId = String(finding && finding.entity_id || '');
     const entityType = String(finding && finding.entity_type || '');
@@ -555,7 +820,7 @@
     state.activeTab = entityType;
     state.selectedId = entityId;
     state.selectedFindingId = '';
-    state.selectedFindingIds.clear();
+    resetSelection({ selectMode: state.selectMode, render: false });
     state.query = '';
     if (searchInput) searchInput.value = '';
     refreshAtlas({ resetOffset: true });
@@ -568,14 +833,19 @@
     try {
       const resp = await api()(`/atlas/entities/${encodeURIComponent(entityId)}`, { cache: 'no-store' });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      state.detail = await resp.json();
+      const detail = await resp.json();
+      if (String(state.selectedId || '') !== String(entityId || '') || currentTab().id === 'findings') return;
+      state.detail = detail;
     } catch (err) {
+      if (String(state.selectedId || '') !== String(entityId || '')) return;
       state.detail = null;
       if (typeof global.logClientError === 'function') global.logClientError('failed to load atlas entity', err);
       showToastSafe('Failed to load entity', 'error');
     } finally {
-      state.detailLoading = false;
-      render();
+      if (String(state.selectedId || '') === String(entityId || '')) {
+        state.detailLoading = false;
+        render();
+      }
     }
   }
 
@@ -593,6 +863,119 @@
     } catch (err) {
       if (typeof global.logClientError === 'function') global.logClientError('failed to refresh atlas intel', err);
       showToastSafe('Failed to refresh intel', 'error');
+    }
+  }
+
+  function cleanupLabel(cleanup) {
+    const entities = Number(cleanup?.entities || 0);
+    const findings = Number(cleanup?.findings || 0);
+    return `${entities.toLocaleString()} ${entities === 1 ? 'entity' : 'entities'} and `
+      + `${findings.toLocaleString()} ${findings === 1 ? 'finding' : 'findings'}`;
+  }
+
+  function deleteCleanupContent(preview, checkboxId) {
+    const cleanup = preview?.sibling_cleanup || {};
+    if (!preview?.source_run_id || !cleanup.has_cleanup) return null;
+    const wrap = document.createElement('div');
+    wrap.className = 'atlas-delete-cleanup-option';
+    const label = document.createElement('label');
+    label.className = 'form-check';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = checkboxId;
+    checkbox.checked = false;
+    const textNode = document.createElement('span');
+    textNode.textContent = 'Also remove non-curated Atlas items only created by the same run';
+    label.append(checkbox, textNode);
+    const note = document.createElement('div');
+    note.className = 'atlas-muted';
+    const curated = Number(cleanup.curated_total || 0);
+    note.textContent = `This will remove ${cleanupLabel(cleanup)}.`;
+    wrap.append(label, note);
+    if (curated > 0) {
+      const curatedNote = document.createElement('div');
+      curatedNote.className = 'atlas-muted';
+      curatedNote.textContent = `${curated.toLocaleString()} curated ${curated === 1 ? 'item' : 'items'} will be kept.`;
+      wrap.appendChild(curatedNote);
+    }
+    return wrap;
+  }
+
+  async function confirmDeleteEntity() {
+    const entityId = String(state.selectedId || '');
+    if (!entityId || typeof global.showConfirm !== 'function') return;
+    try {
+      const previewResp = await api()(`/atlas/entities/${encodeURIComponent(entityId)}/delete-preview`, { cache: 'no-store' });
+      if (!previewResp.ok) throw new Error(`HTTP ${previewResp.status}`);
+      const preview = (await previewResp.json()).preview || {};
+      const checkboxId = `atlas-delete-cleanup-${Date.now()}`;
+      const content = deleteCleanupContent(preview, checkboxId);
+      const attachedFindings = Number((preview.attached_finding_ids || []).length || 0);
+      const note = attachedFindings
+        ? `This also removes ${attachedFindings.toLocaleString()} ${attachedFindings === 1 ? 'finding' : 'findings'} attached to this entity.`
+        : 'This cannot be undone.';
+      const choice = await global.showConfirm({
+        body: { text: 'Delete this Atlas entity?', note },
+        content,
+        tone: 'danger',
+        refocusOnResolve: false,
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'delete', label: 'Delete', role: 'destructive' },
+        ],
+      });
+      if (choice !== 'delete') return;
+      const prune = !!content?.querySelector?.('input')?.checked;
+      const resp = await api()(`/atlas/entities/${encodeURIComponent(entityId)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prune_source_run: prune }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      showToastSafe(prune ? 'Entity and related Atlas items deleted' : 'Entity deleted', 'success');
+      state.selectedId = '';
+      state.detail = null;
+      await refreshAtlas({ resetOffset: state.offset >= state.total - 1 });
+    } catch (err) {
+      if (typeof global.logClientError === 'function') global.logClientError('failed to delete atlas entity', err);
+      showToastSafe('Failed to delete Atlas entity', 'error');
+    }
+  }
+
+  async function confirmDeleteFinding(finding) {
+    const findingId = String(finding?.id || state.selectedFindingId || '');
+    if (!findingId || typeof global.showConfirm !== 'function') return;
+    try {
+      const previewResp = await api()(`/atlas/findings/${encodeURIComponent(findingId)}/delete-preview`, { cache: 'no-store' });
+      if (!previewResp.ok) throw new Error(`HTTP ${previewResp.status}`);
+      const preview = (await previewResp.json()).preview || {};
+      const checkboxId = `atlas-delete-cleanup-${Date.now()}`;
+      const content = deleteCleanupContent(preview, checkboxId);
+      const choice = await global.showConfirm({
+        body: { text: 'Delete this Atlas finding?', note: 'This cannot be undone.' },
+        content,
+        tone: 'danger',
+        refocusOnResolve: false,
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'delete', label: 'Delete', role: 'destructive' },
+        ],
+      });
+      if (choice !== 'delete') return;
+      const prune = !!content?.querySelector?.('input')?.checked;
+      const resp = await api()(`/atlas/findings/${encodeURIComponent(findingId)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prune_source_run: prune }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      showToastSafe(prune ? 'Finding and related Atlas items deleted' : 'Finding deleted', 'success');
+      state.selectedFindingId = '';
+      state.selectedFindingIds.delete(findingId);
+      await refreshAtlas({ resetOffset: state.offset >= state.total - 1 });
+    } catch (err) {
+      if (typeof global.logClientError === 'function') global.logClientError('failed to delete atlas finding', err);
+      showToastSafe('Failed to delete Atlas finding', 'error');
     }
   }
 
@@ -634,6 +1017,7 @@
     if (tab.type) params.set('type', tab.type);
     if (state.query) params.set('q', state.query);
     if (state.projectId) params.set('project_id', state.projectId);
+    params.set('orphan_filter', state.orphanFilter);
     try {
       const resp = await api()(`/atlas/entities/export?${params.toString()}`, { cache: 'no-store' });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -725,6 +1109,8 @@
       state.requestedEntityValue = '';
       state.refreshIntelOnSelect = false;
       state.addActiveProjectOnSelect = false;
+      state.selectedFindingIds.clear();
+      state.selectedEntityIds.clear();
       clearTimeout(state.searchTimer);
       state.searchTimer = setTimeout(() => refreshAtlas({ resetOffset: true }), 180);
     });
@@ -732,27 +1118,60 @@
       state.findingStatus = String(findingStatusFilter.value || '');
       state.selectedFindingId = '';
       state.selectedFindingIds.clear();
+      state.selectedEntityIds.clear();
       refreshAtlas({ resetOffset: true });
     });
+    orphanFilter?.addEventListener('change', () => {
+      state.orphanFilter = String(orphanFilter.value || 'hide') || 'hide';
+      state.selectedId = '';
+      state.selectedFindingId = '';
+      state.selectedFindingIds.clear();
+      state.selectedEntityIds.clear();
+      state.detail = null;
+      refreshAtlas({ resetOffset: true });
+    });
+    selectToggle?.addEventListener('change', () => {
+      setSelectMode(!!selectToggle.checked);
+    });
     findingSelectAllBtn?.addEventListener('click', () => {
-      state.findings.forEach(finding => {
-        if (finding && finding.id) state.selectedFindingIds.add(String(finding.id));
-      });
-      render();
+      selectAllVisibleItems();
     });
     findingClearSelectionBtn?.addEventListener('click', () => {
-      state.selectedFindingIds.clear();
+      activeSelectionSet().clear();
       render();
     });
     findingBulkApplyBtn?.addEventListener('click', () => {
       bulkUpdateFindings();
     });
+    bulkDeleteBtn?.addEventListener('click', () => {
+      bulkDeleteSelectedItems();
+    });
+    exportMenuBtn?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const open = !exportWrap?.classList.contains('open');
+      exportWrap?.classList.toggle('open', open);
+      exportMenuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
     exportCsvBtn?.addEventListener('click', () => {
+      exportWrap?.classList.remove('open');
+      exportMenuBtn?.setAttribute('aria-expanded', 'false');
       exportEntities('csv');
     });
     exportJsonlBtn?.addEventListener('click', () => {
+      exportWrap?.classList.remove('open');
+      exportMenuBtn?.setAttribute('aria-expanded', 'false');
       exportEntities('jsonl');
     });
+    if (typeof global.bindOutsideClickClose === 'function' && exportWrap) {
+      global.bindOutsideClickClose(exportWrap, {
+        triggers: exportMenuBtn,
+        isOpen: () => exportWrap.classList.contains('open'),
+        onClose: () => {
+          exportWrap.classList.remove('open');
+          exportMenuBtn?.setAttribute('aria-expanded', 'false');
+        },
+      });
+    }
     if (typeof global.bindDismissible === 'function' && overlay) {
       global.bindDismissible(overlay, {
         level: 'panel',

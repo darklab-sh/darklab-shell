@@ -11,7 +11,7 @@
   ];
 
   function tabById(id) {
-    return tabs.find(tab => tab.id === id) || tabs[1];
+    return tabs.find(tab => tab.id === id) || tabs[0];
   }
 
   function labelForType(type) {

@@ -29,7 +29,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Schema cleanup is destructive. The run-centric `findings`, project-scoped `project_targets`, and `finding_targets` tables are dropped and replaced by an entity-first schema. Pre-release single-user app — no backwards-compatibility shim, no dual-write phase, no data backfill from legacy rows. The Findings triage inbox's `findings_inbox` table is also collapsed into the unified entity-owned `findings` table here.
   - Hard dependencies: entity-aware classifier hooks are landed; encrypted secrets vault is landed for intel refresh actions.
 - **Current implementation status**
-  - Landed: Phase 1 backend contracts and storage, including the destructive project/finding/target rewrite onto `entities`, `project_links(entity_type='atlas_entity')`, unified `findings`, and `findings_occurrences`; Phase 2 run-finalize entity/finding materialization and retention pruning rules; `/atlas` summary/list/detail/export/refresh/project-link routes; shared label/note/project-link support for `atlas_entity`; Phase 3 browser Atlas surface with rail/mobile/shortcut/history/run-details/project entry points; Phase 4 transcript entity-token navigation; Phase 5 Findings tab absorption with status filters, single-finding updates, and visible-page bulk review updates; Phase 6 project curation where Atlas entity links feed Project Targets, summaries, and cross-tab refresh without copying records; and Phase 7 CSV/JSONL entity exports with schema documentation.
+  - Landed: Phase 1 backend contracts and storage, including the destructive project/finding/target rewrite onto `entities`, `project_links(entity_type='atlas_entity')`, unified `findings`, and `findings_occurrences`; Phase 2 run-finalize entity/finding materialization and retention pruning rules; `/atlas` summary/list/detail/export/refresh/project-link routes; shared label/note/project-link support for `atlas_entity`; Phase 3 browser Atlas surface with rail/mobile/shortcut/history/run-details/project entry points; Phase 4 transcript entity-token navigation; Phase 5 Findings tab absorption with status filters, single-finding updates, and visible-page bulk review updates; Phase 6 project curation where Atlas entity links feed Project Targets, summaries, and cross-tab refresh without copying records; Phase 7 CSV/JSONL entity exports with schema documentation; the concrete Phase 8 regression baseline for URL canonicalization, all supported materialized entity types, unscoped finding route parity, empty Atlas state, Findings-only control visibility, Run Details-style tab row placement, History-style list rows, provider-grouped intel summary highlights, expandable structured intel provider cards, and tab-aware entity/detail column sizing; noisy-run cleanup support for hiding/showing orphaned Atlas rows, optional run-delete cleanup, and individual entity/finding deletes with same-run sibling cleanup; and History-style select mode for visible-page bulk deletion across Atlas entity and Findings tabs.
   - Still pending: richer Atlas entity-list filters and the later feedback/test work described below.
 - **Phase 0 - Existing-code integration check (complete)**
   - Confirm classifier entity metadata (`entities: [{type, value, canonical_value, confidence, source_line}]`) is landed.
@@ -153,6 +153,8 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Entity graph view (visual link map across hosts, domains, hashes, CVEs).
   - Saved Atlas views (named filter combinations).
   - Atlas FTS search across entity values, labels, and notes.
+  - Run-retaining Atlas cleanup controls for noisy runs: detach a run's entities from Atlas without deleting the run transcript and recalculate affected entity/finding counts.
+  - Atlas suppression controls for known-noisy entities or patterns, with a separate reviewable suppressed view so cleanup is reversible.
   - Auto-promote rules — entities matching saved patterns auto-promote into a project.
   - Time-travel view: "what did the Atlas look like a week ago?" using retained snapshots.
   - Side-by-side entity comparison (their runs, findings, intel snapshots).
@@ -381,6 +383,42 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Add an optional operator provider denylist if deployments need to block outbound calls to specific vendors.
   - Revisit mutating provider flows, such as urlscan.io scan submission, only after privacy, terms, visibility, and user-confirmation rules are explicit.
 
+### Post-Atlas Projects modal enhancements
+- **Scope**
+  - The Projects modal predates Atlas and absorbs Atlas data only partially. With the entity graph, intel snapshots, and unified findings table now in place, several places in the modal either drop new data on the floor, render it with the pre-Atlas mental model, or expose actions on Atlas's side that Projects can't reach. Goal of this entry is to close the parity gap so a user who learned Atlas first finds the same data, same controls, and same row primitives inside Projects.
+- **Hard data-display gaps**
+  - Hash and CVE entities added to a project from Atlas are invisible in the Projects modal. `get_project_summary()` in `app/services/projects/workspace.py` filters `e.type IN ('domain', 'ip', 'url')` (around the targets query), so any `project_links` row with `entity_type='atlas_entity'` and `entities.type IN ('hash', 'cve')` lands in the schema but never renders. Fix the SQL to surface every Atlas entity type, even if "Targets" stays scoped to domain/ip/url.
+  - Findings are derived solely from `findings_occurrences` joined to project-linked runs. Atlas's findings model is entity-owned and dedupes across runs, so a finding attached to an Atlas entity that a project links — without one of the run-link records — currently cannot reach the project Findings tab. Read findings via `findings_occurrences.run_id IN linked_runs OR findings.entity_id IN linked_atlas_entities` so entity-linked findings appear in the project context.
+  - Intel snapshots on linked entities (`entity_intel_snapshots` keyed by entity) are not surfaced in the Projects modal at all. Operators can't ask "what intel do I have on this engagement" without leaving for Atlas, filtering to project, and clicking each entity in turn.
+- **Findings parity with Atlas**
+  - Surface review state (`new / reviewed / important / false_positive / needs_followup`) as an inline control on Projects findings rows so triage round-trips between Atlas and Projects without leaving the modal.
+  - Add the same bulk review-state and bulk-delete affordances Atlas exposes (visible-page select, multi-select review, sibling-sweep on delete). Reuse the Atlas review and delete routes — Projects-side just needs the controls.
+  - Add an orphan-source filter on the Projects Findings tab matching Atlas. Project-linked runs get deleted over time and orphans accumulate silently otherwise.
+- **Entity surface and affordances**
+  - Add a top-level **Entities** tab inside the project detail view that mirrors Atlas's tab row (Hosts/IPs, Domains, Hashes, CVEs, URLs) scoped to project-linked rows. Reuse `static/js/features/atlas/atlas_tabs.js` rendering with an implicit `project=<id>` filter so the row primitive, sort, search, and click-to-open-detail behavior stay identical to Atlas.
+  - Keep **Targets** as a curated domain/ip/url subset under Details — it carries scope-of-engagement semantics that's distinct from "every entity that touched a linked run." Two views, two labels, same underlying `project_links` rows.
+  - Add an **Add entity** affordance inside the Projects modal that opens a small picker over the session's Atlas entities (multi-select, search, link). Today the project↔entity workflow is one-directional (Atlas → Projects); this closes the loop.
+  - Clicking an entity/target row in Projects should open the same Atlas entity detail side sheet the rest of the app uses. If that's not already the wiring, route through Atlas's existing detail handler rather than rendering entity data locally in the Projects modal.
+  - Per-entity intel refresh from inside the Projects modal should route through the existing `POST /atlas/entities/<entity_id>/refresh_intel` endpoint — don't duplicate the provider orchestration on the Projects path.
+  - Surface intel availability as a small count badge or icon on entity rows (e.g. "intel: 4 providers") without rendering full snapshot bodies. Full intel rendering stays Atlas's job; Projects just signals presence so operators know it exists.
+- **Bulk and export parity**
+  - Add visible-page bulk unlink on the Projects entities/targets tab matching Atlas's bulk delete affordance. Unlink removes the `project_links` row; the entity itself stays in Atlas.
+  - Add CSV/JSONL export of project-scoped entity rows, reusing the existing Atlas export code path with an implicit `project=<id>` filter rather than building a parallel exporter under `app/services/projects/`.
+- **Schema and contract decisions to confirm before building**
+  - **Findings linkage model.** Two paths to attach a finding to a project: indirectly (through a linked run) or directly (via `project_links(entity_type='finding')`). Today `PROJECT_LINK_ENTITY_TYPES = {"atlas_entity", "run"}` (`app/services/projects/contracts.py`) intentionally excludes `finding`. Two viable directions:
+    - Keep the contract as-is; reach findings through linked runs *and* linked entities (the entity-link extension above). Schema stays lean.
+    - Add `"finding"` to the entity-type allowlist and let users pin specific findings to a project without pinning the run. More flexible, but two paths converge on the same project Findings tab and a "this finding is in this project because…" rule has to be authored carefully.
+    - Recommend the first to start. The entity-link path already covers the high-value case.
+  - **Targets framing.** "Targets" is now a domain/ip/url-only filter over `project_links(entity_type='atlas_entity')`. Decide whether the rename to "Scope" / "In-Scope Entities" / similar is worth the user-facing churn, or whether "Targets" stays as the engagement-focused label even though the underlying storage is generic.
+- **Implementation notes**
+  - The summary endpoint at `GET /projects/<id>/summary` is the single read surface; broaden its returned shape rather than adding parallel routes. The current handler already builds the Atlas-entity subset via `project_links` — extend that block instead of forking it.
+  - Mobile tab strip grows from 5 to 6 (Details / Runs / Entities / Findings / Artifacts / Packages). Verify horizontal scroll and active-tab autoscroll still feel right on a 360px viewport before merging.
+  - Move the new entity-tab and findings-tab rendering off `shell_chrome.js` into a dedicated `app/static/js/features/projects/` module while you're touching the surface — this aligns with the existing follow-up under **Future Project Workspace enhancements → Code organization** ("Move Projects modal rendering and event wiring out of `shell_chrome.js`").
+- **Tests**
+  - Drift guard test against `_projectMobileTabItems()` so adding an entity type to Atlas (e.g. future `asn` or `email` types) doesn't silently drop rows from the Projects modal.
+  - Backend coverage: `get_project_summary()` returns hash/CVE entities; entity-linked findings appear in the Projects findings list; bulk unlink touches only `project_links` rows, never the entity itself.
+  - Playwright: add entity from Projects-side picker → row appears in the project Entities tab; click row opens Atlas entity detail; intel-refresh round-trips via the Atlas route; bulk review/unlink works from both surfaces with consistent results.
+
 ### Future Project Workspace enhancements
 - **Security and lifecycle**
   - Validate `workspace_file` entity ownership during session migration, or document that labels/notes on workspace-file paths can drift when a migrated token lands in a session with a different file at the same path.
@@ -442,9 +480,67 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Skip the unconditional `_store_pty_snapshot(run, force=True)` in `pty_run_snapshot` when the request hits the worker that owns the PTY. The route already returns the live in-memory payload to the caller, and the next reader-loop tick will publish to Redis naturally; the extra Redis SET costs one round-trip per attach for cross-worker freshness that is rarely consumed.
   - Consider pausing xterm rendering for hidden-tab PTYs. xterm.js running in a `display: none` panel still processes writes and grows scrollback (capped at 1000 lines, but still wasted CPU). Either drop incoming `output` chunks into the modal only when visible (queue and replay on tab focus) or accept the cost as small enough to ignore — worth measuring under a long-running ffuf in a backgrounded tab before spending engineering on it.
 
+### Active run reattachment improvements
+- Prefer reusing the original browser tab when a normal command stream reconnects or reattaches to an active `run_id`, as long as that tab still exists. Creating a new tab should be the fallback for reload recovery, missing original tab state, or an explicit attach action from Status Monitor.
+- Add a clearer transcript notice for normal-command reattach events, such as `[reattached to active run after stream recovery]`, so background-tab throttling and SSE recovery do not look like a new command was launched.
+- Keep the existing "same run, same timer" behavior by preserving the server `started` timestamp on reattach; the change is only where the recovered stream lands and how the recovery is explained.
+- Add unit or browser coverage for the normal-command recovery path: start a run, simulate stream detachment while the run remains active, confirm the original tab is reused, and confirm a missing original tab still creates a recovery tab.
+
+### High-volume output handling
+- Add a high-volume live-output mode for normal brokered commands once a run crosses a large output threshold, such as 100k rendered lines or a configurable byte/event rate. The mode should keep counting, bounded persistence, history metadata, and kill controls working while reducing browser rendering pressure.
+- In high-volume mode, stop rendering every line live. Render a periodic status line instead, for example `[high-volume output mode: 1,250,000 lines received; live rendering paused]`, and offer an explicit "resume live rendering" action only if the user wants the browser to catch up.
+- Preserve raw-output fidelity in backend storage according to the existing `persist_full_run_output`, `full_output_max_mb`, `max_output_lines`, and `output_preview_max_mb` settings. High-volume mode should protect the browser, not silently alter the saved-output policy.
+- Surface the mode in the run UI and history preview so users can tell the command is still running and producing output even though the transcript is intentionally throttled.
+- Add regression coverage with synthetic noisy output to verify the browser does not become unresponsive, the line count continues increasing, the kill button still works, and the completed run records the correct `output_line_count` plus truncation state.
+
 ### Run comparison follow-ups
 - Consider active-tab compare, snapshot/permalink compare, package-artifact compare, and export/share comparison once the run-vs-run model has more production use.
 - Add focused large/noisy output regressions if real scanner output exposes performance or alignment gaps beyond the current backend, Vitest, and Playwright coverage.
+
+### Options modal grouping and Secrets tab
+- **Scope**
+  - The Options modal is a flat list of 12 controls today (`app/templates/index.html` around the `#options-modal` block). The Secrets row is the only item whose vertical size grows with user data — 10+ secrets push the modal well past one viewport — and the remaining 11 controls have no visual grouping despite covering four different mental categories (display, identity, run handling, comparison).
+  - Restructure the modal into a two-tab layout with the first tab carrying labeled sections. Secrets gets its own tab so its dynamic growth no longer pushes everything else off-screen.
+- **Tab and section layout**
+  - **Tab 1 — Preferences** (sections rendered as static dividers in this order):
+    - **Display** — Timestamps, Line Numbers, HUD Clock (desktop-only), Welcome Intro.
+    - **Identity** — Prompt Name, Session Token (the full status / Copy / Generate / Set / Rotate / Clear block lives here).
+    - **Runs** — Project Run Capture, Run Notifications (desktop-only), Share Snapshot Redaction.
+    - **Compare** — Compare View, Compare Context. Pairing these fixes the current scanning hazard where they sit between unrelated controls.
+  - **Tab 2 — Secrets** — Provider Status button, Add secret, Refresh, and the dynamic secrets list. Nothing else lives here.
+  - Reject the three-tab variant (Preferences / Session / Secrets) for v1. Session Token is one logical control with one block of explanatory copy; it doesn't earn its own tab the way Secrets does. Revisit only if Identity-section growth (e.g. encryption-key management, recovery flow) materializes.
+- **Implementation notes**
+  - Reuse the existing in-modal tab strip pattern from the projects modal (`project-mobile-tabs` markup + `features/projects/*` styling) rather than inventing a new tabs primitive — matches the shared-helper guidance and keeps mobile/desktop styling consistent.
+  - Section headers are static dividers (rule + small-caps label, ~24px tall), not collapsible disclosure rows. Collapsing inside the Preferences tab would hide controls behind two interactions and adds nothing for 12 fields.
+  - The `options-desktop-only` class continues to gate per-field visibility inside whichever section the field ends up in — no new visibility plumbing needed.
+  - Rewire `ui_focus_trap.js` to scope its trap to the active tab's panel, not the whole modal, so Tab/Shift-Tab moves within the visible tab. Escape still closes the modal. Arrow keys on the tab strip move between tabs the same way the projects modal does today.
+  - Persist the last-selected tab on the session preferences row so reopening the modal returns to Secrets when that's where the operator was working.
+  - Verify on a 720px laptop screen that the new tab strip plus section headers fit without scroll inside Preferences; if tight, drop section headers to a thin "rule + label" treatment rather than full headers.
+- **Tests**
+  - Update `tests/py/test_session_routes.py` (and the preferences integration tests) for the new `options_modal_last_tab` preference key.
+  - Add a Playwright case: open Options, switch to Secrets, close, reopen — Secrets stays selected. Switch back to Preferences, add a secret, reopen — Secrets is still where the new row lives, no overflow on the Preferences tab.
+  - Add a Vitest/JSDOM case asserting `options-desktop-only` fields still hide on mobile inside their new section.
+
+### FAQ modal section grouping
+- **Scope**
+  - The FAQ modal renders ~20 top-level Q&A items in a single flat scroll list (`_builtin_faq()` in `app/services/commands/registry.py`, rendered by `renderFaqItems()` in `app/static/js/features/command-registry/command_registry.js`). With more items planned (Atlas, intel providers, PTY transport notes), the flat list is already a scanning hazard.
+  - Introduce **section headers, not tabs**. FAQ is a scan-and-search surface; tabs hide answers behind a click and break in-page Ctrl-F. Section headers keep the entire FAQ in one scrollable stream but give it structure and deep-link anchors.
+- **Section layout** (proposed ordering of existing items)
+  - **Getting started** — "What is this?", "What commands are allowed?", "What built-in shell features are supported?"
+  - **Core features** — "What are Projects?", "What are session Files?", "What is Interactive PTY mode?", "How do tabs and permalinks work?", "How do I save or share my results?"
+  - **Privacy & sessions** — "Are my commands visible to other users?", "How do session tokens work?"
+  - **Keyboard & controls** — "How do I stop a running command?", "Are there keyboard shortcuts?", "How do I rename a tab?", "How do I access search, history and theme on mobile?", "What do the timestamp options do?", "What do the line number options do?"
+  - **Tool-specific behavior** — "What wordlists are available?", "Why does mtr look different here?", "Why does naabu use connect scan mode?"
+  - **Limits & retention** — "What are the retention and limit settings for this instance?" (longest/most-tabular; goes last).
+- **Implementation notes**
+  - Add an optional `category` field on each entry in `_builtin_faq()` and on every `faq.yaml` entry; default to `"Other"` so a missing or typo'd category never silently drops an item from the modal.
+  - In `renderFaqItems()`, group entries by category in the render pass; emit one `.faq-section-header` per group followed by the existing `.faq-item` accordion markup. Category order is controlled by a small `FAQ_CATEGORY_ORDER` constant; unknown categories fall to the bottom under "Other".
+  - Section headers are static dividers — not collapsible. The individual Q&A rows remain accordion-style (current behavior) so Ctrl-F still finds an answer inside a collapsed row via the existing always-rendered markup.
+  - Wire `#faq=<question-slug>` and `#faq-section=<category-slug>` hash sync so the tour, mobile menu, and onboarding flows can deep-link straight to a question or section. Stable slugs come from the question text (kebab-case) and category name; hash sync updates on open/close without polluting browser history.
+  - Sticky section header behavior: on desktop, headers stay pinned to the top of `.faq-body` while their section is in view (use `position: sticky` inside the scroll container). On mobile, drop the sticky behavior — extra vertical chrome on a sheet modal is more cost than scanning value.
+  - Drift guard: add `tests/py/test_faq_categories.py` asserting every entry returned by `load_all_faq()` carries a category present in `FAQ_CATEGORY_ORDER` (or the explicit `"Other"` fallback). Prevents new entries from quietly landing under Other when they belong in a real section.
+- **When to revisit**
+  - If the FAQ grows past ~30 entries, flip section headers to collapsible disclosure rows (collapsed by default for everything except "Getting started"). Don't pay that cost yet — at 20 entries the all-open scroll is still the right call.
 
 ## Research
 

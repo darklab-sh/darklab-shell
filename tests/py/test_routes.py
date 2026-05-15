@@ -4083,6 +4083,186 @@ class TestAtlasRoutes:
         assert detail["runs"][0]["run_id"] == run_id
         assert detail["findings"][0]["raw_line"] == "443/tcp open https on darklab.sh"
 
+    def test_orphan_filter_surfaces_atlas_rows_after_source_run_delete(self):
+        client = get_client()
+        session_id = self._session_id()
+        run_id, _ = self._seed_entity_run(session_id)
+
+        delete_resp = client.delete(f"/history/{run_id}", headers={"X-Session-ID": session_id})
+        default_summary = client.get("/atlas", headers={"X-Session-ID": session_id})
+        orphan_summary = client.get("/atlas?orphan_filter=only", headers={"X-Session-ID": session_id})
+        orphan_entities = client.get(
+            "/atlas/entities?type=domain&orphan_filter=only",
+            headers={"X-Session-ID": session_id},
+        )
+        orphan_findings = client.get(
+            "/atlas/findings?orphan_filter=only",
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert delete_resp.status_code == 200
+        assert json.loads(default_summary.data)["counts"]["domain"] == 0
+        assert json.loads(default_summary.data)["findings"] == 0
+        assert json.loads(orphan_summary.data)["counts"]["domain"] == 1
+        assert json.loads(orphan_summary.data)["findings"] == 1
+        assert json.loads(orphan_entities.data)["total"] == 1
+        assert json.loads(orphan_findings.data)["total"] == 1
+
+    def test_stale_run_links_do_not_hide_atlas_orphans_or_block_cleanup(self):
+        client = get_client()
+        session_id = self._session_id()
+        live_run_id, _ = self._seed_entity_run(session_id)
+        stale_run_id, _ = self._seed_entity_run(session_id)
+        with db_connect() as conn:
+            conn.execute("DELETE FROM runs WHERE id = ?", (stale_run_id,))
+            conn.commit()
+
+        preview_resp = client.get(
+            f"/history/{live_run_id}/atlas-cleanup-preview",
+            headers={"X-Session-ID": session_id},
+        )
+        default_summary = client.get("/atlas", headers={"X-Session-ID": session_id})
+        orphan_summary = client.get("/atlas?orphan_filter=only", headers={"X-Session-ID": session_id})
+
+        assert preview_resp.status_code == 200
+        preview = json.loads(preview_resp.data)["cleanup"]
+        assert preview["entities"] == 2
+        assert preview["findings"] == 1
+        assert json.loads(default_summary.data)["counts"]["domain"] == 1
+        assert json.loads(default_summary.data)["findings"] == 1
+        assert json.loads(orphan_summary.data)["counts"]["domain"] == 0
+        assert json.loads(orphan_summary.data)["findings"] == 0
+        delete_resp = client.delete(f"/history/{live_run_id}", headers={"X-Session-ID": session_id})
+        orphan_only_summary = client.get("/atlas?orphan_filter=only", headers={"X-Session-ID": session_id})
+        orphan_entities = client.get(
+            "/atlas/entities?type=domain&orphan_filter=only",
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert delete_resp.status_code == 200
+        assert json.loads(client.get("/atlas", headers={"X-Session-ID": session_id}).data)["counts"]["domain"] == 0
+        assert json.loads(orphan_only_summary.data)["counts"]["domain"] == 1
+        assert json.loads(orphan_only_summary.data)["findings"] == 1
+        orphan_data = json.loads(orphan_entities.data)
+        assert orphan_data["total"] == 1
+        assert orphan_data["entities"][0]["run_count"] == 0
+
+    def test_run_delete_can_prune_non_curated_atlas_orphans_and_keep_curated_entities(self):
+        client = get_client()
+        session_id = self._session_id()
+        run_id, recorded = self._seed_entity_run(session_id)
+        cve_id = next(item["id"] for item in recorded if item["type"] == "cve")
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created) "
+                "VALUES (?, ?, 'atlas_entity', ?, 'kept', 'manual', datetime('now'))",
+                ("lbl-" + uuid.uuid4().hex, session_id, cve_id),
+            )
+            conn.commit()
+
+        preview_resp = client.get(
+            f"/history/{run_id}/atlas-cleanup-preview",
+            headers={"X-Session-ID": session_id},
+        )
+        delete_resp = client.delete(
+            f"/history/{run_id}?prune_atlas=1",
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert preview_resp.status_code == 200
+        preview = json.loads(preview_resp.data)["cleanup"]
+        assert preview["entities"] == 1
+        assert preview["findings"] == 1
+        assert preview["curated_entities"] == 1
+        assert delete_resp.status_code == 200
+        with db_connect() as conn:
+            rows = conn.execute(
+                "SELECT type, canonical_value FROM entities WHERE session_id = ? ORDER BY type",
+                (session_id,),
+            ).fetchall()
+            finding_count = conn.execute(
+                "SELECT COUNT(*) FROM findings WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()[0]
+        assert [(row["type"], row["canonical_value"]) for row in rows] == [("cve", "CVE-2025-49113")]
+        assert finding_count == 0
+
+    def test_delete_atlas_finding_can_cleanup_same_run_siblings(self):
+        client = get_client()
+        session_id = self._session_id()
+        self._seed_entity_run(session_id)
+        list_resp = client.get("/atlas/findings", headers={"X-Session-ID": session_id})
+        finding_id = json.loads(list_resp.data)["findings"][0]["id"]
+
+        preview_resp = client.get(
+            f"/atlas/findings/{finding_id}/delete-preview",
+            headers={"X-Session-ID": session_id},
+        )
+        delete_resp = client.delete(
+            f"/atlas/findings/{finding_id}",
+            json={"prune_source_run": True},
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert preview_resp.status_code == 200
+        preview = json.loads(preview_resp.data)["preview"]
+        assert preview["sibling_cleanup"]["entities"] == 2
+        assert delete_resp.status_code == 200
+        with db_connect() as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM findings WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM entities WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()[0] == 0
+
+    def test_bulk_delete_atlas_entities_and_findings(self):
+        client = get_client()
+        session_id = self._session_id()
+        _, recorded = self._seed_entity_run(session_id)
+        domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
+        cve_id = next(item["id"] for item in recorded if item["type"] == "cve")
+        finding_session_id = self._session_id()
+        self._seed_entity_run(finding_session_id)
+        list_resp = client.get("/atlas/findings", headers={"X-Session-ID": finding_session_id})
+        finding_id = json.loads(list_resp.data)["findings"][0]["id"]
+
+        entity_resp = client.post(
+            "/atlas/entities/bulk-delete",
+            json={"entity_ids": [domain_id, "missing-entity"]},
+            headers={"X-Session-ID": session_id},
+        )
+        finding_resp = client.post(
+            "/atlas/findings/bulk-delete",
+            json={"finding_ids": [finding_id, "missing-finding"]},
+            headers={"X-Session-ID": finding_session_id},
+        )
+
+        assert entity_resp.status_code == 200
+        entity_data = json.loads(entity_resp.data)
+        assert entity_data["counts"] == {"deleted": 1, "findings_deleted": 1, "not_found": 1}
+        assert entity_data["results"] == [
+            {"entity_id": domain_id, "status": "deleted"},
+            {"entity_id": "missing-entity", "status": "not_found"},
+        ]
+        assert finding_resp.status_code == 200
+        finding_data = json.loads(finding_resp.data)
+        assert finding_data["counts"] == {"deleted": 1, "not_found": 1}
+        with db_connect() as conn:
+            rows = conn.execute(
+                "SELECT type, canonical_value FROM entities WHERE session_id = ? ORDER BY type",
+                (session_id,),
+            ).fetchall()
+            finding_count = conn.execute(
+                "SELECT COUNT(*) FROM findings WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()[0]
+        assert [(row["type"], row["canonical_value"]) for row in rows] == [("cve", "CVE-2025-49113")]
+        assert cve_id
+        assert finding_count == 0
+
     def test_entity_detail_is_session_scoped(self):
         client = get_client()
         session_id = self._session_id()
@@ -4104,7 +4284,16 @@ class TestAtlasRoutes:
             message="",
             result=mock.Mock(
                 provider="crtsh",
-                payload={"summary": {"has_intel": True, "providers_with_data": ["crtsh"]}},
+                payload={
+                    "providers": {
+                        "crtsh": {
+                            "certificate_count": 3,
+                            "names": ["darklab.sh", "www.darklab.sh"],
+                            "last_seen": "2026-05-14T00:00:00Z",
+                        },
+                    },
+                    "summary": {"has_intel": True, "providers_with_data": ["crtsh"]},
+                },
             ),
         )
         lookup_result = mock.Mock(
@@ -4134,6 +4323,17 @@ class TestAtlasRoutes:
         assert row["status"] == "ok"
         assert row["summary"] == "data available"
         assert json.loads(row["data_json"])["summary"]["has_intel"] is True
+        detail_resp = client.get(f"/atlas/entities/{domain_id}", headers={"X-Session-ID": session_id})
+        detail = json.loads(detail_resp.data)
+        assert detail["intel_summary"]["status"] == "available"
+        assert detail["intel_summary"]["providers_with_data"] == ["crtsh"]
+        assert {
+            (item["label"], item["value"], item["provider"])
+            for item in detail["intel_summary"]["highlights"]
+        } >= {
+            ("Certificates", "3", "crtsh"),
+            ("Names", "darklab.sh, www.darklab.sh", "crtsh"),
+        }
 
     def test_findings_tab_lists_and_bulk_updates_review_state(self):
         client = get_client()
@@ -4161,6 +4361,70 @@ class TestAtlasRoutes:
                 (session_id, finding_id),
             ).fetchone()
         assert row["status"] == "important"
+
+    def test_unscoped_findings_flow_through_atlas_projects_and_run_routes(self):
+        client = get_client()
+        session_id = self._session_id()
+        run_id = "run-" + uuid.uuid4().hex
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Unscoped Finding Case"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, 'external', ?, ?, ?, 1)",
+                (run_id, session_id, "sslscan darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
+            )
+            conn.commit()
+        client.post(
+            f"/projects/{project['id']}/links",
+            json={"entity_type": "run", "entity_id": run_id},
+            headers={"X-Session-ID": session_id},
+        )
+        with db_connect() as conn:
+            recorded = record_run_findings(conn, session_id, run_id, [{
+                "text": "TLSv1.0 enabled [high]",
+                "signals": ["findings"],
+                "line_index": 7,
+            }])
+            conn.commit()
+
+        atlas_resp = client.get("/atlas/findings?review_state=new", headers={"X-Session-ID": session_id})
+        project_findings_resp = client.get(
+            f"/projects/{project['id']}/findings",
+            headers={"X-Session-ID": session_id},
+        )
+        run_findings_resp = client.get(f"/entities/run/{run_id}/findings", headers={"X-Session-ID": session_id})
+        finding = json.loads(atlas_resp.data)["findings"][0]
+        review_resp = client.put(
+            f"/findings/{finding['id']}/review",
+            json={"review_state": "needs_followup"},
+            headers={"X-Session-ID": session_id},
+        )
+        updated_project_findings_resp = client.get(
+            f"/projects/{project['id']}/findings",
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert len(recorded) == 1
+        assert recorded[0]["entity_id"] == ""
+        assert recorded[0]["target_ids"] == []
+        assert atlas_resp.status_code == 200
+        assert finding["entity_id"] == ""
+        assert finding["entity_value"] == ""
+        assert finding["subject_key"].startswith("unscoped:sslscan:")
+        assert project_findings_resp.status_code == 200
+        project_findings = json.loads(project_findings_resp.data)["findings"]
+        assert [(item["id"], item["target_ids"]) for item in project_findings] == [(finding["id"], [])]
+        assert run_findings_resp.status_code == 200
+        run_findings = json.loads(run_findings_resp.data)["findings"]
+        assert [(item["id"], item["target_ids"]) for item in run_findings] == [(finding["id"], [])]
+        assert review_resp.status_code == 200
+        assert json.loads(review_resp.data)["finding"]["review_state"] == "needs_followup"
+        assert json.loads(updated_project_findings_resp.data)["findings"][0]["review_state"] == "needs_followup"
 
     def test_project_links_curate_atlas_entities_into_project_targets(self):
         client = get_client()

@@ -69,6 +69,109 @@
     return wrap;
   }
 
+  function providerPayload(snapshot) {
+    const data = snapshot?.data && typeof snapshot.data === 'object' ? snapshot.data : null;
+    const providers = data?.providers && typeof data.providers === 'object' ? data.providers : null;
+    if (!providers) return data;
+    const label = text(snapshot.provider).toLowerCase();
+    const normalizedLabel = label.replace(/[\s-]+/g, '_');
+    const entries = Object.entries(providers);
+    const match = entries.find(([key]) => {
+      const normalizedKey = text(key).toLowerCase().replace(/[\s-]+/g, '_');
+      return normalizedKey === label || normalizedKey === normalizedLabel;
+    });
+    if (match) return match[1];
+    if (entries.length === 1) return entries[0][1];
+    return providers;
+  }
+
+  function formatIntelKey(key) {
+    const normalized = text(key)
+      .replace(/_/g, ' ')
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .trim();
+    const upper = normalized.toUpperCase();
+    if (['ASN', 'AS', 'CVE', 'CVES', 'DNS', 'HTTP', 'IP', 'ISP', 'RPKI', 'TLS', 'URL'].includes(upper)) return upper;
+    return normalized || 'value';
+  }
+
+  function isRecord(value) {
+    return value && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function primitiveValue(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    if (typeof value === 'boolean') return value ? 'yes' : 'no';
+    if (typeof value === 'number') return value.toLocaleString();
+    return String(value);
+  }
+
+  function compactJson(value) {
+    try {
+      const raw = JSON.stringify(value);
+      if (!raw) return '—';
+      return raw.length > 220 ? `${raw.slice(0, 217)}...` : raw;
+    } catch (_err) {
+      return primitiveValue(value);
+    }
+  }
+
+  function renderIntelDataValue(value, depth = 0) {
+    if (Array.isArray(value)) {
+      if (!value.length) return node('span', 'atlas-intel-data-value', '—');
+      const primitives = value.every(item => !isRecord(item) && !Array.isArray(item));
+      if (primitives) {
+        const shown = value.slice(0, 8).map(primitiveValue).join(', ');
+        const suffix = value.length > 8 ? `, +${value.length - 8} more` : '';
+        return node('span', 'atlas-intel-data-value', `${shown}${suffix}`);
+      }
+      const list = node('div', 'atlas-intel-data-list');
+      value.slice(0, 4).forEach((item, index) => {
+        const itemWrap = node('div', 'atlas-intel-data-item');
+        itemWrap.append(
+          node('div', 'atlas-intel-data-item-title', `Item ${index + 1}`),
+          depth >= 2 ? node('span', 'atlas-intel-data-value', compactJson(item)) : renderIntelDataValue(item, depth + 1),
+        );
+        list.appendChild(itemWrap);
+      });
+      if (value.length > 4) list.appendChild(node('div', 'atlas-muted', `+${value.length - 4} more items`));
+      return list;
+    }
+    if (isRecord(value)) {
+      const entries = Object.entries(value)
+        .filter(([, entryValue]) => entryValue !== undefined && entryValue !== null && entryValue !== '');
+      if (!entries.length) return node('span', 'atlas-intel-data-value', '—');
+      if (depth >= 3) return node('span', 'atlas-intel-data-value', compactJson(value));
+      const wrap = node('div', `atlas-intel-data-object${depth ? ' is-nested' : ''}`);
+      entries.slice(0, 12).forEach(([key, entryValue]) => {
+        wrap.appendChild(renderIntelDataRow(key, entryValue, depth + 1));
+      });
+      if (entries.length > 12) wrap.appendChild(node('div', 'atlas-muted', `+${entries.length - 12} more fields`));
+      return wrap;
+    }
+    return node('span', 'atlas-intel-data-value', primitiveValue(value));
+  }
+
+  function renderIntelDataRow(label, value, depth = 0) {
+    const row = node('div', `atlas-intel-data-row${depth ? ' is-nested' : ''}`);
+    row.append(
+      node('span', 'atlas-intel-data-label', formatIntelKey(label)),
+      renderIntelDataValue(value, depth),
+    );
+    return row;
+  }
+
+  function renderIntelPayload(snapshot) {
+    const payload = providerPayload(snapshot);
+    const wrap = node('div', 'atlas-intel-data');
+    if (!isRecord(payload) && !Array.isArray(payload)) {
+      wrap.appendChild(node('div', 'atlas-empty-inline', 'No structured provider data stored for this snapshot'));
+      return wrap;
+    }
+    wrap.appendChild(renderIntelDataValue(payload));
+    return wrap;
+  }
+
   function renderIntelSnapshots(snapshots) {
     const wrap = node('div', 'atlas-intel-list');
     const rows = Array.isArray(snapshots) ? snapshots : [];
@@ -78,15 +181,72 @@
     }
     rows.forEach(snapshot => {
       const card = node('div', 'atlas-intel-card');
-      const top = node('div', 'atlas-intel-card-top');
-      top.append(
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'atlas-intel-card-toggle';
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.append(
+        node('span', 'atlas-intel-card-caret', '›'),
         node('span', 'atlas-intel-provider', text(snapshot.provider, 'provider')),
         node('span', 'badge badge-tone-muted', text(snapshot.status, 'unknown')),
       );
       const summary = node('div', 'atlas-intel-summary', text(snapshot.summary, 'No summary'));
       const meta = node('div', 'atlas-muted', `Fetched ${formatDate(snapshot.fetched_at)}`);
-      card.append(top, summary, meta);
+      const body = node('div', 'atlas-intel-card-body u-hidden');
+      body.appendChild(renderIntelPayload(snapshot));
+      const disclosure = global.bindDisclosure?.(toggle, {
+        panel: body,
+        openClass: null,
+        hiddenClass: 'u-hidden',
+        onToggle: (open) => card.classList.toggle('is-open', open),
+      });
+      if (!disclosure) {
+        toggle.addEventListener('click', () => {
+          const expanded = toggle.getAttribute('aria-expanded') === 'true';
+          toggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+          body.classList.toggle('u-hidden', expanded);
+          card.classList.toggle('is-open', !expanded);
+        });
+      }
+      card.append(toggle, summary, meta, body);
       wrap.appendChild(card);
+    });
+    return wrap;
+  }
+
+  function renderIntelSummary(summary) {
+    const highlights = Array.isArray(summary?.highlights) ? summary.highlights : [];
+    if (!highlights.length) return null;
+    const wrap = node('div', 'atlas-intel-highlights');
+    const groups = new Map();
+    highlights.forEach(item => {
+      const providerId = text(item.provider, 'provider');
+      if (!groups.has(providerId)) {
+        groups.set(providerId, {
+          label: text(item.provider_label, providerId),
+          items: [],
+        });
+      }
+      groups.get(providerId).items.push(item);
+    });
+    groups.forEach(group => {
+      const providerBlock = node('div', 'atlas-intel-highlight-provider');
+      providerBlock.appendChild(node('div', 'atlas-intel-highlight-provider-title', group.label));
+      const itemList = node('div', 'atlas-intel-highlight-items');
+      group.items.forEach(item => {
+        const row = node('div', 'atlas-intel-highlight-row');
+        row.append(
+          node('span', 'atlas-intel-highlight-label', text(item.label, 'Intel')),
+          node(
+            'span',
+            `atlas-intel-highlight-value${item.tone === 'warning' ? ' is-warning' : ''}`,
+            text(item.value, '—'),
+          ),
+        );
+        itemList.appendChild(row);
+      });
+      providerBlock.appendChild(itemList);
+      wrap.appendChild(providerBlock);
     });
     return wrap;
   }
@@ -194,6 +354,12 @@
       entity.addEventListener('click', () => handlers.onOpenEntity?.(finding));
       actions.appendChild(entity);
     }
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'btn btn-secondary btn-danger btn-compact';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', () => handlers.onDeleteFinding?.(finding));
+    actions.appendChild(deleteBtn);
     const meta = node('div', 'atlas-detail-meta');
     meta.append(
       metaRow('Status', text(finding.review_state || finding.status, 'new')),
@@ -269,6 +435,12 @@
       promote.addEventListener('click', () => handlers.onAddToActiveProject?.(entity));
       actions.appendChild(promote);
     }
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'btn btn-secondary btn-danger btn-compact';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', () => handlers.onDeleteEntity?.(entity));
+    actions.appendChild(deleteBtn);
 
     const meta = node('div', 'atlas-detail-meta');
     meta.append(
@@ -278,6 +450,8 @@
     );
 
     container.append(header, actions, meta);
+    const intelSummary = renderIntelSummary(detail.intel_summary);
+    if (intelSummary) container.append(section('Intel summary', intelSummary));
     container.append(section('Projects', renderProjectLinks(entity.project_links, handlers.onRemoveProjectLink)));
     container.append(section('Labels', renderLabels(entity.labels)));
     container.append(section('Metadata', renderMetadataEditor(entity, handlers)));

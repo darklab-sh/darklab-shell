@@ -406,6 +406,15 @@ class TestIntelServices:
         assert canonical.canonical_entity("url", "HTTPS://BÜCHER.Example/a b?q=one two") == (
             "https://xn--bcher-kva.example/a%20b?q=one%20two"
         )
+        assert canonical.canonical_entity("url", "https://Example.com:443/path/#section") == (
+            "https://example.com/path"
+        )
+        assert canonical.canonical_entity("url", "http://Example.com:80/?b=2&a=1") == (
+            "http://example.com/?b=2&a=1"
+        )
+        assert canonical.canonical_entity("url", "https://Example.com/path/?q=1") == (
+            "https://example.com/path/?q=1"
+        )
 
     def test_canonical_entity_rejects_invalid_values(self):
         from services.intel import canonical
@@ -416,6 +425,7 @@ class TestIntelServices:
             ("hash", "not-hex"),
             ("cve", "2024-1234"),
             ("url", "ftp://example.test/file"),
+            ("url", "https://example.test/" + ("a" * 2050)),
         ]:
             with pytest.raises(canonical.CanonicalizationError):
                 canonical.canonical_entity(entity_type, value)
@@ -6445,7 +6455,15 @@ class TestDatabaseInit:
                         "entities": [
                             {"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"},
                             {"type": "domain", "value": "DarkLab.SH", "canonical_value": "darklab.sh"},
+                            {"type": "host", "value": "WWW.DarkLab.SH.", "canonical_value": "www.darklab.sh"},
+                            {"type": "ip", "value": "2001:0db8::0001", "canonical_value": "2001:db8::1"},
+                            {"type": "hash", "value": "A" * 40, "canonical_value": f"sha1:{'a' * 40}"},
                             {"type": "cve", "value": "cve-2025-49113", "canonical_value": "CVE-2025-49113"},
+                            {
+                                "type": "url",
+                                "value": "HTTPS://Example.com:443/path/#frag",
+                                "canonical_value": "https://example.com/path",
+                            },
                         ],
                     }
                 ],
@@ -6463,9 +6481,13 @@ class TestDatabaseInit:
         assert {(row["type"], row["canonical_value"], row["occurrence_count"]) for row in entity_rows} == {
             ("cve", "CVE-2025-49113", 1),
             ("domain", "darklab.sh", 2),
+            ("domain", "www.darklab.sh", 1),
+            ("hash", f"sha1:{'a' * 40}", 1),
+            ("ip", "2001:db8::1", 1),
+            ("url", "https://example.com/path", 1),
         }
-        assert len(recorded) == 2
-        assert [row["run_id"] for row in link_rows] == ["run-atlas", "run-atlas"]
+        assert len(recorded) == 6
+        assert [row["run_id"] for row in link_rows] == ["run-atlas"] * 6
 
     def test_materializer_ignores_unclassified_raw_output_text(self):
         with tempfile.TemporaryDirectory() as tmp:

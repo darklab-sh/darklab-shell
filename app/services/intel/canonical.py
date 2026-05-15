@@ -10,6 +10,7 @@ from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,}$", re.I)
 HEX_HASH_RE = re.compile(r"^[0-9a-f]+$", re.I)
+MAX_CANONICAL_VALUE_BYTES = 2048
 
 
 class CanonicalizationError(ValueError):
@@ -69,12 +70,25 @@ def canonical_url(value: str) -> str:
     parts = urlsplit(raw)
     if parts.scheme.lower() not in {"http", "https"} or not parts.netloc:
         raise CanonicalizationError("invalid URL")
+    scheme = parts.scheme.lower()
     host = canonical_domain(parts.hostname or "")
-    port = f":{parts.port}" if parts.port else ""
+    try:
+        parsed_port = parts.port
+    except ValueError as exc:
+        raise CanonicalizationError("invalid URL") from exc
+    is_default_port = (scheme == "http" and parsed_port == 80) or (scheme == "https" and parsed_port == 443)
+    port = f":{parsed_port}" if parsed_port and not is_default_port else ""
     netloc = host + port
-    path = quote(unquote(parts.path or "/"), safe="/:@")
+    path = quote(unquote(parts.path or ""), safe="/:@")
+    if path == "/" and not parts.query:
+        path = ""
+    elif not parts.query and path.endswith("/"):
+        path = path.rstrip("/")
     query = quote(unquote(parts.query), safe="=&;:@/?")
-    return urlunsplit((parts.scheme.lower(), netloc, path, query, ""))
+    canonical = urlunsplit((scheme, netloc, path, query, ""))
+    if len(canonical.encode("utf-8")) > MAX_CANONICAL_VALUE_BYTES:
+        raise CanonicalizationError("canonical value is too long")
+    return canonical
 
 
 def canonical_entity(entity_type: str, value: str, *, algorithm: str | None = None) -> str:

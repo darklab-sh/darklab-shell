@@ -1693,6 +1693,45 @@ describe('history panel actions', () => {
     expect(toast.querySelector('.toast-action-btn')?.textContent).toBe('dismiss')
   })
 
+  it('only offers Atlas cleanup on run delete when there are removable candidates', async () => {
+    const showConfirm = vi.fn(() => Promise.resolve('cancel'))
+    const previews = [
+      { has_cleanup: false, entities: 0, findings: 0, curated_total: 0 },
+      { has_cleanup: true, entities: 1, findings: 0, curated_total: 0 },
+      { has_cleanup: true, entities: 1, findings: 1, curated_total: 2 },
+    ]
+    const apiFetch = vi.fn((url) => {
+      if (typeof url === 'string' && url === '/history/run-1/atlas-cleanup-preview') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ cleanup: previews.shift() }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { confirmHistAction } = loadHistoryPanel({
+      apiFetchImpl: apiFetch,
+      showConfirmImpl: showConfirm,
+    })
+
+    confirmHistAction('delete', 'run-1', 'nmap darklab.sh')
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(showConfirm.mock.calls[0][0].content).toBeNull()
+
+    confirmHistAction('delete', 'run-1', 'nmap darklab.sh')
+    await new Promise((resolve) => setImmediate(resolve))
+    const noCuratedContent = showConfirm.mock.calls[1][0].content
+    expect(noCuratedContent.querySelector('[data-history-atlas-cleanup]')).not.toBeNull()
+    expect(noCuratedContent.textContent).toContain('Also remove 0 findings and 1 entity from Atlas')
+    expect(noCuratedContent.textContent).not.toContain('curated')
+
+    confirmHistAction('delete', 'run-1', 'nmap darklab.sh')
+    await new Promise((resolve) => setImmediate(resolve))
+    const curatedContent = showConfirm.mock.calls[2][0].content
+    expect(curatedContent.querySelector('[data-history-atlas-cleanup]')).not.toBeNull()
+    expect(curatedContent.textContent).toContain('2 curated items will be kept.')
+  })
+
   it('copies the run id and links runs to active or selected projects from the history menu', async () => {
     const showConfirm = vi.fn(() => Promise.resolve('add'))
     let activeLinked = false

@@ -8,6 +8,7 @@ import json
 from typing import Any
 
 from services.atlas.materializer import ATLAS_ENTITY_TYPES
+from services.intel.registry import provider_label
 from services.projects.contracts import FINDING_REVIEW_STATES
 
 
@@ -32,6 +33,9 @@ ATLAS_ENTITY_EXPORT_FIELDS = (
     "intel_providers_with_data",
 )
 
+MAX_INTEL_SUMMARY_HIGHLIGHTS = 8
+ORPHAN_FILTERS = {"all", "hide", "only"}
+
 
 def _row_to_entity(row) -> dict[str, Any]:
     return {
@@ -44,6 +48,16 @@ def _row_to_entity(row) -> dict[str, Any]:
         "occurrence_count": int(row["occurrence_count"] or 0),
         "created": row["created"],
     }
+
+
+def _normalize_orphan_filter(value: str | None) -> str:
+    orphan_filter = str(value or "hide").strip().lower()
+    return orphan_filter if orphan_filter in ORPHAN_FILTERS else "hide"
+
+
+def _orphan_params(orphan_filter: str) -> list[str]:
+    normalized = _normalize_orphan_filter(orphan_filter)
+    return [normalized, normalized, normalized]
 
 
 def _row_to_project_link(row) -> dict[str, Any]:
@@ -111,6 +125,338 @@ def _row_to_intel_snapshot(row) -> dict[str, Any]:
     }
 
 
+def _intel_provider_payload(snapshot: dict[str, Any]) -> dict[str, Any]:
+    provider = str(snapshot.get("provider") or "").strip().lower()
+    data = snapshot.get("data") if isinstance(snapshot.get("data"), dict) else {}
+    providers = data.get("providers") if isinstance(data, dict) else {}
+    if not isinstance(providers, dict):
+        return {}
+    payload = providers.get(provider)
+    if isinstance(payload, dict):
+        return payload
+    for key, value in providers.items():
+        if str(key or "").strip().lower() == provider and isinstance(value, dict):
+            return value
+    return {}
+
+
+def _snapshot_has_intel(snapshot: dict[str, Any]) -> bool:
+    data = snapshot.get("data") if isinstance(snapshot.get("data"), dict) else {}
+    summary = data.get("summary") if isinstance(data, dict) else None
+    if isinstance(summary, dict):
+        providers = summary.get("providers_with_data")
+        if isinstance(providers, list) and providers:
+            return True
+        has_intel = summary.get("has_intel")
+        if isinstance(has_intel, bool):
+            return has_intel
+    return bool(_intel_provider_payload(snapshot))
+
+
+def _highlight(label: str, value: object, provider: str, tone: str = "neutral") -> dict[str, str] | None:
+    rendered = _render_value(value)
+    if not rendered:
+        return None
+    provider_id = str(provider or "").strip().lower()
+    return {
+        "label": label,
+        "value": rendered,
+        "provider": provider_id,
+        "provider_label": provider_label(provider_id),
+        "tone": tone,
+    }
+
+
+def _render_value(value: object) -> str:
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(int(value) if isinstance(value, float) and value.is_integer() else value)
+    if isinstance(value, str):
+        return value.strip()
+    return ""
+
+
+def _int_or_none(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _list_values(value: object, *, limit: int = 6) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    results = []
+    for item in value:
+        rendered = _render_value(item)
+        if rendered and rendered not in results:
+            results.append(rendered)
+        if len(results) >= limit:
+            break
+    return results
+
+
+def _join_list(value: object, *, limit: int = 6) -> str:
+    values = _list_values(value, limit=limit)
+    if not values:
+        return ""
+    extra = len(value) - len(values) if isinstance(value, list) else 0
+    suffix = f" +{extra} more" if extra > 0 else ""
+    return ", ".join(values) + suffix
+
+
+def _analysis_stats(value: object) -> str:
+    stats = value if isinstance(value, dict) else {}
+    malicious = _int_or_none(stats.get("malicious")) or 0
+    suspicious = _int_or_none(stats.get("suspicious")) or 0
+    harmless = _int_or_none(stats.get("harmless")) or 0
+    if malicious or suspicious:
+        return f"{malicious} malicious · {suspicious} suspicious"
+    if harmless:
+        return f"{harmless} harmless"
+    return ""
+
+
+def _asn_summary(value: object) -> str:
+    row = value if isinstance(value, dict) else {}
+    asn = _render_value(row.get("asn") or row.get("number"))
+    name = _render_value(row.get("name") or row.get("description"))
+    if asn and not asn.upper().startswith("AS"):
+        asn = f"AS{asn}"
+    return " ".join(part for part in (asn, name) if part)
+
+
+def _location_summary(value: object) -> str:
+    row = value if isinstance(value, dict) else {}
+    return ", ".join(
+        part for part in (
+            _render_value(row.get("city")),
+            _render_value(row.get("region")),
+            _render_value(row.get("country") or row.get("country_code")),
+        )
+        if part
+    )
+
+
+def _pulse_count(value: object) -> str:
+    count = _int_or_none(value)
+    if count is None:
+        return ""
+    return f"{count} pulse{'s' if count != 1 else ''}"
+
+
+def _highlights_for_provider(
+    entity_type: str,
+    provider: str,
+    payload: dict[str, Any],
+) -> list[dict[str, str]]:
+    items: list[dict[str, str] | None] = []
+    if entity_type == "ip":
+        items = _ip_highlights(provider, payload)
+    elif entity_type == "domain":
+        items = _domain_highlights(provider, payload)
+    elif entity_type == "hash":
+        items = _hash_highlights(provider, payload)
+    elif entity_type == "cve":
+        items = _cve_highlights(provider, payload)
+    elif entity_type == "url":
+        items = _url_highlights(provider, payload)
+    return [item for item in items if item]
+
+
+def _ip_highlights(provider: str, payload: dict[str, Any]) -> list[dict[str, str] | None]:
+    if provider == "shodan":
+        return [
+            _highlight("Open ports", _join_list(payload.get("ports"), limit=8), provider),
+            _highlight("CVEs", _join_list(payload.get("cves"), limit=5), provider, "warning"),
+            _highlight("Last updated", payload.get("last_update"), provider),
+        ]
+    if provider == "censys":
+        return [
+            _highlight("Open ports", _join_list(payload.get("ports"), limit=8), provider),
+            _highlight("Names", _join_list(payload.get("names"), limit=4), provider),
+            _highlight("ASN", _asn_summary(payload.get("autonomous_system")), provider),
+            _highlight("Location", _location_summary(payload.get("location")), provider),
+        ]
+    if provider == "greynoise":
+        noise = payload.get("noise")
+        riot = payload.get("riot")
+        noise_parts = []
+        if isinstance(noise, bool):
+            noise_parts.append(f"noise: {'yes' if noise else 'no'}")
+        if isinstance(riot, bool):
+            noise_parts.append(f"RIOT: {'yes' if riot else 'no'}")
+        return [
+            _highlight("GreyNoise", " · ".join(noise_parts), provider),
+            _highlight("Classification", payload.get("classification"), provider),
+            _highlight("Name", payload.get("name"), provider),
+        ]
+    if provider == "abuseipdb":
+        score = _int_or_none(payload.get("abuse_confidence_score"))
+        return [
+            _highlight("Abuse score", f"{score}/100" if score is not None else "", provider),
+            _highlight("Reports", payload.get("total_reports"), provider),
+            _highlight("Network", payload.get("isp") or payload.get("domain"), provider),
+            _highlight("Country", payload.get("country_code"), provider),
+        ]
+    if provider == "ipinfo":
+        location = ", ".join(
+            part for part in (
+                _render_value(payload.get("city")),
+                _render_value(payload.get("region")),
+                _render_value(payload.get("country")),
+            )
+            if part
+        )
+        asn = " ".join(
+            part for part in (
+                _render_value(payload.get("asn")),
+                _render_value(payload.get("org")),
+            )
+            if part
+        )
+        return [
+            _highlight("ASN", asn, provider),
+            _highlight("Hostname", payload.get("hostname") or payload.get("domain"), provider),
+            _highlight("Location", location, provider),
+        ]
+    if provider == "teamcymru":
+        asn = " ".join(
+            part for part in (
+                _render_value(payload.get("asn")),
+                _render_value(payload.get("name")),
+            )
+            if part
+        )
+        return [
+            _highlight("ASN", asn, provider),
+            _highlight("Prefix", payload.get("prefix"), provider),
+            _highlight("Registry", payload.get("registry"), provider),
+        ]
+    if provider == "routeviews":
+        return [
+            _highlight("Prefix", payload.get("prefix"), provider),
+            _highlight("Origins", _join_list(payload.get("origins"), limit=5), provider),
+            _highlight("RPKI", payload.get("rpki"), provider),
+        ]
+    return _shared_ioc_highlights(provider, payload)
+
+
+def _domain_highlights(provider: str, payload: dict[str, Any]) -> list[dict[str, str] | None]:
+    if provider == "virustotal":
+        return [
+            _highlight("Analysis", _analysis_stats(payload.get("last_analysis_stats")), provider),
+            _highlight("Reputation", payload.get("reputation"), provider),
+        ]
+    if provider == "crtsh":
+        return [
+            _highlight("Certificates", payload.get("certificate_count"), provider),
+            _highlight("Names", _join_list(payload.get("names"), limit=4), provider),
+            _highlight("Last seen", payload.get("last_seen"), provider),
+        ]
+    if provider == "urlscan":
+        return [_highlight("urlscan results", payload.get("result_count"), provider)]
+    if provider == "securitytrails":
+        return [_highlight("Subdomains", payload.get("subdomain_count"), provider)]
+    return _shared_ioc_highlights(provider, payload)
+
+
+def _hash_highlights(provider: str, payload: dict[str, Any]) -> list[dict[str, str] | None]:
+    if provider == "virustotal":
+        return [
+            _highlight("Verdict", payload.get("verdict"), provider, "warning"),
+            _highlight("Analysis", _analysis_stats(payload.get("last_analysis_stats")), provider),
+            _highlight("Type", payload.get("type_description"), provider),
+        ]
+    if provider == "hibp":
+        count = _int_or_none(payload.get("count")) or 0
+        return [_highlight("Pwned password", f"{count} matches" if count else "not found", provider)]
+    return _shared_ioc_highlights(provider, payload)
+
+
+def _cve_highlights(provider: str, payload: dict[str, Any]) -> list[dict[str, str] | None]:
+    return [
+        _highlight("Severity", payload.get("severity"), provider, "warning"),
+        _highlight("Score", payload.get("score"), provider, "warning"),
+        _highlight("Exploits", payload.get("exploit_count"), provider, "warning"),
+        _highlight("Published", payload.get("published"), provider),
+    ]
+
+
+def _url_highlights(provider: str, payload: dict[str, Any]) -> list[dict[str, str] | None]:
+    if provider == "urlhaus":
+        return [
+            _highlight("URL status", payload.get("status") or payload.get("query_status"), provider, "warning"),
+            _highlight("Threat", payload.get("threat"), provider, "warning"),
+            _highlight("Host", payload.get("host"), provider),
+        ]
+    if provider == "urlscan":
+        return [_highlight("urlscan results", payload.get("result_count"), provider)]
+    return _shared_ioc_highlights(provider, payload)
+
+
+def _shared_ioc_highlights(provider: str, payload: dict[str, Any]) -> list[dict[str, str] | None]:
+    return [
+        _highlight("Pulses", _pulse_count(payload.get("pulse_count")), provider),
+        _highlight("Reputation", payload.get("reputation"), provider),
+        _highlight("URLs", payload.get("url_count"), provider),
+        _highlight("Payloads", payload.get("payload_count"), provider),
+        _highlight("IOCs", payload.get("ioc_count"), provider),
+        _highlight("Malware", _join_list(payload.get("malware"), limit=4), provider, "warning"),
+        _highlight("Tags", _join_list(payload.get("tags"), limit=5), provider),
+    ]
+
+
+def _dedupe_highlights(highlights: list[dict[str, str]]) -> list[dict[str, str]]:
+    seen: set[tuple[str, str, str]] = set()
+    result = []
+    for item in highlights:
+        key = (item["label"], item["value"], item["provider"])
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(item)
+        if len(result) >= MAX_INTEL_SUMMARY_HIGHLIGHTS:
+            break
+    return result
+
+
+def summarize_intel_snapshots(
+    entity_type: str,
+    snapshots: list[dict[str, Any]],
+) -> dict[str, Any]:
+    providers_with_data: list[str] = []
+    highlights: list[dict[str, str]] = []
+    latest_fetched_at = ""
+    for snapshot in snapshots:
+        provider = str(snapshot.get("provider") or "").strip().lower()
+        if not provider:
+            continue
+        fetched_at = str(snapshot.get("fetched_at") or "")
+        if fetched_at > latest_fetched_at:
+            latest_fetched_at = fetched_at
+        has_data = _snapshot_has_intel(snapshot)
+        payload = _intel_provider_payload(snapshot)
+        if has_data and provider not in providers_with_data:
+            providers_with_data.append(provider)
+        if str(snapshot.get("status") or "") == "ok" and payload:
+            highlights.extend(_highlights_for_provider(str(entity_type or ""), provider, payload))
+    highlights = _dedupe_highlights(highlights)
+    status = "none"
+    if snapshots:
+        status = "available" if providers_with_data or highlights else "empty"
+    return {
+        "status": status,
+        "providers_with_data": providers_with_data,
+        "highlight_count": len(highlights),
+        "highlights": highlights,
+        "updated_at": latest_fetched_at,
+    }
+
+
 def _row_to_finding(row) -> dict[str, Any]:
     snippet = row["snippet"] if "snippet" in row.keys() else ""
     raw_line = row["raw_line"] or ""
@@ -118,8 +464,8 @@ def _row_to_finding(row) -> dict[str, Any]:
     return {
         "id": row["id"],
         "entity_id": row["entity_id"] or "",
-        "entity_type": row["entity_type"] if "entity_type" in row.keys() else "",
-        "entity_value": row["entity_value"] if "entity_value" in row.keys() else "",
+        "entity_type": (row["entity_type"] if "entity_type" in row.keys() else "") or "",
+        "entity_value": (row["entity_value"] if "entity_value" in row.keys() else "") or "",
         "subject_key": row["subject_key"] or "",
         "severity": row["severity"] or "",
         "kind": row["kind"] or "finding",
@@ -167,17 +513,41 @@ def _metadata_for_entity(conn, session_id: str, entity_id: str) -> dict[str, Any
     }
 
 
-def atlas_summary(conn, session_id: str) -> dict[str, Any]:
+def atlas_summary(conn, session_id: str, *, orphan_filter: str = "hide") -> dict[str, Any]:
+    normalized_orphan_filter = _normalize_orphan_filter(orphan_filter)
     rows = conn.execute(
-        "SELECT type, COUNT(*) AS count FROM entities WHERE session_id = ? GROUP BY type",
-        (session_id,),
+        "SELECT e.type, COUNT(*) AS count FROM entities e WHERE e.session_id = ? "
+        "AND (? = 'all' "
+        "OR (? = 'hide' AND EXISTS ("
+        "  SELECT 1 FROM entity_run_links orphan_erl "
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id "
+        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id"
+        ")) "
+        "OR (? = 'only' AND NOT EXISTS ("
+        "  SELECT 1 FROM entity_run_links orphan_erl "
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id "
+        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id"
+        "))) "
+        "GROUP BY e.type",
+        [session_id, *_orphan_params(normalized_orphan_filter)],
     ).fetchall()
     counts = {entity_type: 0 for entity_type in sorted(ATLAS_ENTITY_TYPES)}
     for row in rows:
         counts[str(row["type"])] = int(row["count"] or 0)
     finding_count = int(conn.execute(
-        "SELECT COUNT(*) AS count FROM findings WHERE session_id = ?",
-        (session_id,),
+        "SELECT COUNT(*) AS count FROM findings f WHERE f.session_id = ? "
+        "AND (? = 'all' "
+        "OR (? = 'hide' AND EXISTS ("
+        "  SELECT 1 FROM findings_occurrences orphan_fo "
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id "
+        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id"
+        ")) "
+        "OR (? = 'only' AND NOT EXISTS ("
+        "  SELECT 1 FROM findings_occurrences orphan_fo "
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id "
+        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id"
+        "))) ",
+        [session_id, *_orphan_params(normalized_orphan_filter)],
     ).fetchone()["count"] or 0)
     return {
         "total": sum(counts.values()),
@@ -202,12 +572,14 @@ def list_findings(
     query: str = "",
     project_id: str = "",
     review_states: list[str] | None = None,
+    orphan_filter: str = "hide",
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
     search = str(query or "").strip().lower()
     search_like = f"%{search}%" if search else ""
     project_filter = str(project_id or "").strip()
+    normalized_orphan_filter = _normalize_orphan_filter(orphan_filter)
     statuses = _normalize_finding_statuses(review_states)
     status_params = [*statuses, "", "", "", "", ""][:5]
     params: list[Any] = [
@@ -221,6 +593,7 @@ def list_findings(
         project_filter,
         len(statuses),
         *status_params,
+        *_orphan_params(normalized_orphan_filter),
     ]
     total = int(conn.execute(
         "SELECT COUNT(*) AS count FROM findings f "
@@ -236,7 +609,18 @@ def list_findings(
         "  AND filter_link.project_id = ? "
         "  AND filter_project.session_id = f.session_id"
         ")) "
-        "AND (? = 0 OR f.status IN (?, ?, ?, ?, ?))",
+        "AND (? = 0 OR f.status IN (?, ?, ?, ?, ?)) "
+        "AND (? = 'all' "
+        "OR (? = 'hide' AND EXISTS ("
+        "  SELECT 1 FROM findings_occurrences orphan_fo "
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id "
+        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id"
+        ")) "
+        "OR (? = 'only' AND NOT EXISTS ("
+        "  SELECT 1 FROM findings_occurrences orphan_fo "
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id "
+        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id"
+        "))) ",
         params,
     ).fetchone()["count"] or 0)
     page_limit = max(1, min(int(limit or 50), 200))
@@ -265,6 +649,17 @@ def list_findings(
         "  AND filter_project.session_id = f.session_id"
         ")) "
         "AND (? = 0 OR f.status IN (?, ?, ?, ?, ?)) "
+        "AND (? = 'all' "
+        "OR (? = 'hide' AND EXISTS ("
+        "  SELECT 1 FROM findings_occurrences orphan_fo "
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id "
+        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id"
+        ")) "
+        "OR (? = 'only' AND NOT EXISTS ("
+        "  SELECT 1 FROM findings_occurrences orphan_fo "
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id "
+        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id"
+        "))) "
         "ORDER BY CASE f.status "
         "WHEN 'new' THEN 0 WHEN 'needs_followup' THEN 1 WHEN 'important' THEN 2 "
         "WHEN 'reviewed' THEN 3 WHEN 'false_positive' THEN 4 ELSE 9 END, "
@@ -273,8 +668,20 @@ def list_findings(
     ).fetchall()
     counts = {status: 0 for status in sorted(FINDING_REVIEW_STATES, key=lambda item: FINDING_STATUS_ORDER.get(item, 99))}
     count_rows = conn.execute(
-        "SELECT status, COUNT(*) AS count FROM findings WHERE session_id = ? GROUP BY status",
-        (session_id,),
+        "SELECT f.status, COUNT(*) AS count FROM findings f WHERE f.session_id = ? "
+        "AND (? = 'all' "
+        "OR (? = 'hide' AND EXISTS ("
+        "  SELECT 1 FROM findings_occurrences orphan_fo "
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id "
+        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id"
+        ")) "
+        "OR (? = 'only' AND NOT EXISTS ("
+        "  SELECT 1 FROM findings_occurrences orphan_fo "
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id "
+        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id"
+        "))) "
+        "GROUP BY f.status",
+        [session_id, *_orphan_params(normalized_orphan_filter)],
     ).fetchall()
     for row in count_rows:
         status = str(row["status"] or "new")
@@ -295,6 +702,7 @@ def list_entities(
     entity_type: str = "",
     query: str = "",
     project_id: str = "",
+    orphan_filter: str = "hide",
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
@@ -304,6 +712,7 @@ def list_entities(
     search = str(query or "").strip().lower()
     search_like = f"%{search}%" if search else ""
     project_filter = str(project_id or "").strip()
+    normalized_orphan_filter = _normalize_orphan_filter(orphan_filter)
     common_params: list[Any] = [
         session_id,
         normalized_type,
@@ -312,6 +721,7 @@ def list_entities(
         search_like,
         project_filter,
         project_filter,
+        *_orphan_params(normalized_orphan_filter),
     ]
     total = int(conn.execute(
         "SELECT COUNT(*) AS count "
@@ -326,16 +736,28 @@ def list_entities(
         "  AND filter_link.entity_id = e.id "
         "  AND filter_link.project_id = ? "
         "  AND filter_project.session_id = e.session_id"
-        "))",
+        ")) "
+        "AND (? = 'all' "
+        "OR (? = 'hide' AND EXISTS ("
+        "  SELECT 1 FROM entity_run_links orphan_erl "
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id "
+        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id"
+        ")) "
+        "OR (? = 'only' AND NOT EXISTS ("
+        "  SELECT 1 FROM entity_run_links orphan_erl "
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id "
+        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id"
+        "))) ",
         common_params,
     ).fetchone()["count"] or 0)
     page_limit = max(1, min(int(limit or 50), 200))
     page_offset = max(0, int(offset or 0))
     rows = conn.execute(
         "SELECT e.id, e.session_id, e.type, e.canonical_value, e.first_seen_at, e.last_seen_at, "
-        "e.occurrence_count, e.created, COUNT(DISTINCT erl.run_id) AS run_count "
+        "e.occurrence_count, e.created, COUNT(DISTINCT entity_run.id) AS run_count "
         "FROM entities e "
         "LEFT JOIN entity_run_links erl ON erl.entity_id = e.id "
+        "LEFT JOIN runs entity_run ON entity_run.id = erl.run_id AND entity_run.session_id = e.session_id "
         "WHERE e.session_id = ? "
         "AND (? = '' OR e.type = ?) "
         "AND (? = '' OR lower(e.canonical_value) LIKE ?) "
@@ -347,6 +769,17 @@ def list_entities(
         "  AND filter_link.project_id = ? "
         "  AND filter_project.session_id = e.session_id"
         ")) "
+        "AND (? = 'all' "
+        "OR (? = 'hide' AND EXISTS ("
+        "  SELECT 1 FROM entity_run_links orphan_erl "
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id "
+        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id"
+        ")) "
+        "OR (? = 'only' AND NOT EXISTS ("
+        "  SELECT 1 FROM entity_run_links orphan_erl "
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id "
+        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id"
+        "))) "
         "GROUP BY e.id "
         "ORDER BY e.last_seen_at DESC, e.canonical_value ASC LIMIT ? OFFSET ?",
         [*common_params, page_limit, page_offset],
@@ -394,6 +827,7 @@ def _query_export_entities(
     entity_type: str = "",
     query: str = "",
     project_id: str = "",
+    orphan_filter: str = "hide",
     limit: int = 10000,
 ) -> list[dict[str, Any]]:
     normalized_type = str(entity_type or "").strip().lower()
@@ -402,6 +836,7 @@ def _query_export_entities(
     search = str(query or "").strip().lower()
     search_like = f"%{search}%" if search else ""
     project_filter = str(project_id or "").strip()
+    normalized_orphan_filter = _normalize_orphan_filter(orphan_filter)
     page_limit = max(1, min(int(limit or 10000), 10000))
     params: list[Any] = [
         session_id,
@@ -411,6 +846,7 @@ def _query_export_entities(
         search_like,
         project_filter,
         project_filter,
+        *_orphan_params(normalized_orphan_filter),
         page_limit,
     ]
     rows = conn.execute(
@@ -427,6 +863,17 @@ def _query_export_entities(
         "  AND filter_link.project_id = ? "
         "  AND filter_project.session_id = e.session_id"
         ")) "
+        "AND (? = 'all' "
+        "OR (? = 'hide' AND EXISTS ("
+        "  SELECT 1 FROM entity_run_links orphan_erl "
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id "
+        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id"
+        ")) "
+        "OR (? = 'only' AND NOT EXISTS ("
+        "  SELECT 1 FROM entity_run_links orphan_erl "
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id "
+        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id"
+        "))) "
         "ORDER BY e.last_seen_at DESC, e.canonical_value ASC LIMIT ?",
         params,
     ).fetchall()
@@ -492,6 +939,7 @@ def atlas_entities_export(
     entity_type: str = "",
     query: str = "",
     project_id: str = "",
+    orphan_filter: str = "hide",
     limit: int = 10000,
 ) -> list[dict[str, Any]]:
     return _query_export_entities(
@@ -500,6 +948,7 @@ def atlas_entities_export(
         entity_type=entity_type,
         query=query,
         project_id=project_id,
+        orphan_filter=orphan_filter,
         limit=limit,
     )
 
@@ -559,9 +1008,11 @@ def entity_detail(conn, session_id: str, entity_id: str) -> dict[str, Any] | Non
         "ORDER BY last_seen_at DESC, created DESC",
         (session_id, entity_id),
     ).fetchall()
+    intel_snapshots = [_row_to_intel_snapshot(snapshot) for snapshot in snapshot_rows]
     return {
         "entity": entity,
         "runs": [_row_to_run_link(run) for run in run_rows],
-        "intel_snapshots": [_row_to_intel_snapshot(snapshot) for snapshot in snapshot_rows],
+        "intel_snapshots": intel_snapshots,
+        "intel_summary": summarize_intel_snapshots(entity["type"], intel_snapshots),
         "findings": [_row_to_finding(finding) for finding in finding_rows],
     }

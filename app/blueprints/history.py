@@ -26,6 +26,11 @@ from core.helpers import (
 from core.output_signals import command_root as output_command_root
 from services.history.permalinks import _format_duration, _permalink_error_page, _permalink_page
 from core.process import active_runs_for_session
+from services.atlas.cleanup import (
+    atlas_run_cleanup_preview,
+    delete_atlas_cleanup_preview,
+    public_cleanup_preview,
+)
 from services.projects.contracts import BULK_AUDIT_FAILURE_LIMIT, MAX_BULK_RUN_ACTION_ITEMS, MAX_ENTITY_ID_LEN
 from services.projects.workspace import ProjectWorkspaceError, compare_project_runs
 from core.redaction import omit_raw_only_line_entries, redact_line_entries
@@ -1496,13 +1501,18 @@ def get_run(run_id):
 def delete_run(run_id):
     """Delete a specific run from history for this session."""
     session_id = get_session_id()
+    prune_atlas = str(request.args.get("prune_atlas") or "").strip().lower() in {"1", "true", "yes"}
+    atlas_cleanup = {"entities": 0, "findings": 0}
     with db_connect() as conn:
         owned = conn.execute(
             "SELECT id FROM runs WHERE id = ? AND session_id = ?",
             (run_id, session_id),
         ).fetchone()
         if owned:
+            cleanup_preview = atlas_run_cleanup_preview(conn, session_id, [run_id]) if prune_atlas else None
             delete_run_artifacts(conn, [run_id])
+            if cleanup_preview:
+                atlas_cleanup = delete_atlas_cleanup_preview(conn, session_id, cleanup_preview)
         cur = conn.execute(
             "DELETE FROM runs WHERE id = ? AND session_id = ?", (run_id, session_id)
         )
@@ -1515,7 +1525,22 @@ def delete_run(run_id):
         log.debug("HISTORY_DELETE_MISS", extra={
             "ip": get_client_ip(), "run_id": run_id, "session": get_log_session_id(session_id),
         })
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "atlas_cleanup": atlas_cleanup})
+
+
+@history_bp.route("/history/<run_id>/atlas-cleanup-preview")
+def history_run_atlas_cleanup_preview(run_id):
+    """Preview non-curated Atlas rows that can be removed with a run."""
+    session_id = get_session_id()
+    with db_connect() as conn:
+        owned = conn.execute(
+            "SELECT id FROM runs WHERE id = ? AND session_id = ?",
+            (run_id, session_id),
+        ).fetchone()
+        if not owned:
+            return jsonify({"error": "run not found"}), 404
+        preview = atlas_run_cleanup_preview(conn, session_id, [run_id])
+    return jsonify({"ok": True, "cleanup": public_cleanup_preview(preview)})
 
 
 def _normalize_bulk_ids_payload(data, key):

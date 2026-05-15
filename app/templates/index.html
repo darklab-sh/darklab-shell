@@ -451,23 +451,42 @@
       </div>
       <button type="button" class="close-btn atlas-close" aria-label="Close Atlas">✕</button>
     </div>
+    <div id="atlas-tabs" class="atlas-tabs history-run-tabs" role="tablist" aria-label="Atlas entity types"></div>
     <div class="atlas-shell">
       <div class="atlas-main">
         <div class="atlas-toolbar">
-          <div id="atlas-tabs" class="atlas-tabs" role="tablist" aria-label="Atlas entity types"></div>
-          <div class="atlas-filter-row">
+          <div class="atlas-search-row">
             <input id="atlas-search" class="form-control form-control-compact" type="text" placeholder="search atlas" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search Atlas entities">
-            <select id="atlas-finding-status-filter" class="form-select form-control-compact u-hidden" aria-label="Filter Atlas findings by status"></select>
-            <button id="atlas-export-csv-btn" class="btn btn-ghost btn-compact" type="button" title="Export Atlas entities as CSV">CSV</button>
-            <button id="atlas-export-jsonl-btn" class="btn btn-ghost btn-compact" type="button" title="Export Atlas entities as JSONL">JSONL</button>
-            <button id="atlas-refresh-btn" class="btn btn-secondary btn-compact" type="button">Refresh</button>
+          </div>
+          <div class="atlas-filter-row">
+            <div class="atlas-filter-controls">
+              <select id="atlas-finding-status-filter" class="form-select form-control-compact u-hidden" aria-label="Filter Atlas findings by status"></select>
+              <select id="atlas-orphan-filter" class="form-select form-control-compact atlas-orphan-filter" aria-label="Filter Atlas rows by source run"></select>
+            </div>
+            <div class="atlas-toolbar-actions">
+              <div id="atlas-export-wrap" class="atlas-export-wrap save-menu-wrap save-menu-down">
+                <button id="atlas-export-menu-btn" class="btn btn-ghost btn-compact" type="button" aria-expanded="false">Export</button>
+                <div id="atlas-export-menu" class="atlas-export-menu save-menu dropdown-surface">
+                  <button id="atlas-export-csv-btn" class="dropdown-item dropdown-item-compact" type="button">CSV</button>
+                  <button id="atlas-export-jsonl-btn" class="dropdown-item dropdown-item-compact" type="button">JSONL</button>
+                </div>
+              </div>
+              <button id="atlas-refresh-btn" class="btn btn-secondary btn-compact" type="button">Refresh</button>
+            </div>
           </div>
           <div id="atlas-finding-bulk-row" class="atlas-finding-bulk-row u-hidden">
-            <span id="atlas-finding-selection-summary" class="atlas-muted">0 selected</span>
-            <button id="atlas-finding-select-all" class="btn btn-secondary btn-compact" type="button">Select all</button>
-            <button id="atlas-finding-clear-selection" class="btn btn-ghost btn-compact" type="button">Clear</button>
-            <select id="atlas-finding-bulk-status" class="form-select form-control-compact" aria-label="Bulk finding review state"></select>
-            <button id="atlas-finding-bulk-apply" class="btn btn-secondary btn-compact" type="button">Apply</button>
+            <div class="atlas-bulk-action-row">
+              <label class="history-bulk-toggle control-row">
+                <input id="atlas-select-toggle" type="checkbox">
+                <span>select</span>
+              </label>
+              <button id="atlas-finding-select-all" class="btn btn-secondary btn-compact" type="button">Select all</button>
+              <button id="atlas-finding-clear-selection" class="btn btn-ghost btn-compact" type="button">Clear</button>
+              <select id="atlas-finding-bulk-status" class="form-select form-control-compact" aria-label="Bulk finding review state"></select>
+              <button id="atlas-finding-bulk-apply" class="btn btn-secondary btn-compact" type="button">Apply</button>
+              <button id="atlas-bulk-delete" class="btn btn-secondary btn-danger btn-compact" type="button">Delete</button>
+            </div>
+            <span id="atlas-finding-selection-summary" class="atlas-muted atlas-bulk-selection-summary">0 selected</span>
           </div>
         </div>
         <div id="atlas-list" class="atlas-list nice-scroll" aria-live="polite"></div>
