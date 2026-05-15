@@ -139,12 +139,12 @@ test.describe('session-token lifecycle', () => {
 
     await runCommand(page, `session-token set ${token}`)
     await expect(page.locator('.tab-panel.active .output')).toContainText(
-      'migrate history, files, workflows, and recent domains to this session token?',
+      'migrate history, files, workflows, and recent values to this session token?',
     )
     await answerTerminalConfirm(
       page,
       'no',
-      'History, file, workflow, and recent-domain migration skipped.',
+      'History, file, workflow, and recent-value migration skipped.',
       { timeout: 45_000 },
     )
 
@@ -165,7 +165,7 @@ test.describe('session-token lifecycle', () => {
 
     await runCommand(page, `session-token set ${token}`)
     await expect(page.locator('.tab-panel.active .output')).toContainText(
-      'migrate history, files, workflows, and recent domains to this session token?',
+      'migrate history, files, workflows, and recent values to this session token?',
     )
     await answerTerminalConfirm(page, 'yes', 'migrated —')
 
@@ -177,7 +177,7 @@ test.describe('session-token lifecycle', () => {
     )
   })
 
-  test('recent domain autocomplete follows the active session token across browser contexts', async ({
+  test('recent target autocomplete follows the active session token across browser contexts', async ({
     page,
     browser,
   }) => {
@@ -188,9 +188,9 @@ test.describe('session-token lifecycle', () => {
 
     await runCommand(page, 'ping -c 1 darklab.sh')
     await expect.poll(async () => page.evaluate(async () => {
-      const resp = await apiFetch('/session/recent-domains')
+      const resp = await apiFetch('/session/recent-values')
       const data = await resp.json()
-      return data.domains || []
+      return (data.values && data.values.domain) || []
     })).toContain('darklab.sh')
 
     const context = await browser.newContext()
@@ -203,7 +203,7 @@ test.describe('session-token lifecycle', () => {
       await ensurePromptReady(otherPage, { timeout: 30_000, waitForAutocomplete: true })
       await expect.poll(async () => currentSessionId(otherPage)).toBe(token)
       await expect.poll(async () => otherPage.evaluate(() => (
-        typeof _readRecentDomains === 'function' ? _readRecentDomains() : []
+        typeof _readRecentValues === 'function' ? _readRecentValues('domain') : []
       ))).toContain('darklab.sh')
 
       await expect.poll(async () => otherPage.evaluate(() => (

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-commit checks: flake8, bandit, pytest, pip-audit, eslint, npm audit,
+# Pre-commit checks: Ruff, bandit, pytest, pip-audit, eslint, npm audit,
 # shell script linting, hadolint, yamllint, jsonlint, markdownlint, vendor:check
 # Install once with: git config core.hooksPath scripts/hooks
 
@@ -33,7 +33,7 @@ run_check() {
     fi
 }
 
-run_check "flake8"    "$PYTHON" -m flake8 app/ tests/py/
+run_check "ruff"      "$PYTHON" -m ruff check --config .tooling/ruff.toml app/ tests/py/
 run_check "bandit"    "$PYTHON" -m bandit -r app/ -ll -q
 run_check "pytest"    "$PYTHON" -m pytest tests/py/ -q --tb=short
 run_check "pip-audit" "$PYTHON" -m pip_audit -r app/requirements.txt -r requirements-dev.txt

@@ -1272,13 +1272,13 @@ function _persistSessionTokenRun(command, lineItems, statusValue = 'ok') {
   _persistClientSideRun(command, lineItems, statusValue);
 }
 
-function _sessionMigrationCountLabel(runCount = 0, workspaceFileCount = 0, workflowCount = 0, recentDomainCount = 0) {
+function _sessionMigrationCountLabel(runCount = 0, workspaceFileCount = 0, workflowCount = 0, recentValueCount = 0) {
   const parts = [];
   if (runCount > 0) parts.push(`${runCount} run(s)`);
   if (workspaceFileCount > 0) parts.push(`${workspaceFileCount} workspace file(s)`);
   if (workflowCount > 0) parts.push(`${workflowCount} workflow(s)`);
-  if (recentDomainCount > 0) parts.push(`${recentDomainCount} recent domain(s)`);
-  if (!parts.length) return 'no runs, workspace files, workflows, or recent domains';
+  if (recentValueCount > 0) parts.push(`${recentValueCount} recent value(s)`);
+  if (!parts.length) return 'no runs, workspace files, workflows, or recent values';
   if (parts.length === 1) return parts[0];
   return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
@@ -1288,7 +1288,7 @@ function _sessionMigrationResultText(data = {}) {
   const skippedWorkspaceFiles = Number(data.skipped_workspace_files || 0);
   const workspaceDirs = Number(data.migrated_workspace_directories || 0);
   const skippedWorkspaceDirs = Number(data.skipped_workspace_directories || 0);
-  const recentDomains = Number(data.migrated_recent_domains || 0);
+  const recentValues = Number(data.migrated_recent_values || 0);
   const workspaceParts = [
     `${workspaceFiles} workspace file(s)`,
   ];
@@ -1297,7 +1297,7 @@ function _sessionMigrationResultText(data = {}) {
   if (skippedWorkspaceDirs > 0) workspaceParts.push(`${skippedWorkspaceDirs} folder(s) skipped`);
   return `migrated — ${data.migrated_runs} run(s), ${data.migrated_snapshots} snapshot(s), `
     + `${data.migrated_stars ?? 0} starred command(s), ${data.migrated_workflows ?? 0} workflow(s), `
-    + `${recentDomains} recent domain(s), `
+    + `${recentValues} recent value(s), `
     + `${workspaceParts.join(', ')}, `
     + 'and saved user options when the destination had none';
 }
@@ -1427,7 +1427,7 @@ function _clearVisibleSessionHistoryState() {
 async function _activateSessionTokenIdentity(token) {
   localStorage.setItem('session_token', token);
   updateSessionId(token);
-  if (typeof loadRecentDomains === 'function') await loadRecentDomains().catch(() => {});
+  if (typeof loadRecentValues === 'function') await loadRecentValues().catch(() => {});
   await _seedLocalStorageStarsToServer();
   if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
   if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
@@ -1448,15 +1448,15 @@ async function _sessionTokenGenerate(tabId) {
     const data = await resp.json();
     const newToken = data.session_token;
 
-    if (typeof flushRecentDomains === 'function') {
-      await flushRecentDomains().catch(() => {});
+    if (typeof flushRecentValues === 'function') {
+      await flushRecentValues().catch(() => {});
     }
 
     // Check run/workspace counts on old session before switching identity.
     let runCount = 0;
     let workspaceFileCount = 0;
     let workflowCount = 0;
-    let recentDomainCount = 0;
+    let recentValueCount = 0;
     try {
       const countResp = await apiFetch('/session/run-count');
       if (countResp.ok) {
@@ -1464,7 +1464,7 @@ async function _sessionTokenGenerate(tabId) {
         runCount = countData.count || 0;
         workspaceFileCount = countData.workspace_files || 0;
         workflowCount = countData.workflow_count || 0;
-        recentDomainCount = countData.recent_domain_count || 0;
+        recentValueCount = countData.recent_value_count || 0;
       }
     } catch (_) {}
 
@@ -1473,12 +1473,12 @@ async function _sessionTokenGenerate(tabId) {
     appendLine('use session-token set <value> on another device to continue your session', '', tabId);
     appendLine('warning: your session token grants full access to your session history — treat it like a password', 'notice', tabId);
 
-    if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0 || recentDomainCount > 0) {
+    if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0 || recentValueCount > 0) {
       // Defer identity switch until the user answers the migration prompt so a
       // failed /session/migrate does not strand runs on the old session while
       // the active identity is already the new token.
       appendLine(
-        `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount, workflowCount, recentDomainCount)} in your previous session. migrate history, files, workflows, and recent domains to your new session token?`,
+        `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount, workflowCount, recentValueCount)} in your previous session. migrate history, files, workflows, and recent values to your new session token?`,
         '',
         tabId
       );
@@ -1495,7 +1495,7 @@ async function _sessionTokenGenerate(tabId) {
             _recordSuccessfulLocalCommand('session-token generate');
             _persistSessionTokenRun('session-token generate', [
               { text: `session token generated:  ${maskSessionToken(newToken)}` },
-              { text: 'history, files, workflows, and recent domains migrated to the new session token' },
+              { text: 'history, files, workflows, and recent values migrated to the new session token' },
             ]);
           }
           setStatus('idle');
@@ -1507,10 +1507,10 @@ async function _sessionTokenGenerate(tabId) {
           if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
           if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
           _recordSuccessfulLocalCommand('session-token generate');
-          appendLine('History, file, workflow, and recent-domain migration skipped.', '', tabId);
+          appendLine('History, file, workflow, and recent-value migration skipped.', '', tabId);
           _persistSessionTokenRun('session-token generate', [
             { text: `session token generated:  ${maskSessionToken(newToken)}` },
-            { text: 'History, file, workflow, and recent-domain migration skipped.' },
+            { text: 'History, file, workflow, and recent-value migration skipped.' },
           ]);
           setStatus('idle');
         },
@@ -1579,15 +1579,15 @@ async function _sessionTokenSet(value, tabId) {
 
   const oldSessionId = SESSION_ID;
 
-  if (typeof flushRecentDomains === 'function') {
-    await flushRecentDomains().catch(() => {});
+  if (typeof flushRecentValues === 'function') {
+    await flushRecentValues().catch(() => {});
   }
 
   // Check current session's run/workspace counts before switching identity.
   let runCount = 0;
   let workspaceFileCount = 0;
   let workflowCount = 0;
-  let recentDomainCount = 0;
+  let recentValueCount = 0;
   try {
     const countResp = await apiFetch('/session/run-count');
     if (countResp.ok) {
@@ -1595,16 +1595,16 @@ async function _sessionTokenSet(value, tabId) {
       runCount = countData.count || 0;
       workspaceFileCount = countData.workspace_files || 0;
       workflowCount = countData.workflow_count || 0;
-      recentDomainCount = countData.recent_domain_count || 0;
+      recentValueCount = countData.recent_value_count || 0;
     }
   } catch (_) {}
 
-  if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0 || recentDomainCount > 0) {
+  if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0 || recentValueCount > 0) {
     // Defer identity switch until the user answers the migration prompt so a
     // failed /session/migrate does not strand runs on the old session while
     // the active identity is already the new token.
     appendLine(
-      `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount, workflowCount, recentDomainCount)} in your current session. migrate history, files, workflows, and recent domains to this session token?`,
+      `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount, workflowCount, recentValueCount)} in your current session. migrate history, files, workflows, and recent values to this session token?`,
       '',
       tabId
     );
@@ -1627,11 +1627,11 @@ async function _sessionTokenSet(value, tabId) {
         await _activateSessionTokenIdentity(value);
         _appendSessionTokenSetLines(value, tabId);
         _recordSuccessfulLocalCommand(`session-token set ${value}`);
-        appendLine('History, file, workflow, and recent-domain migration skipped.', '', tabId);
+        appendLine('History, file, workflow, and recent-value migration skipped.', '', tabId);
         _persistSessionTokenRun(`session-token set ${value}`, [
           { text: `session token set: ${maskSessionToken(value)}` },
           { text: 'reload other tabs to apply the new session token' },
-          { text: 'History, file, workflow, and recent-domain migration skipped.' },
+          { text: 'History, file, workflow, and recent-value migration skipped.' },
         ]);
         setStatus('idle');
       },
@@ -1654,8 +1654,8 @@ async function _sessionTokenSet(value, tabId) {
 }
 
 async function _sessionTokenCopy(tabId) {
-  if (typeof flushRecentDomains === 'function') {
-    await flushRecentDomains().catch(() => {});
+  if (typeof flushRecentValues === 'function') {
+    await flushRecentValues().catch(() => {});
   }
   const token = localStorage.getItem('session_token');
   if (!token) {
@@ -2615,8 +2615,8 @@ function submitCommand(rawCmd) {
   }
 
   addToHistory(_historySafeCommand(cmd));
-  if (typeof rememberRecentDomainsFromCommand === 'function') {
-    try { rememberRecentDomainsFromCommand(cmd); } catch (_) { /* autocomplete recents are best-effort */ }
+  if (typeof rememberRecentValuesFromCommand === 'function') {
+    try { rememberRecentValuesFromCommand(cmd); } catch (_) { /* autocomplete recents are best-effort */ }
   }
 
   if (typeof isInteractivePtyCommand === 'function' && isInteractivePtyCommand(cmd)) {

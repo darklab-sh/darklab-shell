@@ -105,8 +105,19 @@ describe('workspace UI helpers', () => {
     ])
   })
 
-  it('renders explicit empty directories from the workspace payload', () => {
-    const { renderWorkspaceFiles } = setupWorkspace()
+  it('renders explicit empty directories from the workspace payload', async () => {
+    const apiFetch = vi.fn(() => responseJson({
+      directories: [{ path: 'reports' }, { path: 'reports/empty' }],
+      files: [{ path: 'targets.txt', size: 11 }],
+      usage: { bytes_used: 11, file_count: 1 },
+      limits: { quota_bytes: 4096, max_files: 10 },
+    }))
+    const { getWorkspaceAutocompleteDirectoryHints, renderWorkspaceFiles } = setupWorkspace(apiFetch)
+
+    await flushWorkspacePromises()
+
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files')
+    expect(getWorkspaceAutocompleteDirectoryHints().map(item => item.value)).toEqual(['reports', 'reports/empty'])
 
     renderWorkspaceFiles({
       directories: [{ path: 'reports' }, { path: 'reports/empty' }],

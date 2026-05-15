@@ -250,8 +250,9 @@ apiFetch('/autocomplete').then(r => r.json()).then(data => {
   acSpecialCommands = data.special_commands || [];
   acBuiltinCommandRoots = data.builtin_command_roots || [];
   if (typeof loadSessionVariables === 'function') loadSessionVariables().catch(() => {});
-  if (typeof loadRecentDomains === 'function') loadRecentDomains().catch(() => {});
+  if (typeof loadRecentValues === 'function') loadRecentValues().catch(() => {});
   if (typeof loadProjectAutocompleteTargets === 'function') loadProjectAutocompleteTargets().catch(() => {});
+  if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache().catch(() => {});
   if (typeof scheduleSearchDiscoverabilityRefresh === 'function') scheduleSearchDiscoverabilityRefresh();
   else if (typeof refreshSearchDiscoverabilityUi === 'function') refreshSearchDiscoverabilityUi();
 }).catch(err => {

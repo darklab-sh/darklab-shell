@@ -5358,6 +5358,41 @@
     return [header, tabs];
   }
 
+  function _focusProjectWorkspaceTab(tabId) {
+    const nextTab = String(tabId || '');
+    window.setTimeout(() => {
+      const buttons = Array.from(projectWorkspaceModal?.querySelectorAll('[data-project-tab], [data-project-mobile-detail-tab]') || []);
+      const target = buttons.find(button => (
+        String(button.dataset.projectTab || button.dataset.projectMobileDetailTab || '') === nextTab
+      ));
+      target?.focus({ preventScroll: true });
+      _syncProjectMobileActiveTabScroll();
+    }, 0);
+  }
+
+  function cycleProjectWorkspaceTab(offset = 1) {
+    if (!isProjectWorkspaceOpen()) return false;
+    const project = _selectedProject();
+    if (!project) return false;
+    const projectId = String(project.id || '');
+    const summary = _projectSummary(projectId);
+    const items = _projectMobileTabItems(projectId, summary);
+    if (items.length < 2) return false;
+    const currentIndex = Math.max(0, items.findIndex(item => item.id === projectWorkspaceTab));
+    const nextIndex = (currentIndex + Number(offset || 1) + items.length) % items.length;
+    const nextTab = items[nextIndex].id || 'details';
+    if (!nextTab || nextTab === projectWorkspaceTab) return false;
+    _flushProjectNotesAutosave().catch(() => {});
+    projectWorkspaceTab = nextTab;
+    if (projectWorkspaceTab !== 'details') _closeProjectTargetEditor();
+    _closeProjectEntityEditor();
+    _setProjectWorkspaceMessage('');
+    if (projectMobileView === 'detail' && projectMobileDetailBody) projectMobileDetailBody.scrollTop = 0;
+    _renderProjectWorkspace();
+    _focusProjectWorkspaceTab(nextTab);
+    return true;
+  }
+
   function _renderProjectDetails(container, project, summary) {
     const meta = document.createElement('div');
     meta.className = 'project-explorer-meta-grid';
@@ -7174,6 +7209,7 @@
   global.openProjectWorkspace = openProjectWorkspace;
   global.closeProjectWorkspace = closeProjectWorkspace;
   global.isProjectWorkspaceOpen = isProjectWorkspaceOpen;
+  global.cycleProjectWorkspaceTab = cycleProjectWorkspaceTab;
   global.closeProjectTargetEditor = _closeProjectTargetEditor;
   global.isProjectTargetEditorOpen = isProjectTargetEditorOpen;
   global.isProjectPackageManifestOpen = isProjectPackageManifestOpen;

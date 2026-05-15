@@ -72,15 +72,25 @@ function _hintsToItems(hints, ctx, options = {}) {
   });
 }
 
-const RECENT_DOMAIN_LIMIT = autocompleteCore.RECENT_DOMAIN_LIMIT;
-const RECENT_DOMAIN_VALUE_TYPES = ['domain', 'host', 'target'];
-let acRecentDomains = [];
-const acRecentDomainPersistPromises = new Set();
+const RECENT_VALUE_LIMIT = autocompleteCore.RECENT_VALUE_LIMIT;
+const RECENT_VALUE_KINDS = ['domain', 'ip', 'url', 'port_set'];
+const RECENT_VALUE_CAPTURE_TYPES = ['domain', 'host', 'target', 'ip', 'url', 'port_set'];
+let acRecentValues = {
+  domain: [],
+  ip: [],
+  url: [],
+  port_set: [],
+};
+const acRecentValuePersistPromises = new Set();
 let acProjectTargets = [];
 let acProjects = [];
 
-function _readRecentDomains() {
-  return acRecentDomains.slice(0, RECENT_DOMAIN_LIMIT);
+function _readRecentValues(kind = '') {
+  const normalizedKind = String(kind || '').trim().toLowerCase();
+  if (normalizedKind) return (acRecentValues[normalizedKind] || []).slice(0, RECENT_VALUE_LIMIT);
+  return Object.assign({}, ...RECENT_VALUE_KINDS.map(itemKind => ({
+    [itemKind]: (acRecentValues[itemKind] || []).slice(0, RECENT_VALUE_LIMIT),
+  })));
 }
 
 function _readProjectTargets() {
@@ -91,9 +101,33 @@ function _readAutocompleteProjects() {
   return acProjects.slice(0, 200);
 }
 
-function setRecentDomains(items) {
-  acRecentDomains = autocompleteCore.normalizeRecentDomainList(items);
-  return _readRecentDomains();
+function _setRecentValuesByKind(valuesByKind) {
+  const next = {
+    domain: [],
+    ip: [],
+    url: [],
+    port_set: [],
+  };
+  RECENT_VALUE_KINDS.forEach((kind) => {
+    const items = valuesByKind && Array.isArray(valuesByKind[kind]) ? valuesByKind[kind] : [];
+    const normalized = autocompleteCore.normalizeRecentValueList(items.map(value => ({ kind, value })));
+    next[kind] = normalized.map(item => item.value).slice(0, RECENT_VALUE_LIMIT);
+  });
+  acRecentValues = next;
+  return _readRecentValues();
+}
+
+function setRecentValues(items) {
+  const grouped = {
+    domain: [],
+    ip: [],
+    url: [],
+    port_set: [],
+  };
+  autocompleteCore.normalizeRecentValueList(items).forEach((item) => {
+    if (grouped[item.kind]) grouped[item.kind].push(item.value);
+  });
+  return _setRecentValuesByKind(grouped);
 }
 
 function setProjectAutocompleteTargets(items) {
@@ -201,47 +235,47 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
   });
 }
 
-function loadRecentDomains() {
-  if (typeof apiFetch !== 'function') return Promise.resolve(_readRecentDomains());
-  return apiFetch('/session/recent-domains')
+function loadRecentValues() {
+  if (typeof apiFetch !== 'function') return Promise.resolve(_readRecentValues());
+  return apiFetch('/session/recent-values')
     .then(resp => (resp && typeof resp.json === 'function' ? resp.json() : {}))
     .then((data) => {
-      if (data && Array.isArray(data.domains)) return setRecentDomains(data.domains);
-      return _readRecentDomains();
+      if (data && data.values && typeof data.values === 'object') return _setRecentValuesByKind(data.values);
+      return _readRecentValues();
     })
     .catch((err) => {
-      if (typeof logClientError === 'function') logClientError('failed to load recent domains', err);
-      return _readRecentDomains();
+      if (typeof logClientError === 'function') logClientError('failed to load recent values', err);
+      return _readRecentValues();
     });
 }
 
-function _persistRecentDomains(items) {
-  const domains = autocompleteCore.normalizeRecentDomainList(items);
-  if (!domains.length || typeof apiFetch !== 'function') return Promise.resolve(null);
-  const request = apiFetch('/session/recent-domains', {
+function _persistRecentValues(items) {
+  const values = autocompleteCore.normalizeRecentValueList(items);
+  if (!values.length || typeof apiFetch !== 'function') return Promise.resolve(null);
+  const request = apiFetch('/session/recent-values', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ domains }),
+    body: JSON.stringify({ values }),
   })
     .then(resp => (resp && typeof resp.json === 'function' ? resp.json() : null))
     .then((data) => {
-      if (data && Array.isArray(data.domains)) setRecentDomains(data.domains);
+      if (data && data.values && typeof data.values === 'object') _setRecentValuesByKind(data.values);
       return data;
     })
     .catch((err) => {
-      if (typeof logClientError === 'function') logClientError('failed to save recent domains', err);
+      if (typeof logClientError === 'function') logClientError('failed to save recent values', err);
       return null;
     });
   const tracked = request.finally(() => {
-    acRecentDomainPersistPromises.delete(tracked);
+    acRecentValuePersistPromises.delete(tracked);
   });
-  acRecentDomainPersistPromises.add(tracked);
+  acRecentValuePersistPromises.add(tracked);
   return tracked;
 }
 
-function flushRecentDomains() {
-  if (!acRecentDomainPersistPromises.size) return Promise.resolve([]);
-  return Promise.all(Array.from(acRecentDomainPersistPromises)).catch(() => []);
+function flushRecentValues() {
+  if (!acRecentValuePersistPromises.size) return Promise.resolve([]);
+  return Promise.all(Array.from(acRecentValuePersistPromises)).catch(() => []);
 }
 
 function _itemValueTypeIs(item, type) {
@@ -274,7 +308,7 @@ const AUTOCOMPLETE_VALUE_TYPE_HANDLERS = {
     slotFromHints: hints => _hintsContainValueType(hints, 'domain'),
     applySuggestions: (ctx, baseItems) => _withProjectTargetSuggestions(
       ctx,
-      _withRecentDomainSuggestions(ctx, baseItems),
+      _withRecentValueSuggestions(ctx, baseItems, ['domain']),
       ['domain'],
     ),
   },
@@ -283,14 +317,18 @@ const AUTOCOMPLETE_VALUE_TYPE_HANDLERS = {
     slotFromHints: hints => _hintsContainValueType(hints, 'host'),
     applySuggestions: (ctx, baseItems) => _withProjectTargetSuggestions(
       ctx,
-      _withRecentDomainSuggestions(ctx, baseItems),
+      _withRecentValueSuggestions(ctx, baseItems, ['domain', 'ip']),
       ['host', 'domain', 'ip'],
     ),
   },
   ip: {
     emptySlot: false,
     slotFromHints: hints => _hintsContainValueType(hints, 'ip'),
-    applySuggestions: (ctx, baseItems) => _withProjectTargetSuggestions(ctx, baseItems, ['ip']),
+    applySuggestions: (ctx, baseItems) => _withProjectTargetSuggestions(
+      ctx,
+      _withRecentValueSuggestions(ctx, baseItems, ['ip']),
+      ['ip'],
+    ),
   },
   cidr: {
     emptySlot: false,
@@ -300,12 +338,20 @@ const AUTOCOMPLETE_VALUE_TYPE_HANDLERS = {
   port_set: {
     emptySlot: false,
     slotFromHints: hints => _hintsContainValueType(hints, 'port_set'),
-    applySuggestions: (ctx, baseItems) => _withProjectTargetSuggestions(ctx, baseItems, ['port_set']),
+    applySuggestions: (ctx, baseItems) => _withProjectTargetSuggestions(
+      ctx,
+      _withRecentValueSuggestions(ctx, baseItems, ['port_set']),
+      ['port_set'],
+    ),
   },
   url: {
     emptySlot: false,
     slotFromHints: hints => _hintsContainValueType(hints, 'url'),
-    applySuggestions: (ctx, baseItems) => _withProjectTargetSuggestions(ctx, baseItems, ['url']),
+    applySuggestions: (ctx, baseItems) => _withProjectTargetSuggestions(
+      ctx,
+      _withRecentValueSuggestions(ctx, baseItems, ['url']),
+      ['url'],
+    ),
   },
   wordlist: {
     emptySlot: { active: false, categories: [] },
@@ -323,7 +369,7 @@ const AUTOCOMPLETE_VALUE_TYPE_HANDLERS = {
     slotFromHints: hints => _hintsContainValueType(hints, 'target'),
     applySuggestions: (ctx, baseItems) => _withProjectTargetSuggestions(
       ctx,
-      _withRecentDomainSuggestions(ctx, baseItems),
+      _withRecentValueSuggestions(ctx, baseItems, ['domain', 'ip', 'url', 'port_set']),
       ['domain', 'host', 'ip', 'cidr', 'url', 'port_set', 'target'],
     ),
     sourceHints: (spec, hints) => {
@@ -500,10 +546,32 @@ function _countCompletedPositionalArgs(ctx, spec) {
   return count;
 }
 
-function _positionalHintSlotsForRecentDomains(spec) {
-  const perTypeSlots = RECENT_DOMAIN_VALUE_TYPES.map(type => (
+function _recentValueKindForToken(type, tokenValue) {
+  const normalizedType = String(type || '').trim().toLowerCase();
+  const candidates = normalizedType === 'host'
+    ? ['domain', 'ip']
+    : (normalizedType === 'target' ? ['domain', 'ip', 'url', 'port_set'] : [normalizedType]);
+  for (const kind of candidates) {
+    const normalized = autocompleteCore.normalizeRecentValue(kind, tokenValue);
+    if (normalized.kind && normalized.value) return normalized;
+  }
+  return { kind: '', value: '' };
+}
+
+function _hintRecentValueTypes(hints) {
+  const found = [];
+  (Array.isArray(hints) ? hints : []).forEach((hint) => {
+    RECENT_VALUE_CAPTURE_TYPES.forEach((type) => {
+      if (_itemValueTypeIs(hint, type) && !found.includes(type)) found.push(type);
+    });
+  });
+  return found;
+}
+
+function _positionalHintSlotsForRecentValues(spec) {
+  const perTypeSlots = RECENT_VALUE_CAPTURE_TYPES.map(type => (
     _positionalHintSlotsForValueType(spec, type).map((slot, index) => (
-      slot && _recentDomainPositionalSlotCapturable(spec, index)
+      slot && _recentValuePositionalSlotCapturable(spec, index)
     ))
   ));
   const maxLength = perTypeSlots.reduce((max, slots) => Math.max(max, slots.length), 0);
@@ -524,13 +592,13 @@ function _hintLooksLikeFileInput(hint) {
     || /<[^>]*(?:file|list|path|wordlist)[^>]*>/.test(text);
 }
 
-function _recentDomainHintsCapturable(hints) {
+function _recentValueHintsCapturable(hints) {
   const list = Array.isArray(hints) ? hints : [];
-  return list.some(hint => RECENT_DOMAIN_VALUE_TYPES.some(type => _itemValueTypeIs(hint, type)))
+  return list.some(hint => RECENT_VALUE_CAPTURE_TYPES.some(type => _itemValueTypeIs(hint, type)))
     && !list.some(_hintLooksLikeFileInput);
 }
 
-function _recentDomainTriggerCapturable(spec, trigger) {
+function _recentValueTriggerCapturable(spec, trigger) {
   const key = String(trigger || '');
   if (!key) return false;
   const workspaceFlags = new Set((Array.isArray(spec && spec.workspace_file_flags) ? spec.workspace_file_flags : [])
@@ -540,21 +608,21 @@ function _recentDomainTriggerCapturable(spec, trigger) {
   const hints = spec && spec.arg_hints && Object.prototype.hasOwnProperty.call(spec.arg_hints, key)
     ? spec.arg_hints[key]
     : [];
-  return _recentDomainHintsCapturable(hints);
+  return _recentValueHintsCapturable(hints);
 }
 
-function _recentDomainPositionalSlotCapturable(spec, slotIndex) {
+function _recentValuePositionalSlotCapturable(spec, slotIndex) {
   const hints = _positionalHintsForSlot(spec, slotIndex);
-  return _recentDomainHintsCapturable(hints);
+  return _recentValueHintsCapturable(hints);
 }
 
-function _argHintTriggersForRecentDomains(spec) {
+function _argHintTriggersForRecentValues(spec) {
   const seen = new Set();
   const triggers = [];
-  RECENT_DOMAIN_VALUE_TYPES.forEach((type) => {
+  RECENT_VALUE_CAPTURE_TYPES.forEach((type) => {
     _argHintTriggersForValueType(spec, type).forEach((trigger) => {
       const key = String(trigger || '');
-      if (!key || seen.has(key) || !_recentDomainTriggerCapturable(spec, key)) return;
+      if (!key || seen.has(key) || !_recentValueTriggerCapturable(spec, key)) return;
       seen.add(key);
       triggers.push(trigger);
     });
@@ -562,13 +630,19 @@ function _argHintTriggersForRecentDomains(spec) {
   return triggers;
 }
 
-function _collectRecentDomainsFromPositionalValues(ctx, spec, contextSpec, triggers) {
-  const positionalSlots = _positionalHintSlotsForRecentDomains(spec);
+function _collectRecentValuesFromPositionalValues(ctx, spec, contextSpec, triggers) {
+  const positionalSlots = _positionalHintSlotsForRecentValues(spec);
   const found = [];
-  _walkAutocompletePositionalValues(ctx, spec, contextSpec, ({ triggered, tokenValue, positionalIndex }) => {
+  _walkAutocompletePositionalValues(ctx, spec, contextSpec, ({ triggered, tokenValue, positionalIndex, previous }) => {
     if (triggered || positionalSlots[positionalIndex]) {
-      const domain = autocompleteCore.normalizeRecentDomain(tokenValue);
-      if (domain) found.push(domain);
+      const hints = triggered ? _argHintsForTrigger(spec.arg_hints || {}, previous) : _positionalHintsForSlot(spec, positionalIndex);
+      for (const type of _hintRecentValueTypes(hints)) {
+        const value = _recentValueKindForToken(type, tokenValue);
+        if (value.kind && value.value) {
+          found.push(value);
+          break;
+        }
+      }
     }
   }, {
     tokens: ctx.tokens,
@@ -578,16 +652,20 @@ function _collectRecentDomainsFromPositionalValues(ctx, spec, contextSpec, trigg
   return found;
 }
 
-function _storeRecentDomains(found) {
+function _storeRecentValues(found) {
   if (!found.length) return [];
-  const existing = _readRecentDomains();
   const next = [];
-  found.concat(existing).forEach(domain => {
-    if (!domain || next.includes(domain)) return;
-    next.push(domain);
+  found.concat(RECENT_VALUE_KINDS.flatMap(kind => (
+    _readRecentValues(kind).map(value => ({ kind, value }))
+  ))).forEach((item) => {
+    const normalized = autocompleteCore.normalizeRecentValue(item.kind, item.value);
+    if (!normalized.kind || !normalized.value) return;
+    if (next.some(existing => existing.kind === normalized.kind && existing.value === normalized.value)) return;
+    if (next.filter(existing => existing.kind === normalized.kind).length >= RECENT_VALUE_LIMIT) return;
+    next.push(normalized);
   });
-  setRecentDomains(next);
-  _persistRecentDomains(found);
+  setRecentValues(next);
+  _persistRecentValues(found);
   return found;
 }
 
@@ -622,13 +700,15 @@ function _autocompleteValueTypeSlots(ctx, spec, contextSpec = {}) {
   };
 }
 
-function _recentDomainAutocompleteItems(ctx) {
-  return _readRecentDomains().map(domain => autocompleteCore.buildItem({
-    value: domain,
-    description: 'Recent domain',
-    replaceStart: ctx.tokenStart,
-    replaceEnd: ctx.tokenEnd,
-  }));
+function _recentValueAutocompleteItems(ctx, kinds = []) {
+  return (Array.isArray(kinds) ? kinds : [])
+    .flatMap(kind => _readRecentValues(kind).map(value => ({ kind, value })))
+    .map(item => autocompleteCore.buildItem({
+      value: item.value,
+      description: 'Recent target',
+      replaceStart: ctx.tokenStart,
+      replaceEnd: ctx.tokenEnd,
+    }));
 }
 
 function _projectTargetAutocompleteItems(ctx, allowedTypes = []) {
@@ -679,8 +759,8 @@ function _prependDedupedItems(specialItems, baseItems) {
   return specialItems.concat(rest);
 }
 
-function _withRecentDomainSuggestions(ctx, baseItems) {
-  const recentItems = autocompleteCore.filterItems(_recentDomainAutocompleteItems(ctx), ctx.currentToken);
+function _withRecentValueSuggestions(ctx, baseItems, kinds = []) {
+  const recentItems = autocompleteCore.filterItems(_recentValueAutocompleteItems(ctx, kinds), ctx.currentToken);
   return _prependDedupedItems(recentItems, baseItems);
 }
 
@@ -711,7 +791,7 @@ function _withTypedValueSlotSuggestions(ctx, baseItems, valueSlots = {}) {
   return baseItems;
 }
 
-function rememberRecentDomainsFromCommand(command) {
+function rememberRecentValuesFromCommand(command) {
   const text = String(command || '').trim();
   if (!text) return [];
   const registry = _getAutocompleteRegistry();
@@ -722,8 +802,8 @@ function rememberRecentDomainsFromCommand(command) {
   const spec = contextSpec.spec;
   if (!spec) return [];
 
-  return _storeRecentDomains(
-    _collectRecentDomainsFromPositionalValues(ctx, spec, contextSpec, _argHintTriggersForRecentDomains(spec)),
+  return _storeRecentValues(
+    _collectRecentValuesFromPositionalValues(ctx, spec, contextSpec, _argHintTriggersForRecentValues(spec)),
   );
 }
 

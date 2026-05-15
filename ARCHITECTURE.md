@@ -283,9 +283,9 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | `GET` | `/session/token/info` | Returns the active named token and creation timestamp, or null fields for anonymous sessions. |
 | `POST` | `/session/token/revoke` | Revokes a named token so future requests with that token fall back to anonymous session handling. |
 | `POST` | `/session/token/verify` | Checks whether a supplied `tok_...` token was issued by this server. |
-| `GET` | `/session/recent-domains` | Returns current-session recent domain values for metadata-gated autocomplete suggestions. |
-| `POST` | `/session/recent-domains` | Saves normalized recent domain values for the current session and prunes the list to the autocomplete cap. |
-| `POST` | `/session/migrate` | Migrates runs, snapshots, starred commands, preferences, command variables, user workflows, project workspace records, recent domains, and non-conflicting workspace paths between session IDs. |
+| `GET` | `/session/recent-values` | Returns current-session recent target values for metadata-gated autocomplete suggestions. |
+| `POST` | `/session/recent-values` | Saves normalized recent values for the current session and prunes each value kind to the autocomplete cap. |
+| `POST` | `/session/migrate` | Migrates runs, snapshots, starred commands, preferences, command variables, user workflows, project workspace records, recent values, and non-conflicting workspace paths between session IDs. |
 | `GET` | `/session/secrets` | Lists encrypted secret names, consumer env bindings, and update timestamps for the current session without returning values. |
 | `POST` | `/session/secrets` | Creates or replaces one encrypted current-session secret value. |
 | `POST` | `/session/secrets/rotate` | Re-wraps the current session's encrypted secret rows under the active master key. |
@@ -299,7 +299,7 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | `GET` | `/session/workflows/<workflow_id>` | Returns one current-session user workflow. |
 | `PUT` | `/session/workflows/<workflow_id>` | Updates one current-session user workflow. |
 | `DELETE` | `/session/workflows/<workflow_id>` | Deletes one current-session user workflow. |
-| `GET` | `/session/run-count` | Returns uncapped run count plus workspace file, user workflow, and recent-domain counts for migration confirmation. |
+| `GET` | `/session/run-count` | Returns uncapped run count plus workspace file, user workflow, and recent-value counts for migration confirmation. |
 | `GET` | `/session/starred` | Returns the current session's starred command list. |
 | `POST` | `/session/starred` | Adds one command to the current session's starred list. |
 | `DELETE` | `/session/starred` | Removes one command, or clears the whole starred list, for the current session. |
@@ -533,7 +533,7 @@ Command editing is split into separate state machines rather than one overloaded
 
 The structured autocomplete path is intentionally token-aware rather than shell-aware. It inspects command root, current token, and prior tokens to decide whether a suggestion should replace the whole input or only the active token. Examples act as discovery suggestions: a unique root or fuzzy root match can flatten root and subcommand examples into full-command replacements, while a selected subcommand switches the matcher to subcommand-scoped flags and value hints. Ambiguous subcommand matches remain token suggestions until only one subcommand matches. The matcher ranks exact matches, prefixes, token-boundary/camel-ish hits, substrings, and fuzzy character matches in that order, while preserving authored example order once an example is eligible. That preserves the classic-shell feel for long scanner commands without turning the frontend into a general shell parser.
 
-Recent-domain autocomplete is session-token-backed state. `autocomplete.js` keeps a page-local cache for immediate suggestions, but `GET`/`POST /session/recent-domains` persist normalized domains in SQLite under the active session ID, cap the list at 10, and migrate those rows with `/session/migrate`. Capture and suggestions still require explicit `value_type: domain` metadata in the command registry; placeholder text and descriptions are display-only and do not make a slot record domains.
+Recent target autocomplete is session-token-backed state. `autocomplete.js` keeps a page-local cache for immediate suggestions, but `GET`/`POST /session/recent-values` persist normalized domains, IPs, URLs, and port sets in SQLite under the active session ID. Each value kind is capped at 10 entries and migrates with `/session/migrate`. Capture and suggestions still require explicit value-type metadata in the command registry; placeholder text and descriptions are display-only and do not make a slot record recent targets. URLs are saved without query strings or fragments so pasted tokens do not become suggestions.
 
 Synthetic post-filters also sit on a distinct path before the normal shell-operator denial logic. `parse_synthetic_postfilter()` in `commands.py` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the broker worker applies the selected helper before lines are emitted or persisted. That keeps shell-like helpers app-native without reopening general shell piping or chaining.
 
@@ -909,111 +909,51 @@ Logical relationships are owned by the app rather than SQLite foreign-key constr
 
 Project workspace tables are the relationship foundation for case-style grouping. Projects link to completed runs and Atlas entities instead of copying them, so source records can remain usable outside any project and can belong to more than one project when that is useful. Snapshots and manually selected workspace files remain in their share/history/files surfaces and are not project-linked. Run-owned records such as artifacts and findings stay attached to their source run and surface in project views through linked runs.
 
+The schema is shown as one compact topology diagram for the full relationship model, then three field-level diagrams for the clusters where column shapes carry real meaning. Per-table field reference continues in the prose list below.
+
+#### Schema topology
+
+Every persistent table and its relationships, without field bodies. `LOGICAL_SESSION` is the shared `session_id` value rather than a stored table.
+
 ```mermaid
 erDiagram
-  LOGICAL_SESSION {
-    TEXT session_id PK "not a table"
-  }
-  RUNS {
-    TEXT id PK
-    TEXT session_id
-    TEXT run_kind
-    TEXT owner_tab_id
-    TEXT command
-    TEXT started
-    TEXT finished
-    INTEGER exit_code
-    TEXT output_preview
-    TEXT output_search_text
-  }
-  RUN_OUTPUT_ARTIFACTS {
-    TEXT run_id PK
-    TEXT rel_path
-    TEXT compression
-    INTEGER byte_size
-    INTEGER line_count
-    INTEGER truncated
-    TEXT created
-  }
-  RUNS_FTS {
-    INTEGER rowid PK
-    TEXT command
-    TEXT output_search_text
-  }
-  SNAPSHOTS {
-    TEXT id PK
-    TEXT session_id
-    TEXT label
-    TEXT created
-    TEXT content
-  }
-  SESSION_TOKENS {
-    TEXT token PK
-    TEXT created
-  }
-  SESSION_PREFERENCES {
-    TEXT session_id PK
-    TEXT preferences
-    TEXT updated
-  }
-  STARRED_COMMANDS {
-    TEXT session_id PK
-    TEXT command PK
-  }
-  SESSION_VARIABLES {
-    TEXT session_id PK
-    TEXT name PK
-    TEXT value
-    TEXT updated
-  }
-  USER_WORKFLOWS {
-    TEXT id PK
-    TEXT session_id
-    TEXT title
-    TEXT description
-    TEXT inputs
-    TEXT steps
-    TEXT created
-    TEXT updated
-  }
-  RECENT_DOMAINS {
-    TEXT session_id PK
-    TEXT domain PK
-    TEXT last_used
-    INTEGER use_count
-  }
-  SECRETS {
-    TEXT session_token PK
-    TEXT name PK
-    BLOB ciphertext
-    BLOB nonce
-    TEXT consumer_envs
-    TEXT created_at
-    TEXT updated_at
-  }
-  PROJECTS {
-    TEXT id PK
-    TEXT session_id
-    TEXT name
-    TEXT slug
-    TEXT description
-    TEXT status
-    TEXT color
-    TEXT created
-    TEXT updated
-  }
-  PROJECT_LINKS {
-    TEXT id PK
-    TEXT project_id
-    TEXT entity_type
-    TEXT entity_id
-    TEXT source
-    REAL confidence
-    TEXT review_state
-    TEXT source_detail
-    TEXT updated
-    TEXT created
-  }
+  SESSION_TOKENS ||--o| LOGICAL_SESSION : "named token"
+  LOGICAL_SESSION ||--o| SESSION_PREFERENCES : "stores"
+  LOGICAL_SESSION ||--o{ STARRED_COMMANDS : "stars"
+  LOGICAL_SESSION ||--o{ SESSION_VARIABLES : "defines"
+  LOGICAL_SESSION ||--o{ USER_WORKFLOWS : "saves"
+  LOGICAL_SESSION ||--o{ RECENT_VALUES : "remembers"
+  LOGICAL_SESSION ||--o{ SECRETS : "stores encrypted"
+  LOGICAL_SESSION ||--o{ RUNS : "owns"
+  LOGICAL_SESSION ||--o{ SNAPSHOTS : "owns"
+  LOGICAL_SESSION ||--o{ RUN_FILE_ARTIFACTS : "tracks"
+  LOGICAL_SESSION ||--o{ ENTITIES : "indexes"
+  LOGICAL_SESSION ||--o{ FINDINGS : "captures"
+  LOGICAL_SESSION ||--o{ ENTITY_LABELS : "labels"
+  LOGICAL_SESSION ||--o{ ENTITY_NOTES : "notes"
+  LOGICAL_SESSION ||--o{ PROJECTS : "owns"
+  LOGICAL_SESSION ||--o{ EVIDENCE_PACKAGES : "packages"
+  RUNS ||--o| RUN_OUTPUT_ARTIFACTS : "full output"
+  RUNS ||--o| RUNS_FTS : "search index"
+  RUNS ||--o{ RUN_FILE_ARTIFACTS : "creates"
+  RUNS ||--o{ FINDINGS : "emits"
+  RUNS ||--o{ ENTITY_RUN_LINKS : "mentions"
+  ENTITIES ||--o{ ENTITY_RUN_LINKS : "seen in"
+  ENTITIES ||--o{ ENTITY_INTEL_SNAPSHOTS : "caches"
+  ENTITIES ||--o{ FINDINGS : "subject of"
+  FINDINGS ||--o{ FINDINGS_OCCURRENCES : "seen in runs"
+  PROJECTS ||--o{ PROJECT_LINKS : "membership"
+  PROJECTS ||--o{ EVIDENCE_PACKAGES : "exports"
+```
+
+`ENTITY_LABELS` and `ENTITY_NOTES` are polymorphic on `(entity_type, entity_id)` and attach to several record types — projects, runs, snapshots, workspace files, run file artifacts, Atlas entities, findings, and packages — without separate FKs per type, which is why they sit under `LOGICAL_SESSION` rather than chaining off one specific parent.
+
+#### Atlas entity model
+
+Entity-first triage tables. `ENTITIES` is the deduped session-scoped record; `ENTITY_RUN_LINKS` is the many-to-many to source runs; `ENTITY_INTEL_SNAPSHOTS` caches normalized provider responses; `FINDINGS` are entity-owned signature-deduped findings with per-run sightings in `FINDINGS_OCCURRENCES`.
+
+```mermaid
+erDiagram
   ENTITIES {
     TEXT id PK
     TEXT session_id
@@ -1043,6 +983,74 @@ erDiagram
     TEXT fetched_at
     TEXT expires_at
   }
+  FINDINGS {
+    TEXT id PK
+    TEXT session_id
+    TEXT run_id
+    TEXT entity_id
+    TEXT subject_key
+    TEXT signature_hash
+    TEXT severity
+    TEXT kind
+    TEXT tool_root
+    TEXT first_run_id
+    TEXT last_run_id
+    TEXT first_seen_at
+    TEXT last_seen_at
+    INTEGER occurrence_count
+    TEXT status
+    TEXT status_updated_at
+    TEXT review_state
+    TEXT fingerprint
+    TEXT title
+    TEXT raw_line
+    TEXT created
+  }
+  FINDINGS_OCCURRENCES {
+    TEXT finding_id
+    TEXT run_id
+    INTEGER line_number
+    TEXT snippet
+    TEXT seen_at
+  }
+  ENTITIES ||--o{ ENTITY_RUN_LINKS : "seen in"
+  ENTITIES ||--o{ ENTITY_INTEL_SNAPSHOTS : "caches"
+  ENTITIES ||--o{ FINDINGS : "subject of"
+  FINDINGS ||--o{ FINDINGS_OCCURRENCES : "seen in runs"
+```
+
+#### Run output and workspace artifacts
+
+Run history with its two artifact families. `RUN_OUTPUT_ARTIFACTS` points at gzip-compressed full transcripts under `<data_dir>/run-output/`; `RUNS_FTS` is the FTS5 content table backing history search; `RUN_FILE_ARTIFACTS` tracks workspace files produced or consumed by a run. `SNAPSHOTS` is a sibling share/permalink record without an FK to `RUNS`.
+
+```mermaid
+erDiagram
+  RUNS {
+    TEXT id PK
+    TEXT session_id
+    TEXT run_kind
+    TEXT owner_tab_id
+    TEXT command
+    TEXT started
+    TEXT finished
+    INTEGER exit_code
+    TEXT output_preview
+    TEXT output_search_text
+  }
+  RUN_OUTPUT_ARTIFACTS {
+    TEXT run_id PK
+    TEXT rel_path
+    TEXT compression
+    INTEGER byte_size
+    INTEGER line_count
+    INTEGER truncated
+    TEXT created
+  }
+  RUNS_FTS {
+    INTEGER rowid PK
+    TEXT command
+    TEXT output_search_text
+  }
   RUN_FILE_ARTIFACTS {
     TEXT id PK
     TEXT session_id
@@ -1057,38 +1065,52 @@ erDiagram
     TEXT content_sha256
     TEXT created
   }
-  FINDINGS {
+  RUNS ||--o| RUN_OUTPUT_ARTIFACTS : "gzip transcript"
+  RUNS ||--o| RUNS_FTS : "search index"
+  RUNS ||--o{ RUN_FILE_ARTIFACTS : "creates"
+```
+
+#### Projects and shared metadata
+
+Project workspace tables plus the polymorphic metadata layer. `PROJECT_LINKS` carries the membership shape `(project_id, entity_type, entity_id)` and the Atlas-target metadata columns. `ENTITY_LABELS` and `ENTITY_NOTES` use `(entity_type, entity_id)` to attach to many record types without per-type FKs — including the records shown in the other diagrams.
+
+```mermaid
+erDiagram
+  PROJECTS {
     TEXT id PK
     TEXT session_id
-    TEXT run_id
-    TEXT target_id
-    TEXT scope
-    INTEGER line_number
-    TEXT review_state
-    TEXT entity_id
-    TEXT subject_key
-    TEXT signature_hash
-    TEXT severity
-    TEXT kind
-    TEXT tool_root
-    TEXT first_run_id
-    TEXT last_run_id
-    TEXT first_seen_at
-    TEXT last_seen_at
-    INTEGER occurrence_count
+    TEXT name
+    TEXT slug
+    TEXT description
     TEXT status
-    TEXT status_updated_at
-    TEXT fingerprint
-    TEXT title
-    TEXT raw_line
+    TEXT color
     TEXT created
+    TEXT updated
   }
-  FINDINGS_OCCURRENCES {
-    TEXT finding_id
-    TEXT run_id
-    INTEGER line_number
-    TEXT snippet
-    TEXT seen_at
+  PROJECT_LINKS {
+    TEXT id PK
+    TEXT project_id
+    TEXT entity_type
+    TEXT entity_id
+    TEXT source
+    REAL confidence
+    TEXT review_state
+    TEXT source_detail
+    TEXT created
+    TEXT updated
+  }
+  EVIDENCE_PACKAGES {
+    TEXT id PK
+    TEXT session_id
+    TEXT project_id
+    TEXT name
+    TEXT description
+    TEXT redaction_mode
+    INTEGER include_artifacts
+    TEXT manifest
+    TEXT status
+    TEXT created
+    TEXT updated
   }
   ENTITY_LABELS {
     TEXT id PK
@@ -1108,46 +1130,8 @@ erDiagram
     TEXT created
     TEXT updated
   }
-  EVIDENCE_PACKAGES {
-    TEXT id PK
-    TEXT session_id
-    TEXT project_id
-    TEXT name
-    TEXT description
-    TEXT redaction_mode
-    INTEGER include_artifacts
-    TEXT manifest
-    TEXT status
-    TEXT created
-    TEXT updated
-  }
-
-  SESSION_TOKENS ||--o| LOGICAL_SESSION : "named token"
-  LOGICAL_SESSION ||--o{ RUNS : "owns"
-  LOGICAL_SESSION ||--o{ SNAPSHOTS : "owns"
-  LOGICAL_SESSION ||--o| SESSION_PREFERENCES : "stores"
-  LOGICAL_SESSION ||--o{ STARRED_COMMANDS : "stars"
-  LOGICAL_SESSION ||--o{ SESSION_VARIABLES : "defines"
-  LOGICAL_SESSION ||--o{ USER_WORKFLOWS : "saves"
-  LOGICAL_SESSION ||--o{ RECENT_DOMAINS : "remembers"
-  LOGICAL_SESSION ||--o{ SECRETS : "stores encrypted"
-  LOGICAL_SESSION ||--o{ PROJECTS : "owns"
-  LOGICAL_SESSION ||--o{ ENTITIES : "indexes"
-  LOGICAL_SESSION ||--o{ RUN_FILE_ARTIFACTS : "tracks"
-  LOGICAL_SESSION ||--o{ FINDINGS : "captures"
-  LOGICAL_SESSION ||--o{ ENTITY_LABELS : "labels"
-  LOGICAL_SESSION ||--o{ ENTITY_NOTES : "notes"
-  LOGICAL_SESSION ||--o{ EVIDENCE_PACKAGES : "packages"
-  RUNS ||--o| RUN_OUTPUT_ARTIFACTS : "full output"
-  RUNS ||--o| RUNS_FTS : "search index"
-  RUNS ||--o{ RUN_FILE_ARTIFACTS : "creates"
-  RUNS ||--o{ FINDINGS : "emits"
-  RUNS ||--o{ ENTITY_RUN_LINKS : "mentions"
-  ENTITIES ||--o{ ENTITY_RUN_LINKS : "seen in"
-  ENTITIES ||--o{ ENTITY_INTEL_SNAPSHOTS : "caches"
-  PROJECTS ||--o{ PROJECT_LINKS : "links top-level records"
-  PROJECTS ||--o{ EVIDENCE_PACKAGES : "packages"
-  FINDINGS ||--o{ FINDINGS_OCCURRENCES : "seen in runs"
+  PROJECTS ||--o{ PROJECT_LINKS : "membership"
+  PROJECTS ||--o{ EVIDENCE_PACKAGES : "exports"
 ```
 
 - `runs` — one row per completed command. Stores run metadata, including `run_kind` (`builtin` or `external`) so history filters, project links, and finding capture can use a durable classification instead of re-reading the command text. It also stores `owner_tab_id` for completed runs that came from a terminal tab, which lets terminal-native commands such as `project link run last` resolve "last" within the tab that issued the command. It also stores a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews store structured `{text, cls, tsC, tsE}` entries plus optional signal and entity metadata so run permalinks can preserve prompt echo, timestamp metadata, scoped findings, and extracted public IP/domain/hash/CVE hints. The preview is capped by both `max_output_lines` and `output_preview_max_mb`, which protects SQLite from huge single-line outputs while full artifacts retain the larger text when enabled. Also stores `output_search_text` (plain text extracted from the full artifact when available, otherwise the preview) for FTS indexing. Persists across restarts. Pruned by `permalink_retention_days`.
@@ -1159,7 +1143,7 @@ erDiagram
 - `starred_commands` — one row per starred command per session `(session_id, command)`. Backs the `/session/starred` endpoints and follows session tokens across devices via the migration path.
 - `session_variables` — one row per session command variable `(session_id, name, value, updated)`. Backs the `var` built-in, `/session/variables`, and app-managed command expansion before validation.
 - `user_workflows` — one row per saved workflow `(id, session_id, title, description, inputs, steps, created, updated)`. Backs the Workflows panel's **My workflows** section, the `workflow` terminal command, and session-token migration.
-- `recent_domains` — one row per recently used domain per session `(session_id, domain, last_used, use_count)`. Backs domain autocomplete across browsers that share the same named session token and follows the session-token migration path.
+- `recent_values` — one row per recently used autocomplete value per session `(session_id, kind, value, last_used, use_count)`. `kind` is one of `domain`, `ip`, `url`, or `port_set`; each kind is capped independently at 10 entries. URL recents keep the scheme, host, and path but drop query strings and fragments before storage.
 - `secrets` — one row per encrypted secret name per session `(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at)`, with a unique `(session_token, name)` binding so replacing a secret updates the existing row. Storage also rejects attempts to bind the same consumer env name to two different secrets in one session, keeping command-time lookup unambiguous. Values are AES-GCM ciphertext and are never returned by list routes or stored in transcripts. The wrapping key comes from `SECRETS_MASTER_KEY` or `<data_dir>/.secrets_master_key`, with a fixed HKDF-SHA256 app context deriving the key used for row encryption. When the key file is used, the app creates or repairs it with `0600` permissions.
 - `projects` — one row per project/case folder. Stores session ownership, display metadata, status, timestamps, and a session-scoped slug. Project notes are stored through `entity_notes` with `entity_type='project'`.
 - `project_links` — generic project membership rows `(project_id, entity_type, entity_id)`. The app owns the valid entity vocabulary and link sources so projects can link completed runs and Atlas entities without copying source data. Atlas-entity links also carry target-list metadata such as source, confidence, review state, and source detail so the Projects modal can keep its target workflow without a separate target table. Run-owned records such as file artifacts and findings are intentionally reached through linked runs instead of direct project links.
@@ -1172,7 +1156,7 @@ erDiagram
 - `entity_labels` — short user-controlled labels/bookmarks for supported entities, including Atlas entities, projects, runs, snapshots, workspace files, run file artifacts, findings, targets, and packages.
 - `entity_notes` — one private note attached to each supported entity per session, including Atlas entities and project notes. Notes are intentionally singular so entity metadata remains an editable note surface instead of a comment thread.
 - `evidence_packages` — draft package manifests scoped to a project and session. The first pass records package name/description, redaction mode, artifact-inclusion preference, and a JSON manifest over the currently linked project data, then exports that manifest plus any still-available selected workspace artifacts as a downloadable archive. Package-level labels/notes are stored through the generic entity metadata tables.
-- Supporting indexes are part of the schema even though the ER diagram stays table-focused. `idx_runs_session_command_started` backs the Recent menu and prompt-history distinct-command query shape `(session_id, command, started DESC)`, `idx_runs_session_kind_started` backs built-in/external history filtering, while `idx_runs_session_started`, `idx_snapshots_session_created`, `idx_user_workflows_session_updated_created`, `idx_recent_domains_session_last_used`, and `idx_secrets_session_updated` keep session-scoped startup, history, workflow, share, autocomplete, and secret-list reads bounded on large history databases. Atlas indexes cover session/type/last-seen lists, entity value lookup, run-link cleanup, finding status/entity/tool/severity filters, finding occurrence cleanup, and cached intel snapshot reads. Project workspace indexes cover session project lists, project contents, reverse entity lookup, run file artifacts, labels, notes, and evidence packages before UI routes depend on those query shapes.
+- Supporting indexes are part of the schema even though the ER diagram stays table-focused. `idx_runs_session_command_started` backs the Recent menu and prompt-history distinct-command query shape `(session_id, command, started DESC)`, `idx_runs_session_kind_started` backs built-in/external history filtering, while `idx_runs_session_started`, `idx_snapshots_session_created`, `idx_user_workflows_session_updated_created`, `idx_recent_values_session_kind_last_used`, and `idx_secrets_session_updated` keep session-scoped startup, history, workflow, share, autocomplete, and secret-list reads bounded on large history databases. Atlas indexes cover session/type/last-seen lists, entity value lookup, run-link cleanup, finding status/entity/tool/severity filters, finding occurrence cleanup, and cached intel snapshot reads. Project workspace indexes cover session project lists, project contents, reverse entity lookup, run file artifacts, labels, notes, and evidence packages before UI routes depend on those query shapes.
 - Redis-backed active-run metadata plus browser `sessionStorage` form a second persistence layer for reload continuity:
   - `/history/active` covers in-flight runs owned by the server/session
   - browser `sessionStorage` covers non-running tabs, transcript previews, status, draft input, and active-tab selection
@@ -1401,12 +1385,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,767
+- behavior tests: 2,772
 - docs/inventory meta-tests: 32
-- `pytest`: 1407 (1375 behavior + 32 meta)
-- `vitest`: 1143
+- `pytest`: 1408 (1376 behavior + 32 meta)
+- `vitest`: 1147
 - `playwright`: 249
-- total: 2,799
+- total: 2,804
 
 ### Testing Architecture
 

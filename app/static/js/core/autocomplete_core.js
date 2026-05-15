@@ -3,7 +3,7 @@
 // in autocomplete.js; matching, ranking, token context, and label transforms
 // live here so tests can exercise a supported browser-visible seam.
 var DarklabAutocompleteCore = (function (global) {
-  const RECENT_DOMAIN_LIMIT = 10;
+  const RECENT_VALUE_LIMIT = 10;
 
   function escapeHtmlText(value) {
     return String(value ?? '')
@@ -234,20 +234,90 @@ var DarklabAutocompleteCore = (function (global) {
     });
   }
 
+  function isIPv6Address(value) {
+    const text = String(value || '').trim();
+    if (!text || !text.includes(':') || /[\s/]/.test(text)) return false;
+    try {
+      return !!new URL(`http://[${text}]`).hostname;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function normalizeRecentDomain(value) {
     const text = String(value || '').trim().toLowerCase().replace(/\.$/, '');
-    if (isIPv4Address(text)) return text;
     return isDomainValue(text) ? text : '';
   }
 
-  function normalizeRecentDomainList(items) {
+  function normalizeRecentIp(value) {
+    const text = String(value || '').trim().toLowerCase();
+    if (isIPv4Address(text)) return text;
+    if (!isIPv6Address(text)) return '';
+    try {
+      return new URL(`http://[${text}]`).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function normalizeRecentUrl(value) {
+    const text = String(value || '').trim();
+    if (!text || /\s/.test(text)) return '';
+    try {
+      const parsed = new URL(text);
+      if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || !parsed.hostname) {
+        return '';
+      }
+      parsed.protocol = parsed.protocol.toLowerCase();
+      parsed.hostname = parsed.hostname.toLowerCase().replace(/\.$/, '');
+      parsed.search = '';
+      parsed.hash = '';
+      return parsed.toString();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function normalizeRecentPortSet(value) {
+    const parts = String(value || '').trim().split(',');
+    if (!parts.length) return '';
+    const normalized = [];
+    for (const part of parts) {
+      const match = part.match(/^\s*(\d{1,5})(?:\s*-\s*(\d{1,5}))?\s*$/);
+      if (!match) return '';
+      const start = Number(match[1]);
+      const end = Number(match[2] || match[1]);
+      if (!Number.isInteger(start) || !Number.isInteger(end)
+        || start < 1 || start > 65535 || end < 1 || end > 65535 || start > end) {
+        return '';
+      }
+      const valueText = start === end ? String(start) : `${start}-${end}`;
+      if (!normalized.includes(valueText)) normalized.push(valueText);
+    }
+    return normalized.join(',');
+  }
+
+  function normalizeRecentValue(kind, value) {
+    const normalizedKind = String(kind || '').trim().toLowerCase();
+    if (normalizedKind === 'domain') return { kind: 'domain', value: normalizeRecentDomain(value) };
+    if (normalizedKind === 'ip') return { kind: 'ip', value: normalizeRecentIp(value) };
+    if (normalizedKind === 'url') return { kind: 'url', value: normalizeRecentUrl(value) };
+    if (normalizedKind === 'port_set') return { kind: 'port_set', value: normalizeRecentPortSet(value) };
+    return { kind: '', value: '' };
+  }
+
+  function normalizeRecentValueList(items) {
     const next = [];
     (Array.isArray(items) ? items : []).forEach((item) => {
-      const domain = normalizeRecentDomain(item);
-      if (!domain || next.includes(domain)) return;
-      next.push(domain);
+      const rawKind = item && typeof item === 'object' ? item.kind : '';
+      const rawValue = item && typeof item === 'object' ? item.value : '';
+      const normalized = normalizeRecentValue(rawKind, rawValue);
+      if (!normalized.kind || !normalized.value) return;
+      if (next.some(existing => existing.kind === normalized.kind && existing.value === normalized.value)) return;
+      if (next.filter(existing => existing.kind === normalized.kind).length >= RECENT_VALUE_LIMIT) return;
+      next.push(normalized);
     });
-    return next.slice(0, RECENT_DOMAIN_LIMIT);
+    return next;
   }
 
   function normalizeWordlistCategories(value) {
@@ -326,7 +396,7 @@ var DarklabAutocompleteCore = (function (global) {
   }
 
   const api = Object.freeze({
-    RECENT_DOMAIN_LIMIT,
+    RECENT_VALUE_LIMIT,
     escapeHtmlText,
     itemText,
     itemInsertValue,
@@ -339,8 +409,14 @@ var DarklabAutocompleteCore = (function (global) {
     scoreItem,
     filterItems,
     isDomainValue,
+    isIPv4Address,
+    isIPv6Address,
     normalizeRecentDomain,
-    normalizeRecentDomainList,
+    normalizeRecentIp,
+    normalizeRecentUrl,
+    normalizeRecentPortSet,
+    normalizeRecentValue,
+    normalizeRecentValueList,
     normalizeWordlistCategories,
     limitItemsForDisplay,
     highlightedLabel,

@@ -103,7 +103,7 @@ lint-py:
     - if: $CI_PIPELINE_SOURCE == "web"
     - if: $CI_PIPELINE_SOURCE == "schedule"
   script:
-    - flake8 app/ tests/py/
+    - ruff check --config .tooling/ruff.toml app/ tests/py/
     - bandit -r app/ -ll -q
     - yamllint -c .tooling/yamllint.yml $(find . \( -name '*.yml' -o -name '*.yaml' \) -not -path './.git/*' -not -path './node_modules/*')
 

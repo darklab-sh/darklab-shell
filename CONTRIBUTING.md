@@ -81,7 +81,7 @@ scripts pick `.venv/bin/pytest` automatically when it exists, while direct app,
 lint, and debugging commands should still run from the virtualenv:
 
 - app runs
-- `npm run lint` which runs flake8
+- `npm run lint` which runs Ruff
 - ad hoc backend debugging
 
 ### VS Code Setup
@@ -95,7 +95,7 @@ Recommended extensions:
 - `Vitest`
 - `Playwright Test for VSCode`
 - `Markdown Preview Mermaid Support`
-- `Flake8`
+- `Ruff`
 - `Bandit`
 - `ESLint`
 
@@ -156,9 +156,9 @@ Before merging a version branch back to `main`:
 
 ## Code Style
 
-**Python** — `flake8` enforces style and syntax. Configuration lives in [`.flake8`](.flake8). The main rules are: max line length 120, with per-file ignores for test files and generated content. Run `flake8 app/ tests/py/` before every commit.
+**Python** — Ruff enforces style and syntax. Configuration lives in [`.tooling/ruff.toml`](.tooling/ruff.toml). The main rules are: max line length 130, with a few local ignores carried over from the previous Python lint setup. Run `ruff check --config .tooling/ruff.toml app/ tests/py/` before every commit.
 
-**JavaScript** — the frontend has no transpiler or bundler. Keep the classic-script pattern: no ES modules, no framework dependencies. New logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the composition root that loads last. Match the existing style of the file you are editing. ESLint enforces 2-space indentation, single quotes, and no semicolons for config and test files ([`config/eslint.config.js`](config/eslint.config.js)).
+**JavaScript** — the frontend has no transpiler or bundler. Keep the classic-script pattern: no ES modules, no framework dependencies. New logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the composition root that loads last. Match the existing style of the file you are editing. ESLint enforces 2-space indentation, single quotes, and no semicolons for config and test files ([`.tooling/eslint.config.js`](.tooling/eslint.config.js)).
 
 **General** — avoid speculative abstractions. Add helpers only when a pattern shows up in at least two real call sites. Prefer editing the relevant existing file over creating new ones.
 
@@ -176,8 +176,8 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **1407 pytest + 1143 Vitest + 249 Playwright = 2,799 tests**.
-That total includes 2,767 behavior tests plus 32 docs/inventory meta-tests.
+Current totals: **1408 pytest + 1147 Vitest + 249 Playwright = 2,804 tests**.
+That total includes 2,772 behavior tests plus 32 docs/inventory meta-tests.
 
 Playwright notes:
 
@@ -206,7 +206,7 @@ The checks and their scope:
 
 | Check | Tool | Scope | Run manually |
 |---|---|---|---|
-| Python style | `flake8` | `app/`, `tests/py/` | `python -m flake8 app/ tests/py/` |
+| Python style | `ruff check` | `app/`, `tests/py/` | `python -m ruff check --config .tooling/ruff.toml app/ tests/py/` |
 | Python security | `bandit` | `app/` | `python -m bandit -r app/ -ll -q` |
 | Python tests | `pytest` | `tests/py/` | `npm run test:pytest` |
 | Python dep CVEs | `pip-audit` | `app/requirements.txt`, `requirements-dev.txt` | `python -m pip_audit -r app/requirements.txt -r requirements-dev.txt` |
@@ -222,7 +222,7 @@ The checks and their scope:
 
 Run all linters at once (Python + JS/CSS/shell/Docker/YAML/Markdown + vendor): `npm run lint`
 
-Tool configurations: [`.flake8`](.flake8), [`config/eslint.config.js`](config/eslint.config.js), [`config/stylelint.config.mjs`](config/stylelint.config.mjs), [`.shellcheckrc`](.shellcheckrc), [`config/hadolint.yaml`](config/hadolint.yaml), [`config/yamllint.yml`](config/yamllint.yml), [`.markdownlint-cli2.jsonc`](.markdownlint-cli2.jsonc).
+Tool configurations: [`.tooling/ruff.toml`](.tooling/ruff.toml), [`.tooling/eslint.config.js`](.tooling/eslint.config.js), [`.tooling/stylelint.config.mjs`](.tooling/stylelint.config.mjs), [`.shellcheckrc`](.shellcheckrc), [`.tooling/hadolint.yaml`](.tooling/hadolint.yaml), [`.tooling/yamllint.yml`](.tooling/yamllint.yml), [`.markdownlint-cli2.jsonc`](.markdownlint-cli2.jsonc).
 
 These checks also run in GitLab CI through the `test`, `lint`, `audit`, and `build` stages defined in [`.gitlab-ci.yml`](.gitlab-ci.yml).
 

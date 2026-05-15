@@ -4,9 +4,11 @@ Session token routes: session token generation and session history migration.
 
 import json
 import logging
+import ipaddress
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit, urlunsplit
 
 from flask import Blueprint, jsonify, request
 
@@ -50,7 +52,8 @@ _PROMPT_USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
 _COMPARE_VIEW_MODES = {"auto", "side_by_side", "unified", "changes_only", "findings_only"}
 _COMPARE_CONTEXT_MODES = {"3", "10", "all"}
 
-_RECENT_DOMAIN_LIMIT = 10
+_RECENT_VALUE_LIMIT = 10
+_RECENT_VALUE_KINDS = ("domain", "ip", "url", "port_set")
 _DOMAIN_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
 _IPV4_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
 
@@ -141,9 +144,6 @@ def _normalize_recent_domain(value):
     if "." not in text:
         return ""
     if _IPV4_RE.fullmatch(text):
-        octets = text.split(".")
-        if all(0 <= int(octet) <= 255 and str(int(octet)) == octet for octet in octets):
-            return text
         return ""
     labels = text.split(".")
     if len(labels) < 2:
@@ -156,91 +156,188 @@ def _normalize_recent_domain(value):
     return text
 
 
-def _normalize_recent_domain_list(values):
+def _normalize_recent_ip(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        return str(ipaddress.ip_address(text)).lower()
+    except ValueError:
+        return ""
+
+
+def _normalize_recent_url(value):
+    text = str(value or "").strip()
+    if not text or re.search(r"\s", text):
+        return ""
+    try:
+        parsed = urlsplit(text)
+        if parsed.scheme.lower() not in {"http", "https"}:
+            return ""
+        if not parsed.hostname or parsed.username or parsed.password:
+            return ""
+        port = parsed.port
+    except ValueError:
+        return ""
+    host = parsed.hostname.lower().rstrip(".")
+    netloc = f"[{host}]" if ":" in host else host
+    if port is not None:
+        netloc = f"{netloc}:{port}"
+    path = parsed.path or ""
+    return urlunsplit((parsed.scheme.lower(), netloc, path, "", ""))
+
+
+def _normalize_recent_port_set(value):
+    parts = str(value or "").strip().split(",")
+    if not parts:
+        return ""
+    normalized = []
+    for part in parts:
+        match = re.fullmatch(r"\s*(\d{1,5})(?:\s*-\s*(\d{1,5}))?\s*", part)
+        if not match:
+            return ""
+        start = int(match.group(1))
+        end = int(match.group(2) or match.group(1))
+        if start < 1 or start > 65535 or end < 1 or end > 65535 or start > end:
+            return ""
+        value_text = str(start) if start == end else f"{start}-{end}"
+        if value_text not in normalized:
+            normalized.append(value_text)
+    return ",".join(normalized)
+
+
+def _normalize_recent_value(kind, value):
+    normalized_kind = str(kind or "").strip().lower()
+    if normalized_kind == "domain":
+        return "domain", _normalize_recent_domain(value)
+    if normalized_kind == "ip":
+        return "ip", _normalize_recent_ip(value)
+    if normalized_kind == "url":
+        return "url", _normalize_recent_url(value)
+    if normalized_kind == "port_set":
+        return "port_set", _normalize_recent_port_set(value)
+    return "", ""
+
+
+def _normalize_recent_value_entries(values):
     if not isinstance(values, list):
         return []
-    domains = []
-    for value in values:
-        domain = _normalize_recent_domain(value)
-        if domain and domain not in domains:
-            domains.append(domain)
-        if len(domains) >= _RECENT_DOMAIN_LIMIT:
-            break
-    return domains
+    entries = []
+    seen = set()
+    per_kind_counts = {kind: 0 for kind in _RECENT_VALUE_KINDS}
+    for item in values:
+        if not isinstance(item, dict):
+            continue
+        kind, value = _normalize_recent_value(item.get("kind"), item.get("value"))
+        if not kind or not value:
+            continue
+        key = (kind, value)
+        if key in seen or per_kind_counts[kind] >= _RECENT_VALUE_LIMIT:
+            continue
+        seen.add(key)
+        per_kind_counts[kind] += 1
+        entries.append({"kind": kind, "value": value})
+    return entries
 
 
-def _list_recent_domains(conn, session_id):
+def _recent_values_response(rows):
+    values = {kind: [] for kind in _RECENT_VALUE_KINDS}
+    for row in rows:
+        kind = str(row["kind"] or "")
+        value = str(row["value"] or "")
+        if kind in values and value:
+            values[kind].append(value)
+    return values
+
+
+def _list_recent_values(conn, session_id, kinds=None):
+    normalized_kinds = [kind for kind in (kinds or _RECENT_VALUE_KINDS) if kind in _RECENT_VALUE_KINDS]
+    if not normalized_kinds:
+        return {kind: [] for kind in _RECENT_VALUE_KINDS}
     rows = conn.execute(
-        "SELECT domain FROM recent_domains "
+        "SELECT kind, value FROM recent_values "
         "WHERE session_id = ? "
-        "ORDER BY last_used DESC, domain ASC "
-        "LIMIT ?",
-        (session_id, _RECENT_DOMAIN_LIMIT),
+        "ORDER BY kind ASC, last_used DESC, value ASC",
+        (session_id,),
     ).fetchall()
-    return [row["domain"] for row in rows]
+    kind_set = set(normalized_kinds)
+    values = _recent_values_response([row for row in rows if row["kind"] in kind_set])
+    return {
+        kind: values[kind][:_RECENT_VALUE_LIMIT]
+        for kind in _RECENT_VALUE_KINDS
+    }
 
 
-def _prune_recent_domains(conn, session_id):
+def _prune_recent_values(conn, session_id, kind):
     conn.execute(
-        "DELETE FROM recent_domains "
+        "DELETE FROM recent_values "
         "WHERE session_id = ? "
-        "AND domain NOT IN ("
-        "    SELECT domain FROM recent_domains "
-        "    WHERE session_id = ? "
-        "    ORDER BY last_used DESC, domain ASC "
+        "AND kind = ? "
+        "AND value NOT IN ("
+        "    SELECT value FROM recent_values "
+        "    WHERE session_id = ? AND kind = ? "
+        "    ORDER BY last_used DESC, value ASC "
         "    LIMIT ?"
         ")",
-        (session_id, session_id, _RECENT_DOMAIN_LIMIT),
+        (session_id, kind, session_id, kind, _RECENT_VALUE_LIMIT),
     )
 
 
-def _upsert_recent_domains(conn, session_id, values):
-    domains = _normalize_recent_domain_list(values)
-    if not domains:
+def _upsert_recent_values(conn, session_id, values):
+    entries = _normalize_recent_value_entries(values)
+    if not entries:
         return 0
     base_time = datetime.now(timezone.utc)
-    for index, domain in enumerate(domains):
+    touched_kinds = set()
+    for index, entry in enumerate(entries):
         last_used = (base_time - timedelta(microseconds=index)).strftime("%Y-%m-%d %H:%M:%S.%f")
         conn.execute(
-            "INSERT INTO recent_domains (session_id, domain, last_used, use_count) "
-            "VALUES (?, ?, ?, 1) "
-            "ON CONFLICT(session_id, domain) DO UPDATE SET "
+            "INSERT INTO recent_values (session_id, kind, value, last_used, use_count) "
+            "VALUES (?, ?, ?, ?, 1) "
+            "ON CONFLICT(session_id, kind, value) DO UPDATE SET "
             "last_used = excluded.last_used, "
-            "use_count = recent_domains.use_count + 1",
-            (session_id, domain, last_used),
+            "use_count = recent_values.use_count + 1",
+            (session_id, entry["kind"], entry["value"], last_used),
         )
-    _prune_recent_domains(conn, session_id)
-    return len(domains)
+        touched_kinds.add(entry["kind"])
+    for kind in touched_kinds:
+        _prune_recent_values(conn, session_id, kind)
+    return len(entries)
 
 
-def _migrate_recent_domains(conn, from_session_id, to_session_id):
+def _migrate_recent_values(conn, from_session_id, to_session_id):
     rows = conn.execute(
-        "SELECT domain, last_used, use_count FROM recent_domains "
+        "SELECT kind, value, last_used, use_count FROM recent_values "
         "WHERE session_id = ? "
-        "ORDER BY last_used DESC, domain ASC",
+        "ORDER BY kind ASC, last_used DESC, value ASC",
         (from_session_id,),
     ).fetchall()
+    migrated = 0
+    touched_kinds = set()
     for row in rows:
-        domain = _normalize_recent_domain(row["domain"])
-        if not domain:
+        kind, value = _normalize_recent_value(row["kind"], row["value"])
+        if not kind or not value:
             continue
         conn.execute(
-            "INSERT INTO recent_domains (session_id, domain, last_used, use_count) "
-            "VALUES (?, ?, ?, ?) "
-            "ON CONFLICT(session_id, domain) DO UPDATE SET "
+            "INSERT INTO recent_values (session_id, kind, value, last_used, use_count) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(session_id, kind, value) DO UPDATE SET "
             "last_used = CASE "
-            "  WHEN excluded.last_used > recent_domains.last_used THEN excluded.last_used "
-            "  ELSE recent_domains.last_used "
+            "  WHEN excluded.last_used > recent_values.last_used THEN excluded.last_used "
+            "  ELSE recent_values.last_used "
             "END, "
-            "use_count = recent_domains.use_count + excluded.use_count",
-            (to_session_id, domain, row["last_used"], int(row["use_count"] or 1)),
+            "use_count = recent_values.use_count + excluded.use_count",
+            (to_session_id, kind, value, row["last_used"], int(row["use_count"] or 1)),
         )
+        migrated += 1
+        touched_kinds.add(kind)
     conn.execute(
-        "DELETE FROM recent_domains WHERE session_id = ?",
+        "DELETE FROM recent_values WHERE session_id = ?",
         (from_session_id,),
     )
-    _prune_recent_domains(conn, to_session_id)
-    return len(rows)
+    for kind in touched_kinds:
+        _prune_recent_values(conn, to_session_id, kind)
+    return migrated
 
 
 @session_bp.route("/session/token/generate")
@@ -372,35 +469,57 @@ def session_token_verify():
     return jsonify({"ok": True, "exists": row is not None})
 
 
-@session_bp.route("/session/recent-domains")
-def session_recent_domains_list():
-    """Return recently used domain values for autocomplete in this session."""
+def _requested_recent_value_kinds():
+    raw_kinds = []
+    for value in request.args.getlist("kind"):
+        raw_kinds.extend(str(value or "").split(","))
+    if not raw_kinds:
+        return list(_RECENT_VALUE_KINDS), ""
+    kinds = []
+    for raw_kind in raw_kinds:
+        kind = raw_kind.strip().lower()
+        if not kind:
+            continue
+        if kind not in _RECENT_VALUE_KINDS:
+            return [], f"unsupported recent value kind: {kind}"
+        if kind not in kinds:
+            kinds.append(kind)
+    return kinds or list(_RECENT_VALUE_KINDS), ""
+
+
+@session_bp.route("/session/recent-values")
+def session_recent_values_list():
+    """Return recently used typed values for autocomplete in this session."""
+    kinds, error = _requested_recent_value_kinds()
+    if error:
+        return jsonify({"error": error}), 400
     session_id = get_session_id()
     with db_connect() as conn:
-        domains = _list_recent_domains(conn, session_id)
-    return jsonify({"domains": domains})
+        values = _list_recent_values(conn, session_id, kinds)
+    return jsonify({"values": values})
 
 
-@session_bp.route("/session/recent-domains", methods=["POST"])
-def session_recent_domains_save():
-    """Persist recently used domain values for autocomplete in this session."""
+@session_bp.route("/session/recent-values", methods=["POST"])
+def session_recent_values_save():
+    """Persist recently used typed values for autocomplete in this session."""
     data = request.get_json(silent=True) or {}
-    raw_domains = data.get("domains")
-    if not isinstance(raw_domains, list):
-        return jsonify({"error": "domains must be a list"}), 400
+    raw_values = data.get("values")
+    if not isinstance(raw_values, list):
+        return jsonify({"error": "values must be a list"}), 400
     session_id = get_session_id()
     with db_connect() as conn:
-        saved = _upsert_recent_domains(conn, session_id, raw_domains)
-        domains = _list_recent_domains(conn, session_id)
+        saved = _upsert_recent_values(conn, session_id, raw_values)
+        values = _list_recent_values(conn, session_id)
         conn.commit()
-    log.debug("SESSION_RECENT_DOMAINS_SAVED", extra={
+    total_count = sum(len(items) for items in values.values())
+    log.debug("SESSION_RECENT_VALUES_SAVED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
         "session_kind": _session_kind(session_id),
         "saved": saved,
-        "count": len(domains),
+        "count": total_count,
     })
-    return jsonify({"ok": True, "domains": domains, "saved": saved})
+    return jsonify({"ok": True, "values": values, "saved": saved})
 
 
 @session_bp.route("/session/migrate", methods=["POST"])
@@ -492,7 +611,7 @@ def session_migrate():
         )
         project_migration = migrate_project_workspace_session(conn, from_session_id, to_session_id)
         migrated_secrets = migrate_session_secrets(conn, from_session_id, to_session_id)
-        migrated_recent_domains = _migrate_recent_domains(conn, from_session_id, to_session_id)
+        migrated_recent_values = _migrate_recent_values(conn, from_session_id, to_session_id)
         conn.execute(
             "DELETE FROM starred_commands WHERE session_id = ?",
             (from_session_id,),
@@ -533,7 +652,7 @@ def session_migrate():
         "migrated_variables": migrated_variables,
         "migrated_workflows": migrated_workflows,
         **project_migration,
-        "migrated_recent_domains": migrated_recent_domains,
+        "migrated_recent_values": migrated_recent_values,
         "migrated_secrets": migrated_secrets,
         "migrated_workspace_files": workspace_migration.migrated_files,
         "skipped_workspace_files": workspace_migration.skipped_files,
@@ -549,7 +668,7 @@ def session_migrate():
         "migrated_variables": migrated_variables,
         "migrated_workflows": migrated_workflows,
         **project_migration,
-        "migrated_recent_domains": migrated_recent_domains,
+        "migrated_recent_values": migrated_recent_values,
         "migrated_secrets": migrated_secrets,
         "migrated_workspace_files": workspace_migration.migrated_files,
         "skipped_workspace_files": workspace_migration.skipped_files,
@@ -740,13 +859,13 @@ def session_run_count():
             "SELECT COUNT(*) AS n FROM user_workflows WHERE session_id = ?",
             (session_id,),
         ).fetchone()
-        recent_domain_row = conn.execute(
-            "SELECT COUNT(*) AS n FROM recent_domains WHERE session_id = ?",
+        recent_value_row = conn.execute(
+            "SELECT COUNT(*) AS n FROM recent_values WHERE session_id = ?",
             (session_id,),
         ).fetchone()
     count = int(row["n"] if row else 0)
     workflow_count = int(workflow_row["n"] if workflow_row else 0)
-    recent_domain_count = int(recent_domain_row["n"] if recent_domain_row else 0)
+    recent_value_count = int(recent_value_row["n"] if recent_value_row else 0)
     workspace_files = 0
     try:
         workspace_files = workspace_usage(session_id).file_count
@@ -759,13 +878,13 @@ def session_run_count():
         "count": count,
         "workspace_files": workspace_files,
         "workflow_count": workflow_count,
-        "recent_domain_count": recent_domain_count,
+        "recent_value_count": recent_value_count,
     })
     return jsonify({
         "count": count,
         "workspace_files": workspace_files,
         "workflow_count": workflow_count,
-        "recent_domain_count": recent_domain_count,
+        "recent_value_count": recent_value_count,
     })
 
 

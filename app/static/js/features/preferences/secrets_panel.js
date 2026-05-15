@@ -182,15 +182,37 @@ function _optionsChip(text, className = '', opts = {}) {
   return chip;
 }
 
-function _optionsSecretLink(name) {
+function _optionsStoredSecretForProviderName(displayName, provider, secrets = []) {
+  const primaryName = _normalizeOptionsSecretName(displayName);
+  const lookupNames = [
+    primaryName,
+    ..._optionsProviderLookupNames(provider),
+  ].filter((item, index, arr) => item && arr.indexOf(item) === index);
+  const hasConsumer = (secret, name) => {
+    const envs = Array.isArray(secret?.consumer_envs) ? secret.consumer_envs : [];
+    return envs.some((env) => _normalizeOptionsSecretName(env) === name);
+  };
+  for (const name of lookupNames) {
+    const exact = secrets.find((secret) => _normalizeOptionsSecretName(secret?.name) === name);
+    if (exact) return exact;
+    const consumerMatch = secrets.find((secret) => hasConsumer(secret, name));
+    if (consumerMatch) return consumerMatch;
+  }
+  return null;
+}
+
+function _optionsSecretLink(name, secret = null) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'options-secret-chip options-secret-link';
   btn.textContent = name;
-  btn.title = `Add ${name}`;
+  btn.title = secret ? `Replace ${_normalizeOptionsSecretName(secret.name) || name}` : `Add ${name}`;
   btn.addEventListener('click', () => {
     closeProviderStatusModal({ refocus: false });
-    openSecretEditor({ name }).catch((err) => _optionsSecretsShowMsg(err.message || 'Unable to add secret', true));
+    const editorOptions = secret ? { secret } : { name };
+    openSecretEditor(editorOptions).catch((err) => {
+      _optionsSecretsShowMsg(err.message || 'Unable to open secret editor', true);
+    });
   });
   return btn;
 }
@@ -203,7 +225,7 @@ function _appendOptionsProviderChips(parent, items, emptyText) {
   items.forEach((item) => parent.appendChild(_optionsChip(item)));
 }
 
-function _optionsProviderRow(provider, secretNames) {
+function _optionsProviderRow(provider, secretNames, secrets = []) {
   const status = _optionsProviderStatus(provider, secretNames);
   const row = document.createElement('div');
   row.className = 'options-provider-row';
@@ -246,7 +268,12 @@ function _optionsProviderRow(provider, secretNames) {
   const secretWrap = document.createElement('div');
   secretWrap.className = 'options-secret-chips';
   if (status.acceptedNames.length) {
-    status.acceptedNames.forEach((name) => secretWrap.appendChild(_optionsSecretLink(name)));
+    status.acceptedNames.forEach((name) => {
+      secretWrap.appendChild(_optionsSecretLink(
+        name,
+        _optionsStoredSecretForProviderName(name, provider, secrets),
+      ));
+    });
   } else {
     secretWrap.appendChild(_optionsChip('No secret needed', 'is-muted'));
   }
@@ -315,7 +342,7 @@ async function openProviderStatusModal() {
         if (leftStatus !== rightStatus) return leftStatus - rightStatus;
         return String(left?.label || left?.id || '').localeCompare(String(right?.label || right?.id || ''));
       })
-      .forEach((provider) => list.appendChild(_optionsProviderRow(provider, secretNames)));
+      .forEach((provider) => list.appendChild(_optionsProviderRow(provider, secretNames, secrets)));
 
     body.innerHTML = '';
     const intro = document.createElement('div');

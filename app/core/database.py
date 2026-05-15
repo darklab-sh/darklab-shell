@@ -4,7 +4,7 @@ Database lives in the configured data directory. If unset, /data is used when
 writable and /tmp is the local-dev fallback.
 
 Tables: runs, run_output_artifacts, snapshots, session_tokens, session_preferences,
-starred_commands, session_variables, user_workflows, recent_domains, Atlas entity
+starred_commands, session_variables, user_workflows, recent_values, Atlas entity
 tables, and project workspace relationship tables.
 FTS: runs_fts (FTS5 virtual table over runs.command + runs.output_search_text).
 """
@@ -166,12 +166,13 @@ def _create_schema(conn):
         )
     """)
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS recent_domains (
+        CREATE TABLE IF NOT EXISTS recent_values (
             session_id TEXT NOT NULL,
-            domain     TEXT NOT NULL,
+            kind       TEXT NOT NULL,
+            value      TEXT NOT NULL,
             last_used  TEXT NOT NULL,
             use_count  INTEGER NOT NULL DEFAULT 1,
-            PRIMARY KEY (session_id, domain)
+            PRIMARY KEY (session_id, kind, value)
         )
     """)
     _create_secrets_schema(conn)
@@ -387,8 +388,8 @@ def _create_indexes(conn):
         "ON user_workflows (session_id, updated DESC, created DESC)"
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_recent_domains_session_last_used "
-        "ON recent_domains (session_id, last_used DESC)"
+        "CREATE INDEX IF NOT EXISTS idx_recent_values_session_kind_last_used "
+        "ON recent_values (session_id, kind, last_used DESC)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_secrets_session_updated "
@@ -750,14 +751,34 @@ def _migrate_schema(conn):
 
     try:
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS recent_domains (
+            CREATE TABLE IF NOT EXISTS recent_values (
                 session_id TEXT NOT NULL,
-                domain     TEXT NOT NULL,
+                kind       TEXT NOT NULL,
+                value      TEXT NOT NULL,
                 last_used  TEXT NOT NULL,
                 use_count  INTEGER NOT NULL DEFAULT 1,
-                PRIMARY KEY (session_id, domain)
+                PRIMARY KEY (session_id, kind, value)
             )
         """)
+    except sqlite3.OperationalError:
+        pass
+    try:
+        old_recent_domains = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'recent_domains'"
+        ).fetchone()
+        if old_recent_domains:
+            conn.execute(
+                "INSERT INTO recent_values (session_id, kind, value, last_used, use_count) "
+                "SELECT session_id, 'domain', domain, last_used, use_count FROM recent_domains "
+                "WHERE 1 "
+                "ON CONFLICT(session_id, kind, value) DO UPDATE SET "
+                "last_used = CASE "
+                "  WHEN excluded.last_used > recent_values.last_used THEN excluded.last_used "
+                "  ELSE recent_values.last_used "
+                "END, "
+                "use_count = recent_values.use_count + excluded.use_count"
+            )
+            conn.execute("DROP TABLE recent_domains")
     except sqlite3.OperationalError:
         pass
 

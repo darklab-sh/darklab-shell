@@ -2489,7 +2489,7 @@ describe('_sessionTokenSet verify failure behavior', () => {
     await _sessionTokenSet('tok_abcd1234efgh5678ijkl9012mnop3456', 'tab-1')
 
     expect(appendLine).toHaveBeenCalledWith(
-      'you have 1 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
+      'you have 1 run(s) in your current session. migrate history, files, workflows, and recent values to this session token?',
       '',
       'tab-1',
     )
@@ -3587,7 +3587,7 @@ describe('session-token set pending prompt', () => {
     await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 1 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
+        'you have 1 run(s) in your current session. migrate history, files, workflows, and recent values to this session token?',
         '',
         'tab-1',
       ),
@@ -3601,7 +3601,7 @@ describe('session-token set pending prompt', () => {
     )
     expect(appendLine).toHaveBeenNthCalledWith(
       2,
-      'you have 1 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
+      'you have 1 run(s) in your current session. migrate history, files, workflows, and recent values to this session token?',
       '',
       'tab-1',
     )
@@ -3634,7 +3634,7 @@ describe('session-token set pending prompt', () => {
       '',
       'tab-1',
     )
-    expect(appendLine).toHaveBeenCalledWith('History, file, workflow, and recent-domain migration skipped.', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('History, file, workflow, and recent-value migration skipped.', '', 'tab-1')
     expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
   })
 
@@ -3662,7 +3662,7 @@ describe('session-token set pending prompt', () => {
     await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 1 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
+        'you have 1 run(s) in your current session. migrate history, files, workflows, and recent values to this session token?',
         '',
         'tab-1',
       ),
@@ -3706,7 +3706,7 @@ describe('session-token set pending prompt', () => {
     await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 1 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
+        'you have 1 run(s) in your current session. migrate history, files, workflows, and recent values to this session token?',
         '',
         'tab-1',
       ),
@@ -3744,7 +3744,7 @@ describe('session-token set pending prompt', () => {
 
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 73 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
+        'you have 73 run(s) in your current session. migrate history, files, workflows, and recent values to this session token?',
         '',
         'tab-1',
       ),
@@ -3772,7 +3772,7 @@ describe('session-token set pending prompt', () => {
 
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 2 workspace file(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
+        'you have 2 workspace file(s) in your current session. migrate history, files, workflows, and recent values to this session token?',
         '',
         'tab-1',
       ),

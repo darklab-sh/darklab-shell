@@ -97,6 +97,13 @@
     return detailApi.text ? detailApi.text(value, fallback) : (String(value ?? '').trim() || fallback);
   }
 
+  function selectorValue(value) {
+    if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') {
+      return CSS.escape(String(value));
+    }
+    return String(value || '').replace(/["\\]/g, '\\$&');
+  }
+
   function countLabel(count, singular, plural) {
     const numeric = Number(count || 0);
     return `${numeric.toLocaleString()} ${numeric === 1 ? singular : plural}`;
@@ -216,6 +223,43 @@
     render();
   }
 
+  function setActiveAtlasTab(tabId, { focus = false } = {}) {
+    const nextTab = String(tabId || '');
+    if (!nextTab) return false;
+    if (state.activeTab === nextTab) {
+      if (focus) tabsHost?.querySelector(`[data-atlas-tab="${selectorValue(nextTab)}"]`)?.focus({ preventScroll: true });
+      return true;
+    }
+    const exists = (tabsApi.tabs || []).some(tab => String(tab.id || '') === nextTab);
+    if (!exists) return false;
+    state.activeTab = nextTab;
+    state.offset = 0;
+    state.selectedId = '';
+    state.selectedFindingId = '';
+    resetSelection({ selectMode: state.selectMode, render: false });
+    state.requestedEntityValue = '';
+    state.refreshIntelOnSelect = false;
+    state.addActiveProjectOnSelect = false;
+    state.detail = null;
+    render();
+    if (focus) {
+      window.setTimeout(() => {
+        tabsHost?.querySelector(`[data-atlas-tab="${selectorValue(nextTab)}"]`)?.focus({ preventScroll: true });
+      }, 0);
+    }
+    refreshAtlas({ resetOffset: true });
+    return true;
+  }
+
+  function cycleAtlasTab(offset = 1) {
+    if (!isOpen()) return false;
+    const tabs = (tabsApi.tabs || []).filter(tab => tab && tab.id);
+    if (tabs.length < 2) return false;
+    const currentIndex = Math.max(0, tabs.findIndex(tab => String(tab.id || '') === String(state.activeTab || '')));
+    const nextIndex = (currentIndex + Number(offset || 1) + tabs.length) % tabs.length;
+    return setActiveAtlasTab(tabs[nextIndex].id);
+  }
+
   function renderTabs() {
     if (!tabsHost) return;
     tabsHost.replaceChildren();
@@ -236,18 +280,7 @@
       count.textContent = String(tabsApi.countForTab ? tabsApi.countForTab(tab, state.summary) : 0);
       button.append(label, count);
       button.addEventListener('click', () => {
-        if (state.activeTab === tab.id) return;
-        state.activeTab = tab.id;
-        state.offset = 0;
-        state.selectedId = '';
-        state.selectedFindingId = '';
-        resetSelection({ selectMode: state.selectMode, render: false });
-        state.requestedEntityValue = '';
-        state.refreshIntelOnSelect = false;
-        state.addActiveProjectOnSelect = false;
-        state.detail = null;
-        render();
-        refreshAtlas({ resetOffset: true });
+        setActiveAtlasTab(tab.id);
       });
       tabsHost.appendChild(button);
     });
@@ -1189,4 +1222,5 @@
   global.closeAtlas = closeAtlas;
   global.isAtlasOverlayOpen = isOpen;
   global.refreshAtlasOverlay = refreshAtlas;
+  global.cycleAtlasTab = cycleAtlasTab;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -100,7 +100,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - App-owned built-in commands use the same matching engine as YAML-backed tools.
 - Workspace file paths and installed wordlist paths match by useful path segments and filename substrings, so users can type the part they remember instead of the beginning of the path.
 - Workspace move slots marked as target values suggest loaded session files and folders. `file move` and `mv` suggest sources first, then destination folders (including `/`) once the source is selected.
-- Domain slots marked with `value_type: domain` capture up to 10 recent domains for the active session token and suggest them only in other marked domain slots. Recents persist across browser restarts and devices when the same `tok_...` session token is active.
+- Value slots marked as domains, hosts, targets, IPs, URLs, or port sets capture up to 10 recent targets per kind for the active session token. They show back up only in compatible autocomplete slots, and URLs are saved without query strings or fragments. Recents persist across browser restarts and devices when the same `tok_...` session token is active.
 - The dropdown opens below the prompt when there is room and flips above when space is tight, preserving top-to-bottom keyboard navigation order.
 - `Tab` expands to the longest shared prefix, then cycles matches; `Shift+Tab` cycles backward; `Enter` accepts the highlighted match or runs the command if none is selected.
 - While typing a command root, a unique root match shows real example invocations. For commands with scoped subcommands, this includes both root-level and subcommand examples.
@@ -1076,11 +1076,11 @@ sqlite3 data/history.db "DELETE FROM snapshots;"
 
 ## Session Tokens
 
-**Purpose:** optional persistent named identity (`tok_<32 hex>`) so run history, snapshots, starred commands, session variables, workspace files, project workspace records, recent domains, user workflows, active-project context, and saved user options follow an operator across browsers and workstations without introducing a login layer.
+**Purpose:** optional persistent named identity (`tok_<32 hex>`) so run history, snapshots, starred commands, session variables, workspace files, project workspace records, recent targets, user workflows, active-project context, and saved user options follow an operator across browsers and workstations without introducing a login layer.
 
 **Behavior:**
 
-- By default each browser gets an anonymous UUID stored in `localStorage` under `session_id`, plus a separate browser/client id used for active-run ownership. A session token replaces the session identity with a persistent `tok_<32 hex>` so run history, snapshots, starred commands, session variables, workspace files, project workspace records, recent domains, user workflows, active-project context, theme choice, and other saved Options settings follow the operator across browsers and workstations without making every browser automatically own the same live run.
+- By default each browser gets an anonymous UUID stored in `localStorage` under `session_id`, plus a separate browser/client id used for active-run ownership. A session token replaces the session identity with a persistent `tok_<32 hex>` so run history, snapshots, starred commands, session variables, workspace files, project workspace records, recent targets, user workflows, active-project context, theme choice, and other saved Options settings follow the operator across browsers and workstations without making every browser automatically own the same live run.
 - Tokens are generated server-side as `tok_` + 32 lowercase hex characters (36 chars total, cryptographically random) and recorded in the `session_tokens` table.
 - The active token is stored in `localStorage` under `session_token`; the original UUID is always preserved under `session_id` so `session-token clear` has a stable fallback.
 - The browser sends the active identity as `X-Session-ID` on every request; possession of the token string is the only authorization check (matching the existing anonymous session model).
@@ -1090,11 +1090,11 @@ sqlite3 data/history.db "DELETE FROM snapshots;"
 **Terminal commands:**
 
 - `session-token` (no subcommand) — prints current status: active token in masked form or "anonymous session".
-- `session-token generate` — requests a new token and offers to migrate the current session's runs, snapshots, starred commands, saved user options, session variables, user workflows, project workspace records, recent domains, active-project context, and workspace files when the current session has portable data. The token becomes active only after a successful migration; declining migration activates it as a fresh named session; migration failure leaves the old session active.
+- `session-token generate` — requests a new token and offers to migrate the current session's runs, snapshots, starred commands, saved user options, session variables, user workflows, project workspace records, recent targets, active-project context, and workspace files when the current session has portable data. The token becomes active only after a successful migration; declining migration activates it as a fresh named session; migration failure leaves the old session active.
 - `session-token set <token>` — adopts an existing token. UUIDs are always accepted; `tok_...` values must already exist on this server. The migration prompt is offered if the current session has history or workspace files; answering `no` skips migration and still applies the token, while `Ctrl+C` cancels the whole set flow.
 - `session-token copy` — copies the active token to the clipboard without printing the raw token in the terminal.
 - `session-token clear` — opens a terminal-owned yes/no confirmation, removes `session_token` from `localStorage` only after explicit confirmation, and reverts to the anonymous UUID session. `Ctrl+C` cancels the clear flow. Server-side session data remains and can be reclaimed with `session-token set`.
-- `session-token rotate` — generates a new token, migrates all runs, snapshots, starred commands, session variables, user workflows, project workspace records, recent domains, active-project context, workspace files, and saved user options (when the destination has no saved preferences yet), then switches. The switch is **atomic** — migration failure aborts the rotation and keeps the old token active. Old token is retired on success.
+- `session-token rotate` — generates a new token, migrates all runs, snapshots, starred commands, session variables, user workflows, project workspace records, recent targets, active-project context, workspace files, and saved user options (when the destination has no saved preferences yet), then switches. The switch is **atomic** — migration failure aborts the rotation and keeps the old token active. Old token is retired on success.
 - `session-token list` — calls `GET /session/token/info` and shows the active token in masked form with its creation date (or "anonymous session").
 - `session-token revoke <token>` — opens a transcript-owned yes/no confirmation, warns that the token's history and workspace files will not be recoverable from the app after revocation, then permanently deletes the given token via `POST /session/token/revoke` only after an explicit `yes`. If the revoked token is the active one, the client clears `localStorage` and falls back to the anonymous UUID session. Runs, snapshots, starred rows, saved preferences, and workspace files for the revoked token are not deleted but become unreachable.
 
@@ -1108,11 +1108,11 @@ sqlite3 data/history.db "DELETE FROM snapshots;"
 | **Rotate** | Token active | Generates a new token, migrates session data, copies the new token |
 | **Clear** | Token active | Opens a destructive confirm, optionally copies the token, then reverts to the anonymous session |
 
-If a session has run history, workspace files, project workspace records, user workflows, or recent domains, the terminal `generate` and `set` flows use transcript-owned yes/no migration prompts; `clear` and `revoke` use transcript-owned destructive confirmations. The Options panel uses the shared modal confirm primitive for its own set/clear actions. `list` and `revoke` remain terminal-only.
+If a session has run history, workspace files, project workspace records, user workflows, or recent targets, the terminal `generate` and `set` flows use transcript-owned yes/no migration prompts; `clear` and `revoke` use transcript-owned destructive confirmations. The Options panel uses the shared modal confirm primitive for its own set/clear actions. `list` and `revoke` remain terminal-only.
 
 **Limits:** there is no user-facing authentication — possession of the token is sufficient access. `POST /session/migrate` requires the `from_session_id` body field to match the caller's `X-Session-ID` header (mismatch returns 403), so a migration call can only move the caller's own data.
 
-**Configuration:** no config keys — token issuance is always enabled. Token scope covers runs, snapshots, starred commands, session variables, user workflows, project workspace records, recent domains, active-project context, saved user options, and app-managed workspace files when Files are enabled.
+**Configuration:** no config keys — token issuance is always enabled. Token scope covers runs, snapshots, starred commands, session variables, user workflows, project workspace records, recent targets, active-project context, saved user options, and app-managed workspace files when Files are enabled.
 
 **Related files:** `app/static/js/session.js` (client-side token flow + cross-tab `storage` sync), `app/blueprints/session.py` (`/session/token/*`, `/session/preferences`, and `/session/migrate` routes), `app/core/database.py` (`session_tokens`, `session_preferences`, and `starred_commands` tables).
 

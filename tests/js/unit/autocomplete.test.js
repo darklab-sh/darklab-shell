@@ -29,8 +29,8 @@ function loadAutocompleteFns({ isActiveTabRunning = () => false } = {}) {
     acExpandSharedPrefix,
     getAutocompleteMatches,
     limitAutocompleteMatchesForDisplay,
-    rememberRecentDomainsFromCommand,
-    _readRecentDomains,
+    rememberRecentValuesFromCommand,
+    _readRecentValues,
     _getAutocompleteSharedPrefix: autocompleteCore.sharedPrefix,
     _setAcIndex: (value) => { acIndex = value; },
     _setAcFiltered: (value) => { acFiltered = value; },
@@ -1087,8 +1087,8 @@ describe('autocomplete helpers', () => {
     expect(getAutocompleteMatches('project delete ', 15).map(item => item.value)).toEqual(['active-case', 'archived-case'])
   })
 
-  it('tracks recent domains from structured flag and positional slots, capped in memory', () => {
-    const { rememberRecentDomainsFromCommand, _readRecentDomains } = fromDomScripts(
+  it('tracks recent values from structured flag and positional slots, capped per kind in memory', () => {
+    const { rememberRecentValuesFromCommand, _readRecentValues } = fromDomScripts(
       ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
@@ -1134,24 +1134,25 @@ describe('autocomplete helpers', () => {
         acSuppressInputOnce: false,
       },
       `{
-      rememberRecentDomainsFromCommand,
-      _readRecentDomains,
+      rememberRecentValuesFromCommand,
+      _readRecentValues,
     }`,
     )
 
-    rememberRecentDomainsFromCommand('subfinder -d Alpha.example.com -silent')
-    rememberRecentDomainsFromCommand('dig MX beta.example.org +short')
-    rememberRecentDomainsFromCommand('dig @8.8.8.8 gamma.example.net')
-    rememberRecentDomainsFromCommand('curl https://not-a-domain-slot.example')
-    rememberRecentDomainsFromCommand('nuclei -l subs.txt -o nuclei-findings.txt')
-    rememberRecentDomainsFromCommand('dnsx -l hosts.txt -resp')
+    rememberRecentValuesFromCommand('subfinder -d Alpha.example.com -silent')
+    rememberRecentValuesFromCommand('dig MX beta.example.org +short')
+    rememberRecentValuesFromCommand('dig @8.8.8.8 gamma.example.net')
+    rememberRecentValuesFromCommand('curl https://not-a-domain-slot.example')
+    rememberRecentValuesFromCommand('nuclei -l subs.txt -o nuclei-findings.txt')
+    rememberRecentValuesFromCommand('dnsx -l hosts.txt -resp')
     for (let i = 0; i < 10; i += 1) {
-      rememberRecentDomainsFromCommand(`subfinder -d d${i}.example.com`)
+      rememberRecentValuesFromCommand(`subfinder -d d${i}.example.com`)
     }
-    rememberRecentDomainsFromCommand('nmap target.example.dev')
-    rememberRecentDomainsFromCommand('subfinder -d beta.example.org')
+    rememberRecentValuesFromCommand('nmap target.example.dev')
+    rememberRecentValuesFromCommand('nmap 192.0.2.10')
+    rememberRecentValuesFromCommand('subfinder -d beta.example.org')
 
-    expect(_readRecentDomains()).toEqual([
+    expect(_readRecentValues('domain')).toEqual([
       'beta.example.org',
       'target.example.dev',
       'd9.example.com',
@@ -1163,11 +1164,12 @@ describe('autocomplete helpers', () => {
       'd3.example.com',
       'd2.example.com',
     ])
-    expect(sessionStorage.getItem('recent_domains:session-a')).toBeNull()
+    expect(_readRecentValues('ip')).toEqual(['192.0.2.10'])
+    expect(sessionStorage.getItem('recent_values:session-a')).toBeNull()
   })
 
-  it('stores complete IPv4 values from domain slots without keeping partial numeric hosts', () => {
-    const { rememberRecentDomainsFromCommand, _readRecentDomains } = fromDomScripts(
+  it('stores complete IPv4 values from host slots without keeping partial numeric hosts', () => {
+    const { rememberRecentValuesFromCommand, _readRecentValues } = fromDomScripts(
       ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
@@ -1178,10 +1180,10 @@ describe('autocomplete helpers', () => {
         SESSION_ID: 'session-a',
         acSuggestions: [],
         acContextRegistry: {
-          subfinder: {
-            flags: [{ value: '-d', description: 'Target domain' }],
-            expects_value: ['-d'],
-            arg_hints: { '-d': [{ value: '<domain>', hintOnly: true, value_type: 'domain', description: 'Target domain to enumerate' }] },
+          ping: {
+            flags: [],
+            expects_value: [],
+            arg_hints: { __positional__: [{ value: '<host>', hintOnly: true, value_type: 'host', description: 'Hostname or IP address to probe' }] },
           },
         },
         acFiltered: [],
@@ -1189,24 +1191,30 @@ describe('autocomplete helpers', () => {
         acSuppressInputOnce: false,
       },
       `{
-      rememberRecentDomainsFromCommand,
-      _readRecentDomains,
+      rememberRecentValuesFromCommand,
+      _readRecentValues,
     }`,
     )
 
-    rememberRecentDomainsFromCommand('subfinder -d 192.168.1.5')
-    rememberRecentDomainsFromCommand('subfinder -d 192.168.1')
+    rememberRecentValuesFromCommand('ping 192.168.1.5')
+    rememberRecentValuesFromCommand('ping 192.168.1')
 
-    expect(_readRecentDomains()).toEqual(['192.168.1.5'])
+    expect(_readRecentValues('ip')).toEqual(['192.168.1.5'])
+    expect(_readRecentValues('domain')).toEqual([])
   })
 
-  it('loads recent domains from the session endpoint', async () => {
+  it('loads recent values from the session endpoint', async () => {
     const apiFetch = vi.fn(() => Promise.resolve({
       json: () => Promise.resolve({
-        domains: ['Alpha.example.com.', 'https://ignored.example', 'beta.example.org'],
+        values: {
+          domain: ['Alpha.example.com.', 'https://ignored.example', 'beta.example.org'],
+          ip: ['192.0.2.10'],
+          url: ['https://Example.com/path?token=ignored#frag'],
+          port_set: ['80, 443'],
+        },
       }),
     }))
-    const { loadRecentDomains, _readRecentDomains } = fromDomScripts(
+    const { loadRecentValues, _readRecentValues } = fromDomScripts(
       ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
@@ -1223,15 +1231,18 @@ describe('autocomplete helpers', () => {
         acSuppressInputOnce: false,
       },
       `{
-      loadRecentDomains,
-      _readRecentDomains,
+      loadRecentValues,
+      _readRecentValues,
     }`,
     )
 
-    await loadRecentDomains()
+    await loadRecentValues()
 
-    expect(apiFetch).toHaveBeenCalledWith('/session/recent-domains')
-    expect(_readRecentDomains()).toEqual(['alpha.example.com', 'beta.example.org'])
+    expect(apiFetch).toHaveBeenCalledWith('/session/recent-values')
+    expect(_readRecentValues('domain')).toEqual(['alpha.example.com', 'beta.example.org'])
+    expect(_readRecentValues('ip')).toEqual(['192.0.2.10'])
+    expect(_readRecentValues('url')).toEqual(['https://example.com/path'])
+    expect(_readRecentValues('port_set')).toEqual(['80,443'])
   })
 
   it('reloads active project targets after a same-session project workspace storage signal', async () => {
@@ -1292,11 +1303,11 @@ describe('autocomplete helpers', () => {
     ])
   })
 
-  it('persists captured recent domains without requiring browser storage', async () => {
+  it('persists captured recent values without requiring browser storage', async () => {
     const apiFetch = vi.fn(() => Promise.resolve({
-      json: () => Promise.resolve({ domains: ['alpha.example.com'] }),
+      json: () => Promise.resolve({ values: { domain: ['alpha.example.com'] } }),
     }))
-    const { rememberRecentDomainsFromCommand, _readRecentDomains } = fromDomScripts(
+    const { rememberRecentValuesFromCommand, _readRecentValues } = fromDomScripts(
       ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
@@ -1319,25 +1330,25 @@ describe('autocomplete helpers', () => {
         acSuppressInputOnce: false,
       },
       `{
-      rememberRecentDomainsFromCommand,
-      _readRecentDomains,
+      rememberRecentValuesFromCommand,
+      _readRecentValues,
     }`,
     )
 
-    rememberRecentDomainsFromCommand('dig Alpha.example.com')
+    rememberRecentValuesFromCommand('dig Alpha.example.com')
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(apiFetch).toHaveBeenCalledWith('/session/recent-domains', expect.objectContaining({
+    expect(apiFetch).toHaveBeenCalledWith('/session/recent-values', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ domains: ['alpha.example.com'] }),
+      body: JSON.stringify({ values: [{ kind: 'domain', value: 'alpha.example.com' }] }),
     }))
-    expect(_readRecentDomains()).toEqual(['alpha.example.com'])
-    expect(sessionStorage.getItem('recent_domains:session-a')).toBeNull()
+    expect(_readRecentValues('domain')).toEqual(['alpha.example.com'])
+    expect(sessionStorage.getItem('recent_values:session-a')).toBeNull()
   })
 
-  it('suggests recent domains only inside known domain value slots', () => {
-    const { getAutocompleteMatches, rememberRecentDomainsFromCommand, setProjectAutocompleteTargets } = fromDomScripts(
+  it('suggests recent targets only inside compatible known value slots', () => {
+    const { getAutocompleteMatches, rememberRecentValuesFromCommand, setProjectAutocompleteTargets } = fromDomScripts(
       ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
@@ -1403,14 +1414,17 @@ describe('autocomplete helpers', () => {
       },
       `{
       getAutocompleteMatches,
-      rememberRecentDomainsFromCommand,
+      rememberRecentValuesFromCommand,
       setProjectAutocompleteTargets,
     }`,
     )
 
-    rememberRecentDomainsFromCommand('subfinder -d alpha.example.com')
-    rememberRecentDomainsFromCommand('dig beta.example.org')
-    rememberRecentDomainsFromCommand('subfinder -d darklab.sh')
+    rememberRecentValuesFromCommand('subfinder -d alpha.example.com')
+    rememberRecentValuesFromCommand('dig beta.example.org')
+    rememberRecentValuesFromCommand('subfinder -d darklab.sh')
+    rememberRecentValuesFromCommand('ping 198.51.100.10')
+    rememberRecentValuesFromCommand('nmap -p 8080-8081 recent.example.net')
+    rememberRecentValuesFromCommand('curl https://recent.example.net/login?token=secret#frag')
     setProjectAutocompleteTargets([
       { type: 'domain', value: 'project.example.com', label: 'Primary' },
       { type: 'ip', value: '192.0.2.10' },
@@ -1420,6 +1434,7 @@ describe('autocomplete helpers', () => {
 
     expect(getAutocompleteMatches('subfinder -d ', 13).map(item => item.value)).toEqual([
       'project.example.com',
+      'recent.example.net',
       'darklab.sh',
       'beta.example.org',
       'alpha.example.com',
@@ -1429,27 +1444,31 @@ describe('autocomplete helpers', () => {
     expect(getAutocompleteMatches('ping ', 5).map(item => item.value)).toEqual([
       'project.example.com',
       '192.0.2.10',
+      'recent.example.net',
       'darklab.sh',
       'beta.example.org',
       'alpha.example.com',
+      '198.51.100.10',
       '-c',
       '-i',
       '<host>',
     ])
     expect(getAutocompleteMatches('nmap -p ', 8).map(item => item.value)).toEqual([
       '22,80',
+      '8080-8081',
       '<ports>',
       '80,443',
     ])
-    expect(getAutocompleteMatches('curl https://pro', 16).map(item => item.value)).toEqual([
+    expect(getAutocompleteMatches('curl https://', 13).map(item => item.value)).toEqual([
       'https://project.example.com/login',
+      'https://recent.example.net/login',
       '<url>',
     ])
     expect(getAutocompleteMatches('subfinder -o ', 13).map(item => item.value)).toEqual(['subdomains.txt'])
   })
 
-  it('does not infer recent-domain slots from placeholder text without value_type metadata', () => {
-    const { getAutocompleteMatches, rememberRecentDomainsFromCommand, _readRecentDomains } = fromDomScripts(
+  it('does not infer recent-value slots from placeholder text without value_type metadata', () => {
+    const { getAutocompleteMatches, rememberRecentValuesFromCommand, _readRecentValues } = fromDomScripts(
       ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
@@ -1477,21 +1496,21 @@ describe('autocomplete helpers', () => {
       },
       `{
       getAutocompleteMatches,
-      rememberRecentDomainsFromCommand,
-      _readRecentDomains,
+      rememberRecentValuesFromCommand,
+      _readRecentValues,
     }`,
     )
 
-    rememberRecentDomainsFromCommand('legacydig ignored.example.com')
-    rememberRecentDomainsFromCommand('dig alpha.example.com')
+    rememberRecentValuesFromCommand('legacydig ignored.example.com')
+    rememberRecentValuesFromCommand('dig alpha.example.com')
 
-    expect(_readRecentDomains()).toEqual(['alpha.example.com'])
+    expect(_readRecentValues('domain')).toEqual(['alpha.example.com'])
     expect(getAutocompleteMatches('legacydig a', 11).map(item => item.value)).toEqual(['<domain>'])
     expect(getAutocompleteMatches('dig a', 5).map(item => item.value)).toEqual(['alpha.example.com', '<domain>'])
   })
 
   it('keeps case-sensitive dnsrecon -d domain and -D wordlist slots separate', () => {
-    const { getAutocompleteMatches, rememberRecentDomainsFromCommand, _readRecentDomains } = fromDomScripts(
+    const { getAutocompleteMatches, rememberRecentValuesFromCommand, _readRecentValues } = fromDomScripts(
       ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
       {
         document,
@@ -1537,18 +1556,18 @@ describe('autocomplete helpers', () => {
       },
       `{
       getAutocompleteMatches,
-      rememberRecentDomainsFromCommand,
-      _readRecentDomains,
+      rememberRecentValuesFromCommand,
+      _readRecentValues,
     }`,
     )
 
-    expect(rememberRecentDomainsFromCommand('dnsrecon -d delta.example.io --xml dnsrecon-results.xml')).toEqual([
-      'delta.example.io',
+    expect(rememberRecentValuesFromCommand('dnsrecon -d delta.example.io --xml dnsrecon-results.xml')).toEqual([
+      { kind: 'domain', value: 'delta.example.io' },
     ])
-    expect(rememberRecentDomainsFromCommand('dnsrecon -D subdomains.txt')).toEqual([])
-    rememberRecentDomainsFromCommand('subfinder -d alpha.example.com')
+    expect(rememberRecentValuesFromCommand('dnsrecon -D subdomains.txt')).toEqual([])
+    rememberRecentValuesFromCommand('subfinder -d alpha.example.com')
 
-    expect(_readRecentDomains()).toEqual(['alpha.example.com', 'delta.example.io'])
+    expect(_readRecentValues('domain')).toEqual(['alpha.example.com', 'delta.example.io'])
     const rootFlags = getAutocompleteMatches('dnsrecon ', 9).map(item => item.value)
     expect(rootFlags).toContain('-d')
     expect(rootFlags).toContain('-D')

@@ -18,8 +18,32 @@ function eventMatchesDigit(e, digit) {
   return !!(e && e.key === String(digit));
 }
 
+function _handleSurfaceTabShortcut(e) {
+  if (!e || e.key !== 'Tab' || !e.altKey || e.ctrlKey || e.metaKey) return false;
+  const offset = e.shiftKey ? -1 : 1;
+  const surfaces = [
+    {
+      isOpen: typeof isHistoryRunOverlayOpen === 'function' ? isHistoryRunOverlayOpen : null,
+      cycle: typeof cycleHistoryRunOverlayTab === 'function' ? cycleHistoryRunOverlayTab : null,
+    },
+    {
+      isOpen: typeof isAtlasOverlayOpen === 'function' ? isAtlasOverlayOpen : null,
+      cycle: typeof cycleAtlasTab === 'function' ? cycleAtlasTab : null,
+    },
+    {
+      isOpen: typeof isProjectWorkspaceOpen === 'function' ? isProjectWorkspaceOpen : null,
+      cycle: typeof cycleProjectWorkspaceTab === 'function' ? cycleProjectWorkspaceTab : null,
+    },
+  ];
+  const surface = surfaces.find(item => item.isOpen && item.isOpen() && item.cycle);
+  if (!surface || !surface.cycle(offset)) return false;
+  e.preventDefault();
+  return true;
+}
+
 function handleTabShortcut(e) {
   if (!e.altKey || e.ctrlKey || e.metaKey) return false;
+  if (_handleSurfaceTabShortcut(e)) return true;
   if (shouldIgnoreGlobalShortcutTarget(e.target)) return false;
   // Letter chords (T, W) require no Shift — Alt+Shift+T is the theme-selector
   // chrome shortcut and must fall through to handleChromeShortcut.
@@ -100,6 +124,7 @@ function handleActionShortcut(e) {
 // sync with the current rail/menu surfaces.
 function handleChromeShortcut(e) {
   if (!e.altKey || e.ctrlKey || e.metaKey) return false;
+  if (_handleSurfaceTabShortcut(e)) return true;
   if (shouldIgnoreGlobalShortcutTarget(e.target)) return false;
   // Alt+Shift+T → theme; guard first so it doesn't match Alt+Shift letter = T as tab-new.
   if (e.shiftKey && eventMatchesLetter(e, 't')) {

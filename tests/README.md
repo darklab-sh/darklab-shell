@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,767
+- behavior tests: 2,772
 - docs/inventory meta-tests: 32
-- `pytest`: 1407 (1375 behavior + 32 meta)
-- `vitest`: 1143
+- `pytest`: 1408 (1376 behavior + 32 meta)
+- `vitest`: 1147
 - `playwright`: 249
-- total: 2,799
+- total: 2,804
 
 This document is organized in two parts:
 
@@ -1460,7 +1460,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestSessionMigrate.test_migrates_session_variables` | Checks that session command variables move to the destination identity and are returned by `/session/variables`. |
 | `TestSessionMigrate.test_migrates_user_workflows` | Checks that session-owned user workflows move to the destination identity during migration. |
 | `TestSessionMigrate.test_migrates_project_workspace_records` | Verifies project workspace records move to the destination identity during session migration while preserving unique project slugs. |
-| `TestSessionMigrate.test_migrates_recent_domains_and_merges_destination` | Checks that recent-domain autocomplete entries move to the destination identity, merge counts for overlapping domains, and keep the newest timestamp. |
+| `TestSessionMigrate.test_migrates_recent_values_and_merges_destination` | Checks that recent autocomplete values move to the destination identity, merge counts for overlapping values, and keep the newest timestamp. |
 | `TestSessionMigrate.test_migrate_keeps_existing_destination_session_preferences` | Checks that migration does not overwrite a destination session's existing saved preference snapshot. |
 | `TestSessionMigrate.test_migrate_merges_active_project_preference_into_existing_destination_preferences` | Checks that active project context is merged into existing destination preferences without overwriting unrelated destination options. |
 | `TestSessionMigrate.test_migrate_workspace_returns_zero_without_source_workspace` | Checks that workspace migration reports zero file movement when the source session has no workspace directory. |
@@ -1470,17 +1470,18 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestSessionWorkflows.test_create_lists_and_returns_normalized_workflow` | Checks that creating a session workflow stores normalized workflow data and returns it through the list endpoint. |
 | `TestSessionWorkflows.test_rejects_undeclared_workflow_variables` | Checks that workflow steps cannot reference undeclared template variables. |
 | `TestSessionWorkflows.test_update_and_delete_are_session_scoped` | Checks that workflow update and delete operations are scoped to the owning session. |
-| `TestSessionRecentDomains.test_get_returns_empty_list_for_new_session` | Checks that a new session starts with no recent-domain autocomplete entries. |
-| `TestSessionRecentDomains.test_post_normalizes_filters_and_caps_domains` | Checks that recent-domain persistence normalizes domain values, rejects non-domain values, de-duplicates entries, and caps each session at 10 domains. |
-| `TestSessionRecentDomains.test_post_is_session_scoped` | Checks that recent-domain entries do not leak between session IDs. |
-| `TestSessionRecentDomains.test_post_updates_existing_domain_count_and_recency` | Checks that saving an existing recent domain updates its recency and increments its usage count. |
-| `TestSessionRecentDomains.test_post_rejects_non_list_payload` | Checks that recent-domain saves require a `domains` array. |
+| `TestSessionRecentValues.test_get_returns_empty_list_for_new_session` | Checks that a new session starts with empty recent autocomplete values. |
+| `TestSessionRecentValues.test_post_normalizes_filters_and_caps_values_per_kind` | Checks that recent-value persistence normalizes domains, IPs, URLs, and port sets while capping each kind at 10 values. |
+| `TestSessionRecentValues.test_post_is_session_scoped` | Checks that recent values do not leak between session IDs. |
+| `TestSessionRecentValues.test_post_updates_existing_value_count_and_recency` | Checks that saving an existing recent value updates its recency and increments its usage count. |
+| `TestSessionRecentValues.test_post_rejects_non_list_payload` | Checks that recent-value saves require a `values` array. |
+| `TestSessionRecentValues.test_get_rejects_unknown_kind` | Checks that recent-value listing rejects unsupported kind filters. |
 | `TestSessionRunCount.test_returns_zero_for_empty_session` | Checks that `/session/run-count` reports zero runs for a session with no run history. |
 | `TestSessionRunCount.test_returns_true_count` | Checks that the endpoint returns the exact number of seeded run rows for the session. |
 | `TestSessionRunCount.test_is_uncapped_beyond_history_panel_limit` | Checks that 75 seeded runs are all counted — confirming the endpoint is not capped by `history_panel_limit` (50). |
 | `TestSessionRunCount.test_is_scoped_to_session` | Checks that the count only includes runs belonging to the requesting `X-Session-ID`. |
 | `TestSessionRunCount.test_returns_user_workflow_count` | Checks that `/session/run-count` reports the session's saved workflow count for migration prompts. |
-| `TestSessionRunCount.test_returns_recent_domain_count` | Checks that `/session/run-count` reports the session's recent-domain count for migration prompts. |
+| `TestSessionRunCount.test_returns_recent_value_count` | Checks that `/session/run-count` reports the session's recent-value count for migration prompts. |
 | `TestSessionStarred.test_get_returns_empty_list_for_new_session` | Checks that `GET /session/starred` returns an empty list for a new session. |
 | `TestSessionStarred.test_get_returns_starred_commands` | Checks that starred commands are included in the GET response. |
 | `TestSessionStarred.test_get_is_scoped_to_session` | Checks that GET only returns stars belonging to the requesting session. |
@@ -1733,6 +1734,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `supports macOS Option+W to close the active tab via physical key code` | Verifies that supports macOS Option+W to close the active tab via physical key code. |
 | `supports Alt+ArrowLeft and Alt+ArrowRight to move by word` | Verifies that terminal-style Option/Alt+ArrowLeft and Option/Alt+ArrowRight move the prompt caret by word without cycling tabs. |
 | `supports Shift+Alt+ArrowLeft and Shift+Alt+ArrowRight to cycle between tabs` | Verifies that Shift+Alt+ArrowLeft and Shift+Alt+ArrowRight cycle between tabs. |
+| `routes Option+Tab through open modal tab sets before terminal tabs` | Verifies that Option+Tab and Shift+Option+Tab cycle an open tabbed modal before switching terminal tabs. |
+| `cycles project modal tabs from non-terminal inputs` | Verifies that Option+Tab still cycles Projects modal tabs when focus is inside a modal input. |
+| `uses the top open modal tab set when multiple tabbed surfaces are present` | Verifies that stacked tabbed modals route Option+Tab to the topmost tab set first. |
 | `supports Alt+digit to jump directly to a tab` | Verifies that supports Alt+digit to jump directly to a tab. |
 | `supports macOS Option+digit tab jumps via physical key code` | Verifies that supports macOS Option+digit tab jumps via physical key code. |
 | `supports Alt+Shift+P to create a permalink for the active tab` | Verifies that supports Alt+Shift+P to create a permalink for the active tab. |
@@ -1800,6 +1804,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | --- | --- |
 | `opens to the Findings tab by default` | Verifies that opening Atlas without a target starts on the Findings tab. |
 | `opens as a first-class surface and renders entity detail` | Verifies that the Atlas overlay opens, loads entity rows, and renders entity detail content. |
+| `cycles Atlas tabs forward and backward for modal keyboard shortcuts` | Verifies that the Atlas tab cycler moves forward and backward through the modal tab row. |
 | `renders an empty Atlas without warning when no saved runs have entities` | Verifies that empty Atlas state is normal and does not show an error toast. |
 | `adds the selected entity to the active project without leaving the surface` | Verifies that the active-project action posts the selected entity link and keeps Atlas open. |
 | `only offers same-run Atlas cleanup on delete when removable siblings exist` | Verifies that Atlas delete confirmations only show optional same-run cleanup when non-curated sibling rows can be removed. |
@@ -1848,13 +1853,13 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `keeps ambiguous partial subcommands as token suggestions instead of examples` | Verifies that ambiguous partial subcommands such as `gobuster d` keep showing matching subcommand tokens instead of prematurely expanding examples. |
 | `uses subcommand-scoped value hints` | Verifies that value hints for repeated flags such as `-o` come from the active subcommand context. |
 | `walks nested subcommands before suggesting the next project argument` | Verifies that nested project subcommands continue into their next argument hints instead of restarting autocomplete at command-root suggestions. |
-| `tracks recent domains from structured flag and positional slots, capped in memory` | Verifies that recent domain capture reads known domain argument slots, skips file-list inputs, preserves recency order in the browser cache, and enforces the autocomplete cap without using browser storage. |
-| `stores complete IPv4 values from domain slots without keeping partial numeric hosts` | Verifies that recent value capture preserves complete IPv4 addresses from domain slots without saving partial numeric host values. |
-| `loads recent domains from the session endpoint` | Verifies that recent-domain autocomplete loads persisted session domains from the backend and normalizes the returned values. |
+| `tracks recent values from structured flag and positional slots, capped per kind in memory` | Verifies that recent target capture reads known typed argument slots, skips file-list inputs, preserves recency order, and enforces the autocomplete cap per kind without using browser storage. |
+| `stores complete IPv4 values from host slots without keeping partial numeric hosts` | Verifies that recent value capture preserves complete IPv4 addresses from host slots without saving partial numeric host values. |
+| `loads recent values from the session endpoint` | Verifies that recent target autocomplete loads persisted session domains, IPs, URLs, and port sets from the backend and normalizes the returned values. |
 | `reloads active project targets after a same-session project workspace storage signal` | Verifies that passive browser tabs refresh project-target autocomplete after another tab changes project workspace state from the terminal. |
-| `persists captured recent domains without requiring browser storage` | Verifies that captured domain values are posted to the session endpoint while the local autocomplete cache remains usable immediately. |
-| `suggests recent domains only inside known domain value slots` | Verifies that recent domain autocomplete appears only where command metadata identifies a domain value. |
-| `does not infer recent-domain slots from placeholder text without value_type metadata` | Verifies that recent-domain capture and suggestions require explicit `value_type: domain` metadata. |
+| `persists captured recent values without requiring browser storage` | Verifies that captured typed values are posted to the session endpoint while the local autocomplete cache remains usable immediately. |
+| `suggests recent targets only inside compatible known value slots` | Verifies that recent target autocomplete appears only where command metadata identifies a compatible value type. |
+| `does not infer recent-value slots from placeholder text without value_type metadata` | Verifies that recent target capture and suggestions require explicit value-type metadata. |
 | `keeps case-sensitive dnsrecon -d domain and -D wordlist slots separate` | Verifies that dnsrecon shows both case-sensitive flags, filters partial flag input exactly, and keeps domain and wordlist value slots separate. |
 | `suggests installed wordlists only inside marked wordlist slots` | Verifies that installed SecLists suggestions appear only in explicit `value_type: wordlist` slots and filter by category. |
 | `keeps workspace file hints while adding installed wordlists for wordlist slots` | Verifies that wordlist autocomplete adds installed SecLists paths without dropping session workspace file hints. |
@@ -3124,7 +3129,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `generate persists the token across reload and clear returns to anonymous` | Verifies that terminal-driven token generation stores the active token, survives a reload, and `session-token clear` returns the browser to its anonymous session after confirmation. |
 | `set can skip migration without moving anonymous history` | Verifies that setting an issued token can explicitly skip migration and does not carry the prior anonymous run history into the token session. |
 | `set migration carries history, starred commands, and workspace files` | Verifies that the browser migration path moves run history, starred commands, and app-mediated workspace files to the selected session token. |
-| `recent domain autocomplete follows the active session token across browser contexts` | Verifies that recent-domain autocomplete persists with the active session token and becomes available in another browser context after setting that token. |
+| `recent target autocomplete follows the active session token across browser contexts` | Verifies that recent target autocomplete persists with the active session token and becomes available in another browser context after setting that token. |
 | `set rejects unknown tok tokens before switching identity` | Verifies that unknown `tok_` values fail verification and leave the browser on the original anonymous session. |
 | `revoke active token clears browser storage and reverts to anonymous` | Verifies that revoking the active token removes browser token storage and switches back to the anonymous session after confirmation. |
 

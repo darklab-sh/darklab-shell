@@ -239,6 +239,7 @@ function loadAtlas({
         openAtlas: window.openAtlas,
         closeAtlas: window.closeAtlas,
         isAtlasOverlayOpen: window.isAtlasOverlayOpen,
+        cycleAtlasTab: window.cycleAtlasTab,
       }`,
       `
         window.apiFetch = apiFetch;
@@ -313,6 +314,22 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-finding-bulk-row')?.classList.contains('u-hidden')).toBe(false)
     expect(apiFetch).toHaveBeenCalledWith('/atlas?orphan_filter=hide', { cache: 'no-store' })
     expect(apiFetch).toHaveBeenCalledWith('/atlas/entities/ent_ip', { cache: 'no-store' })
+  })
+
+  it('cycles Atlas tabs forward and backward for modal keyboard shortcuts', async () => {
+    const { openAtlas, cycleAtlasTab } = loadAtlas()
+
+    await openAtlas({ source: 'test' })
+
+    expect(document.querySelector('[data-atlas-tab="findings"]')?.classList.contains('is-active')).toBe(true)
+    expect(cycleAtlasTab(1)).toBe(true)
+    await Promise.resolve()
+    expect(document.querySelector('[data-atlas-tab="ip"]')?.classList.contains('is-active')).toBe(true)
+    expect(document.activeElement?.matches('[data-atlas-tab]')).toBe(false)
+    expect(cycleAtlasTab(-1)).toBe(true)
+    await Promise.resolve()
+    expect(document.querySelector('[data-atlas-tab="findings"]')?.classList.contains('is-active')).toBe(true)
+    expect(document.activeElement?.matches('[data-atlas-tab]')).toBe(false)
   })
 
   it('renders an empty Atlas without warning when no saved runs have entities', async () => {

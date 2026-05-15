@@ -181,7 +181,10 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
       showWorkspaceViewer,
       hideWorkspaceViewer,
       openWorkspaceEditorFromCommand,
+      refreshWorkspaceFileCache,
       getWorkspaceAutocompleteFileHints,
+      getWorkspaceAutocompleteDirectoryHints,
+      getWorkspaceDirectoryEntries,
       handleWorkspaceFileAction,
       showWorkspaceViewerLoading,
       promptWorkspaceFolderName,
@@ -190,7 +193,7 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
   `
   const fns = new Function(
     ...names,
-    `${SEARCH_CORE_SRC}\n${SEARCH_SRC}\n${CORE_SRC}\n${ENTITY_METADATA_SRC}\n${VIEWER_FORMATS_SRC}\n${SRC}\n${AUTOCOMPLETE_CACHE_SRC}\n${DRAG_DROP_SRC}\n${returnExpr}`,
+    `${SEARCH_CORE_SRC}\n${SEARCH_SRC}\n${CORE_SRC}\n${ENTITY_METADATA_SRC}\n${VIEWER_FORMATS_SRC}\n${AUTOCOMPLETE_CACHE_SRC}\n${SRC}\n${DRAG_DROP_SRC}\n${returnExpr}`,
   )(...values)
   return { ...fns, apiFetch, globals }
 }

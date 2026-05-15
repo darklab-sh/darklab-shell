@@ -15,6 +15,13 @@ let _historyRunModalState = {
 };
 let _historyRunModalToken = 0;
 
+function _historyRunSelectorValue(value) {
+  if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') {
+    return CSS.escape(String(value));
+  }
+  return String(value || '').replace(/["\\]/g, '\\$&');
+}
+
 function _ensureHistoryRunOverlay() {
   let overlay = document.getElementById('history-run-overlay');
   if (overlay) return overlay;
@@ -58,9 +65,7 @@ function _ensureHistoryRunOverlay() {
     }
     const tab = e.target.closest?.('[data-history-run-tab]');
     if (tab) {
-      _closeHistoryRunActionMenus();
-      _historyRunModalState.activeTab = String(tab.dataset.historyRunTab || 'summary');
-      _renderHistoryRunModal();
+      _setHistoryRunOverlayTab(tab.dataset.historyRunTab || 'summary');
       return;
     }
     const action = e.target.closest?.('[data-history-run-action]');
@@ -109,6 +114,34 @@ function _openHistoryRunOverlay() {
 function isHistoryRunOverlayOpen() {
   const overlay = document.getElementById('history-run-overlay');
   return !!(overlay && overlay.classList.contains('open'));
+}
+
+function _setHistoryRunOverlayTab(tabId, { focus = false } = {}) {
+  const overlay = _ensureHistoryRunOverlay();
+  const nextTab = String(tabId || 'summary');
+  const tabSelector = `[data-history-run-tab="${_historyRunSelectorValue(nextTab)}"]`;
+  if (!overlay.querySelector(tabSelector)) return false;
+  _closeHistoryRunActionMenus();
+  _historyRunModalState.activeTab = nextTab;
+  _renderHistoryRunModal();
+  if (focus) {
+    window.setTimeout(() => {
+      overlay.querySelector(tabSelector)?.focus({ preventScroll: true });
+    }, 0);
+  }
+  return true;
+}
+
+function cycleHistoryRunOverlayTab(offset = 1) {
+  const overlay = document.getElementById('history-run-overlay');
+  if (!isHistoryRunOverlayOpen() || !overlay) return false;
+  const tabs = Array.from(overlay.querySelectorAll('[data-history-run-tab]'))
+    .filter(tab => !tab.disabled);
+  if (tabs.length < 2) return false;
+  const currentId = String(_historyRunModalState.activeTab || 'summary');
+  const currentIndex = Math.max(0, tabs.findIndex(tab => String(tab.dataset.historyRunTab || '') === currentId));
+  const nextIndex = (currentIndex + Number(offset || 1) + tabs.length) % tabs.length;
+  return _setHistoryRunOverlayTab(tabs[nextIndex].dataset.historyRunTab || 'summary');
 }
 
 function _historyRunDisplay(run = _historyRunModalState.run) {
@@ -636,3 +669,4 @@ async function _handleHistoryRunModalAction(action) {
 window.openHistoryRunDetails = openHistoryRunDetails;
 window.closeHistoryRunOverlay = closeHistoryRunOverlay;
 window.isHistoryRunOverlayOpen = isHistoryRunOverlayOpen;
+window.cycleHistoryRunOverlayTab = cycleHistoryRunOverlayTab;

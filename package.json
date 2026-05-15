@@ -12,7 +12,7 @@
     "capture:container-smoke-test": "node scripts/capture_output_for_smoke_test.mjs",
     "capture:ui-screenshots": "./scripts/capture_ui_screenshots.sh",
     "lint": "npm run lint:py && npm run lint:js && npm run lint:css && npm run lint:shell && npm run lint:docker && npm run lint:yaml && npm run lint:json && npm run lint:md && npm run vendor:check",
-    "lint:py": "flake8 app/ tests/py/ && bandit -r app/ -ll -q",
+    "lint:py": "ruff check --config .tooling/ruff.toml app/ tests/py/ && bandit -r app/ -ll -q",
     "lint:js": "npx eslint --config .tooling/eslint.config.js tests/js/ .tooling/ scripts/ app/static/js/**/*.js",
     "lint:css": "stylelint \"app/static/css/**/*.css\" --config .tooling/stylelint.config.mjs",
     "lint:shell": "shellcheck $(find . -name '*.sh' -not -path './.git/*' -not -path './node_modules/*' | xargs grep -lE '^#!/.*(bash|sh)')",

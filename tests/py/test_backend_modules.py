@@ -2394,7 +2394,7 @@ class TestDerivedCommandRegistry:
             ("katana", "-list", "url"),
             ("wafw00f", "-i", "url"),
             ("masscan", "-iL", "target"),
-            ("rustscan", "__positional__", "domain"),
+            ("rustscan", "__positional__", "host"),
             ("nmap", "-iL", "target"),
             ("testssl", "__positional__", "url"),
             ("wpscan", "--url", "url"),
@@ -2414,7 +2414,7 @@ class TestDerivedCommandRegistry:
             hints = context[root]["arg_hints"]["__positional__"]
             assert hints[0]["value"] == "<host>"
             assert hints[0]["position"] == 1
-            assert hints[0]["value_type"] == "domain"
+            assert hints[0]["value_type"] == "host"
             assert hints[1]["value"] == "<port>"
             assert hints[1]["position"] == 2
             assert hints[1]["value_type"] == "port_set"

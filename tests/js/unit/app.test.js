@@ -3723,6 +3723,109 @@ describe('app helpers', () => {
     expect(activateTab).toHaveBeenCalledWith('tab-1')
   })
 
+  it('routes Option+Tab through open modal tab sets before terminal tabs', async () => {
+    const activateTab = vi.fn()
+    const cycleAtlasTab = vi.fn(() => true)
+    const { handleTabShortcut, cmdInput } = await loadAppFns({
+      activateTab,
+      isAtlasOverlayOpen: () => true,
+      cycleAtlasTab,
+      activeTabId: 'tab-1',
+      tabs: [
+        { id: 'tab-1', st: 'idle' },
+        { id: 'tab-2', st: 'idle' },
+      ],
+    })
+
+    handleTabShortcut({
+      key: 'Tab',
+      altKey: true,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      target: cmdInput,
+      preventDefault: vi.fn(),
+    })
+    handleTabShortcut({
+      key: 'Tab',
+      altKey: true,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: true,
+      target: cmdInput,
+      preventDefault: vi.fn(),
+    })
+
+    expect(cycleAtlasTab).toHaveBeenNthCalledWith(1, 1)
+    expect(cycleAtlasTab).toHaveBeenNthCalledWith(2, -1)
+    expect(activateTab).not.toHaveBeenCalled()
+  })
+
+  it('cycles project modal tabs from non-terminal inputs', async () => {
+    const activateTab = vi.fn()
+    const cycleProjectWorkspaceTab = vi.fn(() => true)
+    const { handleTabShortcut } = await loadAppFns({
+      activateTab,
+      isProjectWorkspaceOpen: () => true,
+      cycleProjectWorkspaceTab,
+      activeTabId: 'tab-1',
+      tabs: [
+        { id: 'tab-1', st: 'idle' },
+        { id: 'tab-2', st: 'idle' },
+      ],
+    })
+    const modalInput = document.createElement('input')
+
+    handleTabShortcut({
+      key: 'Tab',
+      altKey: true,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      target: modalInput,
+      preventDefault: vi.fn(),
+    })
+
+    expect(cycleProjectWorkspaceTab).toHaveBeenCalledWith(1)
+    expect(activateTab).not.toHaveBeenCalled()
+  })
+
+  it('uses the top open modal tab set when multiple tabbed surfaces are present', async () => {
+    const activateTab = vi.fn()
+    const cycleHistoryRunOverlayTab = vi.fn(() => true)
+    const cycleAtlasTab = vi.fn(() => true)
+    const cycleProjectWorkspaceTab = vi.fn(() => true)
+    const { handleTabShortcut, cmdInput } = await loadAppFns({
+      activateTab,
+      isHistoryRunOverlayOpen: () => true,
+      cycleHistoryRunOverlayTab,
+      isAtlasOverlayOpen: () => true,
+      cycleAtlasTab,
+      isProjectWorkspaceOpen: () => true,
+      cycleProjectWorkspaceTab,
+      activeTabId: 'tab-1',
+      tabs: [
+        { id: 'tab-1', st: 'idle' },
+        { id: 'tab-2', st: 'idle' },
+      ],
+    })
+
+    handleTabShortcut({
+      key: 'Tab',
+      altKey: true,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      target: cmdInput,
+      preventDefault: vi.fn(),
+    })
+
+    expect(cycleHistoryRunOverlayTab).toHaveBeenCalledWith(1)
+    expect(cycleAtlasTab).not.toHaveBeenCalled()
+    expect(cycleProjectWorkspaceTab).not.toHaveBeenCalled()
+    expect(activateTab).not.toHaveBeenCalled()
+  })
+
   it('supports Alt+digit to jump directly to a tab', async () => {
     const activateTab = vi.fn()
     const { cmdInput } = await loadAppFns({
@@ -4891,12 +4994,15 @@ describe('app helpers', () => {
     const showConfirm = vi.fn().mockImplementation(async (opts) => {
       const select = opts.content[0].querySelector('select')
       const valueInput = opts.content.flatMap(node => Array.from(node.querySelectorAll('input')))[1]
+      const replacing = String(opts.body?.text || '').startsWith('Replace ')
       expect([...select.options].map(option => option.value)).toContain('SHODAN_API_KEY')
       expect(select.value).toBe('SHODAN_API_KEY')
+      expect(select.disabled).toBe(replacing)
       select.value = 'SHODAN_API_KEY'
       select.dispatchEvent(new Event('change'))
       expect(opts.content.map(node => node.textContent).join(' ')).toContain('Used by intel Shodan')
-      valueInput.value = 'shodan-secret-value'
+      expect(valueInput.placeholder).toBe(replacing ? 'Paste replacement API key or token' : 'Paste API key or token')
+      valueInput.value = replacing ? 'replacement-shodan-secret-value' : 'shodan-secret-value'
       const ok = await opts.actions.find(action => action.id === 'save').onActivate()
       return ok ? 'save' : null
     })
@@ -4937,6 +5043,28 @@ describe('app helpers', () => {
     expect(postBody).toEqual({
       name: 'SHODAN_API_KEY',
       value: 'shodan-secret-value',
+      consumer_envs: undefined,
+    })
+
+    document.getElementById('options-provider-status-btn').click()
+    await vi.waitFor(() => expect(providerOverlay.classList.contains('u-hidden')).toBe(false))
+    const configuredShodanLink = Array.from(document.querySelectorAll('.options-secret-link'))
+      .find((button) => button.textContent === 'SHODAN_API_KEY')
+    expect(configuredShodanLink.title).toBe('Replace SHODAN_API_KEY')
+    configuredShodanLink.click()
+    await vi.waitFor(() => expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.objectContaining({ text: 'Replace SHODAN_API_KEY?' }),
+    })))
+    await vi.waitFor(() => expect(apiFetch.mock.calls.filter(([url, opts]) => (
+      url === '/session/secrets' && opts?.method === 'POST'
+    ))).toHaveLength(2))
+
+    const replaceBody = JSON.parse(apiFetch.mock.calls.filter(([url, opts]) => (
+      url === '/session/secrets' && opts?.method === 'POST'
+    ))[1][1].body)
+    expect(replaceBody).toEqual({
+      name: 'SHODAN_API_KEY',
+      value: 'replacement-shodan-secret-value',
       consumer_envs: undefined,
     })
   })

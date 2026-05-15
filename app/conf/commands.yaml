@@ -49,7 +49,7 @@ commands:
       arguments:
         - placeholder: <host>
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Hostname or IP address to probe
   - root: fping
     description: Sends fast ICMP echo probes to one or more hosts with summary results.
@@ -90,7 +90,7 @@ commands:
       arguments:
         - placeholder: <host>
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Hostname or IP to probe
   - root: traceroute
     description: Maps the network path to a host by showing each hop and round-trip timing.
@@ -144,7 +144,7 @@ commands:
       arguments:
         - placeholder: <host>
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Hostname or IP to trace
   - root: tcptraceroute
     description: Traces the network path to a TCP service by probing a specific destination port.
@@ -179,7 +179,7 @@ commands:
         - placeholder: <host>
           position: 1
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Hostname or IP to trace
         - placeholder: <port>
           position: 2
@@ -244,7 +244,7 @@ commands:
       arguments:
         - placeholder: <host>
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Hostname or IP followed by one or more ports
   - root: telnet
     description: Opens an interactive Telnet-style TCP session for protocol and banner troubleshooting.
@@ -279,7 +279,7 @@ commands:
         - placeholder: <host>
           position: 1
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Hostname or IP to connect to
         - placeholder: <port>
           position: 2
@@ -348,7 +348,7 @@ commands:
       arguments:
         - placeholder: <host>
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Hostname or IP to trace
   - root: dig
     description: Queries DNS records and resolver behavior with detailed response output.
@@ -500,7 +500,7 @@ commands:
       arguments:
         - placeholder: <domain-or-ip>
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Domain name, IP address, or ASN to query
   - root: curl
     description: Sends HTTP(S) requests and displays or saves the response.
@@ -874,7 +874,7 @@ commands:
       arguments:
         - placeholder: <host>
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Hostname or host:port to scan
   - root: sslyze
     description: Analyzes TLS server configuration and common SSL/TLS weaknesses.
@@ -949,7 +949,7 @@ commands:
       arguments:
         - placeholder: <host>
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Hostname or host:port to scan
   - root: dnsrecon
     description: Performs DNS reconnaissance including record enumeration and zone transfer checks.
@@ -2469,7 +2469,7 @@ commands:
           value_hint:
             placeholder: <host>
             hint_only: true
-            value_type: domain
+            value_type: host
             description: Target hostname or IP address
         - value: -p
           description: Ports or port ranges to scan
@@ -2546,7 +2546,7 @@ commands:
       arguments:
         - placeholder: <target>
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Usually provided through -host
   - root: katana
     description: Crawls web targets to discover URLs, forms, and linked resources.
@@ -3039,7 +3039,7 @@ commands:
           value_hint:
             placeholder: <host>
             hint_only: true
-            value_type: domain
+            value_type: host
             description: Target hostname or IP address
         - value: -p
           description: Specific ports to scan
@@ -3073,7 +3073,7 @@ commands:
       arguments:
         - placeholder: <target>
           hint_only: true
-          value_type: domain
+          value_type: host
           description: Usually provided through -a
   - root: nmap
     description: Scans hosts for open ports, services, versions, and network characteristics.
@@ -3864,7 +3864,7 @@ commands:
           value_hint:
             placeholder: <host>
             hint_only: true
-            value_type: domain
+            value_type: target
             description: Target host, hostname, or URL
         - value: -p
           description: Target port
