@@ -468,6 +468,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── __init__.py         # Service package marker
 │   │   ├── atlas/
 │   │   │   ├── __init__.py     # Atlas service package marker
+│   │   │   ├── intel_bridge.py # Atlas entity intel refresh and snapshot persistence helpers
 │   │   │   ├── lookup.py       # Session entity list/detail queries and Atlas metadata shaping
 │   │   │   └── materializer.py # Run-output entity materialization into the Atlas tables
 │   │   ├── commands/

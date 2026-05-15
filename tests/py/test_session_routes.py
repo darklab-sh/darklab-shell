@@ -193,10 +193,17 @@ class TestSessionMigrate:
                 (project_id, session_id, slug),
             )
             conn.execute(
-                "INSERT OR REPLACE INTO project_targets "
-                "(id, project_id, type, value, created, updated) "
-                "VALUES (?, ?, 'domain', 'darklab.sh', datetime('now'), datetime('now'))",
-                ("ptarget_migrate_test", project_id),
+                "INSERT OR REPLACE INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, occurrence_count, created) "
+                "VALUES (?, ?, 'domain', 'darklab.sh', 'sig_migrate_test', "
+                "datetime('now'), datetime('now'), 1, datetime('now'))",
+                ("ent_migrate_test", session_id),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO project_links "
+                "(id, project_id, entity_type, entity_id, source, created) "
+                "VALUES (?, ?, 'atlas_entity', ?, 'manual', datetime('now'))",
+                ("pl_migrate_test", project_id, "ent_migrate_test"),
             )
             conn.execute(
                 "INSERT OR REPLACE INTO run_file_artifacts "
@@ -206,15 +213,9 @@ class TestSessionMigrate:
             )
             conn.execute(
                 "INSERT OR REPLACE INTO findings "
-                "(id, session_id, run_id, scope, raw_line, created) "
-                "VALUES (?, ?, ?, 'finding', 'open port 443', datetime('now'))",
-                ("fnd_migrate_test", session_id, "run_migrate_test"),
-            )
-            conn.execute(
-                "INSERT OR REPLACE INTO finding_targets "
-                "(id, session_id, finding_id, target_id, source, created) "
-                "VALUES (?, ?, 'fnd_migrate_test', 'ptarget_migrate_test', 'primary_match', datetime('now'))",
-                ("ftarget_migrate_test", session_id),
+                "(id, session_id, run_id, target_id, entity_id, scope, raw_line, created) "
+                "VALUES (?, ?, ?, ?, ?, 'finding', 'open port 443', datetime('now'))",
+                ("fnd_migrate_test", session_id, "run_migrate_test", "ent_migrate_test", "ent_migrate_test"),
             )
             conn.execute(
                 "INSERT OR REPLACE INTO entity_labels "
@@ -554,17 +555,18 @@ class TestSessionMigrate:
                 (to_id,),
             ).fetchone()[0]
             project_target = conn.execute(
-                "SELECT p.session_id, t.value "
-                "FROM project_targets t JOIN projects p ON p.id = t.project_id "
-                "WHERE t.id = 'ptarget_migrate_test'",
+                "SELECT e.session_id, e.canonical_value "
+                "FROM project_links l JOIN entities e ON e.id = l.entity_id "
+                "WHERE l.id = 'pl_migrate_test'",
             ).fetchone()
             run_artifact = conn.execute(
                 "SELECT session_id, workspace_path FROM run_file_artifacts "
                 "WHERE id = 'rfa_migrate_test'",
             ).fetchone()
-            finding_target = conn.execute(
-                "SELECT session_id, finding_id, target_id FROM finding_targets "
-                "WHERE id = 'ftarget_migrate_test'",
+            finding_occurrence = conn.execute(
+                "SELECT f.session_id, fo.finding_id, f.entity_id "
+                "FROM findings_occurrences fo JOIN findings f ON f.id = fo.finding_id "
+                "WHERE fo.finding_id = 'fnd_migrate_test'",
             ).fetchone()
             evidence_package = conn.execute(
                 "SELECT session_id, project_id FROM evidence_packages "
@@ -574,7 +576,7 @@ class TestSessionMigrate:
         assert data["migrated_projects"] == 1
         assert data["migrated_run_file_artifacts"] == 1
         assert data["migrated_findings"] == 1
-        assert data["migrated_finding_targets"] == 1
+        assert data["migrated_finding_targets"] == 0
         assert data["migrated_entity_labels"] == 1
         assert data["migrated_entity_notes"] == 1
         assert data["migrated_evidence_packages"] == 1
@@ -587,7 +589,7 @@ class TestSessionMigrate:
         assert migrated_slug == "case-2"
         assert tuple(project_target) == (to_id, "darklab.sh")
         assert tuple(run_artifact) == (to_id, "findings.txt")
-        assert tuple(finding_target) == (to_id, "fnd_migrate_test", "ptarget_migrate_test")
+        assert tuple(finding_occurrence) == (to_id, "fnd_migrate_test", "ent_migrate_test")
         assert tuple(evidence_package) == (to_id, "prj_migrate_test")
 
     def test_migrates_recent_domains_and_merges_destination(self):

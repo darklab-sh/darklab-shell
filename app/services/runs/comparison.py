@@ -56,12 +56,16 @@ def run_finding_compare_items(
 ):
     limit = compare_item_limit()
     total = conn.execute(
-        "SELECT COUNT(*) AS count FROM findings WHERE session_id = ? AND run_id = ?",
+        "SELECT COUNT(*) AS count "
+        "FROM findings_occurrences fo JOIN findings f ON f.id = fo.finding_id "
+        "WHERE f.session_id = ? AND fo.run_id = ?",
         (session_id, run_id),
     ).fetchone()["count"]
     rows = conn.execute(
-        "SELECT id, raw_line, title, severity, fingerprint, review_state, line_number, created "
-        "FROM findings WHERE session_id = ? AND run_id = ? ORDER BY created ASC, id ASC LIMIT ?",
+        "SELECT f.id, f.raw_line, f.title, f.severity, f.fingerprint, f.status AS review_state, "
+        "fo.line_number, f.created "
+        "FROM findings_occurrences fo JOIN findings f ON f.id = fo.finding_id "
+        "WHERE f.session_id = ? AND fo.run_id = ? ORDER BY fo.line_number ASC, f.id ASC LIMIT ?",
         (session_id, run_id, limit),
     ).fetchall()
     items = []

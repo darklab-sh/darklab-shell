@@ -86,6 +86,27 @@ def _row_to_intel_snapshot(row) -> dict[str, Any]:
     }
 
 
+def _row_to_finding(row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "entity_id": row["entity_id"] or "",
+        "subject_key": row["subject_key"] or "",
+        "severity": row["severity"] or "",
+        "kind": row["kind"] or "finding",
+        "tool_root": row["tool_root"] or "",
+        "first_run_id": row["first_run_id"] or "",
+        "last_run_id": row["last_run_id"] or "",
+        "first_seen_at": row["first_seen_at"] or "",
+        "last_seen_at": row["last_seen_at"] or "",
+        "occurrence_count": int(row["occurrence_count"] or 0),
+        "status": row["status"] or "new",
+        "review_state": row["status"] or "new",
+        "title": row["title"] or "",
+        "raw_line": row["raw_line"] or "",
+        "created": row["created"] or "",
+    }
+
+
 def _metadata_for_entity(conn, session_id: str, entity_id: str) -> dict[str, Any]:
     labels = conn.execute(
         "SELECT id, label, source, created "
@@ -232,9 +253,16 @@ def entity_detail(conn, session_id: str, entity_id: str) -> dict[str, Any] | Non
         "ORDER BY fetched_at DESC, provider ASC",
         (session_id, entity_id),
     ).fetchall()
+    finding_rows = conn.execute(
+        "SELECT id, entity_id, subject_key, severity, kind, tool_root, first_run_id, last_run_id, "
+        "first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created "
+        "FROM findings WHERE session_id = ? AND entity_id = ? "
+        "ORDER BY last_seen_at DESC, created DESC",
+        (session_id, entity_id),
+    ).fetchall()
     return {
         "entity": entity,
         "runs": [_row_to_run_link(run) for run in run_rows],
         "intel_snapshots": [_row_to_intel_snapshot(snapshot) for snapshot in snapshot_rows],
-        "findings": [],
+        "findings": [_row_to_finding(finding) for finding in finding_rows],
     }

@@ -40,7 +40,7 @@ ENTITY_METADATA_TYPES = frozenset({
     "target",
     "package",
 })
-PROJECT_TARGET_TYPES = frozenset({"domain", "url", "host", "ip", "cidr", "port_set"})
+PROJECT_TARGET_TYPES = frozenset({"domain", "url", "host", "ip"})
 PROJECT_TARGET_REVIEW_STATES = frozenset({"confirmed", "pending", "dismissed"})
 PROJECT_TARGET_SOURCES = frozenset({"user", "auto_command", "auto_input_file"})
 FINDING_REVIEW_STATES = frozenset({"new", "reviewed", "important", "false_positive", "needs_followup"})

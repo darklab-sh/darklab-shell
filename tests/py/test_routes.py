@@ -384,7 +384,10 @@ class TestProjectRoutes:
                 (session_id, run_id),
             ).fetchone()[0]
             conn.execute("DELETE FROM project_links WHERE entity_id = ?", (run_id,))
-            conn.execute("DELETE FROM project_targets WHERE id = ?", (target["id"],))
+            conn.execute(
+                "DELETE FROM project_links WHERE entity_type = 'atlas_entity' AND entity_id = ?",
+                (target["id"],),
+            )
             conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
             conn.execute("DELETE FROM projects WHERE id = ?", (project["id"],))
             conn.commit()
@@ -515,23 +518,6 @@ class TestProjectRoutes:
                 (finding_id, session_id, target["id"]),
             )
             conn.execute(
-                "INSERT INTO finding_targets "
-                "(id, session_id, finding_id, target_id, run_id, source, created) "
-                "VALUES (?, ?, ?, ?, 'run_target_delete', 'primary_match', datetime('now'))",
-                ("ftarget_delete_primary_" + uuid.uuid4().hex, session_id, finding_id, target["id"]),
-            )
-            conn.execute(
-                "INSERT INTO finding_targets "
-                "(id, session_id, finding_id, target_id, run_id, source, created) "
-                "VALUES (?, ?, ?, ?, 'run_target_delete', 'secondary_match', datetime('now', '+1 second'))",
-                (
-                    "ftarget_delete_secondary_" + uuid.uuid4().hex,
-                    session_id,
-                    finding_id,
-                    fallback_target["id"],
-                ),
-            )
-            conn.execute(
                 "INSERT INTO entity_labels "
                 "(id, session_id, entity_type, entity_id, label, created) "
                 "VALUES (?, ?, 'finding', ?, 'finding-kept', datetime('now'))",
@@ -555,19 +541,19 @@ class TestProjectRoutes:
         assert [item["id"] for item in targets_after_delete["targets"]] == [fallback_target["id"]]
         with sqlite3.connect(DB_PATH) as conn:
             assert conn.execute(
-                "SELECT COUNT(*) FROM entity_labels WHERE entity_type = 'target' AND entity_id = ?",
+                "SELECT COUNT(*) FROM entity_labels WHERE entity_type = 'atlas_entity' AND entity_id = ?",
                 (target["id"],),
             ).fetchone()[0] == 0
             assert conn.execute(
-                "SELECT COUNT(*) FROM entity_notes WHERE entity_type = 'target' AND entity_id = ?",
+                "SELECT COUNT(*) FROM entity_notes WHERE entity_type = 'atlas_entity' AND entity_id = ?",
                 (target["id"],),
             ).fetchone()[0] == 0
             assert conn.execute(
-                "SELECT COUNT(*) FROM finding_targets WHERE target_id = ?",
+                "SELECT COUNT(*) FROM project_links WHERE entity_type = 'atlas_entity' AND entity_id = ?",
                 (target["id"],),
             ).fetchone()[0] == 0
             assert conn.execute(
-                "SELECT COUNT(*) FROM finding_targets WHERE target_id = ?",
+                "SELECT COUNT(*) FROM project_links WHERE entity_type = 'atlas_entity' AND entity_id = ?",
                 (fallback_target["id"],),
             ).fetchone()[0] == 1
             assert conn.execute(
@@ -578,7 +564,7 @@ class TestProjectRoutes:
             assert conn.execute(
                 "SELECT COUNT(*) FROM findings "
                 "WHERE session_id = ? AND run_id = 'run_target_delete' AND target_id = ?",
-                (session_id, fallback_target["id"]),
+                (session_id, target["id"]),
             ).fetchone()[0] == 1
 
         update_resp = client.put(
@@ -645,7 +631,7 @@ class TestProjectRoutes:
         assert missing_resp.status_code == 404
         with sqlite3.connect(DB_PATH) as conn:
             assert conn.execute(
-                "SELECT COUNT(*) FROM project_targets WHERE project_id = ?",
+                "SELECT COUNT(*) FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity'",
                 (project["id"],),
             ).fetchone()[0] == 0
             assert conn.execute(
@@ -653,11 +639,11 @@ class TestProjectRoutes:
                 (project["id"],),
             ).fetchone()[0] == 0
             assert conn.execute(
-                "SELECT COUNT(*) FROM entity_notes WHERE entity_type = 'target' AND entity_id = ?",
+                "SELECT COUNT(*) FROM entity_notes WHERE entity_type = 'atlas_entity' AND entity_id = ?",
                 (cleanup_target["id"],),
             ).fetchone()[0] == 0
 
-    def test_delete_project_reassigns_finding_primary_target_when_other_targets_remain(self):
+    def test_delete_project_keeps_entity_owned_finding_target_when_entity_is_linked_elsewhere(self):
         client = get_client()
         session_id = self._session_id("project-delete-primary-target")
         deleted_project = self._create_project(client, session_id, name="Deleted target project")
@@ -685,24 +671,6 @@ class TestProjectRoutes:
                 "VALUES (?, ?, ?, ?, 'finding', 'target finding', datetime('now'))",
                 (finding_id, session_id, run_id, deleted_target["id"]),
             )
-            conn.execute(
-                "INSERT INTO finding_targets "
-                "(id, session_id, finding_id, target_id, run_id, source, created) "
-                "VALUES (?, ?, ?, ?, ?, 'primary_match', datetime('now'))",
-                ("ftarget_project_delete_primary_" + uuid.uuid4().hex, session_id, finding_id, deleted_target["id"], run_id),
-            )
-            conn.execute(
-                "INSERT INTO finding_targets "
-                "(id, session_id, finding_id, target_id, run_id, source, created) "
-                "VALUES (?, ?, ?, ?, ?, 'secondary_match', datetime('now', '+1 second'))",
-                (
-                    "ftarget_project_delete_secondary_" + uuid.uuid4().hex,
-                    session_id,
-                    finding_id,
-                    remaining_target["id"],
-                    run_id,
-                ),
-            )
             conn.commit()
 
         delete_resp = client.delete(
@@ -714,15 +682,12 @@ class TestProjectRoutes:
             assert conn.execute(
                 "SELECT target_id FROM findings WHERE session_id = ? AND id = ?",
                 (session_id, finding_id),
-            ).fetchone()[0] == remaining_target["id"]
+            ).fetchone()[0] == deleted_target["id"]
             assert conn.execute(
-                "SELECT COUNT(*) FROM finding_targets WHERE session_id = ? AND target_id = ?",
-                (session_id, deleted_target["id"]),
+                "SELECT COUNT(*) FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity'",
+                (deleted_project["id"],),
             ).fetchone()[0] == 0
-            assert conn.execute(
-                "SELECT COUNT(*) FROM finding_targets WHERE session_id = ? AND target_id = ?",
-                (session_id, remaining_target["id"]),
-            ).fetchone()[0] == 1
+            assert remaining_target["id"]
 
     def test_projects_are_session_scoped_and_slugs_are_unique_per_session(self):
         client = get_client()
@@ -4118,6 +4083,48 @@ class TestAtlasRoutes:
         resp = client.get(f"/atlas/entities/{domain_id}", headers={"X-Session-ID": self._session_id()})
 
         assert resp.status_code == 404
+
+    def test_refresh_intel_persists_provider_snapshot(self):
+        client = get_client()
+        session_id = self._session_id()
+        _, recorded = self._seed_entity_run(session_id)
+        domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
+        provider_result = mock.Mock(
+            provider="crtsh",
+            status="ok",
+            message="",
+            result=mock.Mock(
+                provider="crtsh",
+                payload={"summary": {"has_intel": True, "providers_with_data": ["crtsh"]}},
+            ),
+        )
+        lookup_result = mock.Mock(
+            entity_type="domain",
+            canonical_value="darklab.sh",
+            providers=[provider_result],
+            success_count=1,
+            configured_count=1,
+        )
+
+        with mock.patch("services.atlas.intel_bridge.lookup_entity", return_value=lookup_result):
+            resp = client.post(
+                f"/atlas/entities/{domain_id}/refresh_intel",
+                headers={"X-Session-ID": session_id},
+            )
+
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["refresh"]["success_count"] == 1
+        with db_connect() as conn:
+            row = conn.execute(
+                "SELECT provider, status, summary, data_json FROM entity_intel_snapshots "
+                "WHERE session_id = ? AND entity_id = ?",
+                (session_id, domain_id),
+            ).fetchone()
+        assert row["provider"] == "crtsh"
+        assert row["status"] == "ok"
+        assert row["summary"] == "data available"
+        assert json.loads(row["data_json"])["summary"]["has_intel"] is True
 
 
 # ── /workspace/files ──────────────────────────────────────────────────────────

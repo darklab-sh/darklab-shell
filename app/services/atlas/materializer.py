@@ -31,7 +31,7 @@ def _normalize_entity_type(value: object) -> str:
     return entity_type
 
 
-def _canonicalize_entity(entity: Mapping[str, Any]) -> tuple[str, str] | None:
+def canonicalize_entity_record(entity: Mapping[str, Any]) -> tuple[str, str] | None:
     entity_type = _normalize_entity_type(entity.get("type"))
     if entity_type not in ATLAS_ENTITY_TYPES:
         return None
@@ -49,6 +49,63 @@ def _canonicalize_entity(entity: Mapping[str, Any]) -> tuple[str, str] | None:
     return entity_type, canonical_value
 
 
+def upsert_entity(
+    conn,
+    session_id: str,
+    entity_type: str,
+    canonical_value: str,
+    *,
+    seen_at: str = "",
+    occurrence_count: int = 0,
+) -> str:
+    timestamp = str(seen_at or _now())
+    signature_hash = entity_signature(entity_type, canonical_value)
+    entity_id = atlas_entity_id(session_id, entity_type, canonical_value)
+    conn.execute(
+        "INSERT INTO entities "
+        "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, occurrence_count, created) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(session_id, type, signature_hash) DO UPDATE SET "
+        "last_seen_at = CASE "
+        "WHEN excluded.last_seen_at > entities.last_seen_at THEN excluded.last_seen_at ELSE entities.last_seen_at END, "
+        "occurrence_count = entities.occurrence_count + excluded.occurrence_count",
+        (
+            entity_id,
+            session_id,
+            entity_type,
+            canonical_value,
+            signature_hash,
+            timestamp,
+            timestamp,
+            max(0, int(occurrence_count or 0)),
+            timestamp,
+        ),
+    )
+    row = conn.execute(
+        "SELECT id FROM entities WHERE session_id = ? AND type = ? AND signature_hash = ?",
+        (session_id, entity_type, signature_hash),
+    ).fetchone()
+    return str(row["id"]) if row else entity_id
+
+
+def recalculate_entities(conn, entity_ids: Iterable[str]) -> None:
+    for entity_id in {str(value or "") for value in entity_ids if str(value or "")}:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(occurrence_count), 0) AS occurrence_count, "
+            "MIN(first_seen_at) AS first_seen_at, MAX(last_seen_at) AS last_seen_at "
+            "FROM entity_run_links WHERE entity_id = ?",
+            (entity_id,),
+        ).fetchone()
+        occurrence_count = int(row["occurrence_count"] or 0) if row else 0
+        if occurrence_count <= 0:
+            conn.execute("UPDATE entities SET occurrence_count = 0 WHERE id = ?", (entity_id,))
+            continue
+        conn.execute(
+            "UPDATE entities SET occurrence_count = ?, first_seen_at = ?, last_seen_at = ? WHERE id = ?",
+            (occurrence_count, row["first_seen_at"] or "", row["last_seen_at"] or "", entity_id),
+        )
+
+
 def _iter_entry_entities(entries: Iterable[object]) -> Iterable[Mapping[str, Any]]:
     for entry in entries:
         if not isinstance(entry, Mapping):
@@ -64,42 +121,29 @@ def _iter_entry_entities(entries: Iterable[object]) -> Iterable[Mapping[str, Any
 def materialize_run_entities(conn, session_id: str, run_id: str, entries: Iterable[object], *, seen_at: str = ""):
     """Store unique normalized entities and run links for a completed run."""
     timestamp = str(seen_at or _now())
+    existing_rows = conn.execute(
+        "SELECT entity_id FROM entity_run_links WHERE run_id = ?",
+        (run_id,),
+    ).fetchall()
+    existing_entity_ids = [str(row["entity_id"] or "") for row in existing_rows]
+    conn.execute("DELETE FROM entity_run_links WHERE run_id = ?", (run_id,))
+    recalculate_entities(conn, existing_entity_ids)
     counts: Counter[tuple[str, str]] = Counter()
     for entity in _iter_entry_entities(entries):
-        normalized = _canonicalize_entity(entity)
+        normalized = canonicalize_entity_record(entity)
         if normalized:
             counts[normalized] += 1
 
     materialized = []
     for (entity_type, canonical_value), occurrence_count in sorted(counts.items()):
-        signature_hash = entity_signature(entity_type, canonical_value)
-        entity_id = atlas_entity_id(session_id, entity_type, canonical_value)
-        conn.execute(
-            "INSERT INTO entities "
-            "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, occurrence_count, created) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(session_id, type, signature_hash) DO UPDATE SET "
-            "last_seen_at = excluded.last_seen_at, "
-            "occurrence_count = entities.occurrence_count + excluded.occurrence_count",
-            (
-                entity_id,
-                session_id,
-                entity_type,
-                canonical_value,
-                signature_hash,
-                timestamp,
-                timestamp,
-                int(occurrence_count),
-                timestamp,
-            ),
+        entity_id = upsert_entity(
+            conn,
+            session_id,
+            entity_type,
+            canonical_value,
+            seen_at=timestamp,
+            occurrence_count=int(occurrence_count),
         )
-        row = conn.execute(
-            "SELECT id FROM entities WHERE session_id = ? AND type = ? AND signature_hash = ?",
-            (session_id, entity_type, signature_hash),
-        ).fetchone()
-        if not row:
-            continue
-        entity_id = str(row["id"])
         conn.execute(
             "INSERT INTO entity_run_links "
             "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "

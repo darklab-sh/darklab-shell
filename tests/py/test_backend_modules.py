@@ -6380,8 +6380,11 @@ class TestDatabaseInit:
             project_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info('projects')").fetchall()
             }
-            target_columns = {
-                row[1] for row in conn.execute("PRAGMA table_info('project_targets')").fetchall()
+            finding_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('findings')").fetchall()
+            }
+            occurrence_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('findings_occurrences')").fetchall()
             }
             conn.close()
 
@@ -6392,25 +6395,26 @@ class TestDatabaseInit:
             "entity_run_links",
             "entity_intel_snapshots",
             "run_file_artifacts",
-            "project_targets",
             "findings",
-            "finding_targets",
+            "findings_occurrences",
             "entity_labels",
             "entity_notes",
             "evidence_packages",
         }.issubset(tables)
+        assert "project_targets" not in tables
+        assert "finding_targets" not in tables
         assert "notes" not in project_columns
-        assert "label" not in target_columns
-        assert "notes" not in target_columns
         assert "content_sha256" in artifact_columns
         assert {
-            "review_state",
-            "source",
-            "source_detail",
-            "seen_count",
-            "last_seen",
-            "dismissed_at",
-        }.issubset(target_columns)
+            "entity_id",
+            "subject_key",
+            "signature_hash",
+            "first_run_id",
+            "last_run_id",
+            "occurrence_count",
+            "status",
+        }.issubset(finding_columns)
+        assert {"finding_id", "run_id", "line_number", "snippet", "seen_at"}.issubset(occurrence_columns)
 
     def test_materializes_run_entities_from_output_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -6454,10 +6458,32 @@ class TestDatabaseInit:
         assert len(recorded) == 2
         assert [row["run_id"] for row in link_rows] == ["run-atlas", "run-atlas"]
 
-    def test_project_workspace_migration_backfills_finding_targets(self):
+    def test_project_workspace_migration_drops_legacy_target_and_finding_tables(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
             conn = sqlite3.connect(db_path)
+            conn.execute("""
+                CREATE TABLE project_targets (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    created TEXT NOT NULL,
+                    updated TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE finding_targets (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    finding_id TEXT NOT NULL,
+                    target_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL DEFAULT '',
+                    source TEXT NOT NULL DEFAULT 'primary_match',
+                    confidence REAL NOT NULL DEFAULT 1.0,
+                    created TEXT NOT NULL
+                )
+            """)
             conn.execute("""
                 CREATE TABLE findings (
                     id TEXT PRIMARY KEY,
@@ -6480,32 +6506,48 @@ class TestDatabaseInit:
                 "VALUES ('fnd_legacy', 'sess_legacy', 'run_legacy', 'tgt_legacy', "
                 "'finding', 'open port 443', '443/tcp open https', '2026-05-08 00:00:00')"
             )
+            conn.execute(
+                "INSERT INTO project_targets "
+                "(id, project_id, type, value, created, updated) "
+                "VALUES ('tgt_legacy', 'prj_legacy', 'domain', 'darklab.sh', "
+                "'2026-05-08 00:00:00', '2026-05-08 00:00:00')"
+            )
+            conn.execute(
+                "INSERT INTO finding_targets "
+                "(id, session_id, finding_id, target_id, run_id, source, created) "
+                "VALUES ('ft_legacy', 'sess_legacy', 'fnd_legacy', 'tgt_legacy', "
+                "'run_legacy', 'legacy_primary', '2026-05-08 00:00:00')"
+            )
             conn.commit()
             conn.close()
 
             self._create_tables(db_path)
 
             conn = sqlite3.connect(db_path)
-            rows = conn.execute(
-                "SELECT session_id, finding_id, target_id, run_id, source, confidence "
-                "FROM finding_targets"
-            ).fetchall()
+            tables = {
+                row[0] for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            finding_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('findings')").fetchall()
+            }
+            finding_count = conn.execute("SELECT COUNT(*) FROM findings").fetchone()[0]
             conn.close()
 
-        assert rows == [(
-            "sess_legacy",
-            "fnd_legacy",
-            "tgt_legacy",
-            "run_legacy",
-            "legacy_primary",
-            1.0,
-        )]
+        assert "project_targets" not in tables
+        assert "finding_targets" not in tables
+        assert "findings_occurrences" in tables
+        assert {"signature_hash", "last_seen_at", "run_id"}.issubset(finding_columns)
+        assert finding_count == 0
 
     def test_project_workspace_entity_and_link_source_constants_are_validated(self):
         assert database.validate_project_entity_type("run") == "run"
         assert database.validate_project_entity_type("workspace_file") == "workspace_file"
         assert database.validate_project_link_source("manual") == "manual"
         assert database.validate_project_link_source("active_project") == "active_project"
+        assert database.validate_project_link_source("auto_command") == "auto_command"
+        assert database.validate_project_link_source("auto_input_file") == "auto_input_file"
 
         with pytest.raises(ValueError):
             database.validate_project_entity_type("note")
@@ -6551,10 +6593,9 @@ class TestDatabaseInit:
             artifact_indexes = {
                 row[1] for row in conn.execute("PRAGMA index_list('run_file_artifacts')").fetchall()
             }
-            target_indexes = {row[1] for row in conn.execute("PRAGMA index_list('project_targets')").fetchall()}
             finding_indexes = {row[1] for row in conn.execute("PRAGMA index_list('findings')").fetchall()}
-            finding_target_indexes = {
-                row[1] for row in conn.execute("PRAGMA index_list('finding_targets')").fetchall()
+            occurrence_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('findings_occurrences')").fetchall()
             }
             label_indexes = {row[1] for row in conn.execute("PRAGMA index_list('entity_labels')").fetchall()}
             note_indexes = {row[1] for row in conn.execute("PRAGMA index_list('entity_notes')").fetchall()}
@@ -6565,12 +6606,12 @@ class TestDatabaseInit:
         assert "idx_project_links_project_entity_created" in link_indexes
         assert "idx_project_links_entity_lookup" in link_indexes
         assert "idx_run_file_artifacts_session_run_path" in artifact_indexes
-        assert "idx_project_targets_project_type_value" in target_indexes
-        assert "idx_findings_session_run_created" in finding_indexes
-        assert "idx_findings_target_created" in finding_indexes
-        assert "idx_finding_targets_finding" in finding_target_indexes
-        assert "idx_finding_targets_target_created" in finding_target_indexes
-        assert "idx_finding_targets_run" in finding_target_indexes
+        assert "idx_findings_session_signature" in finding_indexes
+        assert "idx_findings_session_status" in finding_indexes
+        assert "idx_findings_session_entity_seen" in finding_indexes
+        assert "idx_findings_session_tool_seen" in finding_indexes
+        assert "idx_findings_session_severity_seen" in finding_indexes
+        assert "idx_findings_occurrences_run" in occurrence_indexes
         assert "idx_entity_labels_entity_created" in label_indexes
         assert "idx_entity_notes_entity_updated" in note_indexes
         assert "idx_evidence_packages_project_updated" in package_indexes

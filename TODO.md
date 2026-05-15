@@ -51,8 +51,8 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Schema cleanup is destructive. The run-centric `findings`, project-scoped `project_targets`, and `finding_targets` tables are dropped and replaced by an entity-first schema. Pre-release single-user app — no backwards-compatibility shim, no dual-write phase, no data backfill from legacy rows. The Findings triage inbox's `findings_inbox` table is also collapsed into the unified entity-owned `findings` table here.
   - Hard dependencies: entity-aware classifier hooks are landed; encrypted secrets vault is landed for intel refresh actions.
 - **Current implementation status**
-  - Landed: non-destructive Atlas storage foundation (`entities`, `entity_run_links`, `entity_intel_snapshots`), run-finalize materialization from classified output entity metadata, read-only `/atlas` summary/list/detail routes, and `atlas_entity` support in the shared label/note/project-link validation path.
-  - Still pending: browser Atlas surface, transcript token wiring, intel refresh actions, and the destructive project/finding/target rewrite described below.
+  - Landed: Phase 1 backend contracts and storage, including the destructive project/finding/target rewrite onto `entities`, `project_links(entity_type='atlas_entity')`, unified `findings`, and `findings_occurrences`; run-finalize entity/finding materialization; `/atlas` summary/list/detail/refresh/project-link routes; and shared label/note/project-link support for `atlas_entity`.
+  - Still pending: browser Atlas surface, transcript token wiring, richer Atlas list filters, and the later UI/export work described below.
 - **Phase 0 - Existing-code integration check (complete)**
   - Confirm classifier entity metadata (`entities: [{type, value, canonical_value, confidence, source_line}]`) is landed.
   - Audit `app/services/projects/workspace.py` and `app/services/projects/metadata.py` for label/note/finding/target storage that must be reused, not duplicated.
@@ -61,8 +61,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Inventory every SQL call site against `findings`, `project_targets`, and `finding_targets` across `app/services/projects/workspace.py`, `app/services/projects/metadata.py`, and `app/blueprints/projects.py`. Expect ~30+ touch sites in `workspace.py` alone. The rewrite of these call sites lands with the schema migration in Phase 1, not as a follow-up.
   - Confirm the existing generic `project_links` table (`project_id, entity_type, entity_id`) can absorb entity-to-project tagging by introducing `entity_type='atlas_entity'`. This drops the previously proposed standalone `entity_project_links` table from the plan.
   - Lock the destructive-migration decision: pre-release, single-user app, so v1 drops `project_targets`, `finding_targets`, and the existing run-centric `findings` schema outright. No backfill, no compat shim, no dual-write phase. Document this in the migration commit message so any future operator with persisted data sees the warning.
-- **Phase 1 - Backend contracts and storage (in progress)**
-  - **Compatibility foundation already landed:** the initial slice keeps the legacy project/finding tables intact while adding the Atlas tables and read-only routes. The destructive cleanup below is still the intended pre-release end state, but it should land as its own focused slice after the read-only Atlas APIs are stable.
+- **Phase 1 - Backend contracts and storage (complete)**
   - **Destructive schema migration in `app/core/database.py`:**
     - **Drop tables:** `project_targets`, `finding_targets`, and the existing run-centric `findings` table.
     - **Drop indexes:** `idx_findings_session_run_created`, `idx_findings_target_created`, `idx_finding_targets_finding`, `idx_finding_targets_target_created`, `idx_finding_targets_run`, `idx_project_targets_project_type_value`.

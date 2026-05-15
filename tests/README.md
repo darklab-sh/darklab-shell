@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,732
+- behavior tests: 2,741
 - docs/inventory meta-tests: 32
-- `pytest`: 1395 (1363 behavior + 32 meta)
+- `pytest`: 1396 (1364 behavior + 32 meta)
 - `vitest`: 1128
 - `playwright`: 249
-- total: 2,772
+- total: 2,773
 
 This document is organized in two parts:
 
@@ -666,7 +666,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_creates_runs_and_snapshots_tables` | Checks that creates runs and snapshots tables. |
 | `TestDatabaseInit.test_creates_project_workspace_tables` | Verifies that project workspace relationship tables are created during database bootstrap. |
 | `TestDatabaseInit.test_materializes_run_entities_from_output_entries` | Verifies Atlas materialization deduplicates classified run-output entities and creates source-run links. |
-| `TestDatabaseInit.test_project_workspace_migration_backfills_finding_targets` | Verifies that legacy primary finding targets are backfilled into persisted finding-target relationships. |
+| `TestDatabaseInit.test_project_workspace_migration_drops_legacy_target_and_finding_tables` | Verifies that the Atlas schema migration drops legacy project-target and finding-target tables before creating the entity-first replacements. |
 | `TestDatabaseInit.test_project_workspace_entity_and_link_source_constants_are_validated` | Verifies that project entity and link-source constants reject unsupported values. |
 | `TestDatabaseInit.test_creates_session_indexes` | Checks creates session indexes handling. |
 | `TestDatabaseInit.test_creates_project_workspace_indexes` | Verifies that project workspace query-shape indexes are created during database bootstrap. |
@@ -994,7 +994,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestProjectRoutes.test_builtin_runs_do_not_record_findings_even_with_legacy_project_link` | Verifies built-in runs stay out of persisted findings even if old data links them to a project. |
 | `TestProjectRoutes.test_project_write_routes_are_rate_limited` | Verifies project workspace write routes are wrapped by the shared limiter. |
 | `TestProjectRoutes.test_create_list_get_update_archive_and_delete_project` | Verifies the current-session project CRUD and archive filtering route flow. |
-| `TestProjectRoutes.test_delete_project_reassigns_finding_primary_target_when_other_targets_remain` | Verifies project deletion repairs a finding's primary target when another live target relationship remains. |
+| `TestProjectRoutes.test_delete_project_keeps_entity_owned_finding_target_when_entity_is_linked_elsewhere` | Verifies project deletion keeps entity-owned findings intact when the entity remains linked through another project. |
 | `TestProjectRoutes.test_projects_are_session_scoped_and_slugs_are_unique_per_session` | Verifies project session isolation and per-session slug collision handling. |
 | `TestProjectRoutes.test_sets_gets_and_clears_active_project` | Verifies active project context can be saved, read, and cleared for the current session. |
 | `TestProjectRoutes.test_active_project_rejects_cross_session_and_clears_stale_projects` | Verifies active project context rejects cross-session projects and clears archived or deleted projects. |
@@ -1145,6 +1145,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestMobileWelcomeHintsRoute.test_items_key_present` | Checks items key present handling. |
 | `TestAtlasRoutes.test_lists_session_entities_and_detail` | Verifies Atlas summary, list, and detail routes return session-owned materialized entities and source runs. |
 | `TestAtlasRoutes.test_entity_detail_is_session_scoped` | Verifies Atlas entity detail routes do not reveal entities from other sessions. |
+| `TestAtlasRoutes.test_refresh_intel_persists_provider_snapshot` | Verifies Atlas intel refresh stores provider snapshots for the selected session-owned entity. |
 | `TestWorkspaceRoutes.test_requires_active_session_header` | Verifies that workspace routes reject requests without an active session identity. |
 | `TestWorkspaceRoutes.test_disabled_workspace_returns_403` | Verifies that workspace routes stay unavailable while workspace storage is disabled. |
 | `TestWorkspaceRoutes.test_write_list_read_delete_lifecycle` | Verifies the route-level workspace lifecycle for write, list, read, and delete operations. |
@@ -1318,8 +1319,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunStreaming.test_history_restore_json_preserves_signal_metadata` | Verifies that history restore JSON preserves per-line signal metadata from persisted run output. |
 | `TestRunStreaming.test_project_findings_strip_ansi_codes_before_storage` | Verifies that persisted project findings store ANSI-normalized plain text even when scanner output includes terminal formatting. |
 | `TestRunStreaming.test_project_findings_prefer_classifier_target_metadata` | Verifies that persisted project findings use classifier target metadata when the finding line does not repeat the input-file target. |
-| `TestRunStreaming.test_project_findings_match_classifier_ip_to_project_cidr_target` | Verifies that classifier-extracted IP targets attach findings to matching project CIDR targets. |
-| `TestRunStreaming.test_project_findings_filter_by_matching_port_set_target` | Verifies that project finding filters can match port-set targets even when the finding's primary target is the scanned host. |
+| `TestRunStreaming.test_project_targets_reject_cidr_targets` | Verifies that project targets reject CIDR values now that project target rows are backed by concrete Atlas entities. |
+| `TestRunStreaming.test_project_targets_reject_port_set_targets` | Verifies that project targets reject port-set values now that project target rows are backed by concrete Atlas entities. |
 | `TestRunStreaming.test_active_project_auto_discovers_typed_command_targets` | Verifies that active projects stage typed command inputs as pending targets and suppress dismissed discoveries until user re-add. |
 | `TestRunStreaming.test_nonblocking_stream_reader_preserves_partial_lines_until_finalize` | Checks that the nonblocking stream reader buffers partial lines until a newline or finalize flush completes them. |
 | `TestRunStreaming.test_nonblocking_stream_reader_logs_when_nonblocking_setup_fails` | Verifies that non-blocking stream setup failures warn before falling back to blocking line reads. |

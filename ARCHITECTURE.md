@@ -255,7 +255,10 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | -------- | ---------- | ------------- |
 | `GET` | `/atlas` | Returns current-session Atlas entity counts by entity type. |
 | `GET` | `/atlas/entities` | Returns a paginated current-session entity list, with optional `type`, text search, project filter, limit, and offset parameters. |
-| `GET` | `/atlas/entities/<entity_id>` | Returns one current-session entity with source runs, labels, notes, project links, cached intel snapshots, and findings placeholder data. |
+| `GET` | `/atlas/entities/<entity_id>` | Returns one current-session entity with source runs, labels, notes, project links, cached intel snapshots, and related findings. |
+| `POST` | `/atlas/entities/<entity_id>/refresh_intel` | Refreshes app-native intel for one current-session entity and stores provider snapshots on the entity. |
+| `POST` | `/atlas/entities/<entity_id>/project_links` | Adds an Atlas entity to a project through the shared project-link model. |
+| `DELETE` | `/atlas/entities/<entity_id>/project_links/<project_id>` | Removes an Atlas entity from a project. |
 
 ### Session Routes
 
@@ -1091,17 +1094,17 @@ erDiagram
 - `recent_domains` — one row per recently used domain per session `(session_id, domain, last_used, use_count)`. Backs domain autocomplete across browsers that share the same named session token and follows the session-token migration path.
 - `secrets` — one row per encrypted secret name per session `(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at)`, with a unique `(session_token, name)` binding so replacing a secret updates the existing row. Storage also rejects attempts to bind the same consumer env name to two different secrets in one session, keeping command-time lookup unambiguous. Values are AES-GCM ciphertext and are never returned by list routes or stored in transcripts. The wrapping key comes from `SECRETS_MASTER_KEY` or `<data_dir>/.secrets_master_key`, with a fixed HKDF-SHA256 app context deriving the key used for row encryption. When the key file is used, the app creates or repairs it with `0600` permissions.
 - `projects` — one row per project/case folder. Stores session ownership, display metadata, status, timestamps, and a session-scoped slug. Project notes are stored through `entity_notes` with `entity_type='project'`.
-- `project_links` — generic project membership rows `(project_id, entity_type, entity_id)`. The app owns the valid entity vocabulary and link sources so projects can link completed runs and Atlas entities without copying source data. Run-owned records such as file artifacts and findings are intentionally reached through linked runs instead of direct project links.
+- `project_links` — generic project membership rows `(project_id, entity_type, entity_id)`. The app owns the valid entity vocabulary and link sources so projects can link completed runs and Atlas entities without copying source data. Atlas-entity links also carry target-list metadata such as source, confidence, review state, and source detail so the Projects modal can keep its target workflow without a separate target table. Run-owned records such as file artifacts and findings are intentionally reached through linked runs instead of direct project links.
 - `entities` — session-scoped Atlas rows for normalized public IPs, domains, URLs, hashes, and CVEs extracted from saved external-run output metadata. The app stores a canonical value, a stable signature hash, first/last seen timestamps, and an aggregate occurrence count so entity lists are deduplicated across runs.
 - `entity_run_links` — many-to-many Atlas source links from entities to runs, with first/last seen timestamps and per-run occurrence counts. Run pruning removes these link rows while leaving the deduplicated entity row available for labels, notes, project links, and future intel snapshots.
-- `entity_intel_snapshots` — cached, normalized provider snapshots attached to an Atlas entity. The row shape stores provider name, status, short summary, JSON payload, fetch time, and expiry time so the future Atlas UI can render intel cards without re-querying providers on every open.
+- `entity_intel_snapshots` — cached, normalized provider snapshots attached to an Atlas entity. The row shape stores provider name, status, short summary, JSON payload, fetch time, and expiry time so Atlas detail views can render intel cards without re-querying providers on every open. The refresh route writes through the same app-native intel provider orchestration used by the `intel` terminal command.
 - `run_file_artifacts` — durable file manifest rows for workspace files produced or consumed by a run, including recorded size and optional SHA-256 content checksum so project views can flag missing or changed workspace files. This is separate from `run_output_artifacts`, which stores the terminal transcript artifact behind a run permalink.
-- `project_targets` — project-scoped domains, URLs, hosts, IPs, CIDRs, and port sets. Targets can be manually entered or associated with source runs later.
-- `findings` — persisted output-signal rows linked to the source run, a primary target id when one is available, and a stable fingerprint for deduplication/context. The `finding_targets` relationship table stores every matched project target for a finding, so project views can show many-to-many target attribution without overloading the primary `target_id` field. These records are intentionally lightweight so findings can power filtering, review state, notes, and evidence packages without turning the app into a vulnerability-management system.
+- `findings` — entity-owned finding rows deduped across runs by a stable signature. Findings keep a primary Atlas entity when one is available, an unscoped subject key when one is not, first/last run IDs, first/last seen timestamps, occurrence count, severity, status, and lightweight title/raw-line context. The Projects modal and Atlas read the same table, so finding review state does not drift between surfaces.
+- `findings_occurrences` — per-run sightings for findings, keyed by finding, run, and line number. Run pruning removes these occurrence rows while leaving the parent finding row in place so labels, notes, and triage state can survive after the original transcript ages out.
 - `entity_labels` — short user-controlled labels/bookmarks for supported entities, including Atlas entities, projects, runs, snapshots, workspace files, run file artifacts, findings, targets, and packages.
 - `entity_notes` — one private note attached to each supported entity per session, including Atlas entities and project notes. Notes are intentionally singular so entity metadata remains an editable note surface instead of a comment thread.
 - `evidence_packages` — draft package manifests scoped to a project and session. The first pass records package name/description, redaction mode, artifact-inclusion preference, and a JSON manifest over the currently linked project data, then exports that manifest plus any still-available selected workspace artifacts as a downloadable archive. Package-level labels/notes are stored through the generic entity metadata tables.
-- Supporting indexes are part of the schema even though the ER diagram stays table-focused. `idx_runs_session_command_started` backs the Recent menu and prompt-history distinct-command query shape `(session_id, command, started DESC)`, `idx_runs_session_kind_started` backs built-in/external history filtering, while `idx_runs_session_started`, `idx_snapshots_session_created`, `idx_user_workflows_session_updated_created`, `idx_recent_domains_session_last_used`, and `idx_secrets_session_updated` keep session-scoped startup, history, workflow, share, autocomplete, and secret-list reads bounded on large history databases. Atlas indexes cover session/type/last-seen lists, entity value lookup, run-link cleanup, and cached intel snapshot reads. Project workspace indexes cover session project lists, project contents, reverse entity lookup, run file artifacts, targets, findings, labels, notes, and evidence packages before UI routes depend on those query shapes.
+- Supporting indexes are part of the schema even though the ER diagram stays table-focused. `idx_runs_session_command_started` backs the Recent menu and prompt-history distinct-command query shape `(session_id, command, started DESC)`, `idx_runs_session_kind_started` backs built-in/external history filtering, while `idx_runs_session_started`, `idx_snapshots_session_created`, `idx_user_workflows_session_updated_created`, `idx_recent_domains_session_last_used`, and `idx_secrets_session_updated` keep session-scoped startup, history, workflow, share, autocomplete, and secret-list reads bounded on large history databases. Atlas indexes cover session/type/last-seen lists, entity value lookup, run-link cleanup, finding status/entity/tool/severity filters, finding occurrence cleanup, and cached intel snapshot reads. Project workspace indexes cover session project lists, project contents, reverse entity lookup, run file artifacts, labels, notes, and evidence packages before UI routes depend on those query shapes.
 - Redis-backed active-run metadata plus browser `sessionStorage` form a second persistence layer for reload continuity:
   - `/history/active` covers in-flight runs owned by the server/session
   - browser `sessionStorage` covers non-running tabs, transcript previews, status, draft input, and active-tab selection
@@ -1330,12 +1333,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,732
+- behavior tests: 2,741
 - docs/inventory meta-tests: 32
-- `pytest`: 1395 (1363 behavior + 32 meta)
+- `pytest`: 1396 (1364 behavior + 32 meta)
 - `vitest`: 1128
 - `playwright`: 249
-- total: 2,772
+- total: 2,773
 
 ### Testing Architecture
 

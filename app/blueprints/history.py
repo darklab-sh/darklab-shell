@@ -660,8 +660,11 @@ def _run_metadata_counts_by_run(conn, run_ids):
     placeholders = ",".join("?" for _ in ids)
     if _history_table_exists(conn, "findings"):
         for row in conn.execute(
-            f"SELECT run_id, COUNT(*) AS count FROM findings WHERE run_id IN ({placeholders}) GROUP BY run_id",  # nosec
-            ids,
+            "SELECT fo.run_id, COUNT(*) AS count "
+            "FROM findings_occurrences fo JOIN findings f ON f.id = fo.finding_id "
+            f"WHERE f.session_id IN (SELECT session_id FROM runs WHERE id IN ({placeholders})) "  # nosec
+            f"AND fo.run_id IN ({placeholders}) GROUP BY fo.run_id",
+            [*ids, *ids],
         ).fetchall():
             counts.setdefault(str(row["run_id"]), {"finding_count": 0, "label_count": 0, "note_count": 0})
             counts[str(row["run_id"])]["finding_count"] = int(row["count"] or 0)
@@ -754,32 +757,18 @@ def _run_findings_by_run(conn, run_ids):
         return {}
     placeholders = ",".join("?" for _ in ids)
     rows = conn.execute(
-        "SELECT id, session_id, run_id, target_id, scope, title, raw_line, line_number, "  # nosec
-        "severity, fingerprint, review_state, created "
-        f"FROM findings WHERE run_id IN ({placeholders}) "
-        "ORDER BY line_number ASC, created ASC, id ASC",
+        "SELECT f.id, f.session_id, fo.run_id, COALESCE(f.entity_id, f.target_id) AS target_id, f.kind AS scope, "
+        "f.title, COALESCE(fo.snippet, f.raw_line) AS raw_line, fo.line_number, "
+        "f.severity, f.fingerprint, f.status AS review_state, f.created "
+        "FROM findings_occurrences fo JOIN findings f ON f.id = fo.finding_id "
+        f"WHERE fo.run_id IN ({placeholders}) "  # nosec
+        "ORDER BY fo.line_number ASC, f.created ASC, f.id ASC",
         ids,
     ).fetchall()
-    target_ids_by_finding = {str(row["id"]): [] for row in rows}
-    if rows and _history_table_exists(conn, "finding_targets"):
-        finding_ids = [str(row["id"]) for row in rows if row["id"]]
-        finding_placeholders = ",".join("?" for _ in finding_ids)
-        for target_row in conn.execute(
-            "SELECT finding_id, target_id FROM finding_targets "  # nosec
-            f"WHERE finding_id IN ({finding_placeholders}) "
-            "ORDER BY created ASC, id ASC",
-            finding_ids,
-        ).fetchall():
-            finding_id = str(target_row["finding_id"] or "")
-            target_id = str(target_row["target_id"] or "")
-            if finding_id and target_id and target_id not in target_ids_by_finding.setdefault(finding_id, []):
-                target_ids_by_finding[finding_id].append(target_id)
     grouped = {run_id: [] for run_id in ids}
     for row in rows:
         primary_target_id = str(row["target_id"] or "")
-        target_ids = list(target_ids_by_finding.get(str(row["id"]), []))
-        if primary_target_id and primary_target_id not in target_ids:
-            target_ids.insert(0, primary_target_id)
+        target_ids = [primary_target_id] if primary_target_id else []
         grouped.setdefault(str(row["run_id"]), []).append({
             "id": row["id"],
             "run_id": row["run_id"],

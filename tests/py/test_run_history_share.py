@@ -1018,7 +1018,7 @@ class TestRunStreaming:
         assert finding["raw_line"] == "80/tcp open http"
         assert finding["target_id"] == target["id"]
 
-    def test_project_findings_match_classifier_ip_to_project_cidr_target(self):
+    def test_project_targets_reject_cidr_targets(self):
         client = get_client()
         session_id = "sess-project-finding-cidr-target"
         project_resp = client.post(
@@ -1032,42 +1032,11 @@ class TestRunStreaming:
             json={"type": "cidr", "value": "10.0.0.0/24"},
             headers={"X-Session-ID": session_id},
         )
-        target = json.loads(target_resp.data)["target"]
-        client.post(
-            "/projects/active",
-            json={"project_id": project["id"]},
-            headers={"X-Session-ID": session_id},
-        )
-        fake_proc = _FakeProc(lines=[
-            "Nmap scan report for 10.0.0.5\n",
-            "443/tcp open https\n",
-            "",
-        ])
+        data = json.loads(target_resp.data)
+        assert target_resp.status_code == 400
+        assert data["error"] == "target type must be domain, url, host, or ip"
 
-        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
-             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
-             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("blueprints.run.pid_register"), \
-             mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]):
-            resp = _post_run(
-                client,
-                json={"command": "nmap -iL targets.txt"},
-                headers={"X-Session-ID": session_id},
-            )
-            resp.get_data(as_text=True)
-
-        assert resp.status_code == 200
-        with db_connect() as conn:
-            finding = conn.execute(
-                "SELECT target_id, raw_line FROM findings WHERE session_id = ?",
-                (session_id,),
-            ).fetchone()
-        assert finding is not None
-        assert finding["raw_line"] == "443/tcp open https"
-        assert finding["target_id"] == target["id"]
-
-    def test_project_findings_filter_by_matching_port_set_target(self):
+    def test_project_targets_reject_port_set_targets(self):
         client = get_client()
         session_id = "sess-project-finding-port-set-target"
         project_resp = client.post(
@@ -1081,69 +1050,15 @@ class TestRunStreaming:
             json={"type": "domain", "value": "darklab.sh"},
             headers={"X-Session-ID": session_id},
         )
-        domain_target = json.loads(domain_resp.data)["target"]
+        assert domain_resp.status_code == 201
         ports_resp = client.post(
             f"/projects/{project['id']}/targets",
             json={"type": "port_set", "value": "80,443,6788"},
             headers={"X-Session-ID": session_id},
         )
-        port_target = json.loads(ports_resp.data)["target"]
-        client.post(
-            "/projects/active",
-            json={"project_id": project["id"]},
-            headers={"X-Session-ID": session_id},
-        )
-        fake_proc = _FakeProc(lines=[
-            "Nmap scan report for darklab.sh\n",
-            "80/tcp open http\n",
-            "443/tcp open https {\"severity\":\"high\"}\n",
-            "6788/tcp open unknown\n",
-            "22/tcp open ssh\n",
-            "",
-        ])
-
-        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
-             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
-             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("blueprints.run.pid_register"), \
-             mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True, True, True, True]):
-            resp = _post_run(
-                client,
-                json={"command": "nmap -p 80,443,6788 darklab.sh"},
-                headers={"X-Session-ID": session_id},
-            )
-            resp.get_data(as_text=True)
-
-        assert resp.status_code == 200
-        filtered = client.get(
-            f"/projects/{project['id']}/findings?target_id={port_target['id']}",
-            headers={"X-Session-ID": session_id},
-        )
-        data = json.loads(filtered.data)
-        assert {item["raw_line"] for item in data["findings"]} == {
-            "80/tcp open http",
-            "443/tcp open https {\"severity\":\"high\"}",
-            "6788/tcp open unknown",
-        }
-        assert "22/tcp open ssh" not in {item["raw_line"] for item in data["findings"]}
-        assert all(item["target_id"] == domain_target["id"] for item in data["findings"])
-        assert all(port_target["id"] in item["target_ids"] for item in data["findings"])
-        with db_connect() as conn:
-            relationship_rows = conn.execute(
-                "SELECT f.raw_line, ft.target_id, ft.source "
-                "FROM finding_targets ft "
-                "JOIN findings f ON f.id = ft.finding_id "
-                "WHERE ft.session_id = ? "
-                "ORDER BY f.raw_line ASC, ft.source ASC",
-                (session_id,),
-            ).fetchall()
-        relationships = {(row["raw_line"], row["target_id"], row["source"]) for row in relationship_rows}
-        assert ("80/tcp open http", domain_target["id"], "primary_match") in relationships
-        assert ("80/tcp open http", port_target["id"], "line_match") in relationships
-        assert ("443/tcp open https {\"severity\":\"high\"}", port_target["id"], "line_match") in relationships
-        severities = {item["raw_line"]: item["severity"] for item in data["findings"]}
-        assert severities["443/tcp open https {\"severity\":\"high\"}"] == "high"
+        data = json.loads(ports_resp.data)
+        assert ports_resp.status_code == 400
+        assert data["error"] == "target type must be domain, url, host, or ip"
 
     def test_active_project_auto_discovers_typed_command_targets(self):
         client = get_client()
@@ -1179,7 +1094,7 @@ class TestRunStreaming:
             first_body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "[project] discovered 2 targets" in first_body
+        assert "[project] discovered 1 target" in first_body
         targets_resp = client.get(
             f"/projects/{project['id']}/targets",
             headers={"X-Session-ID": session_id},
@@ -1189,29 +1104,15 @@ class TestRunStreaming:
         assert by_value["darklab.sh"]["review_state"] == "pending"
         assert by_value["darklab.sh"]["source"] == "auto_command"
         assert by_value["darklab.sh"]["source_detail"]["kind"] == "positional"
-        assert by_value["80"]["type"] == "port_set"
-        assert by_value["80"]["review_state"] == "pending"
-        assert by_value["80"]["source"] == "auto_command"
+        assert "80" not in by_value
 
         findings_resp = client.get(
-            f"/projects/{project['id']}/findings?target_id={by_value['80']['id']}",
+            f"/projects/{project['id']}/findings?target_id={by_value['darklab.sh']['id']}",
             headers={"X-Session-ID": session_id},
         )
         findings = json.loads(findings_resp.data)["findings"]
         assert [item["raw_line"] for item in findings] == ["80/tcp open http"]
-        assert by_value["80"]["id"] in findings[0]["target_ids"]
-
-        dismiss_resp = client.put(
-            f"/projects/{project['id']}/targets/{by_value['80']['id']}",
-            json={"review_state": "dismissed"},
-            headers={"X-Session-ID": session_id},
-        )
-        assert dismiss_resp.status_code == 200
-        visible_targets = json.loads(client.get(
-            f"/projects/{project['id']}/targets",
-            headers={"X-Session-ID": session_id},
-        ).data)["targets"]
-        assert "80" not in {item["value"] for item in visible_targets}
+        assert by_value["darklab.sh"]["id"] in findings[0]["target_ids"]
 
         second_proc = _FakeProc(lines=["Nmap scan report for darklab.sh\n", "80/tcp open http\n", ""])
         with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
@@ -1228,24 +1129,6 @@ class TestRunStreaming:
             rerun_body = rerun.get_data(as_text=True)
         assert rerun.status_code == 200
         assert "[project] discovered" not in rerun_body
-        with db_connect() as conn:
-            dismissed = conn.execute(
-                "SELECT review_state, seen_count FROM project_targets WHERE id = ?",
-                (by_value["80"]["id"],),
-            ).fetchone()
-        assert dismissed["review_state"] == "dismissed"
-        assert dismissed["seen_count"] == 2
-
-        manual_resp = client.post(
-            f"/projects/{project['id']}/targets",
-            json={"type": "port_set", "value": "80"},
-            headers={"X-Session-ID": session_id},
-        )
-        manual_target = json.loads(manual_resp.data)["target"]
-        assert manual_resp.status_code == 201
-        assert manual_target["id"] == by_value["80"]["id"]
-        assert manual_target["review_state"] == "confirmed"
-        assert manual_target["source"] == "user"
 
         with mock.patch.dict(shell_app.CFG, {"workspace_enabled": True}, clear=False):
             target_file = shell_workspace.resolve_workspace_path(
@@ -3671,11 +3554,22 @@ class TestRunOutputArtifacts:
             assert conn.execute(
                 "SELECT COUNT(*) FROM findings WHERE id = ?",
                 ("fnd_artifact-delete-run",),
+            ).fetchone()[0] == 1
+            assert conn.execute(
+                "SELECT COUNT(*) FROM findings_occurrences WHERE run_id = ?",
+                ("artifact-delete-run",),
             ).fetchone()[0] == 0
+            finding = conn.execute(
+                "SELECT occurrence_count, run_id, last_run_id FROM findings WHERE id = ?",
+                ("fnd_artifact-delete-run",),
+            ).fetchone()
+            assert finding["occurrence_count"] == 0
+            assert finding["run_id"] == ""
+            assert finding["last_run_id"] == ""
             assert conn.execute(
                 "SELECT COUNT(*) FROM entity_labels WHERE id = ?",
                 ("lbl_artifact-delete-run",),
-            ).fetchone()[0] == 0
+            ).fetchone()[0] == 1
             assert conn.execute(
                 "SELECT COUNT(*) FROM entity_notes WHERE id = ?",
                 ("note_artifact-delete-run",),
@@ -3700,11 +3594,16 @@ class TestRunOutputArtifacts:
             assert conn.execute(
                 "SELECT COUNT(*) FROM findings WHERE id IN (?, ?)",
                 ("fnd_artifact-clear-a", "fnd_artifact-clear-b"),
-            ).fetchone()[0] == 0
+            ).fetchone()[0] == 2
+            assert conn.execute("SELECT COUNT(*) FROM findings_occurrences").fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM findings WHERE id IN (?, ?) AND occurrence_count = 0",
+                ("fnd_artifact-clear-a", "fnd_artifact-clear-b"),
+            ).fetchone()[0] == 2
             assert conn.execute(
                 "SELECT COUNT(*) FROM entity_labels WHERE id IN (?, ?)",
                 ("lbl_artifact-clear-a", "lbl_artifact-clear-b"),
-            ).fetchone()[0] == 0
+            ).fetchone()[0] == 2
             assert conn.execute(
                 "SELECT COUNT(*) FROM entity_notes WHERE id IN (?, ?)",
                 ("note_artifact-clear-a", "note_artifact-clear-b"),

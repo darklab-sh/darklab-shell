@@ -168,12 +168,14 @@ def _attach_target_metadata(conn, session_id, targets):
     if not items:
         return items
     target_ids = [target["id"] for target in items]
-    label_map = _entity_labels_by_id(conn, session_id, "target", target_ids)
-    note_map = _entity_notes_by_id(conn, session_id, "target", target_ids)
+    label_map = _entity_labels_by_id(conn, session_id, "atlas_entity", target_ids)
+    legacy_label_map = _entity_labels_by_id(conn, session_id, "target", target_ids)
+    note_map = _entity_notes_by_id(conn, session_id, "atlas_entity", target_ids)
+    legacy_note_map = _entity_notes_by_id(conn, session_id, "target", target_ids)
     for target in items:
         target_id = str(target["id"])
-        target["labels"] = label_map.get(target_id, [])
-        target["note"] = note_map.get(target_id)
+        target["labels"] = [*label_map.get(target_id, []), *legacy_label_map.get(target_id, [])]
+        target["note"] = note_map.get(target_id) or legacy_note_map.get(target_id)
     return items
 
 
@@ -226,6 +228,8 @@ def _normalize_metadata_target(entity_type, entity_id):
         raise ProjectWorkspaceError(str(exc)) from None
     if entity_type not in ENTITY_METADATA_TYPES:
         raise ProjectWorkspaceError(f"entity metadata does not support {entity_type}")
+    if entity_type == "target":
+        entity_type = "atlas_entity"
     entity_id = _trim_text(entity_id, MAX_ENTITY_ID_LEN)
     if not entity_id:
         raise ProjectWorkspaceError("entity_id is required")
@@ -264,7 +268,7 @@ def _workspace_file_belongs_to_session(session_id, entity_id):
 def _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
     if entity_type == "workspace_file":
         return _workspace_file_belongs_to_session(session_id, entity_id)
-    if entity_type == "atlas_entity":
+    if entity_type in {"atlas_entity", "target"}:
         row = conn.execute(
             "SELECT 1 FROM entities WHERE session_id = ? AND id = ?",
             (session_id, entity_id),
@@ -292,13 +296,6 @@ def _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
     elif entity_type == "finding":
         row = conn.execute(
             "SELECT 1 FROM findings WHERE session_id = ? AND id = ?",
-            (session_id, entity_id),
-        ).fetchone()
-    elif entity_type == "target":
-        row = conn.execute(
-            "SELECT 1 FROM project_targets t "
-            "JOIN projects p ON p.id = t.project_id "
-            "WHERE p.session_id = ? AND t.id = ?",
             (session_id, entity_id),
         ).fetchone()
     elif entity_type == "package":
