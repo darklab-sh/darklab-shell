@@ -26,9 +26,11 @@ PROJECT_AUTO_LINK_EXTERNAL_RUNS_PREF_KEY = "pref_project_auto_link_external_runs
 
 PROJECT_STATUSES = frozenset({"active", "archived"})
 PROJECT_LINK_ENTITY_TYPES = frozenset({
+    "atlas_entity",
     "run",
 })
 ENTITY_METADATA_TYPES = frozenset({
+    "atlas_entity",
     "project",
     "run",
     "snapshot",

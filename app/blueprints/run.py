@@ -65,6 +65,7 @@ from services.runs.broker import (
 )
 from services.runs.output_store import RunOutputCapture, load_full_output_entries
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, run_kind_for_cmd_type
+from services.atlas.materializer import materialize_run_entities
 from services.secrets.audit import emit_secret_event
 from services.secrets.storage import InvalidSecretName, get_secret_value_for_env
 from services.secrets.vault import MasterKeyError, SecretDecryptError
@@ -279,6 +280,7 @@ def _save_completed_run(
         preview_lines = list(capture.preview_lines)
         active_project_link = None
         recorded_artifacts = []
+        recorded_entities = []
         recorded_findings = []
         recorded_targets = []
         persisted_entries = preview_lines
@@ -383,6 +385,21 @@ def _save_completed_run(
                     "session": get_log_session_id(session_id),
                     "cmd": command,
                 })
+            try:
+                recorded_entities = materialize_run_entities(
+                    conn,
+                    session_id,
+                    run_id,
+                    persisted_entries,
+                    seen_at=finished_iso,
+                )
+            except Exception:
+                recorded_entities = []
+                log.error("ATLAS_ENTITY_CAPTURE_ERROR", exc_info=True, extra={
+                    "run_id": run_id,
+                    "session": get_log_session_id(session_id),
+                    "cmd": command,
+                })
             conn.commit()
         if active_project_link:
             log.info("PROJECT_ACTIVE_RUN_LINKED", extra={
@@ -409,6 +426,12 @@ def _save_completed_run(
                 "run_id": run_id,
                 "session": get_log_session_id(session_id),
                 "count": len(recorded_targets),
+            })
+        if recorded_entities:
+            log.info("ATLAS_ENTITIES_CAPTURED", extra={
+                "run_id": run_id,
+                "session": get_log_session_id(session_id),
+                "count": len(recorded_entities),
             })
         return active_project_link
     except Exception:

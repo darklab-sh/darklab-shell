@@ -276,6 +276,7 @@
 #   GreyNoise IP: 3600 (1h)
 #   AlienVault OTX indicator: 21600 (6h)
 #   AbuseIPDB IP: 21600 (6h)
+#   IPinfo IP: 21600 (6h)
 #   Team Cymru IP: 86400 (24h)
 #   crt.sh domain: 86400 (24h)
 #   HIBP Pwned Passwords SHA1: 604800 (7d)
@@ -298,6 +299,7 @@
 # intel_cache_ttl_greynoise_ip_seconds: 3600
 # intel_cache_ttl_otx_indicator_seconds: 21600
 # intel_cache_ttl_abuseipdb_ip_seconds: 21600
+# intel_cache_ttl_ipinfo_ip_seconds: 21600
 # intel_cache_ttl_teamcymru_ip_seconds: 86400
 # intel_cache_ttl_crtsh_domain_seconds: 86400
 # intel_cache_ttl_hibp_password_seconds: 604800
@@ -323,6 +325,7 @@
 #   GreyNoise unauthenticated fallback: bucket 10, refill 1 token every 8640s
 #   AlienVault OTX: bucket 30, refill 1 token every 2s
 #   AbuseIPDB: bucket 20, refill 1 token every 4s
+#   IPinfo: bucket 30, refill 1 token every 2s
 #   Team Cymru: bucket 30, refill 1 token every 2s
 #   crt.sh: bucket 10, refill 1 token every 6s
 #   HIBP Pwned Passwords: bucket 10, refill 1 token every 2s
@@ -347,6 +350,8 @@
 # intel_rate_limit_otx_refill_seconds: 2
 # intel_rate_limit_abuseipdb_bucket: 20
 # intel_rate_limit_abuseipdb_refill_seconds: 4
+# intel_rate_limit_ipinfo_bucket: 30
+# intel_rate_limit_ipinfo_refill_seconds: 2
 # intel_rate_limit_teamcymru_bucket: 30
 # intel_rate_limit_teamcymru_refill_seconds: 2
 # intel_rate_limit_crtsh_bucket: 10
@@ -375,6 +380,7 @@
 # intel_negative_cache_censys_quota_seconds: 21600
 # intel_negative_cache_otx_quota_seconds: 21600
 # intel_negative_cache_abuseipdb_quota_seconds: 21600
+# intel_negative_cache_ipinfo_quota_seconds: 21600
 # intel_negative_cache_urlhaus_quota_seconds: 21600
 # intel_negative_cache_vulners_quota_seconds: 21600
 # intel_negative_cache_urlscan_quota_seconds: 21600

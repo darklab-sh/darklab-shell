@@ -4830,11 +4830,25 @@ describe('app helpers', () => {
                 id: 'teamcymru',
                 label: 'Team Cymru',
                 entity_types: ['ip'],
+                uses: ['intel ip'],
                 secret_env: '',
                 secret_env_aliases: [],
                 secret_env_names: [],
                 requires_secret: false,
                 access_note: 'Free public lookup',
+                app_native: true,
+              },
+              {
+                id: 'ipinfo',
+                label: 'IPinfo',
+                entity_types: ['ip'],
+                uses: ['intel ip', 'ipinfo CLI'],
+                secret_env: 'IPINFO_TOKEN',
+                secret_env_aliases: [],
+                secret_env_names: ['IPINFO_TOKEN'],
+                requires_secret: true,
+                optional_secret: true,
+                access_note: 'Free public basics; optional account token',
                 app_native: true,
               },
               {
@@ -4847,6 +4861,18 @@ describe('app helpers', () => {
                 requires_secret: true,
                 access_note: 'Free signup; paid tiers',
                 app_native: true,
+              },
+              {
+                id: 'chaos',
+                label: 'ProjectDiscovery Chaos',
+                entity_types: ['domain'],
+                uses: ['chaos CLI'],
+                secret_env: 'PDCP_API_KEY',
+                secret_env_aliases: [],
+                secret_env_names: ['PDCP_API_KEY'],
+                requires_secret: true,
+                access_note: 'ProjectDiscovery Cloud account key',
+                app_native: false,
               },
             ],
           }),
@@ -4880,14 +4906,18 @@ describe('app helpers', () => {
     const providerOverlay = document.getElementById('provider-status-overlay')
     await vi.waitFor(() => expect(providerOverlay.classList.contains('u-hidden')).toBe(false))
     const providerText = document.getElementById('provider-status-body').textContent
-    expect(providerText).toContain('1 usable · 2 need configuration')
+    expect(providerText).toContain('2 usable · 3 not configured')
     expect(providerText).toContain('Team Cymru')
     expect(providerText).toContain('No secret needed')
+    expect(providerText).toContain('IPinfo')
+    expect(providerText).toContain('ipinfo CLI')
     expect(providerText).toContain('Shodan')
-    expect(providerText).toContain('Needs configuration')
+    expect(providerText).toContain('Not configured')
     expect(providerText).toContain('SHODAN_API_KEY')
     expect(providerText).toContain('VirusTotal')
     expect(providerText).toContain('VT_API_KEY')
+    expect(providerText).toContain('ProjectDiscovery Chaos')
+    expect(providerText).toContain('PDCP_API_KEY')
     expect(providerText).not.toContain('VTCLI_APIKEY')
 
     document.querySelector('.provider-status-close').click()

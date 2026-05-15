@@ -50,7 +50,10 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Project workspaces become a curation layer over the entity store; project_links are tags on entity rows, not parallel copies.
   - Schema cleanup is destructive. The run-centric `findings`, project-scoped `project_targets`, and `finding_targets` tables are dropped and replaced by an entity-first schema. Pre-release single-user app — no backwards-compatibility shim, no dual-write phase, no data backfill from legacy rows. The Findings triage inbox's `findings_inbox` table is also collapsed into the unified entity-owned `findings` table here.
   - Hard dependencies: entity-aware classifier hooks are landed; encrypted secrets vault is landed for intel refresh actions.
-- **Phase 0 - Existing-code integration check**
+- **Current implementation status**
+  - Landed: non-destructive Atlas storage foundation (`entities`, `entity_run_links`, `entity_intel_snapshots`), run-finalize materialization from classified output entity metadata, read-only `/atlas` summary/list/detail routes, and `atlas_entity` support in the shared label/note/project-link validation path.
+  - Still pending: browser Atlas surface, transcript token wiring, intel refresh actions, and the destructive project/finding/target rewrite described below.
+- **Phase 0 - Existing-code integration check (complete)**
   - Confirm classifier entity metadata (`entities: [{type, value, canonical_value, confidence, source_line}]`) is landed.
   - Audit `app/services/projects/workspace.py` and `app/services/projects/metadata.py` for label/note/finding/target storage that must be reused, not duplicated.
   - Audit `app/services/runs/comparison.py` for cross-run finding helpers the Atlas should reuse.
@@ -58,7 +61,8 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Inventory every SQL call site against `findings`, `project_targets`, and `finding_targets` across `app/services/projects/workspace.py`, `app/services/projects/metadata.py`, and `app/blueprints/projects.py`. Expect ~30+ touch sites in `workspace.py` alone. The rewrite of these call sites lands with the schema migration in Phase 1, not as a follow-up.
   - Confirm the existing generic `project_links` table (`project_id, entity_type, entity_id`) can absorb entity-to-project tagging by introducing `entity_type='atlas_entity'`. This drops the previously proposed standalone `entity_project_links` table from the plan.
   - Lock the destructive-migration decision: pre-release, single-user app, so v1 drops `project_targets`, `finding_targets`, and the existing run-centric `findings` schema outright. No backfill, no compat shim, no dual-write phase. Document this in the migration commit message so any future operator with persisted data sees the warning.
-- **Phase 1 - Backend contracts and storage**
+- **Phase 1 - Backend contracts and storage (in progress)**
+  - **Compatibility foundation already landed:** the initial slice keeps the legacy project/finding tables intact while adding the Atlas tables and read-only routes. The destructive cleanup below is still the intended pre-release end state, but it should land as its own focused slice after the read-only Atlas APIs are stable.
   - **Destructive schema migration in `app/core/database.py`:**
     - **Drop tables:** `project_targets`, `finding_targets`, and the existing run-centric `findings` table.
     - **Drop indexes:** `idx_findings_session_run_created`, `idx_findings_target_created`, `idx_finding_targets_finding`, `idx_finding_targets_target_created`, `idx_finding_targets_run`, `idx_project_targets_project_type_value`.
@@ -77,9 +81,9 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - Replaces the role of `seen_count` / `last_seen` / `source_run_id` formerly on `project_targets`.
     - Index: `idx_entity_run_links_run ON entity_run_links (run_id)` so run pruning can sweep entity links cleanly.
   - **New `entity_intel_snapshots` table:**
-    - `(entity_id, provider, payload_json, fetched_at, ttl_seconds, http_status, cache_hit_count, PRIMARY KEY (entity_id, provider))`.
+    - Current foundation shape: `(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at)`.
     - One row per (entity, provider). Refresh replaces in place.
-    - Index: `idx_entity_intel_snapshots_fetched ON entity_intel_snapshots (fetched_at)` for TTL expiry sweeps.
+    - Index: `idx_entity_intel_snapshots_entity_fetched ON entity_intel_snapshots (entity_id, fetched_at DESC)` for detail-card reads; TTL-expiry sweeps can add a broader fetched/expiry index if profiling shows it is needed.
   - **New entity-owned `findings` table (rewritten, not migrated):**
     - `(id, session_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, status_updated_at, fingerprint, created)`.
     - `status` values: `new`, `triaged`, `confirmed`, `false_positive`. **Triage state lives directly on `findings`** — the Findings triage inbox plan's separate `findings_inbox` table is collapsed into this row.
@@ -103,9 +107,9 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - Explicit `intel` commands, sidecar enrichment, and future pipe-helper enrichment all write through the same provider lookup path so cache, quota, missing-secret, and audit behavior cannot drift.
     - Project enrichment stores selected snapshots under the entity/project model rather than creating parallel project-only intel records.
   - **Routes in new `app/blueprints/atlas.py`:**
-    - `GET /atlas` tab summary (entity counts per type, computed from indexed `entities` rows unless profiling proves a rollup table is needed).
-    - `GET /atlas/entities` paginated list with filters (`type`, `q`, `status`, `seen_in_last`, `has_intel`, `project_id`).
-    - `GET /atlas/entities/<id>` detail with linked runs, intel snapshots, findings, labels, notes, project links.
+    - `GET /atlas` tab summary (landed: entity counts per type, computed from indexed `entities` rows unless profiling proves a rollup table is needed).
+    - `GET /atlas/entities` paginated list with filters (landed: `type`, `q`, `project_id`, `limit`, `offset`; still pending: `status`, `seen_in_last`, `has_intel`).
+    - `GET /atlas/entities/<id>` detail with linked runs, intel snapshots, findings, labels, notes, project links (landed; findings are an empty compatibility placeholder until the findings rewrite lands).
     - `POST /atlas/entities/<id>/refresh_intel` triggers a fresh provider fetch via the intel service (rate-limited).
     - `POST /atlas/entities/<id>/project_links` promotes by writing into `project_links` with `entity_type='atlas_entity'`.
     - `DELETE /atlas/entities/<id>/project_links/<project_id>` unpromotes.

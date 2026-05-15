@@ -16,6 +16,14 @@ _MEMORY_LOCK = threading.Lock()
 _MEMORY_CACHE: dict[str, tuple[float, str]] = {}
 
 
+def _coerce_nonnegative_int(value: Any, fallback: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return parsed if parsed >= 0 else fallback
+
+
 def _coerce_positive_int(value: Any, fallback: int) -> int:
     try:
         parsed = int(value)
@@ -28,9 +36,9 @@ def cache_ttl(provider: str, scope: str, cfg: dict[str, Any] | None = None) -> i
     active_cfg = cfg or CFG
     setting = cache_ttl_setting(provider, scope)
     if setting:
-        return _coerce_positive_int(active_cfg.get(setting.config_key), setting.default_seconds)
+        return _coerce_nonnegative_int(active_cfg.get(setting.config_key), setting.default_seconds)
     key = f"intel_cache_ttl_{str(provider or '').lower()}_{str(scope or '').lower()}_seconds"
-    return _coerce_positive_int(active_cfg.get(key), 3600)
+    return _coerce_nonnegative_int(active_cfg.get(key), 3600)
 
 
 def cache_key(provider: str, entity_type: str, canonical_value: str) -> str:
@@ -80,6 +88,8 @@ def set_cached_response(
     ttl_seconds: int,
     redis_client=None,
 ) -> None:
+    if int(ttl_seconds) <= 0:
+        return
     key = cache_key(provider, entity_type, canonical_value)
     encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True)
     store = _store(redis_client)

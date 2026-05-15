@@ -314,6 +314,7 @@ _BUILTIN_COMMAND_DISPATCH = {
     "mkdir":     lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
     "mv":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
     "man":       lambda cmd, sid: _run_builtin_man(cmd),
+    "providers": lambda cmd, sid: _run_builtin_secret("secret show-consumers", sid),
     "ps":        lambda cmd, sid: _run_builtin_ps(sid, cmd),
     "pwd":       lambda cmd, sid: _run_builtin_pwd(),
     "project":   lambda cmd, sid: _run_builtin_project(cmd, sid),

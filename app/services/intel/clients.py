@@ -211,6 +211,18 @@ class AbuseIpdbApiClient(JsonApiClient):
         return self._json_request(f"{self.base_url}/check?{query}", headers=headers)
 
 
+class IpinfoApiClient(JsonApiClient):
+    base_url = "https://api.ipinfo.io"
+    legacy_base_url = "https://ipinfo.io"
+
+    def lookup_ip(self, value: str, *, api_key: str = "") -> dict[str, Any]:
+        path = quote(value, safe="")
+        if api_key:
+            query = urlencode({"token": api_key})
+            return self._json_request(f"{self.base_url}/lookup/{path}?{query}")
+        return self._json_request(f"{self.legacy_base_url}/{path}/json")
+
+
 class CensysApiClient(JsonApiClient):
     base_url = "https://api.platform.censys.io/v3"
 
@@ -220,9 +232,11 @@ class CensysApiClient(JsonApiClient):
             "Accept": "application/vnd.censys.api.v3.host.v1+json",
         }
 
-    def lookup_host(self, value: str, *, api_key: str) -> dict[str, Any]:
+    def lookup_host(self, value: str, *, api_key: str, organization_id: str = "") -> dict[str, Any]:
         path = quote(value, safe="")
-        return self._json_request(f"{self.base_url}/global/asset/host/{path}", headers=self._headers(api_key))
+        query = urlencode({"organization_id": organization_id}) if organization_id else ""
+        suffix = f"?{query}" if query else ""
+        return self._json_request(f"{self.base_url}/global/asset/host/{path}{suffix}", headers=self._headers(api_key))
 
 
 class CrtshApiClient(JsonApiClient):

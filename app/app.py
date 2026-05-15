@@ -57,6 +57,7 @@ _warn_workspace_root_config_drift(CFG)
 from extensions import limiter  # noqa: E402
 from core.helpers import get_client_ip, get_session_id  # noqa: E402, F401 — get_session_id re-exported
 from blueprints.assets import assets_bp  # noqa: E402
+from blueprints.atlas import atlas_bp  # noqa: E402
 from blueprints.content import content_bp  # noqa: E402
 from blueprints.run import run_bp, SUDO_BIN, KILL_BIN  # noqa: E402, F401 — re-exported
 from blueprints.history import history_bp  # noqa: E402
@@ -134,6 +135,7 @@ def _log_response(response):
 
 
 app.register_blueprint(assets_bp)
+app.register_blueprint(atlas_bp)
 app.register_blueprint(content_bp)
 app.register_blueprint(run_bp)
 app.register_blueprint(history_bp)

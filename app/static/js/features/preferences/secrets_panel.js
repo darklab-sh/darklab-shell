@@ -165,11 +165,12 @@ function _optionsProviderStatus(provider, secretNames) {
   const acceptedNames = _optionsProviderPrimaryNames(provider);
   const lookupNames = _optionsProviderLookupNames(provider);
   const needsSecret = Boolean(provider?.requires_secret || lookupNames.length);
-  const configured = !needsSecret || lookupNames.some((name) => secretNames.has(name));
+  const hasStoredSecret = lookupNames.some((name) => secretNames.has(name));
+  const configured = hasStoredSecret || !needsSecret || Boolean(provider?.optional_secret);
   return {
     acceptedNames,
     configured,
-    label: configured ? 'Usable' : 'Needs configuration',
+    label: configured ? 'Usable' : 'Not configured',
   };
 }
 
@@ -229,10 +230,16 @@ function _optionsProviderRow(provider, secretNames) {
 
   const entityWrap = document.createElement('div');
   entityWrap.className = 'options-secret-chips';
+  const uses = Array.isArray(provider?.uses)
+    ? provider.uses.map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+  const entityTypes = Array.isArray(provider?.entity_types)
+    ? provider.entity_types.map((item) => String(item || '').toUpperCase())
+    : [];
   _appendOptionsProviderChips(
     entityWrap,
-    (Array.isArray(provider?.entity_types) ? provider.entity_types : []).map((item) => String(item).toUpperCase()),
-    'No entity types',
+    uses.length ? uses : entityTypes,
+    'No provider uses',
   );
   row.appendChild(entityWrap);
 
@@ -295,8 +302,8 @@ async function openProviderStatusModal() {
     const summary = document.createElement('div');
     summary.className = 'options-provider-summary';
     summary.textContent = providers.length
-      ? `${usableCount} usable · ${needsCount} need configuration`
-      : 'No app-native intel providers are registered.';
+      ? `${usableCount} usable · ${needsCount} not configured`
+      : 'No intel providers are registered.';
 
     const list = document.createElement('div');
     list.className = 'options-provider-list';
@@ -313,7 +320,7 @@ async function openProviderStatusModal() {
     body.innerHTML = '';
     const intro = document.createElement('div');
     intro.className = 'provider-status-intro';
-    intro.textContent = 'See which app-native intel providers can run now and which need an API key in this session.';
+    intro.textContent = 'See which intel providers can run now and which need an API key in this session.';
     body.appendChild(intro);
     body.appendChild(summary);
     body.appendChild(list);

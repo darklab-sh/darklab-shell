@@ -34,6 +34,7 @@ import services.secrets.vault as secrets_vault
 from services.commands.builtins import execute_builtin_command
 from core.database import DB_PATH, db_connect, db_init
 from services.projects.workspace import record_run_findings
+from services.atlas.materializer import materialize_run_entities
 from services.workspace.files import resolve_workspace_path
 
 
@@ -3614,8 +3615,10 @@ class TestCommandCatalogRoute:
             for item in index_data["intel_providers"]
         } >= {
             ("virustotal", ("domain", "hash"), ("VT_API_KEY", "VTCLI_APIKEY")),
+            ("ipinfo", ("ip",), ("IPINFO_TOKEN",)),
             ("teamcymru", ("ip",), ()),
             ("nvd", ("cve",), ()),
+            ("chaos", ("domain",), ("PDCP_API_KEY",)),
         }
         assert {
             (item["consumer"], item["env"], tuple(item.get("fallback_envs") or []))
@@ -3624,10 +3627,12 @@ class TestCommandCatalogRoute:
             ("sentinel", "SHODAN_API_KEY", ()),
             ("intel Shodan", "SHODAN_API_KEY", ()),
             ("intel Censys", "CENSYS_PAT", ()),
+            ("intel Censys organization", "CENSYS_ORGANIZATION_ID", ()),
             ("intel VirusTotal", "VT_API_KEY", ("VTCLI_APIKEY",)),
             ("intel GreyNoise", "GREYNOISE_API_KEY", ()),
             ("intel AlienVault OTX", "OTX_API_KEY", ()),
             ("intel AbuseIPDB", "ABUSEIPDB_API_KEY", ()),
+            ("intel IPinfo", "IPINFO_TOKEN", ()),
             ("intel URLhaus", "URLHAUS_AUTH_KEY", ()),
             ("intel Vulners", "VULNERS_API_KEY", ()),
             ("intel urlscan.io", "URLSCAN_API_KEY", ()),
@@ -4050,6 +4055,69 @@ class TestMobileWelcomeHintsRoute:
         data = json.loads(client.get("/welcome/hints-mobile").data)
         assert "items" in data
         assert isinstance(data["items"], list)
+
+
+# ── /atlas ───────────────────────────────────────────────────────────────────
+
+class TestAtlasRoutes:
+    def _session_id(self):
+        return "atlas-" + uuid.uuid4().hex[:8]
+
+    def _seed_entity_run(self, session_id):
+        run_id = "run-" + uuid.uuid4().hex
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, 'external', ?, ?, ?, 1)",
+                (run_id, session_id, "nmap darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
+            )
+            recorded = materialize_run_entities(
+                conn,
+                session_id,
+                run_id,
+                [{
+                    "text": "darklab.sh CVE-2025-49113",
+                    "entities": [
+                        {"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"},
+                        {"type": "cve", "value": "CVE-2025-49113", "canonical_value": "CVE-2025-49113"},
+                    ],
+                }],
+                seen_at="2026-05-14T00:00:01+00:00",
+            )
+            conn.commit()
+        return run_id, recorded
+
+    def test_lists_session_entities_and_detail(self):
+        client = get_client()
+        session_id = self._session_id()
+        run_id, recorded = self._seed_entity_run(session_id)
+        domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
+
+        summary_resp = client.get("/atlas", headers={"X-Session-ID": session_id})
+        list_resp = client.get("/atlas/entities?type=domain", headers={"X-Session-ID": session_id})
+        detail_resp = client.get(f"/atlas/entities/{domain_id}", headers={"X-Session-ID": session_id})
+
+        assert summary_resp.status_code == 200
+        assert json.loads(summary_resp.data)["counts"]["domain"] == 1
+        assert list_resp.status_code == 200
+        data = json.loads(list_resp.data)
+        assert data["total"] == 1
+        assert data["entities"][0]["id"] == domain_id
+        assert data["entities"][0]["canonical_value"] == "darklab.sh"
+        assert detail_resp.status_code == 200
+        detail = json.loads(detail_resp.data)
+        assert detail["entity"]["id"] == domain_id
+        assert detail["runs"][0]["run_id"] == run_id
+
+    def test_entity_detail_is_session_scoped(self):
+        client = get_client()
+        session_id = self._session_id()
+        _, recorded = self._seed_entity_run(session_id)
+        domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
+
+        resp = client.get(f"/atlas/entities/{domain_id}", headers={"X-Session-ID": self._session_id()})
+
+        assert resp.status_code == 404
 
 
 # ── /workspace/files ──────────────────────────────────────────────────────────

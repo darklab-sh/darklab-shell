@@ -93,6 +93,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `intel_cache_ttl_greynoise_ip_seconds` | `3600` | Server-side only. Default cache lifetime for normalized GreyNoise IP responses |
 | `intel_cache_ttl_otx_indicator_seconds` | `21600` | Server-side only. Default cache lifetime for normalized AlienVault OTX indicator responses |
 | `intel_cache_ttl_abuseipdb_ip_seconds` | `21600` | Server-side only. Default cache lifetime for normalized AbuseIPDB IP responses |
+| `intel_cache_ttl_ipinfo_ip_seconds` | `21600` | Server-side only. Default cache lifetime for normalized IPinfo IP responses |
 | `intel_cache_ttl_teamcymru_ip_seconds` | `86400` | Server-side only. Default cache lifetime for normalized Team Cymru IP ownership responses |
 | `intel_cache_ttl_crtsh_domain_seconds` | `86400` | Server-side only. Default cache lifetime for normalized crt.sh domain responses |
 | `intel_cache_ttl_hibp_password_seconds` | `604800` | Server-side only. Default cache lifetime for HIBP Pwned Passwords SHA1 range responses |
@@ -121,6 +122,8 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `intel_rate_limit_otx_refill_seconds` | `2` | Server-side only. Seconds between AlienVault OTX token refills |
 | `intel_rate_limit_abuseipdb_bucket` | `20` | Server-side only. Token-bucket size for AbuseIPDB lookups per session |
 | `intel_rate_limit_abuseipdb_refill_seconds` | `4` | Server-side only. Seconds between AbuseIPDB token refills |
+| `intel_rate_limit_ipinfo_bucket` | `30` | Server-side only. Token-bucket size for IPinfo lookups per session |
+| `intel_rate_limit_ipinfo_refill_seconds` | `2` | Server-side only. Seconds between IPinfo token refills |
 | `intel_rate_limit_teamcymru_bucket` | `30` | Server-side only. Token-bucket size for Team Cymru lookups per session |
 | `intel_rate_limit_teamcymru_refill_seconds` | `2` | Server-side only. Seconds between Team Cymru token refills |
 | `intel_rate_limit_crtsh_bucket` | `10` | Server-side only. Token-bucket size for crt.sh lookups per session |
@@ -145,6 +148,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `intel_negative_cache_censys_quota_seconds` | `21600` | Server-side only. Fallback cache window for Censys quota-exhausted responses when no reset time is available |
 | `intel_negative_cache_otx_quota_seconds` | `21600` | Server-side only. Fallback cache window for AlienVault OTX quota-exhausted responses when no reset time is available |
 | `intel_negative_cache_abuseipdb_quota_seconds` | `21600` | Server-side only. Fallback cache window for AbuseIPDB quota-exhausted responses when no reset time is available |
+| `intel_negative_cache_ipinfo_quota_seconds` | `21600` | Server-side only. Fallback cache window for IPinfo quota-exhausted responses when no reset time is available |
 | `intel_negative_cache_urlhaus_quota_seconds` | `21600` | Server-side only. Fallback cache window for URLhaus quota-exhausted responses when no reset time is available |
 | `intel_negative_cache_vulners_quota_seconds` | `21600` | Server-side only. Fallback cache window for Vulners quota-exhausted responses when no reset time is available |
 | `intel_negative_cache_urlscan_quota_seconds` | `21600` | Server-side only. Fallback cache window for urlscan.io quota-exhausted responses when no reset time is available |

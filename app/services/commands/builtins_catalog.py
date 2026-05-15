@@ -173,6 +173,7 @@ _DOCUMENTED_BUILTIN_COMMANDS = [
     {"name": "ps", "description": "Show the current shell process view plus recent session commands.", "root": "ps"},
     {"name": "pwd", "description": "Show the session files path.", "root": "pwd"},
     {"name": "project", "description": "Create, select, and link project workspaces from the terminal.", "root": "project"},
+    {"name": "providers", "description": "Alias for `secret show-consumers`.", "root": "providers"},
     {"name": "quit", "description": "Alias for `exit`.", "root": "quit"},
     {"name": "retention", "description": "Show retention and persisted-output settings.", "root": "retention"},
     {"name": "mv <source> <destination>", "description": "Move or rename a session file or folder.", "root": "mv"},

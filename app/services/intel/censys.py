@@ -43,21 +43,34 @@ class CensysProvider(Provider):
     def lookup_ip(self, value: str, *, session_token: str, run_id: str = "") -> IntelResult:
         del run_id
         api_key = self.secret_value(session_token)
+        organization_id = self.secret_getter(session_token, "CENSYS_ORGANIZATION_ID") or ""
         if not self.client:
             raise ProviderClientUnavailable("Censys client is not configured")
         canonical = canonical_ip(value)
-        raw = self.client.lookup_host(canonical, api_key=api_key)
+        raw = self.client.lookup_host(canonical, api_key=api_key, organization_id=organization_id)
         payload = response_with_provider("ip", self.name, normalize_ip_payload(raw))
         return IntelResult(self.name, "ip", canonical, payload, http_status=getattr(self.client, "last_status", None))
 
 
 def _host_record(raw: dict[str, Any]) -> dict[str, Any]:
-    for key in ("host", "resource", "result", "data"):
-        value = raw.get(key)
-        if isinstance(value, dict):
-            nested_host = value.get("host")
-            return nested_host if isinstance(nested_host, dict) else value
-    return raw
+    current = raw
+    seen: set[int] = set()
+    while isinstance(current, dict) and id(current) not in seen:
+        seen.add(id(current))
+        for key in ("host", "resource"):
+            value = current.get(key)
+            if isinstance(value, dict):
+                current = value
+                break
+        else:
+            for key in ("result", "data"):
+                value = current.get(key)
+                if isinstance(value, dict):
+                    current = value
+                    break
+            else:
+                return current
+    return current if isinstance(current, dict) else raw
 
 
 def _service_rows(host: dict[str, Any]) -> list[dict[str, Any]]:

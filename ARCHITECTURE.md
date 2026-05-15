@@ -249,6 +249,14 @@ Finding and artifact object diffs are intentionally order-insensitive: finding k
 stored `raw_line` / `title` text with fingerprint fallback, while artifact keys prefer
 `content_sha256`, then workspace path, then artifact id.
 
+### Atlas Routes
+
+| Method | Endpoint | Description |
+| -------- | ---------- | ------------- |
+| `GET` | `/atlas` | Returns current-session Atlas entity counts by entity type. |
+| `GET` | `/atlas/entities` | Returns a paginated current-session entity list, with optional `type`, text search, project filter, limit, and offset parameters. |
+| `GET` | `/atlas/entities/<entity_id>` | Returns one current-session entity with source runs, labels, notes, project links, cached intel snapshots, and findings placeholder data. |
+
 ### Session Routes
 
 | Method | Endpoint | Description |
@@ -705,35 +713,37 @@ Workspace-aware validation also rewrites declared file and directory flags from 
 
 Registry-owned `requires_secrets` declarations use a separate launch path from runtime environment wrappers. `/runs` resolves the original command root's secret declarations against the current session vault before validation-owned runtime wrappers can change the executed shell text. Required missing secrets or missing session identity block the launch; optional missing secrets log a warning. Found values are decrypted in memory and passed through `subprocess.Popen(env=...)`, never inserted into the shell command text. A declaration can look up one or more vault names and inject the value under a different runtime env name, which is how the VirusTotal CLI accepts either `VT_API_KEY` or `VTCLI_APIKEY` while receiving `VTCLI_APIKEY` in the child process. Optional declarations cover tools such as `ipinfo`, where unauthenticated output can still work but `IPINFO_TOKEN` unlocks richer account-backed results. The urlscan and Chaos CLI wrappers use the same boundary for `URLSCAN_API_KEY` and `PDCP_API_KEY`, with setup/key-writing commands blocked by policy so keys stay in the app vault instead of vendor config files or argv. The command catalog exposes this metadata without values so the Options Secrets picker can suggest known tool keys before falling back to a custom name. In the container scanner path, sudo preserves only the declared secret env names so the scanner process receives them without exposing values in argv or preserving unrelated app env. Interactive PTY registry entries cannot also declare `requires_secrets`; registry loading rejects that combination because the PTY path does not inject secret environment variables. Successful secret use emits one `SECRET_INJECTED` audit event for the run with env names only.
 
-The app-native `intel` built-in uses the same encrypted-secret boundary without spawning a provider CLI. `app/services/intel/registry.py` owns provider metadata such as labels, supported entity types, secret env names and aliases, access notes, cache scopes, and rate-limit config keys. `app/services/intel/lookup.py` canonicalizes requested IP, domain, URL, hash, and CVE values; verifies required provider secrets for the current session; checks Redis-backed cache and quota state; applies per-session provider token buckets; calls the app-native provider clients for Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, and RouteViews; stores normalized provider responses; and emits redacted `INTEL_LOOKUP` audit events. The HTTPS clients use the configured CA environment when present and otherwise prefer the system CA bundle, so container builds with source-built OpenSSL still verify provider certificates against the OS trust store. Missing keyed providers render as terminal placeholders beside configured provider results, while no-key providers still participate in fan-out with the same cache and rate-limit protections. The same provider metadata feeds the Options Secrets picker, the Options Provider Status modal, and `secret show-consumers`, so app-native HTTP providers appear beside CLI-backed command-registry consumers and users can see which providers are usable before running `intel`.
+The app-native `intel` built-in uses the same encrypted-secret boundary without spawning a provider CLI. `app/services/intel/registry.py` owns provider metadata such as labels, supported entity types, secret env names and aliases, access notes, cache scopes, rate-limit config keys, and provider usage labels. `app/services/intel/lookup.py` canonicalizes requested IP, domain, URL, hash, and CVE values; verifies required provider secrets for the current session; checks Redis-backed cache and quota state; applies per-session provider token buckets; calls the app-native provider clients for Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, and RouteViews; stores normalized provider responses; and emits redacted `INTEL_LOOKUP` audit events. The HTTPS clients use the configured CA environment when present and otherwise prefer the system CA bundle, so container builds with source-built OpenSSL still verify provider certificates against the OS trust store. Missing keyed providers render as terminal placeholders beside configured provider results, optional-key providers can still run with public data, and no-key providers participate in fan-out with the same cache and rate-limit protections. The same provider metadata feeds the Options Secrets picker, the Options Provider Status modal, `secret show-consumers`, and the `providers` alias, so users can see which app-native and CLI-backed providers are usable before running lookups or provider CLIs.
 
 The terminal command fans out by entity type. Private, loopback, and other non-public IPs are blocked before provider lookup unless the user passes `--include-private`.
 
 | Command | Providers |
 | --------- | --------- |
-| `intel ip <ip>` | Shodan, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, Team Cymru, URLhaus, ThreatFox, RouteViews |
+| `intel ip <ip>` | Shodan, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, URLhaus, ThreatFox, RouteViews |
 | `intel domain <domain>` | VirusTotal, AlienVault OTX, crt.sh, urlscan.io, URLhaus, ThreatFox, SecurityTrails |
 | `intel url <url>` | urlscan.io, URLhaus, ThreatFox |
 | `intel hash <md5\|sha1\|sha256>` | VirusTotal, AlienVault OTX, HIBP Pwned Passwords for SHA1 only, URLhaus, ThreatFox |
 | `intel cve <CVE-ID>` | NVD, Vulners |
 
-The provider table below is the source-of-truth shape exposed through the command catalog, Options Provider Status, Options Secrets suggestions, and `secret show-consumers`. "No" in the API key column means the provider works without a stored session secret, but the app still applies its own cache and per-session token bucket before calling the third-party service.
+The provider table below covers both app-native `intel` providers and provider CLI wrappers exposed through the command registry. App-native and CLI-backed rows feed the Options Provider Status modal, `secret show-consumers`, and the `providers` alias, and their secret metadata feeds the command catalog and Options Secrets suggestions. "No" in the API key column means the app-native provider works without a stored session secret, but the app still applies its own cache and per-session token bucket before calling the third-party service. "Optional" means the lookup or CLI can run without a key but gets richer account-backed results when the session vault has one.
 
-| Provider | Used by | API key required | Accepted secret names | Access note | App-native use |
+| Provider | Used by | API key required | Accepted secret names | Access note | Darklab use |
 | --------- | --------- | --------- | --------- | --------- | --------- |
-| Shodan | `ip` | Yes | `SHODAN_API_KEY` | Free signup; paid tiers | Host ports, banners, CVEs, tags, organization, and ISP context |
-| Censys | `ip` | Yes | `CENSYS_PAT` | Account-backed; paid tiers | Platform host services, protocols, location, names, ASN, and ownership context |
-| GreyNoise | `ip` | Yes | `GREYNOISE_API_KEY` | Free community key | Internet-noise classification, actor, tags, and last-seen context |
+| Shodan | `ip`, `shodan` CLI | Yes | `SHODAN_API_KEY` | Free signup; paid tiers | Host ports, banners, CVEs, tags, organization, and ISP context |
+| Censys | `ip` | Yes | `CENSYS_PAT`, optional `CENSYS_ORGANIZATION_ID` | Account-backed; paid tiers | Platform host services, protocols, location, names, ASN, and ownership context, with optional org-scoped requests |
+| GreyNoise | `ip`, `greynoise` CLI | Yes | `GREYNOISE_API_KEY` | Free community key | Internet-noise classification, actor, tags, and last-seen context |
 | AlienVault OTX | `ip`, `domain`, `hash` | Yes | `OTX_API_KEY` | Free signup | Pulse counts, malware families, tags, and indicator metadata |
 | AbuseIPDB | `ip` | Yes | `ABUSEIPDB_API_KEY` | Free signup; paid tiers | Abuse confidence, report counts, usage type, ISP, and country context |
 | Team Cymru | `ip` | No | None | Free public lookup | DNS TXT origin and ASN-description lookups for IP-to-ASN ownership |
 | RouteViews | `ip` | No | None | Free public lookup | Prefix, origin ASN, collector, and RPKI-style BGP context |
-| VirusTotal | `domain`, `hash` | Yes | `VT_API_KEY`, `VTCLI_APIKEY` | Free signup; paid tiers | Domain reputation, analysis stats, recent URLs, WHOIS summary, and file/hash reputation |
+| IPinfo | `ip`, `ipinfo` CLI | Optional | `IPINFO_TOKEN` | Free unauthenticated basics; account token optional | IP geolocation, ASN, ownership, hostname, and account-backed context through app-native lookups and the `ipinfo` CLI |
+| VirusTotal | `domain`, `hash`, `vt` CLI | Yes | `VT_API_KEY`, `VTCLI_APIKEY` | Free signup; paid tiers | Domain reputation, analysis stats, recent URLs, WHOIS summary, and file/hash reputation |
 | crt.sh | `domain` | No | None | Free public lookup | Certificate Transparency certificate names, issuers, and first/last sightings |
-| urlscan.io | `domain`, `url` | Yes | `URLSCAN_API_KEY` | Free signup; paid tiers | Read-only search/result context for observed pages and verdicts; app-native scan submission is not enabled |
+| urlscan.io | `domain`, `url`, `urlscan` CLI | Yes | `URLSCAN_API_KEY` | Free signup; paid tiers | Read-only search/result context for observed pages and verdicts; app-native scan submission is not enabled |
 | URLhaus | `ip`, `domain`, `url`, `hash` | Yes | `URLHAUS_AUTH_KEY` | Free abuse.ch Auth-Key | Malware URL, host, and payload-hash status from abuse.ch |
 | ThreatFox | `ip`, `domain`, `url`, `hash` | Yes | `THREATFOX_AUTH_KEY` | Free abuse.ch Auth-Key | IOC and malware context for hosts, URLs, IPs, and hashes |
-| SecurityTrails | `domain` | Yes | `SECURITYTRAILS_API_KEY` | Free signup; paid tiers | DNS records, WHOIS summary, and subdomain pivots |
+| SecurityTrails | `domain` | Yes | `SECURITYTRAILS_API_KEY` | Paid account required | DNS records, WHOIS summary, and subdomain pivots |
+| ProjectDiscovery Chaos | `chaos` CLI | Yes | `PDCP_API_KEY` | ProjectDiscovery Cloud account key | Provider-native known-subdomain lookups through the `chaos` CLI, with key-writing and file-output flows blocked by policy |
 | HIBP Pwned Passwords | `hash` | No | None | Free public lookup | SHA1 k-anonymity range lookups; only the first five SHA1 characters are sent |
 | NVD | `cve` | No | None | Free public lookup | CVE severity, scores, summaries, dates, and references |
 | Vulners | `cve` | Yes | `VULNERS_API_KEY` | Free signup; paid tiers | CVE document and exploitability context beyond NVD |
@@ -815,11 +825,11 @@ That split is what allows the app to keep the interactive shell fast while still
 
 ### Database
 
-`<data_dir>/history.db` — SQLite, WAL mode. Nineteen persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable.
+`<data_dir>/history.db` — SQLite, WAL mode. Twenty-two persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable.
 
 Logical relationships are owned by the app rather than SQLite foreign-key constraints. Anonymous browser sessions can appear as `session_id` values without a matching `session_tokens` row.
 
-Project workspace tables are the relationship foundation for case-style grouping. Projects link to completed runs instead of copying them, so runs can remain usable outside any project and can belong to more than one project when that is useful. Snapshots and manually selected workspace files remain in their share/history/files surfaces and are not project-linked. Run-owned records such as artifacts and findings stay attached to their source run and surface in project views through linked runs.
+Project workspace tables are the relationship foundation for case-style grouping. Projects link to completed runs and Atlas entities instead of copying them, so source records can remain usable outside any project and can belong to more than one project when that is useful. Snapshots and manually selected workspace files remain in their share/history/files surfaces and are not project-linked. Run-owned records such as artifacts and findings stay attached to their source run and surface in project views through linked runs.
 
 ```mermaid
 erDiagram
@@ -921,6 +931,35 @@ erDiagram
     TEXT source
     TEXT created
   }
+  ENTITIES {
+    TEXT id PK
+    TEXT session_id
+    TEXT type
+    TEXT canonical_value
+    TEXT signature_hash
+    TEXT first_seen_at
+    TEXT last_seen_at
+    INTEGER occurrence_count
+    TEXT created
+  }
+  ENTITY_RUN_LINKS {
+    TEXT entity_id PK
+    TEXT run_id PK
+    TEXT first_seen_at
+    TEXT last_seen_at
+    INTEGER occurrence_count
+  }
+  ENTITY_INTEL_SNAPSHOTS {
+    TEXT id PK
+    TEXT session_id
+    TEXT entity_id
+    TEXT provider
+    TEXT status
+    TEXT summary
+    TEXT data_json
+    TEXT fetched_at
+    TEXT expires_at
+  }
   RUN_FILE_ARTIFACTS {
     TEXT id PK
     TEXT session_id
@@ -1019,6 +1058,7 @@ erDiagram
   LOGICAL_SESSION ||--o{ RECENT_DOMAINS : "remembers"
   LOGICAL_SESSION ||--o{ SECRETS : "stores encrypted"
   LOGICAL_SESSION ||--o{ PROJECTS : "owns"
+  LOGICAL_SESSION ||--o{ ENTITIES : "indexes"
   LOGICAL_SESSION ||--o{ RUN_FILE_ARTIFACTS : "tracks"
   LOGICAL_SESSION ||--o{ FINDINGS : "captures"
   LOGICAL_SESSION ||--o{ FINDING_TARGETS : "attributes"
@@ -1029,6 +1069,9 @@ erDiagram
   RUNS ||--o| RUNS_FTS : "search index"
   RUNS ||--o{ RUN_FILE_ARTIFACTS : "creates"
   RUNS ||--o{ FINDINGS : "emits"
+  RUNS ||--o{ ENTITY_RUN_LINKS : "mentions"
+  ENTITIES ||--o{ ENTITY_RUN_LINKS : "seen in"
+  ENTITIES ||--o{ ENTITY_INTEL_SNAPSHOTS : "caches"
   PROJECTS ||--o{ PROJECT_LINKS : "links top-level records"
   PROJECTS ||--o{ PROJECT_TARGETS : "scopes"
   PROJECTS ||--o{ EVIDENCE_PACKAGES : "packages"
@@ -1048,14 +1091,17 @@ erDiagram
 - `recent_domains` — one row per recently used domain per session `(session_id, domain, last_used, use_count)`. Backs domain autocomplete across browsers that share the same named session token and follows the session-token migration path.
 - `secrets` — one row per encrypted secret name per session `(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at)`, with a unique `(session_token, name)` binding so replacing a secret updates the existing row. Storage also rejects attempts to bind the same consumer env name to two different secrets in one session, keeping command-time lookup unambiguous. Values are AES-GCM ciphertext and are never returned by list routes or stored in transcripts. The wrapping key comes from `SECRETS_MASTER_KEY` or `<data_dir>/.secrets_master_key`, with a fixed HKDF-SHA256 app context deriving the key used for row encryption. When the key file is used, the app creates or repairs it with `0600` permissions.
 - `projects` — one row per project/case folder. Stores session ownership, display metadata, status, timestamps, and a session-scoped slug. Project notes are stored through `entity_notes` with `entity_type='project'`.
-- `project_links` — generic project membership rows `(project_id, entity_type, entity_id)`. The app owns the valid entity vocabulary and link sources so projects can link completed runs without copying source data. Run-owned records such as file artifacts and findings are intentionally reached through linked runs instead of direct project links.
+- `project_links` — generic project membership rows `(project_id, entity_type, entity_id)`. The app owns the valid entity vocabulary and link sources so projects can link completed runs and Atlas entities without copying source data. Run-owned records such as file artifacts and findings are intentionally reached through linked runs instead of direct project links.
+- `entities` — session-scoped Atlas rows for normalized public IPs, domains, URLs, hashes, and CVEs extracted from saved external-run output metadata. The app stores a canonical value, a stable signature hash, first/last seen timestamps, and an aggregate occurrence count so entity lists are deduplicated across runs.
+- `entity_run_links` — many-to-many Atlas source links from entities to runs, with first/last seen timestamps and per-run occurrence counts. Run pruning removes these link rows while leaving the deduplicated entity row available for labels, notes, project links, and future intel snapshots.
+- `entity_intel_snapshots` — cached, normalized provider snapshots attached to an Atlas entity. The row shape stores provider name, status, short summary, JSON payload, fetch time, and expiry time so the future Atlas UI can render intel cards without re-querying providers on every open.
 - `run_file_artifacts` — durable file manifest rows for workspace files produced or consumed by a run, including recorded size and optional SHA-256 content checksum so project views can flag missing or changed workspace files. This is separate from `run_output_artifacts`, which stores the terminal transcript artifact behind a run permalink.
 - `project_targets` — project-scoped domains, URLs, hosts, IPs, CIDRs, and port sets. Targets can be manually entered or associated with source runs later.
 - `findings` — persisted output-signal rows linked to the source run, a primary target id when one is available, and a stable fingerprint for deduplication/context. The `finding_targets` relationship table stores every matched project target for a finding, so project views can show many-to-many target attribution without overloading the primary `target_id` field. These records are intentionally lightweight so findings can power filtering, review state, notes, and evidence packages without turning the app into a vulnerability-management system.
-- `entity_labels` — short user-controlled labels/bookmarks for supported entities, including projects, runs, snapshots, workspace files, run file artifacts, findings, targets, and packages.
-- `entity_notes` — one private note attached to each supported entity per session, including project notes. Notes are intentionally singular so entity metadata remains an editable note surface instead of a comment thread.
+- `entity_labels` — short user-controlled labels/bookmarks for supported entities, including Atlas entities, projects, runs, snapshots, workspace files, run file artifacts, findings, targets, and packages.
+- `entity_notes` — one private note attached to each supported entity per session, including Atlas entities and project notes. Notes are intentionally singular so entity metadata remains an editable note surface instead of a comment thread.
 - `evidence_packages` — draft package manifests scoped to a project and session. The first pass records package name/description, redaction mode, artifact-inclusion preference, and a JSON manifest over the currently linked project data, then exports that manifest plus any still-available selected workspace artifacts as a downloadable archive. Package-level labels/notes are stored through the generic entity metadata tables.
-- Supporting indexes are part of the schema even though the ER diagram stays table-focused. `idx_runs_session_command_started` backs the Recent menu and prompt-history distinct-command query shape `(session_id, command, started DESC)`, `idx_runs_session_kind_started` backs built-in/external history filtering, while `idx_runs_session_started`, `idx_snapshots_session_created`, `idx_user_workflows_session_updated_created`, `idx_recent_domains_session_last_used`, and `idx_secrets_session_updated` keep session-scoped startup, history, workflow, share, autocomplete, and secret-list reads bounded on large history databases. Project workspace indexes cover session project lists, project contents, reverse entity lookup, run file artifacts, targets, findings, labels, notes, and evidence packages before UI routes depend on those query shapes.
+- Supporting indexes are part of the schema even though the ER diagram stays table-focused. `idx_runs_session_command_started` backs the Recent menu and prompt-history distinct-command query shape `(session_id, command, started DESC)`, `idx_runs_session_kind_started` backs built-in/external history filtering, while `idx_runs_session_started`, `idx_snapshots_session_created`, `idx_user_workflows_session_updated_created`, `idx_recent_domains_session_last_used`, and `idx_secrets_session_updated` keep session-scoped startup, history, workflow, share, autocomplete, and secret-list reads bounded on large history databases. Atlas indexes cover session/type/last-seen lists, entity value lookup, run-link cleanup, and cached intel snapshot reads. Project workspace indexes cover session project lists, project contents, reverse entity lookup, run file artifacts, targets, findings, labels, notes, and evidence packages before UI routes depend on those query shapes.
 - Redis-backed active-run metadata plus browser `sessionStorage` form a second persistence layer for reload continuity:
   - `/history/active` covers in-flight runs owned by the server/session
   - browser `sessionStorage` covers non-running tabs, transcript previews, status, draft input, and active-tab selection
@@ -1284,12 +1330,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,731
+- behavior tests: 2,732
 - docs/inventory meta-tests: 32
-- `pytest`: 1391 (1359 behavior + 32 meta)
+- `pytest`: 1395 (1363 behavior + 32 meta)
 - `vitest`: 1128
 - `playwright`: 249
-- total: 2,768
+- total: 2,772
 
 ### Testing Architecture
 

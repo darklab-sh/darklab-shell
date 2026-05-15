@@ -528,6 +528,10 @@ commands:
           description: "Show full IDs, started timestamps, and metadata source"
         - value: --json
           description: "Print active-run metadata as JSON"
+  - root: providers
+    description: "built-in: show app-native intel provider setup status"
+    autocomplete:
+      closes: true
   - root: secret
     description: "built-in: manage encrypted session secrets"
     autocomplete:
@@ -552,7 +556,7 @@ commands:
             hint_only: true
             description: "Environment-style secret name"
         - value: show-consumers
-          description: "Show command registry env vars that consume secrets"
+          description: "Show app-native intel provider setup status"
           closes: true
   - root: session-token
     description: "built-in: show or manage persistent session tokens"

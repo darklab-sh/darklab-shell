@@ -23,6 +23,7 @@ from services.intel.clients import (
     CrtshApiClient,
     GreyNoiseApiClient,
     HibpPwnedPasswordsClient,
+    IpinfoApiClient,
     NvdApiClient,
     OtxApiClient,
     RouteViewsApiClient,
@@ -40,6 +41,7 @@ from services.intel.censys import CensysProvider
 from services.intel.crtsh import CrtshProvider
 from services.intel.greynoise import GreyNoiseProvider
 from services.intel.hibp import HibpPwnedPasswordsProvider
+from services.intel.ipinfo import IpinfoProvider
 from services.intel.nvd import NvdProvider
 from services.intel.otx import OtxProvider
 from services.intel.routeviews import RouteViewsProvider
@@ -106,6 +108,8 @@ def _provider_factory(provider_id: str) -> ProviderFactory | None:
         return lambda: OtxProvider(client=OtxApiClient())
     if provider_id == "abuseipdb":
         return lambda: AbuseIpdbProvider(client=AbuseIpdbApiClient())
+    if provider_id == "ipinfo":
+        return lambda: IpinfoProvider(client=IpinfoApiClient())
     if provider_id == "teamcymru":
         return lambda: TeamCymruProvider(client=TeamCymruDnsClient())
     if provider_id == "crtsh":
@@ -178,17 +182,19 @@ def _lookup_provider(
     except ProviderMissingSecret as exc:
         return ProviderLookup(provider.name, status="missing_secret", message=str(exc))
 
-    cached = cache.get_cached_response(provider.name, entity_type, canonical, redis_client=redis_client)
-    if cached is not None:
-        result = IntelResult(provider.name, entity_type, canonical, cached, cache_hit=True)
-        audit.emit_intel_lookup(
-            session_id,
-            provider.name,
-            entity_type,
-            run_id=run_id,
-            cache_hit=True,
-        )
-        return ProviderLookup(provider.name, result=result)
+    ttl = provider.cache_ttl(entity_type, cfg=cfg)
+    if ttl > 0:
+        cached = cache.get_cached_response(provider.name, entity_type, canonical, redis_client=redis_client)
+        if cached is not None:
+            result = IntelResult(provider.name, entity_type, canonical, cached, cache_hit=True)
+            audit.emit_intel_lookup(
+                session_id,
+                provider.name,
+                entity_type,
+                run_id=run_id,
+                cache_hit=True,
+            )
+            return ProviderLookup(provider.name, result=result)
 
     quota = cache.get_quota_exhausted(session_id, provider.name, redis_client=redis_client)
     if quota:
@@ -232,14 +238,23 @@ def _lookup_provider(
         return ProviderLookup(provider.name, status="error", message=str(exc))
 
     ttl = provider.cache_ttl(result.entity_type, cfg=cfg)
-    cache.set_cached_response(
-        provider.name,
-        result.entity_type,
-        result.canonical_value,
-        result.payload,
-        ttl_seconds=ttl,
-        redis_client=redis_client,
-    )
+    if ttl > 0:
+        cache.set_cached_response(
+            provider.name,
+            result.entity_type,
+            result.canonical_value,
+            result.payload,
+            ttl_seconds=ttl,
+            redis_client=redis_client,
+        )
+    else:
+        summary = result.payload.get("summary")
+        if isinstance(summary, dict):
+            cache_status = summary.get("cache_status")
+            if not isinstance(cache_status, dict):
+                cache_status = {}
+                summary["cache_status"] = cache_status
+            cache_status[provider.name] = "disabled"
     audit.emit_intel_lookup(
         session_id,
         provider.name,

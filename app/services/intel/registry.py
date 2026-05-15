@@ -1,4 +1,4 @@
-"""Metadata registry for app-native external intel providers."""
+"""Metadata registry for external intel providers."""
 
 from __future__ import annotations
 
@@ -35,6 +35,7 @@ class IntelProviderDefinition:
     tier: str = "shipped"
     access_note: str = "Account-backed"
     app_native: bool = True
+    uses: tuple[str, ...] = ()
 
     @property
     def secret_env_names(self) -> tuple[str, ...]:
@@ -155,6 +156,22 @@ INTEL_PROVIDERS: dict[str, IntelProviderDefinition] = {
             ),
         },
         access_note="Free signup; paid tiers",
+    ),
+    "ipinfo": IntelProviderDefinition(
+        id="ipinfo",
+        label="IPinfo",
+        entity_types=("ip",),
+        secret_env="IPINFO_TOKEN",
+        optional_secret=True,
+        cache_scopes={"ip": "ip"},
+        cache_ttls={
+            "ip": CacheTtlSetting("intel_cache_ttl_ipinfo_ip_seconds", 21600),
+        },
+        rate_limits={
+            "": RateLimitSetting("intel_rate_limit_ipinfo_bucket", "intel_rate_limit_ipinfo_refill_seconds", 30, 2),
+        },
+        access_note="Free public basics; optional account token",
+        uses=("intel ip", "ipinfo CLI"),
     ),
     "teamcymru": IntelProviderDefinition(
         id="teamcymru",
@@ -305,7 +322,7 @@ INTEL_PROVIDERS: dict[str, IntelProviderDefinition] = {
                 6,
             ),
         },
-        access_note="Free signup; paid tiers",
+        access_note="Paid account required",
     ),
     "routeviews": IntelProviderDefinition(
         id="routeviews",
@@ -319,6 +336,15 @@ INTEL_PROVIDERS: dict[str, IntelProviderDefinition] = {
             "": RateLimitSetting("intel_rate_limit_routeviews_bucket", "intel_rate_limit_routeviews_refill_seconds", 20, 3),
         },
         access_note="Free public lookup",
+    ),
+    "chaos": IntelProviderDefinition(
+        id="chaos",
+        label="ProjectDiscovery Chaos",
+        entity_types=("domain",),
+        secret_env="PDCP_API_KEY",
+        app_native=False,
+        access_note="ProjectDiscovery Cloud account key",
+        uses=("chaos CLI",),
     ),
 }
 
@@ -339,7 +365,7 @@ def providers_for_entity_type(entity_type: str) -> list[IntelProviderDefinition]
     return [
         definition
         for definition in INTEL_PROVIDERS.values()
-        if normalized in definition.entity_types
+        if definition.app_native and normalized in definition.entity_types
     ]
 
 
@@ -379,6 +405,15 @@ def app_native_secret_consumers() -> list[dict[str, Any]]:
             "fallback_envs": list(definition.secret_env_aliases),
             "optional": definition.optional_secret,
         })
+        if definition.id == "censys":
+            consumers.append({
+                "source": "app_native_intel",
+                "consumer": "intel Censys organization",
+                "provider": definition.id,
+                "env": "CENSYS_ORGANIZATION_ID",
+                "fallback_envs": [],
+                "optional": True,
+            })
     return consumers
 
 
@@ -393,9 +428,16 @@ def provider_status_catalog() -> list[dict[str, Any]]:
             "secret_env_aliases": list(definition.secret_env_aliases),
             "secret_env_names": list(definition.secret_env_names),
             "requires_secret": bool(definition.secret_env),
+            "optional_secret": bool(definition.optional_secret),
             "access_note": definition.access_note,
             "app_native": definition.app_native,
+            "uses": list(definition.uses or _default_provider_uses(definition)),
         }
         for definition in INTEL_PROVIDERS.values()
-        if definition.app_native
     ]
+
+
+def _default_provider_uses(definition: IntelProviderDefinition) -> tuple[str, ...]:
+    if definition.app_native:
+        return tuple(f"intel {entity_type}" for entity_type in definition.entity_types)
+    return ()

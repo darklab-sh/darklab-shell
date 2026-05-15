@@ -77,11 +77,13 @@ def _format_lookup_result(result: IntelLookupResult) -> list[dict[str, str]]:
             "builtin-section",
         ),
     ]
-    for provider in result.providers:
+    for index, provider in enumerate(result.providers):
+        if index > 0:
+            lines.append(output_line("", "builtin-spacer"))
         lines.extend(_format_provider_lookup(provider, result.entity_type))
     if result.providers and result.configured_count == 0:
         lines.append(output_line("No providers are configured for this lookup.", "builtin-note"))
-        lines.append(output_line("Use `secret show-consumers` to see accepted secret names.", "builtin-note"))
+        lines.append(output_line("Use `providers` to see provider setup status and accepted secret names.", "builtin-note"))
     return lines
 
 
@@ -94,8 +96,8 @@ def _format_provider_lookup(provider: ProviderLookup, entity_type: str) -> list[
     if provider.result is None:
         return [output_line(f"{label}: no result", "builtin-note")]
 
-    cache_label = "cache hit" if provider.result.cache_hit else "cache miss"
-    lines = [output_line(f"{label}: {cache_label}", "builtin-subsection")]
+    cache_label = _provider_cache_label(provider)
+    lines = [output_line(f"{label} results - {cache_label}", "builtin-section")]
     provider_payload = provider.result.payload.get("providers", {}).get(provider.provider, {})
     if not isinstance(provider_payload, dict):
         return [*lines, output_line("  no provider data returned", "builtin-note")]
@@ -109,6 +111,8 @@ def _format_provider_lookup(provider: ProviderLookup, entity_type: str) -> list[
         lines.extend(_format_otx(provider_payload))
     elif entity_type == "ip" and provider.provider == "abuseipdb":
         lines.extend(_format_abuseipdb(provider_payload))
+    elif entity_type == "ip" and provider.provider == "ipinfo":
+        lines.extend(_format_ipinfo(provider_payload))
     elif entity_type == "ip" and provider.provider == "teamcymru":
         lines.extend(_format_teamcymru(provider_payload))
     elif entity_type == "ip" and provider.provider == "urlhaus":
@@ -156,6 +160,21 @@ def _format_provider_lookup(provider: ProviderLookup, entity_type: str) -> list[
     return lines
 
 
+def _provider_cache_label(provider: ProviderLookup) -> str:
+    if provider.result and provider.result.cache_hit:
+        return "retrieved from cache:"
+    cache_status = None
+    if provider.result:
+        summary = provider.result.payload.get("summary")
+        if isinstance(summary, dict):
+            statuses = summary.get("cache_status")
+            if isinstance(statuses, dict):
+                cache_status = statuses.get(provider.provider)
+    if cache_status == "disabled":
+        return "retrieved live (cache disabled):"
+    return "retrieved and cached:"
+
+
 def _format_shodan(payload: dict[str, Any]) -> list[dict[str, str]]:
     lines = [
         output_line(format_native_record("ports", _join_values(payload.get("ports")) or "none", 14), "builtin-kv"),
@@ -180,11 +199,23 @@ def _format_shodan(payload: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def _format_greynoise(payload: dict[str, Any]) -> list[dict[str, str]]:
-    return [
+    lines = []
+    message = str(payload.get("message") or "").strip()
+    if message:
+        lines.append(output_line(format_native_record("status", message, 14), "builtin-kv"))
+    lines.extend([
         output_line(format_native_record("classification", str(payload.get("classification") or "unknown"), 14), "builtin-kv"),
         output_line(format_native_record("name", str(payload.get("name") or "-"), 14), "builtin-kv"),
         output_line(format_native_record("last seen", str(payload.get("last_seen") or "-"), 14), "builtin-kv"),
-    ]
+    ])
+    if isinstance(payload.get("noise"), bool):
+        lines.append(output_line(format_native_record("noise", "yes" if payload.get("noise") else "no", 14), "builtin-kv"))
+    if isinstance(payload.get("riot"), bool):
+        lines.append(output_line(format_native_record("riot", "yes" if payload.get("riot") else "no", 14), "builtin-kv"))
+    link = str(payload.get("link") or "").strip()
+    if link:
+        lines.append(output_line(format_native_record("link", link, 14), "builtin-kv"))
+    return lines
 
 
 def _format_censys(payload: dict[str, Any]) -> list[dict[str, str]]:
@@ -256,6 +287,24 @@ def _format_abuseipdb(payload: dict[str, Any]) -> list[dict[str, str]]:
         output_line(format_native_record("isp", str(payload.get("isp") or "-"), 14), "builtin-kv"),
         output_line(format_native_record("tor", "yes" if payload.get("is_tor") else "no", 14), "builtin-kv"),
         output_line(format_native_record("last report", str(payload.get("last_reported_at") or "-"), 14), "builtin-kv"),
+    ]
+
+
+def _format_ipinfo(payload: dict[str, Any]) -> list[dict[str, str]]:
+    country = str(payload.get("country") or payload.get("country_code") or "-")
+    place_parts = [
+        str(payload.get("city") or "").strip(),
+        str(payload.get("region") or "").strip(),
+    ]
+    place = ", ".join(part for part in place_parts if part)
+    return [
+        output_line(format_native_record("asn", str(payload.get("asn") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("org", str(payload.get("org") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("domain", str(payload.get("domain") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("country", country, 14), "builtin-kv"),
+        output_line(format_native_record("place", place or "-", 14), "builtin-kv"),
+        output_line(format_native_record("hostname", str(payload.get("hostname") or "-"), 14), "builtin-kv"),
+        output_line(format_native_record("timezone", str(payload.get("timezone") or "-"), 14), "builtin-kv"),
     ]
 
 

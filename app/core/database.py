@@ -4,8 +4,8 @@ Database lives in the configured data directory. If unset, /data is used when
 writable and /tmp is the local-dev fallback.
 
 Tables: runs, run_output_artifacts, snapshots, session_tokens, session_preferences,
-starred_commands, session_variables, user_workflows, recent_domains, and project
-workspace relationship tables.
+starred_commands, session_variables, user_workflows, recent_domains, Atlas entity
+tables, and project workspace relationship tables.
 FTS: runs_fts (FTS5 virtual table over runs.command + runs.output_search_text).
 """
 
@@ -29,6 +29,7 @@ DB_PATH  = os.path.join(DATA_DIR, "history.db")
 DB_INIT_LOCK_PATH = os.path.join(DATA_DIR, "history.db.init.lock")
 
 PROJECT_ENTITY_TYPES = frozenset({
+    "atlas_entity",
     "project",
     "run",
     "snapshot",
@@ -218,6 +219,44 @@ def _create_project_workspace_schema(conn):
         )
     """)
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS entities (
+            id               TEXT PRIMARY KEY,
+            session_id       TEXT NOT NULL,
+            type             TEXT NOT NULL,
+            canonical_value  TEXT NOT NULL,
+            signature_hash   TEXT NOT NULL,
+            first_seen_at    TEXT NOT NULL,
+            last_seen_at     TEXT NOT NULL,
+            occurrence_count INTEGER NOT NULL DEFAULT 0,
+            created          TEXT NOT NULL,
+            UNIQUE (session_id, type, signature_hash)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS entity_run_links (
+            entity_id        TEXT NOT NULL,
+            run_id           TEXT NOT NULL,
+            first_seen_at    TEXT NOT NULL,
+            last_seen_at     TEXT NOT NULL,
+            occurrence_count INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (entity_id, run_id)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS entity_intel_snapshots (
+            id          TEXT PRIMARY KEY,
+            session_id  TEXT NOT NULL,
+            entity_id   TEXT NOT NULL,
+            provider    TEXT NOT NULL,
+            status      TEXT NOT NULL DEFAULT '',
+            summary     TEXT NOT NULL DEFAULT '',
+            data_json   TEXT NOT NULL DEFAULT '{}',
+            fetched_at  TEXT NOT NULL,
+            expires_at  TEXT NOT NULL DEFAULT '',
+            UNIQUE (entity_id, provider)
+        )
+    """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS run_file_artifacts (
             id             TEXT PRIMARY KEY,
             session_id     TEXT NOT NULL,
@@ -369,6 +408,22 @@ def _create_indexes(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_project_links_entity_lookup "
         "ON project_links (entity_type, entity_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entities_session_type_last_seen "
+        "ON entities (session_id, type, last_seen_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entities_session_value "
+        "ON entities (session_id, canonical_value)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entity_run_links_run "
+        "ON entity_run_links (run_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entity_intel_snapshots_entity_fetched "
+        "ON entity_intel_snapshots (entity_id, fetched_at DESC)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_run_file_artifacts_session_run_path "
@@ -753,6 +808,10 @@ def delete_run_artifacts(conn, run_ids):
             f"DELETE FROM findings WHERE id IN ({finding_placeholders})",  # nosec
             finding_ids,
         )
+    conn.execute(
+        f"DELETE FROM entity_run_links WHERE run_id IN ({placeholders})",  # nosec
+        ids,
+    )
     conn.execute(
         f"DELETE FROM run_file_artifacts WHERE run_id IN ({placeholders})",  # nosec
         ids,

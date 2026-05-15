@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,731
+- behavior tests: 2,732
 - docs/inventory meta-tests: 32
-- `pytest`: 1391 (1359 behavior + 32 meta)
+- `pytest`: 1395 (1363 behavior + 32 meta)
 - `vitest`: 1128
 - `playwright`: 249
-- total: 2,768
+- total: 2,772
 
 This document is organized in two parts:
 
@@ -405,6 +405,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestIntelServices.test_teamcymru_dns_client_fetches_origin_and_asn_description_records` | Verifies the Team Cymru DNS client fetches origin records and matching ASN-description records. |
 | `TestIntelServices.test_provider_missing_secret_blocks_lookup_before_client_call` | Verifies provider calls stop before client access when the required secret is missing. |
 | `TestIntelServices.test_lookup_entity_requires_secret_before_cache_hit` | Verifies cached provider data is not returned when the current session lacks the required provider secret. |
+| `TestIntelServices.test_lookup_entity_skips_cached_provider_response_when_ttl_is_zero` | Verifies a zero provider TTL disables cached response reuse and fetches fresh provider data. |
 | `TestIntelServices.test_lookup_entity_includes_no_secret_provider_and_caches_result` | Verifies no-key providers run through the same lookup and cache path as keyed providers. |
 | `TestIntelServices.test_default_hash_providers_only_include_hibp_for_sha1` | Verifies HIBP Pwned Passwords is included only for SHA1 hash lookups. |
 | `TestIntelServices.test_builtin_intel_ip_formats_partial_provider_results` | Verifies the `intel ip` built-in renders configured provider results beside missing-provider placeholders. |
@@ -664,6 +665,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPermalinkErrorPage.test_no_retention_mention_when_unlimited` | Checks that no retention mention when unlimited. |
 | `TestDatabaseInit.test_creates_runs_and_snapshots_tables` | Checks that creates runs and snapshots tables. |
 | `TestDatabaseInit.test_creates_project_workspace_tables` | Verifies that project workspace relationship tables are created during database bootstrap. |
+| `TestDatabaseInit.test_materializes_run_entities_from_output_entries` | Verifies Atlas materialization deduplicates classified run-output entities and creates source-run links. |
 | `TestDatabaseInit.test_project_workspace_migration_backfills_finding_targets` | Verifies that legacy primary finding targets are backfilled into persisted finding-target relationships. |
 | `TestDatabaseInit.test_project_workspace_entity_and_link_source_constants_are_validated` | Verifies that project entity and link-source constants reject unsupported values. |
 | `TestDatabaseInit.test_creates_session_indexes` | Checks creates session indexes handling. |
@@ -1141,6 +1143,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestWelcomeHintsRoute.test_items_key_present` | Checks items key present handling. |
 | `TestMobileWelcomeHintsRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestMobileWelcomeHintsRoute.test_items_key_present` | Checks items key present handling. |
+| `TestAtlasRoutes.test_lists_session_entities_and_detail` | Verifies Atlas summary, list, and detail routes return session-owned materialized entities and source runs. |
+| `TestAtlasRoutes.test_entity_detail_is_session_scoped` | Verifies Atlas entity detail routes do not reveal entities from other sessions. |
 | `TestWorkspaceRoutes.test_requires_active_session_header` | Verifies that workspace routes reject requests without an active session identity. |
 | `TestWorkspaceRoutes.test_disabled_workspace_returns_403` | Verifies that workspace routes stay unavailable while workspace storage is disabled. |
 | `TestWorkspaceRoutes.test_write_list_read_delete_lifecycle` | Verifies the route-level workspace lifecycle for write, list, read, and delete operations. |

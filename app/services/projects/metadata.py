@@ -264,7 +264,12 @@ def _workspace_file_belongs_to_session(session_id, entity_id):
 def _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
     if entity_type == "workspace_file":
         return _workspace_file_belongs_to_session(session_id, entity_id)
-    if entity_type == "project":
+    if entity_type == "atlas_entity":
+        row = conn.execute(
+            "SELECT 1 FROM entities WHERE session_id = ? AND id = ?",
+            (session_id, entity_id),
+        ).fetchone()
+    elif entity_type == "project":
         row = conn.execute(
             "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
             (session_id, entity_id),

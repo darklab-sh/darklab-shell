@@ -3925,6 +3925,8 @@ def _normalize_bulk_link_payload(data):
         raise ProjectWorkspaceError(str(exc)) from None
     if entity_type not in PROJECT_LINK_ENTITY_TYPES:
         raise ProjectWorkspaceError(f"project links do not support {entity_type}")
+    if entity_type != "run":
+        raise ProjectWorkspaceError(f"bulk project links do not support {entity_type}")
     raw_ids = data.get("entity_ids")
     if not isinstance(raw_ids, list):
         raise ProjectWorkspaceError("entity_ids must be a list")
@@ -4137,7 +4139,12 @@ def _workspace_file_belongs_to_session(session_id, entity_id):
 def _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
     if entity_type == "workspace_file":
         return _workspace_file_belongs_to_session(session_id, entity_id)
-    if entity_type == "project":
+    if entity_type == "atlas_entity":
+        row = conn.execute(
+            "SELECT 1 FROM entities WHERE session_id = ? AND id = ?",
+            (session_id, entity_id),
+        ).fetchone()
+    elif entity_type == "project":
         row = conn.execute(
             "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
             (session_id, entity_id),
@@ -4231,7 +4238,7 @@ def link_project_entity(session_id, project_id, data):
             return _row_to_link(row)
         count_row = conn.execute(
             "SELECT COUNT(*) AS count FROM project_links "
-            "WHERE project_id = ? AND entity_type = 'run'",
+            "WHERE project_id = ?",
             [project_id],
         ).fetchone()
         if _quota_exceeded(
