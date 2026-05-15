@@ -104,6 +104,13 @@
   min-width: 0;
 }
 
+.atlas-finding-bulk-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .atlas-list {
   display: grid;
   gap: 8px;
@@ -125,9 +132,30 @@
   text-align: left;
 }
 
+.atlas-finding-queue-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 72px;
+  padding: 12px 14px;
+  text-align: left;
+}
+
 .atlas-entity-row.is-selected {
   border-color: var(--green-dim);
   background: var(--green-glow);
+}
+
+.atlas-finding-queue-row.is-selected {
+  border-color: var(--green-dim);
+  background: var(--green-glow);
+}
+
+.atlas-finding-select {
+  width: 18px;
+  height: 18px;
 }
 
 .atlas-entity-main {
@@ -325,6 +353,17 @@
   display: grid;
   gap: 4px;
   padding: 10px;
+}
+
+.atlas-finding-raw {
+  display: block;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--theme-chrome-row-bg);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .atlas-source-action {

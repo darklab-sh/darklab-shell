@@ -29,8 +29,8 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Schema cleanup is destructive. The run-centric `findings`, project-scoped `project_targets`, and `finding_targets` tables are dropped and replaced by an entity-first schema. Pre-release single-user app — no backwards-compatibility shim, no dual-write phase, no data backfill from legacy rows. The Findings triage inbox's `findings_inbox` table is also collapsed into the unified entity-owned `findings` table here.
   - Hard dependencies: entity-aware classifier hooks are landed; encrypted secrets vault is landed for intel refresh actions.
 - **Current implementation status**
-  - Landed: Phase 1 backend contracts and storage, including the destructive project/finding/target rewrite onto `entities`, `project_links(entity_type='atlas_entity')`, unified `findings`, and `findings_occurrences`; Phase 2 run-finalize entity/finding materialization and retention pruning rules; `/atlas` summary/list/detail/refresh/project-link routes; shared label/note/project-link support for `atlas_entity`; Phase 3 browser Atlas surface with rail/mobile/shortcut/history/run-details/project entry points; and Phase 4 transcript entity-token navigation.
-  - Still pending: richer Atlas list filters, Findings tab triage absorption, and the later UI/export work described below.
+  - Landed: Phase 1 backend contracts and storage, including the destructive project/finding/target rewrite onto `entities`, `project_links(entity_type='atlas_entity')`, unified `findings`, and `findings_occurrences`; Phase 2 run-finalize entity/finding materialization and retention pruning rules; `/atlas` summary/list/detail/refresh/project-link routes; shared label/note/project-link support for `atlas_entity`; Phase 3 browser Atlas surface with rail/mobile/shortcut/history/run-details/project entry points; Phase 4 transcript entity-token navigation; and Phase 5 Findings tab absorption with status filters, single-finding updates, and visible-page bulk review updates.
+  - Still pending: richer Atlas entity-list filters, project curation/export follow-through, and the later UI/export/test work described below.
 - **Phase 0 - Existing-code integration check (complete)**
   - Confirm classifier entity metadata (`entities: [{type, value, canonical_value, confidence, source_line}]`) is landed.
   - Audit `app/services/projects/workspace.py` and `app/services/projects/metadata.py` for label/note/finding/target storage that must be reused, not duplicated.
@@ -63,7 +63,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - Index: `idx_entity_intel_snapshots_entity_fetched ON entity_intel_snapshots (entity_id, fetched_at DESC)` for detail-card reads; TTL-expiry sweeps can add a broader fetched/expiry index if profiling shows it is needed.
   - **New entity-owned `findings` table (rewritten, not migrated):**
     - `(id, session_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, status_updated_at, fingerprint, created)`.
-    - `status` values: `new`, `triaged`, `confirmed`, `false_positive`. **Triage state lives directly on `findings`** — the Findings triage inbox plan's separate `findings_inbox` table is collapsed into this row.
+    - `status` values reuse the existing finding review vocabulary: `new`, `reviewed`, `important`, `false_positive`, and `needs_followup`. **Triage state lives directly on `findings`** — the Findings triage inbox plan's separate `findings_inbox` table is collapsed into this row.
     - `entity_id` is nullable. Entity-backed findings point to an Atlas entity. Findings without a primary IP/domain/hash/CVE use `entity_id = NULL` and a stable `subject_key` such as `unscoped:<tool_root>:<normalized_signal_key>` so command-scoped warnings remain triageable instead of being dropped.
     - UNIQUE `(session_id, signature_hash)` for cross-run dedup. Signature: `sha256(tool_root | kind | severity | normalized_signal_key | entity.signature_hash_or_subject_key)`.
     - Indexes: `(session_id, status)`, `(session_id, entity_id, last_seen_at DESC)`, `(session_id, tool_root, last_seen_at DESC)`, `(session_id, severity, last_seen_at DESC)`.
@@ -86,7 +86,9 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - **Routes in new `app/blueprints/atlas.py`:**
     - `GET /atlas` tab summary (landed: entity counts per type, computed from indexed `entities` rows unless profiling proves a rollup table is needed).
     - `GET /atlas/entities` paginated list with filters (landed: `type`, `q`, `project_id`, `limit`, `offset`; still pending: `status`, `seen_in_last`, `has_intel`).
-    - `GET /atlas/entities/<id>` detail with linked runs, intel snapshots, findings, labels, notes, project links (landed; findings are an empty compatibility placeholder until the findings rewrite lands).
+    - `GET /atlas/entities/<id>` detail with linked runs, intel snapshots, findings, labels, notes, project links.
+    - `GET /atlas/findings` paginated Findings-tab list with text, project, review-state, limit, and offset filters.
+    - `POST /atlas/findings/review` visible-page bulk review-state update route for selected findings.
     - `POST /atlas/entities/<id>/refresh_intel` triggers a fresh provider fetch via the intel service (rate-limited).
     - `POST /atlas/entities/<id>/project_links` promotes by writing into `project_links` with `entity_type='atlas_entity'`.
     - `DELETE /atlas/entities/<id>/project_links/<project_id>` unpromotes.
@@ -109,10 +111,11 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Output renderer in `app/static/js/output.js` decorates classifier-extracted entities as tagged spans.
   - Click opens entity detail; long-press / right-click opens a shared action menu for opening Atlas, editing metadata in Atlas, promoting through Atlas, copying the value, refreshing intel, or focusing the current transcript line.
   - "See in run" in entity detail opens the source run in the existing Run Details overlay.
-- **Phase 5 - Findings tab absorption**
-  - The Findings tab implements the full triage queue described in the Findings triage inbox plan (status transitions, dedupe, filters, project pinning, bulk status update).
-  - If the standalone inbox modal has already shipped, its entry points migrate to the Atlas Findings tab and the standalone modal is retired; the backing service and routes are reused unchanged.
-  - If the Atlas ships first, the inbox plan does not ship as a separate modal — its scope is absorbed entirely here.
+- **Phase 5 - Findings tab absorption (complete)**
+  - The Findings tab now lists deduped findings from the unified `findings` table with text, project, and review-state filters.
+  - Selecting a finding opens the shared detail renderer with source-run navigation, entity navigation, evidence text, and the same review-state control used by Run Details and Projects.
+  - Visible-page selection supports bulk review-state updates through `/atlas/findings/review`; mixed missing rows return count/result feedback instead of failing the whole action.
+  - The standalone Findings triage inbox does not ship as a separate modal because its scope is absorbed by the Atlas Findings tab.
 - **Phase 6 - Projects as curation, not gating**
   - Adding an entity to a project writes a row in the existing generic `project_links` table with `entity_type='atlas_entity'`. No new project-link table is introduced.
   - The `project_targets` table is dropped in Phase 1 and not preserved. The "Targets" view in the Projects modal becomes a server-side filter over project-linked Atlas entities of type `host` / `domain` / `ip` / `url`, computed in the rewritten `/projects/<id>/targets` route.
@@ -149,7 +152,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - **`output.js` decoration for legacy / pre-migration runs.** Question: do saved runs from before the migration get retroactive entity tagging on reopen? **Recommend:** **no** — the SSE pipeline only emits entity offsets for new runs after the classifier change ships. Reopened legacy runs render as plain text. Future work can add a backfill that re-classifies old transcripts.
   - **Findings emitter for the unified `findings` table.** Question: where does the materializer that writes `findings` rows live? **Recommend:** `app/services/atlas/materializer.py` writes both `entities` and `findings` in the same transaction at run-finalize time. The proposed `app/services/findings/inbox.py` from the Findings triage inbox plan is **not** created when the Atlas ships first.
   - **Run-prune sweep order.** Question: when a run is pruned, what's the cascade order? **Recommend:** `findings_occurrences` → `entity_run_links` → recalc `entities.occurrence_count` / `entities.last_seen_at`. Document in the pruning helper. `entities` and `findings` rows survive even after their last link is pruned.
-  - **Atlas Findings tab sort default.** Question: default sort when entering the Findings tab? **Recommend:** explicit status priority (`new`, `triaged`, `confirmed`, `false_positive`) then `last_seen_at DESC` within each triage bucket. Do not rely on lexical `status ASC`, which would put the statuses in the wrong order.
+  - **Atlas Findings tab sort default.** Question: default sort when entering the Findings tab? **Recommend:** explicit status priority (`new`, `needs_followup`, `important`, `reviewed`, `false_positive`) then `last_seen_at DESC` within each triage bucket. Do not rely on lexical `status ASC`, which would put the statuses in the wrong order.
 
 - **Future**
   - Entity graph view (visual link map across hosts, domains, hashes, CVEs).
@@ -383,81 +386,6 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Add an optional operator provider denylist if deployments need to block outbound calls to specific vendors.
   - Revisit mutating provider flows, such as urlscan.io scan submission, only after privacy, terms, visibility, and user-confirmation rules are explicit.
 
-### Findings triage inbox
-
-- **Scope**
-  - Cross-run queue of every classifier-emitted finding and warning for the active session, with stable dedupe across runs by finding signature.
-  - Per-finding triage status: `new`, `triaged`, `confirmed`, `false_positive`.
-  - Filters: severity, status, tool, project, time range, free-text.
-  - Detail side sheet with occurrence list, source-run permalinks, line snippets, and pin-to-project action.
-  - Bulk status updates with the same partial-success and `results[]` contract as the History multi-select bulk-actions plan.
-  - Standalone modal in v1. If the Session Entity Atlas plan ships, this scope folds into the Atlas Findings tab and the standalone modal is retired.
-- **Phase 0 - Existing-code integration check**
-  - Audit `app/core/output_signals.py` for the finding event shape, persistence point in run finalization, and severity/kind taxonomy.
-  - Audit the existing Projects modal Findings tab for filter UI and row patterns to reuse.
-  - Confirm dedupe scope: per-session-token (recommended) so cross-tool overlap is captured.
-  - Confirm retention-pruning interaction so inbox rows are not orphaned when their source runs are pruned.
-- **Phase 1 - Backend contracts and storage**
-  - The `findings_inbox` and `findings_inbox_occurrences` tables described here are the **standalone-shipping schema**. If the Session Entity Atlas plan ships first or alongside, the inbox tables are not created — the Atlas's unified entity-owned `findings` and `findings_occurrences` tables carry triage state directly, and this plan's routes are rewired to read from those instead. The two schemas are intentionally column-compatible so this collapse is a route-level swap, not a data migration.
-  - New `app/services/findings/inbox.py` materializer that runs at run-finalize, consumes classified signals, computes a stable signature, and upserts inbox rows. Signature: `sha256(tool_root | normalized_kind | normalized_target | severity | normalized_signal_key)`; normalization rules are documented in the module and shared with the frontend. `normalized_signal_key` comes from the classifier fingerprint when available, then a normalized title/subtype, then a normalized snippet fallback so distinct findings on the same target do not collapse into one row.
-  - New SQLite tables (standalone path only):
-    - `findings_inbox` `(id, session_token, signature_hash, tool_root, kind, severity, first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, status_updated_at)`.
-    - `findings_inbox_occurrences` `(finding_id, run_id, line_no, snippet, seen_at)` with retention pruning tied to run pruning.
-  - Routes in new `app/blueprints/findings_inbox.py`:
-    - `GET /findings/inbox` paginated list with filters.
-    - `GET /findings/inbox/<id>` detail with occurrences.
-    - `PUT /findings/inbox/<id>/status` single-status update.
-    - `PUT /findings/inbox/status` bulk-status update with `{finding_ids: [...], status}`. Same `results` and `reason` contract as the bulk-actions plan; max bulk size 100; `4xx` overflow.
-    - `POST /findings/inbox/<id>/pin` promotes into a project as a structured finding via existing `services.projects.workspace` helpers.
-  - Audit log: `FINDING_STATUS_CHANGED`, `FINDINGS_BULK_STATUS_CHANGED`, `FINDING_PINNED_TO_PROJECT`.
-  - Materialization is idempotent on re-finalization; signatures collapse duplicates.
-- **Phase 2 - Schema migration and backfill**
-  - Migration in `app/core/database.py` with indexes on `(session_token, signature_hash)` and `(session_token, status)`.
-  - Backfill helper walks existing saved runs on first deploy and materializes findings.
-  - Pruning rule: occurrence rows follow their source run; inbox rows survive after the last occurrence is pruned (the pattern is the value).
-- **Phase 3 - Browser surface**
-  - New `app/static/js/features/findings/findings_inbox.js` and `app/static/css/features/findings_inbox.css`.
-  - Top-level modal with sticky filter row and paginated row list. Row chrome: severity badge, kind, normalized target, occurrence count, first/last seen, status chip.
-  - Detail side sheet: occurrence list with permalinks and snippet excerpts, status controls, pin-to-project picker (active-project-first ordering).
-  - Entry points:
-    - Desktop chrome rail entry with unread `new` count badge.
-    - Mobile menu item.
-    - History row action: "Findings" opens inbox prefiltered to that run.
-    - Run Details: "Open in inbox" prefiltered to the run.
-    - Projects modal: "Open in inbox" prefiltered to the project.
-  - Reuses `ui_dismissible`, `ui_focus_trap`, `ui_outside_click`, `ui_pressable`, `ui_entity_metadata`, and the existing bulk-actions toast and `results[]` rendering.
-- **Phase 4 - Cross-surface integration**
-  - `false_positive` status propagates to Run Details and the project Findings tab as a greyed-out row treatment.
-  - Project-pin creates a structured finding using existing `services.projects.workspace` writes; the pinned finding carries the inbox `finding_id` as a back-link.
-  - `?` shortcuts overlay gains "Open Findings inbox".
-  - Terminal-native built-ins: `findings list`, `findings show <id>`, `findings status <id> <state>`.
-- **Phase 5 - Feedback and tests**
-  - Bulk status update uses the existing bulk-result toast policy (sticky when non-zero `rejected`/`not_found`).
-  - Backend coverage: signature stability across runs of the same tool/target/severity/signal key, distinct-finding separation when target/tool/severity match, re-finalize idempotency, status transition state machine, backfill correctness, bulk status update with mixed not_found/rejected entries (with inline reasons), project-pin creates structured finding and links back, cross-session rejection, max-bulk-size rejection.
-  - Frontend coverage: filter combinations, single and bulk status changes, project pin flow, occurrence list rendering, prefiltered entry-point parity (History, Run Details, Projects), unread badge accuracy after status changes.
-  - Playwright: one desktop and one mobile flow covering triage end-to-end (open, filter, change status, pin, see status reflect in Run Details).
-- **Open Decisions** (recommended answers below; review before implementation starts)
-  - **Signature `normalized_target` source.** Question: which "target" gets hashed into the signature — the run's command target (via `extract_target`) or an entity extracted from the finding line? **Recommend:** the run's command target (canonical form). Keeps dedup stable across many similar lines from the same scan; entity-line extraction comes later via the Atlas plan. If a finding has no command target, use the empty string but still include `normalized_signal_key` so unrelated command-scoped findings do not collapse together.
-  - **`normalized_kind` source.** Question: where does `kind` come from? **Recommend:** prefer the most specific classifier-provided kind/subtype/fingerprint family. Fall back to the existing `output_signals` event `cls` field (`finding`, `warning`, `error`, `summary`) only when no subtype exists. Document the canonical kind taxonomy in `app/core/output_signals.py`.
-  - **Severity taxonomy.** Question: what severity values does the inbox accept and filter on? **Recommend:** `{critical, high, medium, low, info}`. If `output_signals` does not currently emit a severity field, derive at materialization time from the kind (`error` → high, `warning` → medium, `finding` → medium, `summary` → info) and persist on the inbox row. Document the derivation.
-  - **Status transition graph.** Question: are arbitrary status transitions allowed, or only certain edges? **Recommend:** any → any in v1, audit-logged via `FINDING_STATUS_CHANGED`. Avoids modal-state UX where users get stuck in a state and can't revert. State-machine constraints are future work if abuse appears.
-  - **Backfill scope.** Question: how far back does the first-deploy backfill walk? **Recommend:** every saved run for the session. Retention pruning already bounds the historic set, so the cost is bounded; partial backfill creates a confusing inbox.
-  - **Pin-to-project payload.** Question: what does the structured `findings`-row look like when an inbox row is pinned? **Recommend:** copy the latest occurrence's `snippet` into `raw_line`, copy `line_no` into `line_number`, populate `findings.fingerprint` with the inbox `signature_hash` (so the project finding back-links to the inbox row), set `findings.review_state = 'new'`. Document the column mapping in the `pin` route docstring.
-  - **Unread badge counting rule.** Question: what does the rail badge actually count? **Recommend:** count of inbox rows with `status = 'new'`. Simple, no per-user read-state to track. Future work can introduce per-user read marks if needed.
-  - **Prefilter URL parameter shape.** Question: how do "open inbox prefiltered to this run" links express the filter? **Recommend:** query params on the inbox modal launch — `?run_id=<id>`, `?project_id=<id>`, `?status=new`. The inbox controller renders matching chips at the top so the prefilter is visible and removable.
-  - **Signature status persistence.** Question: when a user marks a signature `false_positive`, do future identical-signature occurrences inherit that status? **Recommend:** yes, by preserving the existing row's `status` when a known signature reappears. Materialization writes a fresh row only if the signature does not already exist; if it exists, only `last_seen_at` / `occurrence_count` / `last_run_id` update. This is not a separate suppression-rules engine — future suppression rules layer on top of this signature-status behavior.
-  - **Pagination size and ordering.** Question: default page size and sort order? **Recommend:** 50 rows per page, sorted by `last_seen_at DESC` by default. Filter chips override (e.g., severity filter sorts within filtered set). Mirrors history-drawer defaults.
-  - **Atlas-collapse routes.** Question: when the Atlas ships, does the inbox blueprint stay registered or is it deleted? **Recommend:** the inbox blueprint is deleted; its routes are rewritten under the Atlas's `/findings/*` and `/atlas/*` namespaces. The inbox modal entry points redirect to the Atlas Findings tab. Spell this out in the absorption commit message so callers know to update their links.
-
-- **Future**
-  - Bulk pin (pin many findings into one project in one click).
-  - Saved triage views (named filter combinations).
-  - Per-finding labels and notes via `ui_entity_metadata` helpers.
-  - Suppression rules — auto-mark newly seen signatures as `false_positive` based on regex, tool root, or classifier subtype.
-  - Export inbox snapshot as CSV/JSONL.
-  - Cross-session triage view for operators managing multiple sessions.
-  - Folded into the Session Entity Atlas Findings tab if the Atlas plan ships.
-
 ### Future Project Workspace enhancements
 - **Security and lifecycle**
   - Validate `workspace_file` entity ownership during session migration, or document that labels/notes on workspace-file paths can drift when a migrated token lands in a session with a different file at the same path.
@@ -688,19 +616,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Browser surface: a "Report" tab inside the existing Projects modal; renderer reuses `export_html.js` and `export_pdf.js`.
   - Honors share-redaction defaults; the draft is always previewed before download so this stays additive to evidence packages, not a replacement.
 
-### Findings triage inbox
-- Folded into the Session Entity Atlas idea below as phase 4 (the Findings tab becomes the inbox surface). Kept here so the standalone scope/architecture stays reviewable if the Atlas does not land first.
-- Cross-run, cross-project queue of every finding and warning the classifier has emitted, with status (new / triaged / confirmed / false-positive) and a "seen before in run X" dedupe link. Today findings live per-run; this surfaces patterns over time.
-- **Entry-level scope:**
-  - A Findings modal listing all classifier-emitted findings and warnings across saved runs for the active session, with filters for severity, status, tool, and project.
-  - Per-finding actions: mark triaged, confirm, mark false-positive, jump to source run, optionally pin into a project as a structured finding.
-  - Dedupe: identical finding signature across runs collapses into one row with a count and first/last-seen timestamps.
-- **Architecture:**
-  - New `app/services/findings/` service that materializes per-run finding records from `app/core/output_signals.py` into a `findings_inbox` SQLite table at run-finalize time. Each row carries a stable signature hash for dedupe.
-  - New `app/blueprints/findings.py` for list, filter, and status routes.
-  - Browser surface: new `app/static/js/features/findings/findings_inbox.js` and `app/static/css/features/findings.css`; entry points from the History drawer, Run Details modal, and Projects modal.
-  - The natural consumer of the structured output model in Architecture: design the inbox schema so it can move onto richer line/event data later without breaking the dedupe signature.
-
 ### Session Entity Atlas (entity-first triage surface)
 - Reframe darklab_shell's exploration model so entities (findings, hosts/IPs, domains, hashes, CVEs, URLs) become the primary navigation primitive — not runs, not projects. Runs become the *source* of entities. Projects become a *curated subset* of entities for engagement work. The active session token owns the entity graph.
 - **The gap it closes:**
@@ -725,7 +640,7 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Phase 1 — Read-only Atlas: render Findings, Hosts, Domains, Hashes, CVEs tabs from data already classified by `app/core/output_signals.py`. Rows click into their source run; no new metadata yet. Ships value alone.
   - Phase 2 — Entity Detail: aggregate across runs, attach labels/notes, dedupe via stable signature, "see in run" navigation.
   - Phase 3 — Intel attachment: explicit `intel` results, sidecar enrichment, and pipe-helper enrichment all write into entity-keyed intel rows; entity detail renders them.
-  - Phase 4 — Findings triage state: promote the Findings triage inbox actions (new / triaged / confirmed / false-positive, signature dedupe) onto the Findings tab. The standalone Findings triage inbox idea folds in here instead of shipping as its own surface.
+  - Phase 4 — Findings triage state: keep finding review actions (`new`, `reviewed`, `important`, `false_positive`, `needs_followup`) on the Findings tab. The standalone Findings triage inbox idea folds in here instead of shipping as its own surface.
   - Phase 5 — Project linking: adding to a project becomes a tag on the entity row; project workspace, evidence packages, and engagement report builder all read from the same entity store.
 - **Architecture:**
   - Storage:
@@ -754,7 +669,7 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Do not gate intel data on the user calling `intel` explicitly. Sidecar enrichment, pipe-helper enrichment, and explicit `intel` calls must all write through the same per-entity intel rows so a user who never types `intel` still sees enriched data.
   - Do not break runs that have no findings. Utility commands and failed commands produce zero entities; the Atlas must treat that as the normal case, not an empty state worth surfacing.
 - **Relationships to other ideas:**
-  - Folds in the **Findings triage inbox** idea as phase 4 — the inbox becomes the Findings lens on the Atlas, not a separate surface.
+  - Folds finding triage into the Atlas Findings lens instead of adding a separate inbox surface.
   - Provides the natural home for **External intel provider enhancements** — entity detail is where intel snapshots live; sidecar enrichment, the `intel` built-in, and pipe-helper enrichment all write here.
   - Consumes the entity-aware output classifier hooks called out under intel integrations and the **structured output model** under Architecture.
   - Reframes **Project workspaces** as a curation layer over the entity store rather than the only triage surface; project linking is a tag, not a copy.

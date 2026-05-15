@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,746
+- behavior tests: 2,749
 - docs/inventory meta-tests: 32
-- `pytest`: 1398 (1366 behavior + 32 meta)
-- `vitest`: 1131
+- `pytest`: 1399 (1367 behavior + 32 meta)
+- `vitest`: 1133
 - `playwright`: 249
-- total: 2,778
+- total: 2,781
 
 This document is organized in two parts:
 
@@ -1148,6 +1148,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestAtlasRoutes.test_lists_session_entities_and_detail` | Verifies Atlas summary, list, and detail routes return session-owned materialized entities and source runs. |
 | `TestAtlasRoutes.test_entity_detail_is_session_scoped` | Verifies Atlas entity detail routes do not reveal entities from other sessions. |
 | `TestAtlasRoutes.test_refresh_intel_persists_provider_snapshot` | Verifies Atlas intel refresh stores provider snapshots for the selected session-owned entity. |
+| `TestAtlasRoutes.test_findings_tab_lists_and_bulk_updates_review_state` | Verifies the Atlas Findings queue lists deduped findings and bulk-updates review state for selected findings. |
 | `TestWorkspaceRoutes.test_requires_active_session_header` | Verifies that workspace routes reject requests without an active session identity. |
 | `TestWorkspaceRoutes.test_disabled_workspace_returns_403` | Verifies that workspace routes stay unavailable while workspace storage is disabled. |
 | `TestWorkspaceRoutes.test_write_list_read_delete_lifecycle` | Verifies the route-level workspace lifecycle for write, list, read, and delete operations. |
@@ -1792,6 +1793,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `opens as a first-class surface and renders entity detail` | Verifies that the Atlas overlay opens, loads entity rows, and renders entity detail content. |
 | `adds the selected entity to the active project without leaving the surface` | Verifies that the active-project action posts the selected entity link and keeps Atlas open. |
 | `applies the project filter when opened from a project` | Verifies that project-launched Atlas requests entities filtered to that project. |
+| `renders the Findings tab and updates review state` | Verifies that the Atlas Findings tab renders finding detail and can update a finding review state. |
+| `bulk-updates selected Atlas findings` | Verifies that selected Atlas findings can be bulk-updated from the Findings tab. |
 
 #### `autocomplete.test.js`
 

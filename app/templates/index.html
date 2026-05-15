@@ -457,7 +457,15 @@
           <div id="atlas-tabs" class="atlas-tabs" role="tablist" aria-label="Atlas entity types"></div>
           <div class="atlas-filter-row">
             <input id="atlas-search" class="form-control form-control-compact" type="text" placeholder="search atlas" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search Atlas entities">
+            <select id="atlas-finding-status-filter" class="form-select form-control-compact u-hidden" aria-label="Filter Atlas findings by status"></select>
             <button id="atlas-refresh-btn" class="btn btn-secondary btn-compact" type="button">Refresh</button>
+          </div>
+          <div id="atlas-finding-bulk-row" class="atlas-finding-bulk-row u-hidden">
+            <span id="atlas-finding-selection-summary" class="atlas-muted">0 selected</span>
+            <button id="atlas-finding-select-all" class="btn btn-secondary btn-compact" type="button">Select all</button>
+            <button id="atlas-finding-clear-selection" class="btn btn-ghost btn-compact" type="button">Clear</button>
+            <select id="atlas-finding-bulk-status" class="form-select form-control-compact" aria-label="Bulk finding review state"></select>
+            <button id="atlas-finding-bulk-apply" class="btn btn-secondary btn-compact" type="button">Apply</button>
           </div>
         </div>
         <div id="atlas-list" class="atlas-list nice-scroll" aria-live="polite"></div>

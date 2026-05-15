@@ -6,6 +6,16 @@ import json
 from typing import Any
 
 from services.atlas.materializer import ATLAS_ENTITY_TYPES
+from services.projects.contracts import FINDING_REVIEW_STATES
+
+
+FINDING_STATUS_ORDER = {
+    "new": 0,
+    "needs_followup": 1,
+    "important": 2,
+    "reviewed": 3,
+    "false_positive": 4,
+}
 
 
 def _row_to_entity(row) -> dict[str, Any]:
@@ -87,22 +97,31 @@ def _row_to_intel_snapshot(row) -> dict[str, Any]:
 
 
 def _row_to_finding(row) -> dict[str, Any]:
+    snippet = row["snippet"] if "snippet" in row.keys() else ""
+    raw_line = row["raw_line"] or ""
+    line_number = row["line_number"] if "line_number" in row.keys() else None
     return {
         "id": row["id"],
         "entity_id": row["entity_id"] or "",
+        "entity_type": row["entity_type"] if "entity_type" in row.keys() else "",
+        "entity_value": row["entity_value"] if "entity_value" in row.keys() else "",
         "subject_key": row["subject_key"] or "",
         "severity": row["severity"] or "",
         "kind": row["kind"] or "finding",
         "tool_root": row["tool_root"] or "",
         "first_run_id": row["first_run_id"] or "",
         "last_run_id": row["last_run_id"] or "",
+        "run_id": row["last_run_id"] or "",
+        "run_command": row["run_command"] if "run_command" in row.keys() else "",
+        "run_kind": row["run_kind"] if "run_kind" in row.keys() else "",
         "first_seen_at": row["first_seen_at"] or "",
         "last_seen_at": row["last_seen_at"] or "",
         "occurrence_count": int(row["occurrence_count"] or 0),
         "status": row["status"] or "new",
         "review_state": row["status"] or "new",
         "title": row["title"] or "",
-        "raw_line": row["raw_line"] or "",
+        "raw_line": snippet or raw_line,
+        "line_number": line_number,
         "created": row["created"] or "",
     }
 
@@ -141,8 +160,115 @@ def atlas_summary(conn, session_id: str) -> dict[str, Any]:
     counts = {entity_type: 0 for entity_type in sorted(ATLAS_ENTITY_TYPES)}
     for row in rows:
         counts[str(row["type"])] = int(row["count"] or 0)
+    finding_count = int(conn.execute(
+        "SELECT COUNT(*) AS count FROM findings WHERE session_id = ?",
+        (session_id,),
+    ).fetchone()["count"] or 0)
     return {
         "total": sum(counts.values()),
+        "counts": counts,
+        "findings": finding_count,
+    }
+
+
+def _normalize_finding_statuses(values: list[str] | None) -> list[str]:
+    statuses: list[str] = []
+    for value in values or []:
+        status = str(value or "").strip().lower()
+        if status in FINDING_REVIEW_STATES and status not in statuses:
+            statuses.append(status)
+    return statuses
+
+
+def list_findings(
+    conn,
+    session_id: str,
+    *,
+    query: str = "",
+    project_id: str = "",
+    review_states: list[str] | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    search = str(query or "").strip().lower()
+    search_like = f"%{search}%" if search else ""
+    project_filter = str(project_id or "").strip()
+    statuses = _normalize_finding_statuses(review_states)
+    status_params = [*statuses, "", "", "", "", ""][:5]
+    params: list[Any] = [
+        session_id,
+        search,
+        search_like,
+        search_like,
+        search_like,
+        search_like,
+        project_filter,
+        project_filter,
+        len(statuses),
+        *status_params,
+    ]
+    total = int(conn.execute(
+        "SELECT COUNT(*) AS count FROM findings f "
+        "LEFT JOIN entities e ON e.id = f.entity_id "
+        "WHERE f.session_id = ? "
+        "AND (? = '' OR lower(f.title) LIKE ? OR lower(f.raw_line) LIKE ? "
+        "OR lower(f.tool_root) LIKE ? OR lower(COALESCE(e.canonical_value, '')) LIKE ?) "
+        "AND (? = '' OR EXISTS ("
+        "  SELECT 1 FROM project_links filter_link "
+        "  JOIN projects filter_project ON filter_project.id = filter_link.project_id "
+        "  WHERE filter_link.entity_type = 'atlas_entity' "
+        "  AND filter_link.entity_id = f.entity_id "
+        "  AND filter_link.project_id = ? "
+        "  AND filter_project.session_id = f.session_id"
+        ")) "
+        "AND (? = 0 OR f.status IN (?, ?, ?, ?, ?))",
+        params,
+    ).fetchone()["count"] or 0)
+    page_limit = max(1, min(int(limit or 50), 200))
+    page_offset = max(0, int(offset or 0))
+    rows = conn.execute(
+        "SELECT f.id, f.entity_id, e.type AS entity_type, e.canonical_value AS entity_value, "
+        "f.subject_key, f.severity, f.kind, f.tool_root, f.first_run_id, f.last_run_id, "
+        "r.command AS run_command, r.run_kind AS run_kind, "
+        "f.first_seen_at, f.last_seen_at, f.occurrence_count, f.status, f.title, f.raw_line, f.created, "
+        "(SELECT fo.line_number FROM findings_occurrences fo WHERE fo.finding_id = f.id "
+        " ORDER BY fo.seen_at DESC, fo.run_id DESC LIMIT 1) AS line_number, "
+        "(SELECT fo.snippet FROM findings_occurrences fo WHERE fo.finding_id = f.id "
+        " ORDER BY fo.seen_at DESC, fo.run_id DESC LIMIT 1) AS snippet "
+        "FROM findings f "
+        "LEFT JOIN entities e ON e.id = f.entity_id "
+        "LEFT JOIN runs r ON r.id = f.last_run_id AND r.session_id = f.session_id "
+        "WHERE f.session_id = ? "
+        "AND (? = '' OR lower(f.title) LIKE ? OR lower(f.raw_line) LIKE ? "
+        "OR lower(f.tool_root) LIKE ? OR lower(COALESCE(e.canonical_value, '')) LIKE ?) "
+        "AND (? = '' OR EXISTS ("
+        "  SELECT 1 FROM project_links filter_link "
+        "  JOIN projects filter_project ON filter_project.id = filter_link.project_id "
+        "  WHERE filter_link.entity_type = 'atlas_entity' "
+        "  AND filter_link.entity_id = f.entity_id "
+        "  AND filter_link.project_id = ? "
+        "  AND filter_project.session_id = f.session_id"
+        ")) "
+        "AND (? = 0 OR f.status IN (?, ?, ?, ?, ?)) "
+        "ORDER BY CASE f.status "
+        "WHEN 'new' THEN 0 WHEN 'needs_followup' THEN 1 WHEN 'important' THEN 2 "
+        "WHEN 'reviewed' THEN 3 WHEN 'false_positive' THEN 4 ELSE 9 END, "
+        "f.last_seen_at DESC, f.created DESC LIMIT ? OFFSET ?",
+        [*params, page_limit, page_offset],
+    ).fetchall()
+    counts = {status: 0 for status in sorted(FINDING_REVIEW_STATES, key=lambda item: FINDING_STATUS_ORDER.get(item, 99))}
+    count_rows = conn.execute(
+        "SELECT status, COUNT(*) AS count FROM findings WHERE session_id = ? GROUP BY status",
+        (session_id,),
+    ).fetchall()
+    for row in count_rows:
+        status = str(row["status"] or "new")
+        counts[status] = int(row["count"] or 0)
+    return {
+        "findings": [_row_to_finding(row) for row in rows],
+        "total": total,
+        "limit": page_limit,
+        "offset": page_offset,
         "counts": counts,
     }
 

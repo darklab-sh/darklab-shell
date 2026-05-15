@@ -141,6 +141,72 @@
     return wrap;
   }
 
+  function reviewStateSelect(value, onChange) {
+    const select = document.createElement('select');
+    select.className = 'form-select form-control-compact atlas-finding-review';
+    select.setAttribute('aria-label', 'Finding review state');
+    [
+      ['new', 'New'],
+      ['reviewed', 'Reviewed'],
+      ['important', 'Important'],
+      ['false_positive', 'False positive'],
+      ['needs_followup', 'Follow-up'],
+    ].forEach(([optionValue, label]) => {
+      const option = document.createElement('option');
+      option.value = optionValue;
+      option.textContent = label;
+      select.appendChild(option);
+    });
+    select.value = text(value, 'new');
+    select.addEventListener('change', () => onChange?.(select.value));
+    return select;
+  }
+
+  function renderFindingDetail(container, finding, handlers = {}) {
+    clear(container);
+    if (!container) return;
+    if (!finding || !finding.id) {
+      container.appendChild(node('div', 'atlas-empty-inline', 'Select a finding'));
+      return;
+    }
+    const header = node('div', 'atlas-detail-identity');
+    header.append(
+      node('div', 'atlas-detail-type', text(finding.kind, 'FINDING').toUpperCase()),
+      node('div', 'atlas-detail-value', text(finding.title || finding.raw_line, finding.id)),
+    );
+    const actions = node('div', 'atlas-detail-actions');
+    actions.appendChild(reviewStateSelect(finding.review_state || finding.status, (reviewState) => {
+      handlers.onReviewState?.(finding, reviewState);
+    }));
+    if (finding.run_id) {
+      const run = document.createElement('button');
+      run.type = 'button';
+      run.className = 'btn btn-secondary btn-compact';
+      run.textContent = 'See in run';
+      run.addEventListener('click', () => handlers.onSeeRun?.(finding));
+      actions.appendChild(run);
+    }
+    if (finding.entity_id) {
+      const entity = document.createElement('button');
+      entity.type = 'button';
+      entity.className = 'btn btn-secondary btn-compact';
+      entity.textContent = 'Open entity';
+      entity.addEventListener('click', () => handlers.onOpenEntity?.(finding));
+      actions.appendChild(entity);
+    }
+    const meta = node('div', 'atlas-detail-meta');
+    meta.append(
+      metaRow('Status', text(finding.review_state || finding.status, 'new')),
+      metaRow('Severity', text(finding.severity, '—')),
+      metaRow('Tool', text(finding.tool_root, '—')),
+      metaRow('Entity', text(finding.entity_value, finding.subject_key || '—')),
+      metaRow('Occurrences', Number(finding.occurrence_count || 0).toLocaleString()),
+      metaRow('Last seen', formatDate(finding.last_seen_at)),
+    );
+    const raw = node('code', 'atlas-finding-raw', text(finding.raw_line, finding.title || finding.id));
+    container.append(header, actions, meta, section('Evidence', raw));
+  }
+
   function renderMetadataEditor(entity, handlers = {}) {
     const wrap = node('div', 'atlas-metadata-editor');
     const labelInput = document.createElement('input');
@@ -228,6 +294,7 @@
 
   global.DarklabAtlasDetail = {
     renderDetail,
+    renderFindingDetail,
     formatCount,
     formatDate,
     text,

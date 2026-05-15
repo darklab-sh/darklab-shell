@@ -4049,6 +4049,12 @@ class TestAtlasRoutes:
                 }],
                 seen_at="2026-05-14T00:00:01+00:00",
             )
+            record_run_findings(conn, session_id, run_id, [{
+                "text": "443/tcp open https on darklab.sh",
+                "signals": ["findings"],
+                "line_index": 0,
+                "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
+            }])
             conn.commit()
         return run_id, recorded
 
@@ -4064,6 +4070,7 @@ class TestAtlasRoutes:
 
         assert summary_resp.status_code == 200
         assert json.loads(summary_resp.data)["counts"]["domain"] == 1
+        assert json.loads(summary_resp.data)["findings"] == 1
         assert list_resp.status_code == 200
         data = json.loads(list_resp.data)
         assert data["total"] == 1
@@ -4073,6 +4080,7 @@ class TestAtlasRoutes:
         detail = json.loads(detail_resp.data)
         assert detail["entity"]["id"] == domain_id
         assert detail["runs"][0]["run_id"] == run_id
+        assert detail["findings"][0]["raw_line"] == "443/tcp open https on darklab.sh"
 
     def test_entity_detail_is_session_scoped(self):
         client = get_client()
@@ -4125,6 +4133,33 @@ class TestAtlasRoutes:
         assert row["status"] == "ok"
         assert row["summary"] == "data available"
         assert json.loads(row["data_json"])["summary"]["has_intel"] is True
+
+    def test_findings_tab_lists_and_bulk_updates_review_state(self):
+        client = get_client()
+        session_id = self._session_id()
+        self._seed_entity_run(session_id)
+
+        list_resp = client.get("/atlas/findings?review_state=new", headers={"X-Session-ID": session_id})
+        data = json.loads(list_resp.data)
+        finding_id = data["findings"][0]["id"]
+        bulk_resp = client.post(
+            "/atlas/findings/review",
+            json={"finding_ids": [finding_id, "missing-finding"], "review_state": "important"},
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert list_resp.status_code == 200
+        assert data["total"] == 1
+        assert data["findings"][0]["entity_value"] == "darklab.sh"
+        assert bulk_resp.status_code == 200
+        bulk_data = json.loads(bulk_resp.data)
+        assert bulk_data["counts"] == {"updated": 1, "not_found": 1}
+        with db_connect() as conn:
+            row = conn.execute(
+                "SELECT status FROM findings WHERE session_id = ? AND id = ?",
+                (session_id, finding_id),
+            ).fetchone()
+        assert row["status"] == "important"
 
 
 # ── /workspace/files ──────────────────────────────────────────────────────────

@@ -256,6 +256,8 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | `GET` | `/atlas` | Returns current-session Atlas entity counts by entity type. |
 | `GET` | `/atlas/entities` | Returns a paginated current-session entity list, with optional `type`, text search, project filter, limit, and offset parameters. |
 | `GET` | `/atlas/entities/<entity_id>` | Returns one current-session entity with source runs, labels, notes, project links, cached intel snapshots, and related findings. |
+| `GET` | `/atlas/findings` | Returns the paginated Atlas Findings queue with optional text, project, review-state, limit, and offset filters. |
+| `POST` | `/atlas/findings/review` | Bulk-updates the review state for selected current-session findings. |
 | `POST` | `/atlas/entities/<entity_id>/refresh_intel` | Refreshes app-native intel for one current-session entity and stores provider snapshots on the entity. |
 | `POST` | `/atlas/entities/<entity_id>/project_links` | Adds an Atlas entity to a project through the shared project-link model. |
 | `DELETE` | `/atlas/entities/<entity_id>/project_links/<project_id>` | Removes an Atlas entity from a project. |
@@ -433,7 +435,7 @@ External dependencies: local vendor routes serving committed builds of `ansi_up`
 
 **JS module load order:** `session.js` → `state.js` → `utils.js` → `export_html.js` → `config.js` → `dom.js` → `ui_helpers.js` → `ui_pressable.js` → `ui_disclosure.js` → `ui_dismissible.js` → `ui_focus_trap.js` → `ui_confirm.js` → `ui_outside_click.js` → `ui_entity_metadata.js` → `export_pdf.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history_core.js` → `history.js` → `workspace_core.js` → `workspace.js` → `welcome.js` → `status_monitor.js` → `atlas_tabs.js` → `atlas_entity_detail.js` → `atlas_overlay.js` → `runner_core.js` → `pty.js` → `runner.js` → `app_preferences_core.js` → `app.js` → `preferences.js` → `secrets_panel.js` → `session_token_controls.js` → `tour_modal.js` → `mobile_sheet.js` → `controller.js` → `shell_chrome.js` → `mobile_chrome.js`. `state.js` owns the shared store boundary, `ui_helpers.js` owns DOM-facing setters/getters and visibility helpers, the `ui_*` helper modules form the shared UI interaction layer (see **UI Interaction Helpers** below), `ui_entity_metadata.js` owns the shared `/entities/<type>/<id>` label/note client consumed by Files, Projects, and Atlas, `app.js` still provides reusable browser helpers, `secrets_panel.js` owns the Options Secrets list plus the terminal `secret set NAME` value prompt, `tour_modal.js` owns the desktop visual onboarding carousel, `controller.js` owns the composition root, and `shell_chrome.js` / `mobile_chrome.js` load last so their rail, tabbar, HUD, and mobile-sheet wiring can attach after all tab, search, and action helpers are defined. `welcome.js` must precede `runner.js` because `runner.js` calls `cancelWelcome()` at the top of `runCommand()`.
 
-**Session Entity Atlas surface.** `static/js/features/atlas/` owns the top-level Atlas overlay used from the desktop rail, mobile menu, `Alt+A`, History actions, Run Details, project-filtered launches from Projects, and entity tokens rendered inside transcripts. The Atlas surface lists deduped session entities by type, opens an entity detail side sheet, refreshes app-native intel snapshots, links entities to the active project, and edits labels/notes through `ui_entity_metadata.js`. `output.js` decorates classifier-provided entity ranges as transcript tokens and routes token clicks, long-presses, and context menus into Atlas. `static/css/features/atlas.css` keeps the surface and transcript-token actions on the same sheet/menu primitives as History, Projects, and Status Monitor.
+**Session Entity Atlas surface.** `static/js/features/atlas/` owns the top-level Atlas overlay used from the desktop rail, mobile menu, `Alt+A`, History actions, Run Details, project-filtered launches from Projects, and entity tokens rendered inside transcripts. The Atlas surface lists deduped session entities by type, opens an entity detail side sheet, refreshes app-native intel snapshots, links entities to the active project, and edits labels/notes through `ui_entity_metadata.js`. Its Findings tab reads the same unified `findings` table as Projects and Run Details, gives users a cross-run triage queue with review-state filters, and supports single or visible-page bulk review updates. `output.js` decorates classifier-provided entity ranges as transcript tokens and routes token clicks, long-presses, and context menus into Atlas. `static/css/features/atlas.css` keeps the surface and transcript-token actions on the same sheet/menu primitives as History, Projects, and Status Monitor.
 
 **UI Interaction Helpers.** A five-helper family in `static/js/ui_helpers.js` + four sibling `ui_*.js` modules is the single contract for chrome-surface interaction. Every module loads before the domain scripts that consume it, so every downstream module sees the helpers as plain globals — no wiring glue at call sites.
 
@@ -1101,7 +1103,7 @@ erDiagram
 - `entity_run_links` — many-to-many Atlas source links from entities to runs, with first/last seen timestamps and per-run occurrence counts. Run pruning removes these link rows while leaving the deduplicated entity row available for labels, notes, project links, and future intel snapshots.
 - `entity_intel_snapshots` — cached, normalized provider snapshots attached to an Atlas entity. The row shape stores provider name, status, short summary, JSON payload, fetch time, and expiry time so Atlas detail views can render intel cards without re-querying providers on every open. The refresh route writes through the same app-native intel provider orchestration used by the `intel` terminal command.
 - `run_file_artifacts` — durable file manifest rows for workspace files produced or consumed by a run, including recorded size and optional SHA-256 content checksum so project views can flag missing or changed workspace files. This is separate from `run_output_artifacts`, which stores the terminal transcript artifact behind a run permalink.
-- `findings` — entity-owned finding rows deduped across runs by a stable signature. Findings keep a primary Atlas entity when one is available, an unscoped subject key when one is not, first/last run IDs, first/last seen timestamps, occurrence count, severity, status, and lightweight title/raw-line context. The Projects modal and Atlas read the same table, so finding review state does not drift between surfaces.
+- `findings` — entity-owned finding rows deduped across runs by a stable signature. Findings keep a primary Atlas entity when one is available, an unscoped subject key when one is not, first/last run IDs, first/last seen timestamps, occurrence count, severity, status, and lightweight title/raw-line context. The Projects modal, Run Details, and Atlas read the same table, so finding review state does not drift between surfaces.
 - `findings_occurrences` — per-run sightings for findings, keyed by finding, run, and line number. Run pruning removes these occurrence rows while leaving the parent finding row in place so labels, notes, and triage state can survive after the original transcript ages out.
 - `entity_labels` — short user-controlled labels/bookmarks for supported entities, including Atlas entities, projects, runs, snapshots, workspace files, run file artifacts, findings, targets, and packages.
 - `entity_notes` — one private note attached to each supported entity per session, including Atlas entities and project notes. Notes are intentionally singular so entity metadata remains an editable note surface instead of a comment thread.
@@ -1335,12 +1337,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,746
+- behavior tests: 2,749
 - docs/inventory meta-tests: 32
-- `pytest`: 1398 (1366 behavior + 32 meta)
-- `vitest`: 1131
+- `pytest`: 1399 (1367 behavior + 32 meta)
+- `vitest`: 1133
 - `playwright`: 249
-- total: 2,778
+- total: 2,781
 
 ### Testing Architecture
 

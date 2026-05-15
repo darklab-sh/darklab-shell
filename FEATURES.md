@@ -393,6 +393,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 
 - Open **Atlas** from the desktop rail, mobile menu, `Alt+A`, History row actions, Run Details, or a project filtered view.
 - Atlas groups saved entities by **Findings**, **Hosts/IPs**, **Domains**, **Hashes**, **CVEs**, and **URLs**. Entity rows show the canonical value, hit count, source-run count, project links, and labels.
+- The **Findings** tab works as the cross-run triage queue. It lists deduped findings, supports text/project/review-state filters, opens finding detail with source-run and entity navigation, and can update one finding or selected visible findings in bulk.
 - Selecting an entity opens a detail side sheet with first/last seen times, project links, labels, notes, cached intel snapshots, source runs, and related findings.
 - Entity tokens in saved and live transcripts can open Atlas directly. Long-pressing or right-clicking a token opens quick actions for copying the value, refreshing intel, editing metadata in Atlas, or refocusing the transcript line.
 - **Refresh intel** fetches current app-native intel for that entity and stores normalized provider snapshots back on the entity.

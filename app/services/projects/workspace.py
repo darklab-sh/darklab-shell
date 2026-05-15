@@ -3721,7 +3721,9 @@ def record_run_findings(conn, session_id, run_id, entries):
                 (run_id, entity_id, run_id, created, severity, severity, title, raw_line, finding_id),
             )
         else:
-            finding_id = "fnd_" + signature_hash[:32]
+            finding_id = "fnd_" + hashlib.sha256(
+                f"{session_id}\x1f{signature_hash}".encode("utf-8", errors="replace")
+            ).hexdigest()[:32]
             conn.execute(
                 "INSERT INTO findings "
                 "(id, session_id, run_id, target_id, scope, line_number, review_state, "

@@ -11,7 +11,14 @@
   const tabsHost = document.getElementById('atlas-tabs');
   const subtitle = document.getElementById('atlas-subtitle');
   const searchInput = document.getElementById('atlas-search');
+  const findingStatusFilter = document.getElementById('atlas-finding-status-filter');
   const refreshBtn = document.getElementById('atlas-refresh-btn');
+  const findingBulkRow = document.getElementById('atlas-finding-bulk-row');
+  const findingSelectionSummary = document.getElementById('atlas-finding-selection-summary');
+  const findingSelectAllBtn = document.getElementById('atlas-finding-select-all');
+  const findingClearSelectionBtn = document.getElementById('atlas-finding-clear-selection');
+  const findingBulkStatus = document.getElementById('atlas-finding-bulk-status');
+  const findingBulkApplyBtn = document.getElementById('atlas-finding-bulk-apply');
   const listHost = document.getElementById('atlas-list');
   const detailHost = document.getElementById('atlas-detail');
   const pagination = document.getElementById('atlas-pagination');
@@ -23,6 +30,11 @@
     activeTab: 'ip',
     summary: null,
     entities: [],
+    findings: [],
+    findingCounts: {},
+    selectedFindingId: '',
+    selectedFindingIds: new Set(),
+    findingStatus: '',
     total: 0,
     limit: 50,
     offset: 0,
@@ -52,6 +64,14 @@
   function text(value, fallback = '') {
     return detailApi.text ? detailApi.text(value, fallback) : (String(value ?? '').trim() || fallback);
   }
+
+  const findingStates = [
+    ['new', 'New'],
+    ['reviewed', 'Reviewed'],
+    ['important', 'Important'],
+    ['false_positive', 'False positive'],
+    ['needs_followup', 'Follow-up'],
+  ];
 
   function isOpen() {
     return !!(overlay && overlay.classList.contains('open'));
@@ -91,6 +111,8 @@
       if (searchInput) searchInput.value = '';
     }
     state.selectedId = '';
+    state.selectedFindingId = '';
+    state.selectedFindingIds.clear();
     state.detail = null;
     show();
     if (typeof global.markInteractionSurfaceReady === 'function') {
@@ -130,6 +152,8 @@
         state.activeTab = tab.id;
         state.offset = 0;
         state.selectedId = '';
+        state.selectedFindingId = '';
+        state.selectedFindingIds.clear();
         state.requestedEntityValue = '';
         state.refreshIntelOnSelect = false;
         state.addActiveProjectOnSelect = false;
@@ -145,7 +169,90 @@
     if (!subtitle) return;
     const total = tabsApi.totalEntityCount ? tabsApi.totalEntityCount(state.summary) : Number(state.summary?.total || 0);
     const base = `${total.toLocaleString()} ${total === 1 ? 'entity' : 'entities'}`;
-    subtitle.textContent = state.projectId && state.projectName ? `${base} · ${state.projectName}` : base;
+    const findingCount = Number(state.summary?.findings || 0);
+    const summary = `${base} · ${findingCount.toLocaleString()} ${findingCount === 1 ? 'finding' : 'findings'}`;
+    subtitle.textContent = state.projectId && state.projectName ? `${summary} · ${state.projectName}` : summary;
+  }
+
+  function populateFindingControls() {
+    const option = (label, value) => {
+      const item = document.createElement('option');
+      item.value = value;
+      item.textContent = label;
+      return item;
+    };
+    if (findingStatusFilter && !findingStatusFilter.dataset.populated) {
+      findingStatusFilter.appendChild(option('All findings', ''));
+      findingStates.forEach(([value, label]) => findingStatusFilter.appendChild(option(label, value)));
+      findingStatusFilter.dataset.populated = '1';
+    }
+    if (findingBulkStatus && !findingBulkStatus.dataset.populated) {
+      findingStates.forEach(([value, label]) => findingBulkStatus.appendChild(option(label, value)));
+      findingBulkStatus.value = 'reviewed';
+      findingBulkStatus.dataset.populated = '1';
+    }
+  }
+
+  function renderFindingControls() {
+    populateFindingControls();
+    const active = currentTab().id === 'findings';
+    findingStatusFilter?.classList.toggle('u-hidden', !active);
+    findingBulkRow?.classList.toggle('u-hidden', !active);
+    if (!active) return;
+    if (findingStatusFilter) findingStatusFilter.value = state.findingStatus;
+    const selectedCount = state.selectedFindingIds.size;
+    if (findingSelectionSummary) {
+      findingSelectionSummary.textContent = `${selectedCount.toLocaleString()} selected`;
+    }
+    if (findingBulkApplyBtn) findingBulkApplyBtn.disabled = !selectedCount || state.loading;
+    if (findingClearSelectionBtn) findingClearSelectionBtn.disabled = !selectedCount || state.loading;
+    if (findingSelectAllBtn) findingSelectAllBtn.disabled = !state.findings.length || state.loading;
+  }
+
+  function findingStatusLabel(value) {
+    const found = findingStates.find(([stateValue]) => stateValue === String(value || ''));
+    return found ? found[1] : text(value, 'New');
+  }
+
+  function findingRow(finding) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'chrome-row chrome-row-clickable atlas-finding-queue-row';
+    row.classList.toggle('is-selected', finding.id === state.selectedFindingId);
+    row.dataset.findingId = finding.id;
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'atlas-finding-select';
+    checkbox.checked = state.selectedFindingIds.has(String(finding.id || ''));
+    checkbox.setAttribute('aria-label', `Select finding: ${finding.title || finding.id}`);
+    checkbox.addEventListener('click', (event) => {
+      event.stopPropagation();
+      toggleFindingSelection(finding.id, checkbox.checked);
+    });
+
+    const main = document.createElement('span');
+    main.className = 'atlas-entity-main';
+    const title = document.createElement('span');
+    title.className = 'atlas-finding-title';
+    title.textContent = text(finding.title || finding.raw_line, finding.id);
+    const meta = document.createElement('span');
+    meta.className = 'atlas-muted';
+    meta.textContent = [
+      findingStatusLabel(finding.review_state || finding.status),
+      text(finding.severity),
+      text(finding.tool_root),
+      text(finding.entity_value || finding.subject_key),
+    ].filter(Boolean).join(' · ');
+    main.append(title, meta);
+
+    const badges = document.createElement('span');
+    badges.className = 'atlas-entity-badges';
+    badges.appendChild(badge(findingStatusLabel(finding.review_state || finding.status), 'green'));
+    if (finding.occurrence_count) badges.appendChild(badge(`${finding.occurrence_count} hits`, 'muted'));
+    row.append(checkbox, main, badges);
+    row.addEventListener('click', () => selectFinding(finding.id));
+    return row;
   }
 
   function renderList() {
@@ -157,7 +264,11 @@
       return;
     }
     if (tab.id === 'findings') {
-      listHost.appendChild(rowMessage('No findings queued'));
+      if (!state.findings.length) {
+        listHost.appendChild(rowMessage(state.query || state.findingStatus ? 'No matching findings' : 'No findings queued'));
+        return;
+      }
+      state.findings.forEach(finding => listHost.appendChild(findingRow(finding)));
       return;
     }
     if (!state.entities.length) {
@@ -211,8 +322,7 @@
 
   function renderPagination() {
     if (!pagination || !paginationSummary || !prevBtn || !nextBtn) return;
-    const tab = currentTab();
-    const showPager = tab.id !== 'findings' && (state.total > state.limit || state.offset > 0);
+    const showPager = state.total > state.limit || state.offset > 0;
     pagination.classList.toggle('u-hidden', !showPager);
     if (!showPager) return;
     const start = state.total ? state.offset + 1 : 0;
@@ -226,6 +336,20 @@
     if (!detailHost) return;
     if (state.detailLoading) {
       detailHost.replaceChildren(rowMessage('Loading entity...'));
+      return;
+    }
+    if (currentTab().id === 'findings') {
+      const finding = state.findings.find(item => String(item.id || '') === state.selectedFindingId);
+      detailApi.renderFindingDetail?.(detailHost, finding, {
+        onReviewState: (item, reviewState) => updateFindingReviewState(item, reviewState),
+        onSeeRun: (item) => openSourceRun({
+          id: item.run_id,
+          run_id: item.run_id,
+          command: item.run_command,
+          run_kind: item.run_kind,
+        }),
+        onOpenEntity: (item) => openEntityFromFinding(item),
+      });
       return;
     }
     const activeProject = typeof global.getActiveProjectContext === 'function'
@@ -248,6 +372,7 @@
 
   function render() {
     renderSubtitle();
+    renderFindingControls();
     renderTabs();
     renderList();
     renderPagination();
@@ -265,9 +390,33 @@
       state.summary = await summaryResp.json();
       const tab = currentTab();
       if (tab.id === 'findings') {
+        const params = new URLSearchParams({
+          limit: String(state.limit),
+          offset: String(state.offset),
+        });
+        if (state.query) params.set('q', state.query);
+        if (state.projectId) params.set('project_id', state.projectId);
+        if (state.findingStatus) params.append('review_state', state.findingStatus);
+        const listResp = await api()(`/atlas/findings?${params.toString()}`, { cache: 'no-store' });
+        if (!listResp.ok) throw new Error(`HTTP ${listResp.status}`);
+        const data = await listResp.json();
         state.entities = [];
-        state.total = 0;
+        state.findings = Array.isArray(data.findings) ? data.findings : [];
+        state.findingCounts = data.counts && typeof data.counts === 'object' ? data.counts : {};
+        state.total = Number(data.total || 0);
+        state.selectedFindingIds.forEach((findingId) => {
+          if (!state.findings.some(finding => String(finding.id || '') === findingId)) {
+            state.selectedFindingIds.delete(findingId);
+          }
+        });
+        if (!state.selectedFindingId && state.findings[0]) state.selectedFindingId = state.findings[0].id;
+        if (state.selectedFindingId && !state.findings.some(item => String(item.id || '') === state.selectedFindingId)) {
+          state.selectedFindingId = state.findings[0]?.id || '';
+        }
+        state.detail = null;
       } else {
+        state.findings = [];
+        state.selectedFindingId = '';
         const params = new URLSearchParams({
           type: tab.type,
           limit: String(state.limit),
@@ -316,6 +465,77 @@
     state.selectedId = String(entityId || '');
     renderList();
     await loadDetail(state.selectedId);
+  }
+
+  function selectFinding(findingId) {
+    state.selectedFindingId = String(findingId || '');
+    renderList();
+    renderDetail();
+  }
+
+  function toggleFindingSelection(findingId, selected) {
+    const normalized = String(findingId || '');
+    if (!normalized) return;
+    if (selected) state.selectedFindingIds.add(normalized);
+    else state.selectedFindingIds.delete(normalized);
+    renderFindingControls();
+  }
+
+  async function updateFindingReviewState(finding, reviewState) {
+    const findingId = String(finding && finding.id || '');
+    if (!findingId || !reviewState) return;
+    try {
+      const resp = await api()(`/findings/${encodeURIComponent(findingId)}/review`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ review_state: reviewState }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      showToastSafe('Finding updated', 'success');
+      await refreshAtlas();
+    } catch (err) {
+      if (typeof global.logClientError === 'function') global.logClientError('failed to update atlas finding', err);
+      showToastSafe('Failed to update finding', 'error');
+    }
+  }
+
+  async function bulkUpdateFindings() {
+    const reviewState = String(findingBulkStatus?.value || '').trim();
+    const findingIds = [...state.selectedFindingIds];
+    if (!findingIds.length || !reviewState) return;
+    try {
+      const resp = await api()('/atlas/findings/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ finding_ids: findingIds, review_state: reviewState }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json().catch(() => ({}));
+      const updated = Number(data?.counts?.updated || 0);
+      const notFound = Number(data?.counts?.not_found || 0);
+      showToastSafe(
+        notFound ? `Updated ${updated} findings · ${notFound} not found` : `Updated ${updated} findings`,
+        notFound ? 'warning' : 'success',
+      );
+      state.selectedFindingIds.clear();
+      await refreshAtlas();
+    } catch (err) {
+      if (typeof global.logClientError === 'function') global.logClientError('failed to bulk update atlas findings', err);
+      showToastSafe('Failed to update findings', 'error');
+    }
+  }
+
+  function openEntityFromFinding(finding) {
+    const entityId = String(finding && finding.entity_id || '');
+    const entityType = String(finding && finding.entity_type || '');
+    if (!entityId || !entityType) return;
+    state.activeTab = entityType;
+    state.selectedId = entityId;
+    state.selectedFindingId = '';
+    state.selectedFindingIds.clear();
+    state.query = '';
+    if (searchInput) searchInput.value = '';
+    refreshAtlas({ resetOffset: true });
   }
 
   async function loadDetail(entityId, { renderLoading = true } = {}) {
@@ -437,6 +657,25 @@
       state.addActiveProjectOnSelect = false;
       clearTimeout(state.searchTimer);
       state.searchTimer = setTimeout(() => refreshAtlas({ resetOffset: true }), 180);
+    });
+    findingStatusFilter?.addEventListener('change', () => {
+      state.findingStatus = String(findingStatusFilter.value || '');
+      state.selectedFindingId = '';
+      state.selectedFindingIds.clear();
+      refreshAtlas({ resetOffset: true });
+    });
+    findingSelectAllBtn?.addEventListener('click', () => {
+      state.findings.forEach(finding => {
+        if (finding && finding.id) state.selectedFindingIds.add(String(finding.id));
+      });
+      render();
+    });
+    findingClearSelectionBtn?.addEventListener('click', () => {
+      state.selectedFindingIds.clear();
+      render();
+    });
+    findingBulkApplyBtn?.addEventListener('click', () => {
+      bulkUpdateFindings();
     });
     if (typeof global.bindDismissible === 'function' && overlay) {
       global.bindDismissible(overlay, {
