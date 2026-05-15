@@ -4161,6 +4161,49 @@ class TestAtlasRoutes:
             ).fetchone()
         assert row["status"] == "important"
 
+    def test_project_links_curate_atlas_entities_into_project_targets(self):
+        client = get_client()
+        session_id = self._session_id()
+        _, recorded = self._seed_entity_run(session_id)
+        domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Atlas Case"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+
+        link_resp = client.post(
+            f"/atlas/entities/{domain_id}/project_links",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        targets_resp = client.get(
+            f"/projects/{project['id']}/targets",
+            headers={"X-Session-ID": session_id},
+        )
+        summary_resp = client.get(
+            f"/projects/{project['id']}/summary",
+            headers={"X-Session-ID": session_id},
+        )
+        unlink_resp = client.delete(
+            f"/atlas/entities/{domain_id}/project_links/{project['id']}",
+            headers={"X-Session-ID": session_id},
+        )
+        targets_after_unlink = client.get(
+            f"/projects/{project['id']}/targets",
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert link_resp.status_code == 201
+        assert json.loads(link_resp.data)["link"]["entity_type"] == "atlas_entity"
+        assert targets_resp.status_code == 200
+        targets = json.loads(targets_resp.data)["targets"]
+        assert [(item["id"], item["value"]) for item in targets] == [(domain_id, "darklab.sh")]
+        assert json.loads(summary_resp.data)["counts"]["targets"] == 1
+        assert unlink_resp.status_code == 200
+        assert json.loads(targets_after_unlink.data)["targets"] == []
+
 
 # ── /workspace/files ──────────────────────────────────────────────────────────
 

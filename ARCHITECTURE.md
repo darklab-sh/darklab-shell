@@ -936,6 +936,10 @@ erDiagram
     TEXT entity_type
     TEXT entity_id
     TEXT source
+    REAL confidence
+    TEXT review_state
+    TEXT source_detail
+    TEXT updated
     TEXT created
   }
   ENTITIES {
@@ -981,47 +985,38 @@ erDiagram
     TEXT content_sha256
     TEXT created
   }
-  PROJECT_TARGETS {
-    TEXT id PK
-    TEXT project_id
-    TEXT type
-    TEXT value
-    TEXT label
-    TEXT notes
-    TEXT source_run_id
-    REAL confidence
-    TEXT review_state
-    TEXT source
-    TEXT source_detail
-    INTEGER seen_count
-    TEXT last_seen
-    TEXT dismissed_at
-    TEXT created
-    TEXT updated
-  }
   FINDINGS {
     TEXT id PK
     TEXT session_id
     TEXT run_id
     TEXT target_id
     TEXT scope
+    INTEGER line_number
+    TEXT review_state
+    TEXT entity_id
+    TEXT subject_key
+    TEXT signature_hash
+    TEXT severity
+    TEXT kind
+    TEXT tool_root
+    TEXT first_run_id
+    TEXT last_run_id
+    TEXT first_seen_at
+    TEXT last_seen_at
+    INTEGER occurrence_count
+    TEXT status
+    TEXT status_updated_at
+    TEXT fingerprint
     TEXT title
     TEXT raw_line
-    INTEGER line_number
-    TEXT severity
-    TEXT fingerprint
-    TEXT review_state
     TEXT created
   }
-  FINDING_TARGETS {
-    TEXT id PK
-    TEXT session_id
+  FINDINGS_OCCURRENCES {
     TEXT finding_id
-    TEXT target_id
     TEXT run_id
-    TEXT source
-    REAL confidence
-    TEXT created
+    INTEGER line_number
+    TEXT snippet
+    TEXT seen_at
   }
   ENTITY_LABELS {
     TEXT id PK
@@ -1068,7 +1063,6 @@ erDiagram
   LOGICAL_SESSION ||--o{ ENTITIES : "indexes"
   LOGICAL_SESSION ||--o{ RUN_FILE_ARTIFACTS : "tracks"
   LOGICAL_SESSION ||--o{ FINDINGS : "captures"
-  LOGICAL_SESSION ||--o{ FINDING_TARGETS : "attributes"
   LOGICAL_SESSION ||--o{ ENTITY_LABELS : "labels"
   LOGICAL_SESSION ||--o{ ENTITY_NOTES : "notes"
   LOGICAL_SESSION ||--o{ EVIDENCE_PACKAGES : "packages"
@@ -1080,10 +1074,8 @@ erDiagram
   ENTITIES ||--o{ ENTITY_RUN_LINKS : "seen in"
   ENTITIES ||--o{ ENTITY_INTEL_SNAPSHOTS : "caches"
   PROJECTS ||--o{ PROJECT_LINKS : "links top-level records"
-  PROJECTS ||--o{ PROJECT_TARGETS : "scopes"
   PROJECTS ||--o{ EVIDENCE_PACKAGES : "packages"
-  FINDINGS ||--o{ FINDING_TARGETS : "matches"
-  PROJECT_TARGETS ||--o{ FINDING_TARGETS : "matched by"
+  FINDINGS ||--o{ FINDINGS_OCCURRENCES : "seen in runs"
 ```
 
 - `runs` — one row per completed command. Stores run metadata, including `run_kind` (`builtin` or `external`) so history filters, project links, and finding capture can use a durable classification instead of re-reading the command text. It also stores a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews store structured `{text, cls, tsC, tsE}` entries plus optional signal and entity metadata so run permalinks can preserve prompt echo, timestamp metadata, scoped findings, and extracted public IP/domain/hash/CVE hints. The preview is capped by both `max_output_lines` and `output_preview_max_mb`, which protects SQLite from huge single-line outputs while full artifacts retain the larger text when enabled. Also stores `output_search_text` (plain text extracted from the full artifact when available, otherwise the preview) for FTS indexing. Persists across restarts. Pruned by `permalink_retention_days`.
@@ -1337,12 +1329,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,749
+- behavior tests: 2,750
 - docs/inventory meta-tests: 32
-- `pytest`: 1399 (1367 behavior + 32 meta)
+- `pytest`: 1400 (1368 behavior + 32 meta)
 - `vitest`: 1133
 - `playwright`: 249
-- total: 2,781
+- total: 2,782
 
 ### Testing Architecture
 

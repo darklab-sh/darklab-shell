@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fromDomScripts } from './helpers/extract.js'
+import { MemoryStorage, fromDomScripts } from './helpers/extract.js'
 
 const ENTITY = {
   id: 'ent_ip',
@@ -75,6 +75,8 @@ function loadAtlas({
   apiFetchImpl = null,
 } = {}) {
   const showToast = vi.fn()
+  const storage = new MemoryStorage()
+  const projectEvents = []
   const apiFetch = apiFetchImpl || vi.fn((url, options = {}) => {
     const target = String(url)
     if (target === '/atlas') {
@@ -145,11 +147,17 @@ function loadAtlas({
         apiFetch,
         fetch: apiFetch,
         showToast,
+        localStorage: storage,
         URLSearchParams,
         setTimeout,
         clearTimeout,
         getActiveProjectContext: () => activeProject,
         refreshActiveProjectContext: vi.fn(() => Promise.resolve(activeProject)),
+        emitUiEvent: (name, detail = {}) => {
+          projectEvents.push({ name, detail })
+          document.dispatchEvent(new CustomEvent(name, { detail }))
+          return true
+        },
         refocusComposerAfterAction: vi.fn(),
       },
       `{
@@ -162,6 +170,7 @@ function loadAtlas({
       `
         window.apiFetch = apiFetch;
         window.showToast = showToast;
+        window.emitUiEvent = emitUiEvent;
         window.getActiveProjectContext = getActiveProjectContext;
         window.refreshActiveProjectContext = refreshActiveProjectContext;
         window.refocusComposerAfterAction = refocusComposerAfterAction;
@@ -169,6 +178,8 @@ function loadAtlas({
     ),
     apiFetch,
     showToast,
+    projectEvents,
+    storage,
   }
 }
 
@@ -194,7 +205,7 @@ describe('Atlas overlay', () => {
   })
 
   it('adds the selected entity to the active project without leaving the surface', async () => {
-    const { openAtlas, isAtlasOverlayOpen, apiFetch, showToast } = loadAtlas({
+    const { openAtlas, isAtlasOverlayOpen, apiFetch, showToast, projectEvents, storage } = loadAtlas({
       activeProject: { id: 'prj_1', name: 'Case Alpha' },
     })
 
@@ -211,6 +222,20 @@ describe('Atlas overlay', () => {
       }),
     )
     expect(showToast).toHaveBeenCalledWith('Added to active project', 'success')
+    expect(projectEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: 'app:project-workspace-changed',
+        detail: expect.objectContaining({ reason: 'atlas_entity_linked', project_id: 'prj_1' }),
+      }),
+      expect.objectContaining({
+        name: 'app:project-workspace-mutated',
+        detail: expect.objectContaining({ reason: 'atlas_entity_linked', project_id: 'prj_1' }),
+      }),
+    ]))
+    expect(JSON.parse(storage.getItem('darklab_project_workspace_changed'))).toEqual(expect.objectContaining({
+      reason: 'atlas_entity_linked',
+      project_id: 'prj_1',
+    }))
     expect(isAtlasOverlayOpen()).toBe(true)
   })
 

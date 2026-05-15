@@ -61,6 +61,25 @@
     if (typeof global.showToast === 'function') global.showToast(message, tone);
   }
 
+  function broadcastProjectWorkspaceChange(reason, projectId) {
+    const payload = {
+      reason: String(reason || 'updated'),
+      project_id: String(projectId || ''),
+      changed_at: Date.now(),
+    };
+    if (typeof global.emitUiEvent === 'function') {
+      global.emitUiEvent('app:project-workspace-changed', payload);
+      global.emitUiEvent('app:project-workspace-mutated', payload);
+    }
+    try {
+      if (typeof localStorage !== 'undefined' && localStorage && typeof localStorage.setItem === 'function') {
+        localStorage.setItem('darklab_project_workspace_changed', JSON.stringify(payload));
+      }
+    } catch (_) {
+      // Cross-tab refresh is best-effort; the local Atlas refresh still completes.
+    }
+  }
+
   function text(value, fallback = '') {
     return detailApi.text ? detailApi.text(value, fallback) : (String(value ?? '').trim() || fallback);
   }
@@ -596,6 +615,7 @@
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       showToastSafe('Added to active project', 'success');
+      broadcastProjectWorkspaceChange('atlas_entity_linked', projectId);
       if (typeof global.refreshActiveProjectContext === 'function') {
         await global.refreshActiveProjectContext().catch(() => null);
       }
@@ -616,6 +636,7 @@
       );
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       showToastSafe('Removed from project', 'success');
+      broadcastProjectWorkspaceChange('atlas_entity_unlinked', projectId);
       await refreshAtlas();
     } catch (err) {
       if (typeof global.logClientError === 'function') global.logClientError('failed to unlink atlas entity', err);
