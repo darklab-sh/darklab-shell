@@ -12,6 +12,8 @@
   const subtitle = document.getElementById('atlas-subtitle');
   const searchInput = document.getElementById('atlas-search');
   const findingStatusFilter = document.getElementById('atlas-finding-status-filter');
+  const exportCsvBtn = document.getElementById('atlas-export-csv-btn');
+  const exportJsonlBtn = document.getElementById('atlas-export-jsonl-btn');
   const refreshBtn = document.getElementById('atlas-refresh-btn');
   const findingBulkRow = document.getElementById('atlas-finding-bulk-row');
   const findingSelectionSummary = document.getElementById('atlas-finding-selection-summary');
@@ -217,6 +219,8 @@
     const active = currentTab().id === 'findings';
     findingStatusFilter?.classList.toggle('u-hidden', !active);
     findingBulkRow?.classList.toggle('u-hidden', !active);
+    exportCsvBtn?.classList.toggle('u-hidden', active);
+    exportJsonlBtn?.classList.toggle('u-hidden', active);
     if (!active) return;
     if (findingStatusFilter) findingStatusFilter.value = state.findingStatus;
     const selectedCount = state.selectedFindingIds.size;
@@ -598,6 +602,51 @@
     global.openHistoryRunDetails({ ...run, id: runId });
   }
 
+  function exportDownloadName(format) {
+    const tab = currentTab();
+    const type = tab && tab.type ? String(tab.type) : 'entities';
+    const suffix = new Date().toISOString().replace(/[:.]/g, '-');
+    return `darklab-atlas-${type}-${suffix}.${format}`;
+  }
+
+  function filenameFromDisposition(value) {
+    const match = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(String(value || ''));
+    if (!match) return '';
+    try {
+      return decodeURIComponent(match[1].replace(/"$/u, ''));
+    } catch (_) {
+      return match[1].replace(/"$/u, '');
+    }
+  }
+
+  async function exportEntities(format) {
+    if (currentTab().id === 'findings') {
+      showToastSafe('Switch to an entity tab before exporting', 'error');
+      return;
+    }
+    if (typeof global.downloadBlobAsAttachment !== 'function') {
+      showToastSafe('Downloads are not available', 'error');
+      return;
+    }
+    const params = new URLSearchParams();
+    params.set('format', format);
+    const tab = currentTab();
+    if (tab.type) params.set('type', tab.type);
+    if (state.query) params.set('q', state.query);
+    if (state.projectId) params.set('project_id', state.projectId);
+    try {
+      const resp = await api()(`/atlas/entities/export?${params.toString()}`, { cache: 'no-store' });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const blob = await resp.blob();
+      const filename = filenameFromDisposition(resp.headers?.get?.('content-disposition')) || exportDownloadName(format);
+      global.downloadBlobAsAttachment(blob, filename);
+      showToastSafe(`Atlas ${format.toUpperCase()} export started`, 'success');
+    } catch (err) {
+      if (typeof global.logClientError === 'function') global.logClientError('failed to export atlas entities', err);
+      showToastSafe('Failed to export Atlas entities', 'error');
+    }
+  }
+
   async function addToActiveProject() {
     const activeProject = typeof global.getActiveProjectContext === 'function'
       ? global.getActiveProjectContext()
@@ -697,6 +746,12 @@
     });
     findingBulkApplyBtn?.addEventListener('click', () => {
       bulkUpdateFindings();
+    });
+    exportCsvBtn?.addEventListener('click', () => {
+      exportEntities('csv');
+    });
+    exportJsonlBtn?.addEventListener('click', () => {
+      exportEntities('jsonl');
     });
     if (typeof global.bindDismissible === 'function' && overlay) {
       global.bindDismissible(overlay, {

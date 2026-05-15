@@ -6,6 +6,7 @@ Run with: pytest tests/ (from the repo root)
 
 import errno
 import base64
+import csv
 import hashlib
 import io
 import json
@@ -4203,6 +4204,82 @@ class TestAtlasRoutes:
         assert json.loads(summary_resp.data)["counts"]["targets"] == 1
         assert unlink_resp.status_code == 200
         assert json.loads(targets_after_unlink.data)["targets"] == []
+
+    def test_exports_entities_as_csv_and_jsonl_with_metadata(self):
+        client = get_client()
+        session_id = self._session_id()
+        _, recorded = self._seed_entity_run(session_id)
+        domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Atlas Export"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        client.post(
+            f"/atlas/entities/{domain_id}/project_links",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO entity_labels "
+                "(id, session_id, entity_type, entity_id, label, created) "
+                "VALUES (?, ?, 'atlas_entity', ?, 'primary', datetime('now'))",
+                ("lbl_" + uuid.uuid4().hex, session_id, domain_id),
+            )
+            conn.execute(
+                "INSERT INTO entity_notes "
+                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "VALUES (?, ?, 'atlas_entity', ?, 'Scope approved', datetime('now'), datetime('now'))",
+                ("note_" + uuid.uuid4().hex, session_id, domain_id),
+            )
+            conn.execute(
+                "INSERT INTO entity_intel_snapshots "
+                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at) "
+                "VALUES (?, ?, ?, 'crtsh', 'ok', 'data available', ?, datetime('now'))",
+                (
+                    "intel_" + uuid.uuid4().hex,
+                    session_id,
+                    domain_id,
+                    json.dumps({"summary": {"has_intel": True, "providers_with_data": ["crtsh"]}}),
+                ),
+            )
+            conn.commit()
+
+        csv_resp = client.get(
+            f"/atlas/entities/export?format=csv&type=domain&project_id={quote(project['id'])}",
+            headers={"X-Session-ID": session_id},
+        )
+        jsonl_resp = client.get(
+            f"/atlas/entities/export?format=jsonl&type=domain&project_id={quote(project['id'])}",
+            headers={"X-Session-ID": session_id},
+        )
+        invalid_resp = client.get(
+            "/atlas/entities/export?format=xml",
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert csv_resp.status_code == 200
+        assert csv_resp.mimetype == "text/csv"
+        assert "darklab-atlas-entities.csv" in csv_resp.headers["Content-Disposition"]
+        rows = list(csv.DictReader(io.StringIO(csv_resp.get_data(as_text=True))))
+        assert len(rows) == 1
+        assert rows[0]["id"] == domain_id
+        assert rows[0]["type"] == "domain"
+        assert rows[0]["canonical_value"] == "darklab.sh"
+        assert rows[0]["labels"] == "primary"
+        assert rows[0]["notes"] == "Scope approved"
+        assert rows[0]["project_names"] == "Atlas Export"
+        assert rows[0]["intel_providers_with_data"] == "crtsh"
+        assert jsonl_resp.status_code == 200
+        assert jsonl_resp.mimetype == "application/x-ndjson"
+        exported = json.loads(jsonl_resp.get_data(as_text=True).splitlines()[0])
+        assert exported["labels"] == ["primary"]
+        assert exported["notes"] == "Scope approved"
+        assert exported["project_names"] == ["Atlas Export"]
+        assert exported["intel_providers_with_data"] == ["crtsh"]
+        assert invalid_resp.status_code == 400
 
 
 # ── /workspace/files ──────────────────────────────────────────────────────────

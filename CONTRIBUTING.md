@@ -176,8 +176,8 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **1400 pytest + 1133 Vitest + 249 Playwright = 2,782 tests**.
-That total includes 2,750 behavior tests plus 32 docs/inventory meta-tests.
+Current totals: **1401 pytest + 1134 Vitest + 249 Playwright = 2,784 tests**.
+That total includes 2,752 behavior tests plus 32 docs/inventory meta-tests.
 
 Playwright notes:
 
@@ -383,6 +383,7 @@ Keep the summary factual. Do not bury risk or incomplete validation.
 - [README.md](README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [docs/atlas-export.md](docs/atlas-export.md) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

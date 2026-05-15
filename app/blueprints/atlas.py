@@ -4,14 +4,22 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 from extensions import limiter
 from config import CFG
 from core.database import db_connect
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from services.atlas.intel_bridge import refresh_entity_intel
-from services.atlas.lookup import atlas_summary, entity_detail, list_entities, list_findings
+from services.atlas.lookup import (
+    atlas_entities_export,
+    atlas_entities_export_csv,
+    atlas_entities_export_jsonl,
+    atlas_summary,
+    entity_detail,
+    list_entities,
+    list_findings,
+)
 from services.projects.contracts import FINDING_REVIEW_STATES, MAX_BULK_RUN_ACTION_ITEMS, MAX_ENTITY_ID_LEN
 from services.projects.workspace import (
     ProjectWorkspaceError,
@@ -82,6 +90,45 @@ def atlas_entities_list():
             limit=limit,
             offset=offset,
         ))
+
+
+@atlas_bp.route("/atlas/entities/export")
+def atlas_entities_export_download():
+    session_id = get_session_id()
+    export_format = str(request.args.get("format") or "csv").strip().lower()
+    if export_format not in {"csv", "jsonl"}:
+        return jsonify({"error": "format must be csv or jsonl"}), 400
+    limit = _parse_int(request.args.get("limit"), 10000, minimum=1, maximum=10000)
+    with db_connect() as conn:
+        rows = atlas_entities_export(
+            conn,
+            session_id,
+            entity_type=request.args.get("type") or "",
+            query=request.args.get("q") or "",
+            project_id=request.args.get("project_id") or "",
+            limit=limit,
+        )
+    if export_format == "jsonl":
+        body = atlas_entities_export_jsonl(rows)
+        mimetype = "application/x-ndjson; charset=utf-8"
+        filename = "darklab-atlas-entities.jsonl"
+    else:
+        body = atlas_entities_export_csv(rows)
+        mimetype = "text/csv; charset=utf-8"
+        filename = "darklab-atlas-entities.csv"
+    log.info("ATLAS_ENTITIES_EXPORTED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "format": export_format,
+        "count": len(rows),
+        "entity_type": request.args.get("type") or "",
+        "project_id": request.args.get("project_id") or "",
+    })
+    return Response(
+        body,
+        mimetype=mimetype,
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @atlas_bp.route("/atlas/findings")

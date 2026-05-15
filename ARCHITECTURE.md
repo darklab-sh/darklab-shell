@@ -255,6 +255,7 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | -------- | ---------- | ------------- |
 | `GET` | `/atlas` | Returns current-session Atlas entity counts by entity type. |
 | `GET` | `/atlas/entities` | Returns a paginated current-session entity list, with optional `type`, text search, project filter, limit, and offset parameters. |
+| `GET` | `/atlas/entities/export` | Downloads current-session Atlas entity rows as CSV or JSONL, honoring optional type, text, project, and limit filters. |
 | `GET` | `/atlas/entities/<entity_id>` | Returns one current-session entity with source runs, labels, notes, project links, cached intel snapshots, and related findings. |
 | `GET` | `/atlas/findings` | Returns the paginated Atlas Findings queue with optional text, project, review-state, limit, and offset filters. |
 | `POST` | `/atlas/findings/review` | Bulk-updates the review state for selected current-session findings. |
@@ -435,7 +436,7 @@ External dependencies: local vendor routes serving committed builds of `ansi_up`
 
 **JS module load order:** `session.js` → `state.js` → `utils.js` → `export_html.js` → `config.js` → `dom.js` → `ui_helpers.js` → `ui_pressable.js` → `ui_disclosure.js` → `ui_dismissible.js` → `ui_focus_trap.js` → `ui_confirm.js` → `ui_outside_click.js` → `ui_entity_metadata.js` → `export_pdf.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history_core.js` → `history.js` → `workspace_core.js` → `workspace.js` → `welcome.js` → `status_monitor.js` → `atlas_tabs.js` → `atlas_entity_detail.js` → `atlas_overlay.js` → `runner_core.js` → `pty.js` → `runner.js` → `app_preferences_core.js` → `app.js` → `preferences.js` → `secrets_panel.js` → `session_token_controls.js` → `tour_modal.js` → `mobile_sheet.js` → `controller.js` → `shell_chrome.js` → `mobile_chrome.js`. `state.js` owns the shared store boundary, `ui_helpers.js` owns DOM-facing setters/getters and visibility helpers, the `ui_*` helper modules form the shared UI interaction layer (see **UI Interaction Helpers** below), `ui_entity_metadata.js` owns the shared `/entities/<type>/<id>` label/note client consumed by Files, Projects, and Atlas, `app.js` still provides reusable browser helpers, `secrets_panel.js` owns the Options Secrets list plus the terminal `secret set NAME` value prompt, `tour_modal.js` owns the desktop visual onboarding carousel, `controller.js` owns the composition root, and `shell_chrome.js` / `mobile_chrome.js` load last so their rail, tabbar, HUD, and mobile-sheet wiring can attach after all tab, search, and action helpers are defined. `welcome.js` must precede `runner.js` because `runner.js` calls `cancelWelcome()` at the top of `runCommand()`.
 
-**Session Entity Atlas surface.** `static/js/features/atlas/` owns the top-level Atlas overlay used from the desktop rail, mobile menu, `Alt+A`, History actions, Run Details, project-filtered launches from Projects, and entity tokens rendered inside transcripts. The Atlas surface lists deduped session entities by type, opens an entity detail side sheet, refreshes app-native intel snapshots, links entities to the active project, and edits labels/notes through `ui_entity_metadata.js`. Its Findings tab reads the same unified `findings` table as Projects and Run Details, gives users a cross-run triage queue with review-state filters, and supports single or visible-page bulk review updates. `output.js` decorates classifier-provided entity ranges as transcript tokens and routes token clicks, long-presses, and context menus into Atlas. `static/css/features/atlas.css` keeps the surface and transcript-token actions on the same sheet/menu primitives as History, Projects, and Status Monitor.
+**Session Entity Atlas surface.** `static/js/features/atlas/` owns the top-level Atlas overlay used from the desktop rail, mobile menu, `Alt+A`, History actions, Run Details, project-filtered launches from Projects, and entity tokens rendered inside transcripts. The Atlas surface lists deduped session entities by type, opens an entity detail side sheet, refreshes app-native intel snapshots, links entities to the active project, exports filtered entity rows as CSV or JSONL, and edits labels/notes through `ui_entity_metadata.js`. Its Findings tab reads the same unified `findings` table as Projects and Run Details, gives users a cross-run triage queue with review-state filters, and supports single or visible-page bulk review updates. `output.js` decorates classifier-provided entity ranges as transcript tokens and routes token clicks, long-presses, and context menus into Atlas. `static/css/features/atlas.css` keeps the surface and transcript-token actions on the same sheet/menu primitives as History, Projects, and Status Monitor.
 
 **UI Interaction Helpers.** A five-helper family in `static/js/ui_helpers.js` + four sibling `ui_*.js` modules is the single contract for chrome-surface interaction. Every module loads before the domain scripts that consume it, so every downstream module sees the helpers as plain globals — no wiring glue at call sites.
 
@@ -1329,12 +1330,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,750
+- behavior tests: 2,752
 - docs/inventory meta-tests: 32
-- `pytest`: 1400 (1368 behavior + 32 meta)
-- `vitest`: 1133
+- `pytest`: 1401 (1369 behavior + 32 meta)
+- `vitest`: 1134
 - `playwright`: 249
-- total: 2,782
+- total: 2,784
 
 ### Testing Architecture
 
@@ -1373,6 +1374,7 @@ Keep the detailed suite appendix, focused run commands, and maintenance notes in
 - [README.md](README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [docs/atlas-export.md](docs/atlas-export.md) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

@@ -378,6 +378,7 @@ To prevent commands from writing to either path directly, the app blocks any com
 - [FEATURES.md](FEATURES.md) - Full per-feature reference: autocomplete, pipe support, keyboard shortcuts, allowlist, welcome animation, history, permalinks, themes, and more
 - [THEME.md](THEME.md) - Theme registry, selector metadata, and override behavior
 - [TODO.md](TODO.md) - Open follow-ups, research notes, known issues, and future ideas
+- [docs/atlas-export.md](docs/atlas-export.md) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - External command registry, rewrite, environment, Files, and smoke-test contracts
 - [tests/README.md](tests/README.md) - Detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory
@@ -718,6 +719,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   └── history.db              #   stores run history and tab snapshots
 ├── docker-compose.yml
 ├── docs/
+│   ├── atlas-export.md # Session Entity Atlas CSV/JSONL export schema and filters
 │   ├── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
 │   └── release-drafts/
 │       ├── v2.0-merge-request.md # Draft merge-request notes for the next major release
@@ -792,7 +794,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   │   └── button_primitive_allowlist.json # Exception selectors for button_primitives_allowlist.test.js
     │   └── unit/               # Vitest unit tests for browser-module logic
     │       ├── app.test.js         # bootstrap wiring, session-preference hydration, mobile shell/run-button regressions, prompt/composer boundaries, and modal controls
-    │       ├── atlas.test.js       # Session Entity Atlas overlay, detail rendering, project-filter, and active-project link coverage
+    │       ├── atlas.test.js       # Session Entity Atlas overlay, detail rendering, project-filter, export, and active-project link coverage
     │       ├── autocomplete.test.js # dropdown filtering, placement, viewport clamping, active-item scroll, active-input-only accept
     │       ├── button_primitives.test.js # regression guard — scans app source and fails if any retired button class name reappears
     │       ├── button_primitives_allowlist.test.js # positive contract — scans HTML templates and fails if a button-like element uses a class outside the primitive family (with fixture-backed exceptions)

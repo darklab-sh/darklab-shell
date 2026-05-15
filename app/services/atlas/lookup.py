@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 from typing import Any
 
@@ -16,6 +18,19 @@ FINDING_STATUS_ORDER = {
     "reviewed": 3,
     "false_positive": 4,
 }
+
+ATLAS_ENTITY_EXPORT_FIELDS = (
+    "id",
+    "type",
+    "canonical_value",
+    "first_seen_at",
+    "last_seen_at",
+    "occurrence_count",
+    "labels",
+    "notes",
+    "project_names",
+    "intel_providers_with_data",
+)
 
 
 def _row_to_entity(row) -> dict[str, Any]:
@@ -352,6 +367,164 @@ def list_entities(
         "limit": page_limit,
         "offset": page_offset,
     }
+
+
+def _has_intel_data(data_json: str) -> bool:
+    try:
+        payload = json.loads(data_json or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    summary = payload.get("summary")
+    if isinstance(summary, dict):
+        providers = summary.get("providers_with_data")
+        if isinstance(providers, list) and providers:
+            return True
+        has_intel = summary.get("has_intel")
+        if isinstance(has_intel, bool):
+            return has_intel
+    return False
+
+
+def _query_export_entities(
+    conn,
+    session_id: str,
+    *,
+    entity_type: str = "",
+    query: str = "",
+    project_id: str = "",
+    limit: int = 10000,
+) -> list[dict[str, Any]]:
+    normalized_type = str(entity_type or "").strip().lower()
+    if normalized_type not in ATLAS_ENTITY_TYPES:
+        normalized_type = ""
+    search = str(query or "").strip().lower()
+    search_like = f"%{search}%" if search else ""
+    project_filter = str(project_id or "").strip()
+    page_limit = max(1, min(int(limit or 10000), 10000))
+    params: list[Any] = [
+        session_id,
+        normalized_type,
+        normalized_type,
+        search,
+        search_like,
+        project_filter,
+        project_filter,
+        page_limit,
+    ]
+    rows = conn.execute(
+        "SELECT e.id, e.type, e.canonical_value, e.first_seen_at, e.last_seen_at, e.occurrence_count "
+        "FROM entities e "
+        "WHERE e.session_id = ? "
+        "AND (? = '' OR e.type = ?) "
+        "AND (? = '' OR lower(e.canonical_value) LIKE ?) "
+        "AND (? = '' OR EXISTS ("
+        "  SELECT 1 FROM project_links filter_link "
+        "  JOIN projects filter_project ON filter_project.id = filter_link.project_id "
+        "  WHERE filter_link.entity_type = 'atlas_entity' "
+        "  AND filter_link.entity_id = e.id "
+        "  AND filter_link.project_id = ? "
+        "  AND filter_project.session_id = e.session_id"
+        ")) "
+        "ORDER BY e.last_seen_at DESC, e.canonical_value ASC LIMIT ?",
+        params,
+    ).fetchall()
+    entities = [
+        {
+            "id": row["id"],
+            "type": row["type"],
+            "canonical_value": row["canonical_value"],
+            "first_seen_at": row["first_seen_at"],
+            "last_seen_at": row["last_seen_at"],
+            "occurrence_count": int(row["occurrence_count"] or 0),
+            "labels": [],
+            "notes": "",
+            "project_names": [],
+            "intel_providers_with_data": [],
+        }
+        for row in rows
+    ]
+    entity_ids = [str(row["id"]) for row in entities]
+    if not entity_ids:
+        return entities
+    placeholders = ",".join("?" for _ in entity_ids)
+    labels = conn.execute(
+        "SELECT entity_id, label FROM entity_labels "
+        "WHERE session_id = ? AND entity_type = 'atlas_entity' "
+        f"AND entity_id IN ({placeholders}) ORDER BY label COLLATE NOCASE ASC",  # nosec
+        [session_id, *entity_ids],
+    ).fetchall()
+    notes = conn.execute(
+        "SELECT entity_id, body FROM entity_notes "
+        "WHERE session_id = ? AND entity_type = 'atlas_entity' "
+        f"AND entity_id IN ({placeholders})",  # nosec
+        [session_id, *entity_ids],
+    ).fetchall()
+    projects = conn.execute(
+        "SELECT l.entity_id, p.name FROM project_links l JOIN projects p ON p.id = l.project_id "
+        "WHERE p.session_id = ? AND l.entity_type = 'atlas_entity' "
+        f"AND l.entity_id IN ({placeholders}) ORDER BY p.name COLLATE NOCASE ASC",  # nosec
+        [session_id, *entity_ids],
+    ).fetchall()
+    snapshots = conn.execute(
+        "SELECT entity_id, provider, data_json FROM entity_intel_snapshots "
+        f"WHERE session_id = ? AND entity_id IN ({placeholders}) ORDER BY provider COLLATE NOCASE ASC",  # nosec
+        [session_id, *entity_ids],
+    ).fetchall()
+    by_id = {str(entity["id"]): entity for entity in entities}
+    for row in labels:
+        by_id[str(row["entity_id"])]["labels"].append(str(row["label"] or ""))
+    for row in notes:
+        by_id[str(row["entity_id"])]["notes"] = str(row["body"] or "")
+    for row in projects:
+        by_id[str(row["entity_id"])]["project_names"].append(str(row["name"] or ""))
+    for row in snapshots:
+        if _has_intel_data(str(row["data_json"] or "")):
+            by_id[str(row["entity_id"])]["intel_providers_with_data"].append(str(row["provider"] or ""))
+    return entities
+
+
+def atlas_entities_export(
+    conn,
+    session_id: str,
+    *,
+    entity_type: str = "",
+    query: str = "",
+    project_id: str = "",
+    limit: int = 10000,
+) -> list[dict[str, Any]]:
+    return _query_export_entities(
+        conn,
+        session_id,
+        entity_type=entity_type,
+        query=query,
+        project_id=project_id,
+        limit=limit,
+    )
+
+
+def _export_csv_value(value: Any) -> str:
+    if isinstance(value, list):
+        return "; ".join(str(item) for item in value if str(item or ""))
+    return str(value or "")
+
+
+def atlas_entities_export_csv(rows: list[dict[str, Any]]) -> str:
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=ATLAS_ENTITY_EXPORT_FIELDS, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({field: _export_csv_value(row.get(field)) for field in ATLAS_ENTITY_EXPORT_FIELDS})
+    return output.getvalue()
+
+
+def atlas_entities_export_jsonl(rows: list[dict[str, Any]]) -> str:
+    lines = [
+        json.dumps({field: row.get(field) for field in ATLAS_ENTITY_EXPORT_FIELDS}, sort_keys=True)
+        for row in rows
+    ]
+    return "\n".join(lines) + ("\n" if lines else "")
 
 
 def entity_detail(conn, session_id: str, entity_id: str) -> dict[str, Any] | None:

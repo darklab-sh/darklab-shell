@@ -399,6 +399,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 - **Refresh intel** fetches current app-native intel for that entity and stores normalized provider snapshots back on the entity.
 - **Add to active project** links the entity to the current project without copying it. Project-filtered Atlas opens show only the entities linked to that project.
 - Labels and notes use the same metadata editor model as History, Files, and Projects, so entity notes stay attached to the entity wherever it appears.
+- Entity tabs can export the current Atlas filter as CSV or JSONL. Exports include summary fields, labels, notes, project names, and provider names that have cached intel, but they leave raw provider response bodies out.
 
 **Limits:** Atlas only includes entities materialized from saved external-run output after the entity store was added. Built-in commands do not create Atlas entities.
 
@@ -1225,6 +1226,7 @@ curl http://localhost:8888/diag?format=json
 - [README.md](README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [docs/atlas-export.md](docs/atlas-export.md) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

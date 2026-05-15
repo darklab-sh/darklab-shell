@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,750
+- behavior tests: 2,752
 - docs/inventory meta-tests: 32
-- `pytest`: 1400 (1368 behavior + 32 meta)
-- `vitest`: 1133
+- `pytest`: 1401 (1369 behavior + 32 meta)
+- `vitest`: 1134
 - `playwright`: 249
-- total: 2,782
+- total: 2,784
 
 This document is organized in two parts:
 
@@ -1150,6 +1150,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestAtlasRoutes.test_refresh_intel_persists_provider_snapshot` | Verifies Atlas intel refresh stores provider snapshots for the selected session-owned entity. |
 | `TestAtlasRoutes.test_findings_tab_lists_and_bulk_updates_review_state` | Verifies the Atlas Findings queue lists deduped findings and bulk-updates review state for selected findings. |
 | `TestAtlasRoutes.test_project_links_curate_atlas_entities_into_project_targets` | Verifies Atlas project links surface as Project Targets and can be unlinked without copying entity records. |
+| `TestAtlasRoutes.test_exports_entities_as_csv_and_jsonl_with_metadata` | Verifies Atlas entity exports include labels, notes, project names, and provider names in CSV and JSONL formats. |
 | `TestWorkspaceRoutes.test_requires_active_session_header` | Verifies that workspace routes reject requests without an active session identity. |
 | `TestWorkspaceRoutes.test_disabled_workspace_returns_403` | Verifies that workspace routes stay unavailable while workspace storage is disabled. |
 | `TestWorkspaceRoutes.test_write_list_read_delete_lifecycle` | Verifies the route-level workspace lifecycle for write, list, read, and delete operations. |
@@ -1796,6 +1797,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `applies the project filter when opened from a project` | Verifies that project-launched Atlas requests entities filtered to that project. |
 | `renders the Findings tab and updates review state` | Verifies that the Atlas Findings tab renders finding detail and can update a finding review state. |
 | `bulk-updates selected Atlas findings` | Verifies that selected Atlas findings can be bulk-updated from the Findings tab. |
+| `exports filtered entity rows without leaving the Atlas surface` | Verifies that Atlas entity exports use the active type, search, and project filters and start a browser download. |
 
 #### `autocomplete.test.js`
 
@@ -3302,5 +3304,6 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 - [README.md](../README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](../TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [docs/atlas-export.md](../docs/atlas-export.md) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/external-command-integrations.md](../docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [tests/ui-capture-scenes.md](ui-capture-scenes.md) - UI screenshot capture scene inventory

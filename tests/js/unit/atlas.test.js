@@ -50,6 +50,8 @@ function setupAtlasDom() {
         <div id="atlas-tabs"></div>
         <input id="atlas-search" />
         <select id="atlas-finding-status-filter" class="u-hidden"></select>
+        <button id="atlas-export-csv-btn" type="button">csv</button>
+        <button id="atlas-export-jsonl-btn" type="button">jsonl</button>
         <button id="atlas-refresh-btn" type="button">refresh</button>
         <div id="atlas-finding-bulk-row" class="u-hidden">
           <span id="atlas-finding-selection-summary"></span>
@@ -75,6 +77,7 @@ function loadAtlas({
   apiFetchImpl = null,
 } = {}) {
   const showToast = vi.fn()
+  const downloadBlobAsAttachment = vi.fn()
   const storage = new MemoryStorage()
   const projectEvents = []
   const apiFetch = apiFetchImpl || vi.fn((url, options = {}) => {
@@ -108,6 +111,14 @@ function loadAtlas({
         limit: 50,
         offset: 0,
       }))
+    }
+    if (target.startsWith('/atlas/entities/export?')) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'attachment; filename=darklab-atlas-entities.csv' },
+        blob: () => Promise.resolve(new Blob(['id,type\nent_ip,ip\n'], { type: 'text/csv' })),
+      })
     }
     if (target === '/atlas/entities/ent_ip') {
       return Promise.resolve(jsonResponse({
@@ -159,10 +170,12 @@ function loadAtlas({
           return true
         },
         refocusComposerAfterAction: vi.fn(),
+        downloadBlobAsAttachment,
       },
       `{
         apiFetch,
         showToast,
+        downloadBlobAsAttachment,
         openAtlas: window.openAtlas,
         closeAtlas: window.closeAtlas,
         isAtlasOverlayOpen: window.isAtlasOverlayOpen,
@@ -174,10 +187,12 @@ function loadAtlas({
         window.getActiveProjectContext = getActiveProjectContext;
         window.refreshActiveProjectContext = refreshActiveProjectContext;
         window.refocusComposerAfterAction = refocusComposerAfterAction;
+        window.downloadBlobAsAttachment = downloadBlobAsAttachment;
       `,
     ),
     apiFetch,
     showToast,
+    downloadBlobAsAttachment,
     projectEvents,
     storage,
   }
@@ -286,5 +301,26 @@ describe('Atlas overlay', () => {
       body: JSON.stringify({ finding_ids: ['fnd_1'], review_state: 'important' }),
     }))
     await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Updated 1 findings', 'success'))
+  })
+
+  it('exports filtered entity rows without leaving the Atlas surface', async () => {
+    const { openAtlas, apiFetch, downloadBlobAsAttachment, showToast } = loadAtlas()
+
+    await openAtlas({ source: 'project-workspace', projectId: 'prj_1', projectName: 'Case Alpha' })
+    const search = document.getElementById('atlas-search')
+    search.value = '107.178'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    document.getElementById('atlas-export-csv-btn')?.click()
+
+    await vi.waitFor(() => expect(downloadBlobAsAttachment).toHaveBeenCalled())
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/atlas/entities/export?format=csv&type=ip&q=107.178&project_id=prj_1',
+      { cache: 'no-store' },
+    )
+    expect(downloadBlobAsAttachment).toHaveBeenCalledWith(
+      expect.any(Blob),
+      'darklab-atlas-entities.csv',
+    )
+    expect(showToast).toHaveBeenCalledWith('Atlas CSV export started', 'success')
   })
 })

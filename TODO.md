@@ -29,8 +29,8 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Schema cleanup is destructive. The run-centric `findings`, project-scoped `project_targets`, and `finding_targets` tables are dropped and replaced by an entity-first schema. Pre-release single-user app — no backwards-compatibility shim, no dual-write phase, no data backfill from legacy rows. The Findings triage inbox's `findings_inbox` table is also collapsed into the unified entity-owned `findings` table here.
   - Hard dependencies: entity-aware classifier hooks are landed; encrypted secrets vault is landed for intel refresh actions.
 - **Current implementation status**
-  - Landed: Phase 1 backend contracts and storage, including the destructive project/finding/target rewrite onto `entities`, `project_links(entity_type='atlas_entity')`, unified `findings`, and `findings_occurrences`; Phase 2 run-finalize entity/finding materialization and retention pruning rules; `/atlas` summary/list/detail/refresh/project-link routes; shared label/note/project-link support for `atlas_entity`; Phase 3 browser Atlas surface with rail/mobile/shortcut/history/run-details/project entry points; Phase 4 transcript entity-token navigation; Phase 5 Findings tab absorption with status filters, single-finding updates, and visible-page bulk review updates; and Phase 6 project curation where Atlas entity links feed Project Targets, summaries, and cross-tab refresh without copying records.
-  - Still pending: richer Atlas entity-list filters, sharing/redaction/export follow-through, and the later feedback/test work described below.
+  - Landed: Phase 1 backend contracts and storage, including the destructive project/finding/target rewrite onto `entities`, `project_links(entity_type='atlas_entity')`, unified `findings`, and `findings_occurrences`; Phase 2 run-finalize entity/finding materialization and retention pruning rules; `/atlas` summary/list/detail/export/refresh/project-link routes; shared label/note/project-link support for `atlas_entity`; Phase 3 browser Atlas surface with rail/mobile/shortcut/history/run-details/project entry points; Phase 4 transcript entity-token navigation; Phase 5 Findings tab absorption with status filters, single-finding updates, and visible-page bulk review updates; Phase 6 project curation where Atlas entity links feed Project Targets, summaries, and cross-tab refresh without copying records; and Phase 7 CSV/JSONL entity exports with schema documentation.
+  - Still pending: richer Atlas entity-list filters and the later feedback/test work described below.
 - **Phase 0 - Existing-code integration check (complete)**
   - Confirm classifier entity metadata (`entities: [{type, value, canonical_value, confidence, source_line}]`) is landed.
   - Audit `app/services/projects/workspace.py` and `app/services/projects/metadata.py` for label/note/finding/target storage that must be reused, not duplicated.
@@ -116,7 +116,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Selecting a finding opens the shared detail renderer with source-run navigation, entity navigation, evidence text, and the same review-state control used by Run Details and Projects.
   - Visible-page selection supports bulk review-state updates through `/atlas/findings/review`; mixed missing rows return count/result feedback instead of failing the whole action.
   - The standalone Findings triage inbox does not ship as a separate modal because its scope is absorbed by the Atlas Findings tab.
-- **Phase 7 - Sharing, redaction, and exports**
+- **Phase 7 - Sharing, redaction, and exports (complete)**
   - Entity rows never appear in snapshot permalinks; only the source-run transcript does. Existing share-redaction handles transcript content.
   - Atlas export options ship in v1:
     - Per-entity CSV/JSONL with selected fields.
