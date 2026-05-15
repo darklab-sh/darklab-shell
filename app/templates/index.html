@@ -197,6 +197,11 @@
             <span class="menu-item-hint" id="mobile-menu-history-count"></span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="atlas">
+            <span class="menu-item-icon" aria-hidden="true">◎</span>
+            <span class="menu-item-label">atlas</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
           <button type="button" class="menu-item nav-item" data-menu-action="status-monitor">
             <span class="menu-item-icon" aria-hidden="true">◉</span>
             <span class="menu-item-label">status</span>
@@ -293,6 +298,7 @@
       <button class="rail-nav-item nav-item" data-action="options" type="button" title="Display and preference options (Alt+,)"><span class="rail-nav-glyph">≡</span><span class="rail-nav-label">options</span></button>
       <button class="rail-nav-item nav-item" data-action="projects" type="button" title="Project workspaces"><span class="rail-nav-glyph">◇</span><span class="rail-nav-label">projects</span></button>
       <button class="rail-nav-item nav-item" data-action="history" type="button" title="Run history (Alt+H)"><span class="rail-nav-glyph">⧖</span><span class="rail-nav-label">history</span></button>
+      <button class="rail-nav-item nav-item" data-action="atlas" type="button" title="Session Entity Atlas (Alt+A)"><span class="rail-nav-glyph">◎</span><span class="rail-nav-label">atlas</span></button>
       <button class="rail-nav-item nav-item" data-action="status-monitor" type="button" title="Status Monitor (Alt+M)"><span class="rail-nav-glyph">◉</span><span class="rail-nav-label">status</span></button>
       <button class="rail-nav-item nav-item" data-action="command-registry" type="button" title="Command Registry"><span class="rail-nav-glyph">⌘</span><span class="rail-nav-label">commands</span></button>
       {% if workspace_enabled %}
@@ -432,6 +438,38 @@
       </div>
     </div>
   </main>
+</div>
+
+<!-- Session Entity Atlas -->
+<div id="atlas-overlay" class="mobile-sheet-overlay u-hidden" aria-hidden="true">
+  <section id="atlas-surface" class="atlas-surface mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="atlas-title">
+    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close Atlas"></div>
+    <div class="atlas-header surface-header">
+      <div>
+        <span class="atlas-title" id="atlas-title">ATLAS</span>
+        <div class="atlas-subtitle" id="atlas-subtitle">0 entities</div>
+      </div>
+      <button type="button" class="close-btn atlas-close" aria-label="Close Atlas">✕</button>
+    </div>
+    <div class="atlas-shell">
+      <div class="atlas-main">
+        <div class="atlas-toolbar">
+          <div id="atlas-tabs" class="atlas-tabs" role="tablist" aria-label="Atlas entity types"></div>
+          <div class="atlas-filter-row">
+            <input id="atlas-search" class="form-control form-control-compact" type="text" placeholder="search atlas" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search Atlas entities">
+            <button id="atlas-refresh-btn" class="btn btn-secondary btn-compact" type="button">Refresh</button>
+          </div>
+        </div>
+        <div id="atlas-list" class="atlas-list nice-scroll" aria-live="polite"></div>
+        <div id="atlas-pagination" class="atlas-pagination u-hidden" aria-live="polite">
+          <span id="atlas-pagination-summary" class="atlas-pagination-summary"></span>
+          <button id="atlas-prev-btn" class="btn btn-secondary btn-compact" type="button">Previous</button>
+          <button id="atlas-next-btn" class="btn btn-secondary btn-compact" type="button">Next</button>
+        </div>
+      </div>
+      <aside id="atlas-detail" class="atlas-detail nice-scroll" aria-live="polite"></aside>
+    </div>
+  </section>
 </div>
 
 <!-- Run History panel -->
@@ -1086,6 +1124,9 @@
 <script src="/static/js/features/status-monitor/status_monitor_data.js"></script>
 <script src="/static/js/features/status-monitor/status_monitor_resources.js"></script>
 <script src="/static/js/status_monitor.js"></script>
+<script src="/static/js/features/atlas/atlas_tabs.js"></script>
+<script src="/static/js/features/atlas/atlas_entity_detail.js"></script>
+<script src="/static/js/features/atlas/atlas_overlay.js"></script>
 <script src="/static/js/core/runner_core.js"></script>
 <script src="/static/js/features/runner/runner_active_restore.js"></script>
 <script src="/static/js/features/runner/runner_persistence.js"></script>

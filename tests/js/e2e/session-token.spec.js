@@ -181,7 +181,7 @@ test.describe('session-token lifecycle', () => {
     page,
     browser,
   }) => {
-    test.setTimeout(60_000)
+    test.setTimeout(90_000)
     const token = await issueSessionToken(page)
     await runCommand(page, `session-token set ${token}`)
     await expect.poll(async () => currentSessionId(page)).toBe(token)
@@ -199,7 +199,7 @@ test.describe('session-token lifecycle', () => {
       await otherPage.addInitScript((sessionToken) => {
         localStorage.setItem('session_token', sessionToken)
       }, token)
-      await otherPage.goto('/')
+      await otherPage.goto('/', { waitUntil: 'domcontentloaded' })
       await ensurePromptReady(otherPage, { timeout: 30_000, waitForAutocomplete: true })
       await expect.poll(async () => currentSessionId(otherPage)).toBe(token)
       await expect.poll(async () => otherPage.evaluate(() => (

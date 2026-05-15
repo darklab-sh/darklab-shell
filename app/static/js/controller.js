@@ -660,6 +660,7 @@ document.addEventListener('keydown', e => {
     || isThemeOverlayOpen()
     || isWorkflowsOverlayOpen()
     || isHistoryPanelOpen()
+    || (typeof isAtlasOverlayOpen === 'function' && isAtlasOverlayOpen())
     || (typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
     || (typeof isHistoryRunOverlayOpen === 'function' && isHistoryRunOverlayOpen())
   ) {

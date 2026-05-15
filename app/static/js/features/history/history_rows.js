@@ -93,9 +93,12 @@ function _createHistoryActionMenu(run, { includeDelete = false } = {}) {
   const isProjectLinkableRun = String(run?.run_kind || 'external') !== 'builtin';
   const items = [
     ['edit-metadata', 'edit'],
+  ];
+  if (isProjectLinkableRun) items.push(['open-atlas', 'open in atlas']);
+  items.push(
     ['permalink', 'permalink'],
     ['compare', 'compare'],
-  ];
+  );
   if (isProjectLinkableRun && projectLinks.length) {
     items.push(['remove-project', 'remove from project']);
   } else if (isProjectLinkableRun) {

@@ -17,6 +17,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [Built-In Pipe Support](#built-in-pipe-support)
 - [Output Search](#output-search)
 - [Command Findings](#command-findings)
+- [Session Entity Atlas](#session-entity-atlas)
 - [Copy, Save, and Export](#copy-save-and-export)
 - [Tabs & Run History](#tabs--run-history)
 - [Run Comparison](#run-comparison)
@@ -369,7 +370,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
   - DNS answers from `dig`, `host`, and `nslookup`
   - certificate and TLS verdict lines from `openssl s_client`, `sslscan`, `sslyze`, and `testssl`
 - Noise-heavy lines are intentionally excluded from findings when they behave like banners, progress meters, or startup chatter instead of actionable results.
-- The same server pass also attaches structured entity metadata to external command output lines when it sees public IPs, hostnames, hashes, or CVE IDs. That metadata is kept with live streams, restored history, and saved full-output artifacts so future triage surfaces can use it without re-parsing transcripts.
+- The same server pass also attaches structured entity metadata to external command output lines when it sees public IPs, hostnames, hashes, or CVE IDs. That metadata is kept with live streams, restored history, saved full-output artifacts, and the Session Entity Atlas without re-parsing transcripts.
 - User-killed runs are intentionally **not** counted as errors; the transcript still shows the kill line, but the signal counts stay focused on issues the operator may need to investigate.
 - The **summarize** button appends a synthetic **Command Findings:** block to the active tab after the tab is idle. The summary groups external command blocks by server-provided command and target metadata when present, merges repeated runs for the same command/target, collapses duplicate full-command labels with a repeat count, includes only command blocks that produced at least one finding/warning/error/summary line, and falls back to per-command sections when target metadata is unavailable. The button stays disabled while the active tab has a running command so synthetic summary output cannot mix into live command output.
 - If a single command produces per-target metadata for multiple targets, such as `nmap -iL ...` output with multiple `Nmap scan report for ...` sections, the summary splits that one command into separate target sections instead of combining every host's findings together.
@@ -381,6 +382,27 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 **Configuration:** none — the current scopes, server matchers, and summary format are app-defined and not operator-configurable.
 
 **Related files:** `app/core/output_signals.py` (server-side signal classification), `app/blueprints/run.py` (SSE metadata), `app/services/runs/output_store.py` (signal metadata persistence), `app/static/js/search.js` (metadata-driven scoped navigation and summaries), `app/static/js/controller.js` (chip-to-search navigation), `app/static/js/output.js` (metadata rendering and summary line behavior), `app/static/css/primitives/components.css` and `app/static/css/shell-chrome.css` (tabbar signal controls).
+
+---
+
+## Session Entity Atlas
+
+**Purpose:** browse the entities the shell has seen across saved external runs, without starting from a specific project or transcript.
+
+**Behavior:**
+
+- Open **Atlas** from the desktop rail, mobile menu, `Alt+A`, History row actions, Run Details, or a project filtered view.
+- Atlas groups saved entities by **Findings**, **Hosts/IPs**, **Domains**, **Hashes**, **CVEs**, and **URLs**. Entity rows show the canonical value, hit count, source-run count, project links, and labels.
+- Selecting an entity opens a detail side sheet with first/last seen times, project links, labels, notes, cached intel snapshots, source runs, and related findings.
+- **Refresh intel** fetches current app-native intel for that entity and stores normalized provider snapshots back on the entity.
+- **Add to active project** links the entity to the current project without copying it. Project-filtered Atlas opens show only the entities linked to that project.
+- Labels and notes use the same metadata editor model as History, Files, and Projects, so entity notes stay attached to the entity wherever it appears.
+
+**Limits:** Atlas only includes entities materialized from saved external-run output after the entity store was added. Built-in commands do not create Atlas entities. Transcript token click/hover navigation is handled separately from the main Atlas surface.
+
+**Configuration:** Atlas uses existing history retention, intel cache, and provider-secret settings. Provider keys are managed through Options → Secrets or `secret set NAME`.
+
+**Related files:** `app/blueprints/atlas.py`, `app/services/atlas/`, `app/static/js/features/atlas/`, `app/static/css/features/atlas.css`, `app/core/output_signals.py`.
 
 ---
 

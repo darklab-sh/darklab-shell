@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,743
+- behavior tests: 2,746
 - docs/inventory meta-tests: 32
 - `pytest`: 1398 (1366 behavior + 32 meta)
-- `vitest`: 1128
+- `vitest`: 1131
 - `playwright`: 249
-- total: 2,775
+- total: 2,778
 
 This document is organized in two parts:
 
@@ -1784,6 +1784,14 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `saves off and unchecks toggle when mode is off` | Verifies that saves off and unchecks toggle when mode is off. |
 | `reflects off preference as unchecked toggle` | Verifies that reflects off preference as unchecked toggle. |
 | `reflects on preference as checked toggle` | Verifies that reflects on preference as checked toggle. |
+
+#### `atlas.test.js`
+
+| Test | Description |
+| --- | --- |
+| `opens as a first-class surface and renders entity detail` | Verifies that the Atlas overlay opens, loads entity rows, and renders entity detail content. |
+| `adds the selected entity to the active project without leaving the surface` | Verifies that the active-project action posts the selected entity link and keeps Atlas open. |
+| `applies the project filter when opened from a project` | Verifies that project-launched Atlas requests entities filtered to that project. |
 
 #### `autocomplete.test.js`
 

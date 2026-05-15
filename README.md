@@ -566,6 +566,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   │   └── fonts.css   # @font-face declarations for vendored local fonts
 │   │   │   ├── diag.css        # Diagnostics-page-specific layout and responsive chrome
 │   │   │   ├── features/       # Feature-owned styles split out of shared shell/component stylesheets
+│   │   │   │   ├── atlas.css # Session Entity Atlas overlay, tabs, entity rows, and detail side sheet
 │   │   │   │   ├── command-registry.css # Command Registry modal and command catalog detail modal
 │   │   │   │   ├── faq-shortcuts.css # FAQ content, command chips, visual-tour entry, and shortcuts overlay
 │   │   │   │   ├── history.css # History drawer, history rows, Run Details modal, and history actions
@@ -605,6 +606,10 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── export_html.js  # Shared export HTML builder / embedded-font helper
 │   │       ├── export_pdf.js   # Shared PDF export module — used by the desktop tab bar and permalink page
 │   │       ├── features/
+│   │       │   ├── atlas/
+│   │       │   │   ├── atlas_entity_detail.js # Session Entity Atlas entity detail rendering helpers
+│   │       │   │   ├── atlas_overlay.js # Session Entity Atlas overlay controller and route wiring
+│   │       │   │   └── atlas_tabs.js # Session Entity Atlas tab metadata and count helpers
 │   │       │   ├── autocomplete/
 │   │       │   │   ├── runtime_context.js # Runtime autocomplete contexts for built-ins, workspace paths, variables, and command lookup
 │   │       │   │   └── suggestions.js # Command autocomplete suggestion resolution, recent values, and value-slot application
@@ -786,6 +791,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   │   └── button_primitive_allowlist.json # Exception selectors for button_primitives_allowlist.test.js
     │   └── unit/               # Vitest unit tests for browser-module logic
     │       ├── app.test.js         # bootstrap wiring, session-preference hydration, mobile shell/run-button regressions, prompt/composer boundaries, and modal controls
+    │       ├── atlas.test.js       # Session Entity Atlas overlay, detail rendering, project-filter, and active-project link coverage
     │       ├── autocomplete.test.js # dropdown filtering, placement, viewport clamping, active-item scroll, active-input-only accept
     │       ├── button_primitives.test.js # regression guard — scans app source and fails if any retired button class name reappears
     │       ├── button_primitives_allowlist.test.js # positive contract — scans HTML templates and fails if a button-like element uses a class outside the primitive family (with fixture-backed exceptions)

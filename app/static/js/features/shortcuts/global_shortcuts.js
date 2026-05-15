@@ -126,6 +126,15 @@ function handleChromeShortcut(e) {
     e.preventDefault();
     return true;
   }
+  if (eventMatchesLetter(e, 'a')) {
+    if (typeof isAtlasOverlayOpen === 'function' && isAtlasOverlayOpen() && typeof closeAtlas === 'function') {
+      closeAtlas();
+    } else if (typeof openAtlas === 'function') {
+      void openAtlas({ source: 'shortcut' });
+    }
+    e.preventDefault();
+    return true;
+  }
   if (eventMatchesLetter(e, 'c')) {
     if (
       typeof isCommandRegistryOverlayOpen === 'function'

@@ -156,6 +156,10 @@ function _historyRunActionButton(label, action, { disabled = false, tone = 'seco
   return btn;
 }
 
+function _historyRunCanOpenAtlas(run = _historyRunPrimary()) {
+  return String(run?.run_kind || 'external') !== 'builtin';
+}
+
 function _historyRunActionMenu() {
   const wrap = document.createElement('div');
   wrap.className = 'history-run-action-menu-wrap save-menu-wrap';
@@ -168,13 +172,17 @@ function _historyRunActionMenu() {
   const menu = document.createElement('div');
   menu.className = 'history-run-action-menu save-menu dropdown-surface';
   menu.setAttribute('role', 'menu');
-  [
+  const items = [
     ['copy-command', 'Copy command'],
     ['edit-metadata', 'Edit metadata'],
+  ];
+  if (_historyRunCanOpenAtlas()) items.push(['open-atlas', 'Open in Atlas']);
+  items.push(
     ['add-active-project', 'Add to active project'],
     ['add-project', 'Add to project'],
     ['copy-run-id', 'Copy run ID'],
-  ].forEach(([action, label]) => {
+  );
+  items.forEach(([action, label]) => {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'dropdown-item dropdown-item-compact';
@@ -311,8 +319,9 @@ function _renderHistoryRunSummary(body, run) {
     _historyRunActionButton('Delete', 'delete'),
     _historyRunActionButton('Permalink', 'permalink'),
     _historyRunActionButton('Compare', 'compare'),
-    _historyRunActionMenu(),
   );
+  if (_historyRunCanOpenAtlas(run)) actions.appendChild(_historyRunActionButton('Atlas', 'open-atlas'));
+  actions.appendChild(_historyRunActionMenu());
   body.appendChild(actions);
 }
 
@@ -595,6 +604,9 @@ async function _handleHistoryRunModalAction(action) {
     confirmHistAction('delete', run.id, run.command);
   } else if (action === 'edit-metadata') {
     _historyEditEntityMetadata('run', run);
+  } else if (action === 'open-atlas') {
+    closeHistoryRunOverlay();
+    if (typeof openAtlas === 'function') void openAtlas({ source: 'run-details' });
   } else if (action === 'add-active-project') {
     const projectState = _historyRunModalState.projectState;
     const project = projectState && projectState.project;

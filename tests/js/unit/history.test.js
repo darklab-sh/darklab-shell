@@ -844,7 +844,8 @@ describe('history panel actions', () => {
       'Delete',
       'Permalink',
       'Compare',
-      'ActionsCopy commandEdit metadataAdd to active projectAdd to projectCopy run ID',
+      'Atlas',
+      'ActionsCopy commandEdit metadataOpen in AtlasAdd to active projectAdd to projectCopy run ID',
     ])
     document.querySelector('.history-run-action-menu-trigger').click()
     expect(document.querySelector('.history-run-action-menu-wrap').classList.contains('open')).toBe(true)
@@ -998,10 +999,16 @@ describe('history panel actions', () => {
 
     const entry = document.querySelector('#history-list .history-entry')
     const visibleActions = [...entry.querySelector('.history-actions').children].map(el => el.textContent)
-    expect(visibleActions).toEqual(['copy command', 'restore', 'delete', 'moreeditpermalinkcompareadd to active projectadd to projectcopy run id'])
+    expect(visibleActions).toEqual([
+      'copy command',
+      'restore',
+      'delete',
+      'moreeditopen in atlaspermalinkcompareadd to active projectadd to projectcopy run id',
+    ])
     const menuActions = [...entry.querySelectorAll('.history-action-menu [data-action]')].map(el => el.dataset.action)
     expect(menuActions).toEqual([
       'edit-metadata',
+      'open-atlas',
       'permalink',
       'compare',
       'add-active-project',
@@ -1053,11 +1060,12 @@ describe('history panel actions', () => {
     expect(visibleActions).toEqual([
       'copy command',
       'restore',
-      'moreeditpermalinkcompareadd to active projectadd to projectcopy run iddelete',
+      'moreeditopen in atlaspermalinkcompareadd to active projectadd to projectcopy run iddelete',
     ])
     const menuActions = [...entry.querySelectorAll('.history-action-menu [data-action]')].map(el => el.dataset.action)
     expect(menuActions).toEqual([
       'edit-metadata',
+      'open-atlas',
       'permalink',
       'compare',
       'add-active-project',
@@ -1882,6 +1890,7 @@ describe('history panel actions', () => {
     const menuActions = [...linkedEntry.querySelectorAll('.history-action-menu [data-action]')].map(el => el.dataset.action)
     expect(menuActions).toEqual([
       'edit-metadata',
+      'open-atlas',
       'permalink',
       'compare',
       'remove-project',

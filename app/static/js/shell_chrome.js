@@ -449,6 +449,10 @@
       global.toggleHistoryPanelSurface();
       return;
     }
+    if (action === 'atlas' && typeof global.openAtlas === 'function') {
+      void global.openAtlas({ source: 'rail' });
+      return;
+    }
     if (action === 'status-monitor' && typeof global.openStatusMonitor === 'function') {
       void global.openStatusMonitor({ source: 'rail' });
       return;
@@ -5323,6 +5327,9 @@
     } else {
       actions.appendChild(_makeProjectButton('Unarchive', 'unarchive', String(project.id || '')));
     }
+    if (typeof global.openAtlas === 'function') {
+      actions.appendChild(_makeProjectButton('Open in Atlas', 'open-atlas', String(project.id || '')));
+    }
     actions.appendChild(_makeProjectButton('Delete', 'delete', String(project.id || ''), 'destructive'));
     header.append(titleWrap, actions);
 
@@ -6628,6 +6635,20 @@
         if (!project) throw new Error('Project is missing its details.');
         _setProjectWorkspaceMessage('');
         _openProjectEntityEditor(projectId, 'project', project);
+        return;
+      } else if (action === 'open-atlas') {
+        const summary = projectWorkspaceSummaries.get(String(projectId || ''));
+        const project = (summary && summary.project && typeof summary.project === 'object')
+          ? summary.project
+          : projectWorkspaceRows.find(item => String(item.id || '') === projectId);
+        closeProjectWorkspace({ refocus: false });
+        if (typeof global.openAtlas === 'function') {
+          void global.openAtlas({
+            source: 'project-workspace',
+            projectId,
+            projectName: project ? _projectDisplayName(project) : '',
+          });
+        }
         return;
       } else if (action === 'new-target') {
         _setProjectWorkspaceMessage('');

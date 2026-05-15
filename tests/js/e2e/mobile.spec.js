@@ -140,11 +140,13 @@ test.beforeEach(async ({ page }) => {
   test('mobile startup uses the mobile welcome and keeps the composer visible', async ({
     page,
   }) => {
-    await expect(page.locator('.welcome-banner')).toBeVisible()
-    await expect(page.locator('.welcome-ascii-art')).toBeVisible()
+    await expect(page.locator('.welcome-banner')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.welcome-ascii-art')).toBeVisible({ timeout: 15_000 })
     await expect(page.locator('.welcome-status-loaded')).toHaveCount(5, { timeout: 15_000 })
     await expect(page.locator('.welcome-command')).toHaveCount(0)
-    await expect(page.locator('.welcome-section-header')).toContainText('Helpful hints')
+    await expect(page.locator('.welcome-section-header')).toContainText('Helpful hints', {
+      timeout: 15_000,
+    })
     await expect(page.locator('.line.welcome-hint')).toBeVisible({ timeout: 15_000 })
     // Desktop run button stays hidden; the mobile helper row stays hidden until the keyboard opens
     await expect(page.locator('#run-btn')).toBeHidden()

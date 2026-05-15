@@ -190,6 +190,9 @@ function _closeMajorOverlays() {
   if (globalThis.isProjectWorkspaceOpen && globalThis.isProjectWorkspaceOpen()) {
     globalThis.closeProjectWorkspace({ refocus: false });
   }
+  if (typeof isAtlasOverlayOpen === 'function' && isAtlasOverlayOpen()) {
+    if (typeof closeAtlas === 'function') closeAtlas({ refocus: false });
+  }
   if (isHistoryPanelOpen()) hideHistoryPanel();
   if (isWorkflowsOverlayOpen()) {
     if (typeof closeWorkflows === 'function') closeWorkflows();

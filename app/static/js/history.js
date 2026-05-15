@@ -1461,6 +1461,15 @@ function _historyRenderPanelData(data) {
           _historyEditEntityMetadata('run', run);
         },
       });
+      bindPressable(entry.querySelector('[data-action="open-atlas"]'), {
+        refocusComposer: false,
+        onActivate: (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          _closeHistoryActionMenus();
+          if (typeof openAtlas === 'function') void openAtlas({ source: 'history-run' });
+        },
+      });
       bindPressable(entry.querySelector('[data-action="compare"]'), {
         refocusComposer: false,
         onActivate: () => {

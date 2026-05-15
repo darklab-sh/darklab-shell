@@ -29,8 +29,8 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Schema cleanup is destructive. The run-centric `findings`, project-scoped `project_targets`, and `finding_targets` tables are dropped and replaced by an entity-first schema. Pre-release single-user app — no backwards-compatibility shim, no dual-write phase, no data backfill from legacy rows. The Findings triage inbox's `findings_inbox` table is also collapsed into the unified entity-owned `findings` table here.
   - Hard dependencies: entity-aware classifier hooks are landed; encrypted secrets vault is landed for intel refresh actions.
 - **Current implementation status**
-  - Landed: Phase 1 backend contracts and storage, including the destructive project/finding/target rewrite onto `entities`, `project_links(entity_type='atlas_entity')`, unified `findings`, and `findings_occurrences`; Phase 2 run-finalize entity/finding materialization and retention pruning rules; `/atlas` summary/list/detail/refresh/project-link routes; and shared label/note/project-link support for `atlas_entity`.
-  - Still pending: browser Atlas surface, transcript token wiring, richer Atlas list filters, and the later UI/export work described below.
+  - Landed: Phase 1 backend contracts and storage, including the destructive project/finding/target rewrite onto `entities`, `project_links(entity_type='atlas_entity')`, unified `findings`, and `findings_occurrences`; Phase 2 run-finalize entity/finding materialization and retention pruning rules; `/atlas` summary/list/detail/refresh/project-link routes; shared label/note/project-link support for `atlas_entity`; and Phase 3 browser Atlas surface with rail/mobile/shortcut/history/run-details/project entry points.
+  - Still pending: transcript token wiring, richer Atlas list filters, Findings tab triage absorption, and the later UI/export work described below.
 - **Phase 0 - Existing-code integration check (complete)**
   - Confirm classifier entity metadata (`entities: [{type, value, canonical_value, confidence, source_line}]`) is landed.
   - Audit `app/services/projects/workspace.py` and `app/services/projects/metadata.py` for label/note/finding/target storage that must be reused, not duplicated.
@@ -96,16 +96,14 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Hook into the run-finalize path in `app/blueprints/run.py` after classification. Lazy extraction — only process classified entity events, never raw output lines, so cost scales with distinct entities rather than output volume.
   - No backfill is shipped. Pre-release single-user app drops all historic findings/targets in Phase 1 and starts the entity store fresh from the first new run finalized after the migration. Saved runs from before the migration have no Atlas entities; entity-tab counts simply omit them.
   - Retention pruning rule: `entity_run_links` and `findings_occurrences` rows follow their source run; `entities` and `findings` rows survive after the last link is pruned so the historical pattern is preserved.
-- **Phase 3 - Browser surface**
+- **Phase 3 - Browser surface (complete)**
   - New `app/static/js/features/atlas/`:
     - `atlas_overlay.js` — full-surface controller wired into the desktop rail and mobile menu, not stacked over History.
     - `atlas_tabs.js` — tab rendering and filter state.
     - `atlas_entity_detail.js` — side sheet with identity, intel card, source runs, findings, labels/notes, project links.
-    - `atlas_transcript_links.js` — tagged-token hover popover and click/long-press handler.
   - New `app/static/css/features/atlas.css`.
-  - Entry points: left-rail entry between History and Workflows; mobile menu item; keyboard shortcut documented in the `?` overlay; History row context menu "Open entities"; Run Details linked-entities sidebar; Projects modal "Open in Atlas (filtered to this project)".
+  - Entry points: left-rail entry between History and Workflows; mobile menu item; keyboard shortcut documented in the `?` overlay; History row action menu; Run Details Atlas action; Projects modal "Open in Atlas" filtered to the selected project.
   - Reuses `ui_dismissible`, `ui_focus_trap`, `ui_outside_click`, `ui_pressable`, `ui_entity_metadata`, and the existing bulk-action toast contract.
-  - Hover popover shows the high-signal summary: type, occurrence count, last seen, GreyNoise verdict (if any), Shodan port count (if any), VT positives (if any).
   - Intel snapshot card renders from provider registry metadata so future providers appear with consistent labels, setup state, cache state, and refresh affordances.
 - **Phase 4 - Transcript wiring**
   - Output renderer in `app/static/js/output.js` decorates classifier-extracted entities as tagged spans.
