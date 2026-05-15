@@ -203,6 +203,8 @@ def _add_entity(
     value: str,
     canonical_value: str,
     source_line: int | None,
+    start: int | None = None,
+    end: int | None = None,
 ) -> None:
     key = (entity_type, canonical_value)
     if key in seen:
@@ -216,6 +218,9 @@ def _add_entity(
     }
     if source_line is not None:
         item["source_line"] = source_line
+    if start is not None and end is not None and 0 <= start < end:
+        item["start"] = start
+        item["end"] = end
     entities.append(item)
 
 
@@ -255,7 +260,16 @@ def extract_entities(text: str, *, include_private_ips: bool = False, source_lin
             continue
         if not include_private_ips and not _is_public_ip(canonical):
             continue
-        _add_entity(entities, seen, entity_type="ip", value=raw, canonical_value=canonical, source_line=source_line)
+        _add_entity(
+            entities,
+            seen,
+            entity_type="ip",
+            value=raw,
+            canonical_value=canonical,
+            source_line=source_line,
+            start=match.start(),
+            end=match.end(),
+        )
 
     for match in _ENTITY_IPV6_RE.finditer(stripped):
         raw = match.group(0).strip("[]")
@@ -267,17 +281,39 @@ def extract_entities(text: str, *, include_private_ips: bool = False, source_lin
             continue
         if not include_private_ips and not _is_public_ip(canonical):
             continue
-        _add_entity(entities, seen, entity_type="ip", value=raw, canonical_value=canonical, source_line=source_line)
+        _add_entity(
+            entities,
+            seen,
+            entity_type="ip",
+            value=raw,
+            canonical_value=canonical,
+            source_line=source_line,
+            start=match.start(),
+            end=match.end(),
+        )
 
     for match in _ENTITY_URL_RE.finditer(stripped):
-        host = urlparse(match.group(0)).hostname or ""
+        raw_url = match.group(0)
+        host = urlparse(raw_url).hostname or ""
         if not host or _looks_like_file_hostname(host):
             continue
         try:
             canonical = canonical_domain(host)
         except CanonicalizationError:
             continue
-        _add_entity(entities, seen, entity_type="domain", value=host, canonical_value=canonical, source_line=source_line)
+        host_offset = raw_url.lower().find(host.lower())
+        start = match.start() + host_offset if host_offset >= 0 else match.start()
+        end = start + len(host) if host_offset >= 0 else match.end()
+        _add_entity(
+            entities,
+            seen,
+            entity_type="domain",
+            value=host,
+            canonical_value=canonical,
+            source_line=source_line,
+            start=start,
+            end=end,
+        )
 
     for match in _ENTITY_HOSTNAME_RE.finditer(stripped):
         raw = match.group(0).rstrip(".")
@@ -287,7 +323,16 @@ def extract_entities(text: str, *, include_private_ips: bool = False, source_lin
             canonical = canonical_domain(raw)
         except CanonicalizationError:
             continue
-        _add_entity(entities, seen, entity_type="domain", value=raw, canonical_value=canonical, source_line=source_line)
+        _add_entity(
+            entities,
+            seen,
+            entity_type="domain",
+            value=raw,
+            canonical_value=canonical,
+            source_line=source_line,
+            start=match.start(),
+            end=match.end(),
+        )
 
     for match in _ENTITY_HASH_RE.finditer(stripped):
         raw = match.group(0)
@@ -296,7 +341,16 @@ def extract_entities(text: str, *, include_private_ips: bool = False, source_lin
             canonical = canonical_hash(raw, algorithm=algorithm)
         except CanonicalizationError:
             continue
-        _add_entity(entities, seen, entity_type="hash", value=raw, canonical_value=canonical, source_line=source_line)
+        _add_entity(
+            entities,
+            seen,
+            entity_type="hash",
+            value=raw,
+            canonical_value=canonical,
+            source_line=source_line,
+            start=match.start(),
+            end=match.end(),
+        )
 
     for match in _ENTITY_CVE_RE.finditer(stripped):
         raw = match.group(0)
@@ -304,7 +358,16 @@ def extract_entities(text: str, *, include_private_ips: bool = False, source_lin
             canonical = canonical_cve(raw)
         except CanonicalizationError:
             continue
-        _add_entity(entities, seen, entity_type="cve", value=raw, canonical_value=canonical, source_line=source_line)
+        _add_entity(
+            entities,
+            seen,
+            entity_type="cve",
+            value=raw,
+            canonical_value=canonical,
+            source_line=source_line,
+            start=match.start(),
+            end=match.end(),
+        )
 
     return entities
 

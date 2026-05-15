@@ -124,6 +124,9 @@ class RunOutputCapture:
             }
             if isinstance(entity.get("source_line"), int):
                 item["source_line"] = entity["source_line"]
+            if isinstance(entity.get("start"), int) and isinstance(entity.get("end"), int):
+                item["start"] = entity["start"]
+                item["end"] = entity["end"]
             normalized.append(item)
         return normalized
 

@@ -5442,6 +5442,8 @@ class TestOutputSignals:
         assert ("ip", "127.0.0.1") not in by_type
         assert ("domain", "subs.txt") not in by_type
         assert all(item["source_line"] == 7 for item in entities)
+        assert all(isinstance(item["start"], int) and isinstance(item["end"], int) for item in entities)
+        assert by_type[("domain", "xn--bcher-kva.example")]["value"] == "bücher.example"
 
     def test_extract_entities_can_include_private_ips_when_requested(self):
         entities = extract_entities("localhost-ish: 127.0.0.1 and fd00::1", include_private_ips=True)
@@ -5460,6 +5462,9 @@ class TestOutputSignals:
         assert ("domain", "darklab.sh") in values
         assert ("ip", "104.21.4.35") in values
         assert all(item["source_line"] == 0 for item in entities)
+        by_type = {(item["type"], item["canonical_value"]): item for item in entities}
+        assert by_type[("domain", "darklab.sh")]["start"] == 0
+        assert by_type[("domain", "darklab.sh")]["end"] == len("darklab.sh")
 
     def test_nmap_input_file_sections_update_signal_target(self):
         classifier = OutputSignalClassifier("nmap -iL darklab_inputs.txt -sT")
@@ -5577,6 +5582,8 @@ class TestRunOutputCapture:
                 "canonical_value": "ip.darklab.sh",
                 "confidence": "medium",
                 "source_line": 0,
+                "start": 14,
+                "end": 27,
             }],
         )
         capture.finalize()
@@ -5596,6 +5603,8 @@ class TestRunOutputCapture:
                 "canonical_value": "ip.darklab.sh",
                 "confidence": "medium",
                 "source_line": 0,
+                "start": 14,
+                "end": 27,
             }],
         }]
         assert list(capture.preview_lines) == expected

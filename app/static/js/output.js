@@ -427,6 +427,213 @@ function _applyOutputSignalMetadata(span, rawLine, metadata) {
   }
 }
 
+function _atlasTabForOutputEntity(type) {
+  const value = String(type || '').trim().toLowerCase();
+  if (value === 'ip') return 'ip';
+  if (value === 'domain') return 'domain';
+  if (value === 'url') return 'url';
+  if (value === 'hash') return 'hash';
+  if (value === 'cve') return 'cve';
+  return value || 'ip';
+}
+
+function _outputEntityValue(entity) {
+  return String(entity && (entity.canonical_value || entity.value) || '').trim();
+}
+
+function _outputEntityRangeCandidates(text, entity) {
+  const value = String(entity && entity.value || '').trim();
+  const canonical = _outputEntityValue(entity);
+  const candidates = [];
+  if (Number.isInteger(entity && entity.start) && Number.isInteger(entity && entity.end)) {
+    candidates.push({ start: entity.start, end: entity.end });
+  }
+  [value, canonical].filter(Boolean).forEach(needle => {
+    const index = String(text || '').indexOf(needle);
+    if (index >= 0) candidates.push({ start: index, end: index + needle.length });
+  });
+  return candidates;
+}
+
+function _outputEntityRanges(text, entities) {
+  const source = String(text || '');
+  const ranges = [];
+  const overlaps = (start, end) => ranges.some(range => start < range.end && end > range.start);
+  (Array.isArray(entities) ? entities : []).forEach(entity => {
+    const type = String(entity && entity.type || '').trim();
+    const value = _outputEntityValue(entity);
+    if (!type || !value) return;
+    const candidate = _outputEntityRangeCandidates(source, entity)
+      .find(range => range.start >= 0 && range.end > range.start && range.end <= source.length);
+    if (!candidate || overlaps(candidate.start, candidate.end)) return;
+    ranges.push({ ...candidate, entity });
+  });
+  return ranges.sort((a, b) => a.start - b.start);
+}
+
+function _entityTokenFromText(text, entity, tabId) {
+  const token = document.createElement('button');
+  token.type = 'button';
+  token.className = 'atlas-entity-token';
+  token.dataset.atlasEntityType = String(entity && entity.type || '');
+  token.dataset.atlasEntityValue = _outputEntityValue(entity);
+  token.dataset.atlasEntityTab = _atlasTabForOutputEntity(entity && entity.type);
+  token.title = `Open ${token.dataset.atlasEntityValue} in Atlas`;
+  token.setAttribute('aria-label', token.title);
+  token.innerHTML = _getAnsiRendererForTab(tabId).ansi_to_html(text);
+  return token;
+}
+
+function _renderAnsiWithEntityTokens(content, text, entities, tabId) {
+  const ranges = _outputEntityRanges(text, entities);
+  if (!ranges.length) {
+    content.innerHTML = _getAnsiRendererForTab(tabId).ansi_to_html(text);
+    return;
+  }
+  const renderer = _getAnsiRendererForTab(tabId);
+  let cursor = 0;
+  ranges.forEach(range => {
+    if (range.start > cursor) {
+      const plain = document.createElement('span');
+      plain.innerHTML = renderer.ansi_to_html(text.slice(cursor, range.start));
+      content.appendChild(plain);
+    }
+    content.appendChild(_entityTokenFromText(text.slice(range.start, range.end), range.entity, tabId));
+    cursor = range.end;
+  });
+  if (cursor < text.length) {
+    const trailing = document.createElement('span');
+    trailing.innerHTML = renderer.ansi_to_html(text.slice(cursor));
+    content.appendChild(trailing);
+  }
+}
+
+function _openAtlasForOutputEntity(token, options = {}) {
+  if (!token || typeof openAtlas !== 'function') return;
+  const entityType = String(token.dataset.atlasEntityType || '');
+  const entityValue = String(token.dataset.atlasEntityValue || '');
+  const tab = String(token.dataset.atlasEntityTab || _atlasTabForOutputEntity(entityType));
+  if (!entityType || !entityValue) return;
+  _closeOutputEntityMenu();
+  void openAtlas({
+    source: 'output-entity',
+    tab,
+    entityType,
+    entityValue,
+    refreshIntel: !!options.refreshIntel,
+    addActiveProject: !!options.addActiveProject,
+  });
+}
+
+function _focusOutputEntityLine(token) {
+  const line = token && token.closest ? token.closest('.line') : null;
+  if (!line) return;
+  line.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  line.classList.add('atlas-line-focus');
+  setTimeout(() => line.classList.remove('atlas-line-focus'), 1600);
+}
+
+let _outputEntityMenu = null;
+
+function _closeOutputEntityMenu() {
+  if (_outputEntityMenu) {
+    _outputEntityMenu.remove();
+    _outputEntityMenu = null;
+  }
+}
+
+function _outputEntityMenuButton(label, action) {
+  const item = document.createElement('button');
+  item.type = 'button';
+  item.className = 'dropdown-item dropdown-item-compact';
+  item.dataset.outputEntityAction = action;
+  item.setAttribute('role', 'menuitem');
+  item.textContent = label;
+  return item;
+}
+
+function _showOutputEntityMenu(token, x, y) {
+  _closeOutputEntityMenu();
+  const menu = document.createElement('div');
+  menu.className = 'atlas-output-entity-menu save-menu dropdown-surface';
+  menu.setAttribute('role', 'menu');
+  menu.append(
+    _outputEntityMenuButton('Open in Atlas', 'open-atlas'),
+    _outputEntityMenuButton('Edit labels/notes', 'edit-metadata'),
+    _outputEntityMenuButton('Add to active project', 'promote'),
+    _outputEntityMenuButton('Lookup intel', 'lookup-intel'),
+    _outputEntityMenuButton('Copy value', 'copy-value'),
+    _outputEntityMenuButton('See in run', 'see-run'),
+  );
+  menu.addEventListener('click', (event) => {
+    const action = event.target && event.target.closest
+      ? event.target.closest('[data-output-entity-action]')?.dataset.outputEntityAction
+      : '';
+    if (!action) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (action === 'open-atlas') _openAtlasForOutputEntity(token);
+    if (action === 'edit-metadata') _openAtlasForOutputEntity(token);
+    if (action === 'promote') _openAtlasForOutputEntity(token, { addActiveProject: true });
+    if (action === 'lookup-intel') _openAtlasForOutputEntity(token, { refreshIntel: true });
+    if (action === 'copy-value') {
+      copyTextToClipboard(String(token.dataset.atlasEntityValue || ''))
+        .then(() => showToast('Entity copied'))
+        .catch(() => showToast('Failed to copy entity', 'error'));
+    }
+    if (action === 'see-run') _focusOutputEntityLine(token);
+    _closeOutputEntityMenu();
+  });
+  document.body.appendChild(menu);
+  const rect = menu.getBoundingClientRect();
+  const left = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
+  const top = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+  _outputEntityMenu = menu;
+}
+
+let _outputEntityLongPressTimer = null;
+
+function _bindOutputEntityTokenEvents() {
+  if (typeof document === 'undefined' || document._darklabOutputEntityTokensBound) return;
+  document._darklabOutputEntityTokensBound = true;
+  document.addEventListener('click', (event) => {
+    const token = event.target && event.target.closest ? event.target.closest('.atlas-entity-token') : null;
+    if (token) {
+      event.preventDefault();
+      event.stopPropagation();
+      _openAtlasForOutputEntity(token);
+    } else {
+      _closeOutputEntityMenu();
+    }
+  });
+  document.addEventListener('contextmenu', (event) => {
+    const token = event.target && event.target.closest ? event.target.closest('.atlas-entity-token') : null;
+    if (!token) return;
+    event.preventDefault();
+    event.stopPropagation();
+    _showOutputEntityMenu(token, event.clientX, event.clientY);
+  });
+  document.addEventListener('touchstart', (event) => {
+    const token = event.target && event.target.closest ? event.target.closest('.atlas-entity-token') : null;
+    if (!token) return;
+    const touch = event.touches && event.touches[0];
+    clearTimeout(_outputEntityLongPressTimer);
+    _outputEntityLongPressTimer = setTimeout(() => {
+      _showOutputEntityMenu(token, touch ? touch.clientX : 12, touch ? touch.clientY : 12);
+    }, 550);
+  }, { passive: true });
+  ['touchend', 'touchmove', 'touchcancel'].forEach(name => {
+    document.addEventListener(name, () => clearTimeout(_outputEntityLongPressTimer), { passive: true });
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') _closeOutputEntityMenu();
+  });
+}
+
+_bindOutputEntityTokenEvents();
+
 function _activateOutputCommandChip(command) {
   const activate = typeof globalThis.activateFaqCommandChip === 'function'
     ? globalThis.activateFaqCommandChip
@@ -479,7 +686,7 @@ function _buildOutputLine(text, cls, tabId, now, runStart, metadata = null) {
   } else if (metadata && typeof metadata.faq_command === 'string' && metadata.faq_command.trim()) {
     _appendOutputCommandChip(content, metadata.faq_command.trim(), String(text || '').trim());
   } else {
-    content.innerHTML = _getAnsiRendererForTab(tabId).ansi_to_html(text);
+    _renderAnsiWithEntityTokens(content, String(text || ''), _normalizeOutputEntities(metadata && metadata.entities), tabId);
   }
   span.appendChild(content);
 
@@ -614,7 +821,7 @@ function _appendRestoredOutputSpan(out, rawLine, tabId) {
   } else if (cls === 'notice' || cls === 'denied' || cls === 'exit-ok' || cls === 'exit-fail') {
     content.textContent = text;
   } else {
-    content.innerHTML = _getAnsiRendererForTab(tabId).ansi_to_html(text);
+    _renderAnsiWithEntityTokens(content, text, _normalizeOutputEntities(rawLine && rawLine.entities), tabId);
   }
   span.appendChild(content);
   _appendOutputSpan(out, span);

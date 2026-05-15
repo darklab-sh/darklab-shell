@@ -327,6 +327,39 @@
   padding: 10px;
 }
 
+.atlas-source-action {
+  justify-self: start;
+}
+
+.atlas-entity-token {
+  display: inline;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--green-glow);
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+.atlas-entity-token:hover,
+.atlas-entity-token:focus-visible {
+  background: var(--theme-button-ghost-hover-bg);
+  outline: 1px solid var(--green-dim);
+  outline-offset: 1px;
+}
+
+.atlas-line-focus {
+  background: var(--green-glow);
+}
+
+.atlas-output-entity-menu {
+  position: fixed;
+  z-index: 650;
+  min-width: 150px;
+}
+
 @media (max-width: 820px) {
   #atlas-overlay {
     z-index: 520;

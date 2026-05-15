@@ -111,6 +111,10 @@ var DarklabOutputCore = (function (global) {
         confidence: String(entity.confidence || 'medium').trim() || 'medium',
       };
       if (Number.isInteger(entity.source_line)) normalized.source_line = entity.source_line;
+      if (Number.isInteger(entity.start) && Number.isInteger(entity.end)) {
+        normalized.start = entity.start;
+        normalized.end = entity.end;
+      }
       return normalized;
     }).filter(Boolean);
   }

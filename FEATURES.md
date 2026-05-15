@@ -394,11 +394,12 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 - Open **Atlas** from the desktop rail, mobile menu, `Alt+A`, History row actions, Run Details, or a project filtered view.
 - Atlas groups saved entities by **Findings**, **Hosts/IPs**, **Domains**, **Hashes**, **CVEs**, and **URLs**. Entity rows show the canonical value, hit count, source-run count, project links, and labels.
 - Selecting an entity opens a detail side sheet with first/last seen times, project links, labels, notes, cached intel snapshots, source runs, and related findings.
+- Entity tokens in saved and live transcripts can open Atlas directly. Long-pressing or right-clicking a token opens quick actions for copying the value, refreshing intel, editing metadata in Atlas, or refocusing the transcript line.
 - **Refresh intel** fetches current app-native intel for that entity and stores normalized provider snapshots back on the entity.
 - **Add to active project** links the entity to the current project without copying it. Project-filtered Atlas opens show only the entities linked to that project.
 - Labels and notes use the same metadata editor model as History, Files, and Projects, so entity notes stay attached to the entity wherever it appears.
 
-**Limits:** Atlas only includes entities materialized from saved external-run output after the entity store was added. Built-in commands do not create Atlas entities. Transcript token click/hover navigation is handled separately from the main Atlas surface.
+**Limits:** Atlas only includes entities materialized from saved external-run output after the entity store was added. Built-in commands do not create Atlas entities.
 
 **Configuration:** Atlas uses existing history retention, intel cache, and provider-secret settings. Provider keys are managed through Options → Secrets or `secret set NAME`.
 

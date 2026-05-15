@@ -270,27 +270,43 @@ describe('appendLine', () => {
   it('stores server-provided signal metadata on DOM lines and rawLines', () => {
     const { appendLine, _getTabs } = loadOutputFns()
 
-    appendLine('443/tcp open https', '', 'tab-1', {
+    appendLine('scan ip.darklab.sh 443/tcp open https', '', 'tab-1', {
       signals: ['findings'],
       line_index: 7,
       line_number: 1,
       command_root: 'nmap',
       target: 'ip.darklab.sh',
+      entities: [{
+        type: 'domain',
+        value: 'ip.darklab.sh',
+        canonical_value: 'ip.darklab.sh',
+        start: 5,
+        end: 18,
+      }],
     })
 
     const line = document.querySelector('.line')
+    const token = line?.querySelector('.atlas-entity-token')
     expect(line?.dataset.signals).toBe('findings')
     expect(line?.dataset.lineIndex).toBe('7')
     expect(line?.dataset.commandRoot).toBe('nmap')
     expect(line?.dataset.signalTarget).toBe('ip.darklab.sh')
+    expect(token?.dataset.atlasEntityType).toBe('domain')
+    expect(token?.dataset.atlasEntityValue).toBe('ip.darklab.sh')
 
     expect(_getTabs()[0].rawLines[0]).toMatchObject({
-      text: '443/tcp open https',
+      text: 'scan ip.darklab.sh 443/tcp open https',
       signals: ['findings'],
       line_index: 7,
       line_number: 1,
       command_root: 'nmap',
       target: 'ip.darklab.sh',
+      entities: [{
+        type: 'domain',
+        canonical_value: 'ip.darklab.sh',
+        start: 5,
+        end: 18,
+      }],
     })
     expect(_getTabs()[0]._outputSignalCounts).toEqual({
       findings: 1,

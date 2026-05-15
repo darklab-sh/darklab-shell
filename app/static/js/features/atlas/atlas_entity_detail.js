@@ -91,7 +91,7 @@
     return wrap;
   }
 
-  function renderRuns(runs) {
+  function renderRuns(runs, onSeeRun) {
     const wrap = node('div', 'atlas-source-list');
     const rows = Array.isArray(runs) ? runs : [];
     if (!rows.length) {
@@ -107,6 +107,14 @@
         `${formatCount(run.occurrence_count, 'hit')} · ${formatDate(run.last_seen_at || run.started)}`,
       );
       row.append(title, meta);
+      if (typeof onSeeRun === 'function') {
+        const action = document.createElement('button');
+        action.type = 'button';
+        action.className = 'btn btn-ghost btn-compact atlas-source-action';
+        action.textContent = 'See in run';
+        action.addEventListener('click', () => onSeeRun(run));
+        row.appendChild(action);
+      }
       wrap.appendChild(row);
     });
     return wrap;
@@ -208,7 +216,7 @@
     container.append(section('Labels', renderLabels(entity.labels)));
     container.append(section('Metadata', renderMetadataEditor(entity, handlers)));
     container.append(section('Intel', renderIntelSnapshots(detail.intel_snapshots)));
-    container.append(section('Source runs', renderRuns(detail.runs)));
+    container.append(section('Source runs', renderRuns(detail.runs, handlers.onSeeRun)));
     container.append(section('Findings', renderFindings(detail.findings)));
   }
 

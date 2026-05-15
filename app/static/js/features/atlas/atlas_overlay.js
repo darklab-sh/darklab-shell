@@ -31,6 +31,9 @@
     projectName: '',
     loading: false,
     selectedId: '',
+    requestedEntityValue: '',
+    refreshIntelOnSelect: false,
+    addActiveProjectOnSelect: false,
     detail: null,
     detailLoading: false,
     searchTimer: null,
@@ -77,6 +80,16 @@
     if (options && options.tab) state.activeTab = tabsApi.tabById?.(options.tab)?.id || state.activeTab;
     state.projectId = String(options && options.projectId || '');
     state.projectName = String(options && options.projectName || '').trim();
+    state.requestedEntityValue = String(options && options.entityValue || '').trim();
+    state.refreshIntelOnSelect = !!(options && options.refreshIntel);
+    state.addActiveProjectOnSelect = !!(options && options.addActiveProject);
+    if (state.requestedEntityValue) {
+      state.query = state.requestedEntityValue;
+      if (searchInput) searchInput.value = state.query;
+    } else {
+      state.query = '';
+      if (searchInput) searchInput.value = '';
+    }
     state.selectedId = '';
     state.detail = null;
     show();
@@ -117,6 +130,9 @@
         state.activeTab = tab.id;
         state.offset = 0;
         state.selectedId = '';
+        state.requestedEntityValue = '';
+        state.refreshIntelOnSelect = false;
+        state.addActiveProjectOnSelect = false;
         state.detail = null;
         render();
         refreshAtlas({ resetOffset: true });
@@ -226,6 +242,7 @@
       onAddToActiveProject: () => addToActiveProject(),
       onRemoveProjectLink: (link) => removeProjectLink(link),
       onSaveMetadata: (payload) => saveMetadata(payload),
+      onSeeRun: (run) => openSourceRun(run),
     });
   }
 
@@ -263,10 +280,29 @@
         const data = await listResp.json();
         state.entities = Array.isArray(data.entities) ? data.entities : [];
         state.total = Number(data.total || 0);
-        if (!state.selectedId && state.entities[0]) state.selectedId = state.entities[0].id;
+        if (!state.selectedId && state.requestedEntityValue) {
+          const requested = state.requestedEntityValue.toLowerCase();
+          const match = state.entities.find(entity => (
+            String(entity.canonical_value || entity.value || '').toLowerCase() === requested
+          ));
+          if (match) state.selectedId = match.id;
+          else {
+            state.refreshIntelOnSelect = false;
+            state.addActiveProjectOnSelect = false;
+          }
+        }
+        if (!state.selectedId && !state.requestedEntityValue && state.entities[0]) state.selectedId = state.entities[0].id;
       }
       if (state.selectedId) await loadDetail(state.selectedId, { renderLoading: false });
       else state.detail = null;
+      if (state.selectedId && state.refreshIntelOnSelect) {
+        state.refreshIntelOnSelect = false;
+        await refreshIntel();
+      }
+      if (state.selectedId && state.addActiveProjectOnSelect) {
+        state.addActiveProjectOnSelect = false;
+        await addToActiveProject();
+      }
     } catch (err) {
       if (typeof global.logClientError === 'function') global.logClientError('failed to load /atlas', err);
       showToastSafe('Failed to load Atlas', 'error');
@@ -315,6 +351,12 @@
       if (typeof global.logClientError === 'function') global.logClientError('failed to refresh atlas intel', err);
       showToastSafe('Failed to refresh intel', 'error');
     }
+  }
+
+  function openSourceRun(run) {
+    const runId = String(run && (run.id || run.run_id) || '');
+    if (!runId || typeof global.openHistoryRunDetails !== 'function') return;
+    global.openHistoryRunDetails({ ...run, id: runId });
   }
 
   async function addToActiveProject() {
@@ -390,6 +432,9 @@
     });
     searchInput?.addEventListener('input', () => {
       state.query = String(searchInput.value || '').trim();
+      state.requestedEntityValue = '';
+      state.refreshIntelOnSelect = false;
+      state.addActiveProjectOnSelect = false;
       clearTimeout(state.searchTimer);
       state.searchTimer = setTimeout(() => refreshAtlas({ resetOffset: true }), 180);
     });
