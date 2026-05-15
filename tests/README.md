@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,741
+- behavior tests: 2,743
 - docs/inventory meta-tests: 32
-- `pytest`: 1396 (1364 behavior + 32 meta)
+- `pytest`: 1398 (1366 behavior + 32 meta)
 - `vitest`: 1128
 - `playwright`: 249
-- total: 2,773
+- total: 2,775
 
 This document is organized in two parts:
 
@@ -666,6 +666,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_creates_runs_and_snapshots_tables` | Checks that creates runs and snapshots tables. |
 | `TestDatabaseInit.test_creates_project_workspace_tables` | Verifies that project workspace relationship tables are created during database bootstrap. |
 | `TestDatabaseInit.test_materializes_run_entities_from_output_entries` | Verifies Atlas materialization deduplicates classified run-output entities and creates source-run links. |
+| `TestDatabaseInit.test_materializer_ignores_unclassified_raw_output_text` | Verifies Atlas materialization only reads classifier-provided entity metadata and does not rescan raw output text. |
+| `TestDatabaseInit.test_materializer_replaces_run_links_on_refinalize_and_preserves_entities` | Verifies Atlas materialization replaces stale run links on re-finalization while preserving deduped entity rows. |
 | `TestDatabaseInit.test_project_workspace_migration_drops_legacy_target_and_finding_tables` | Verifies that the Atlas schema migration drops legacy project-target and finding-target tables before creating the entity-first replacements. |
 | `TestDatabaseInit.test_project_workspace_entity_and_link_source_constants_are_validated` | Verifies that project entity and link-source constants reject unsupported values. |
 | `TestDatabaseInit.test_creates_session_indexes` | Checks creates session indexes handling. |

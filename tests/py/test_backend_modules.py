@@ -6458,6 +6458,75 @@ class TestDatabaseInit:
         assert len(recorded) == 2
         assert [row["run_id"] for row in link_rows] == ["run-atlas", "run-atlas"]
 
+    def test_materializer_ignores_unclassified_raw_output_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                ("run-atlas-raw", "atlas-session", "host darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
+            )
+            recorded = materialize_run_entities(
+                conn,
+                "atlas-session",
+                "run-atlas-raw",
+                [{"text": "darklab.sh has address 203.0.113.10"}],
+                seen_at="2026-05-14T00:00:01+00:00",
+            )
+            conn.commit()
+            entity_count = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+            link_count = conn.execute("SELECT COUNT(*) FROM entity_run_links").fetchone()[0]
+            conn.close()
+
+        assert recorded == []
+        assert entity_count == 0
+        assert link_count == 0
+
+    def test_materializer_replaces_run_links_on_refinalize_and_preserves_entities(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) VALUES (?, ?, ?, ?, ?)",
+                ("run-atlas-refinalize", "atlas-session", "nmap darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
+            )
+            materialize_run_entities(
+                conn,
+                "atlas-session",
+                "run-atlas-refinalize",
+                [{"entities": [{"type": "domain", "value": "darklab.sh"}]}],
+                seen_at="2026-05-14T00:00:01+00:00",
+            )
+            materialize_run_entities(
+                conn,
+                "atlas-session",
+                "run-atlas-refinalize",
+                [{"entities": [{"type": "cve", "value": "CVE-2025-49113"}]}],
+                seen_at="2026-05-14T00:00:02+00:00",
+            )
+            conn.commit()
+            entity_rows = conn.execute(
+                "SELECT type, canonical_value, occurrence_count FROM entities ORDER BY type, canonical_value"
+            ).fetchall()
+            link_rows = conn.execute(
+                "SELECT e.type, e.canonical_value, erl.occurrence_count "
+                "FROM entity_run_links erl JOIN entities e ON e.id = erl.entity_id "
+                "ORDER BY e.type, e.canonical_value"
+            ).fetchall()
+            conn.close()
+
+        assert {(row["type"], row["canonical_value"], row["occurrence_count"]) for row in entity_rows} == {
+            ("cve", "CVE-2025-49113", 1),
+            ("domain", "darklab.sh", 0),
+        }
+        assert [(row["type"], row["canonical_value"], row["occurrence_count"]) for row in link_rows] == [
+            ("cve", "CVE-2025-49113", 1),
+        ]
+
     def test_project_workspace_migration_drops_legacy_target_and_finding_tables(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)

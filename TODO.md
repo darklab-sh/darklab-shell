@@ -17,28 +17,6 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 
 ## Open TODOs
 
-### Table-size diagnostics in `/diag`
-- **Scope**
-  - Add a storage breakdown to `/diag` so operators can see which tables and indexes are driving database growth.
-  - Include a high-level summary for the major storage buckets: `runs`, `runs_fts*`, snapshots, run artifacts, findings, projects, labels/notes, and indexes.
-  - Include content-size estimates for the fields most likely to grow quickly: `runs.output`, `runs.output_preview`, `runs.output_search_text`, and `snapshots.content`.
-  - Show row counts beside size estimates so growth is understandable as both bytes and volume.
-  - If SQLite `dbstat` is unavailable, show a clear "table page-size breakdown unavailable" message and still render content-size and row-count estimates.
-- **Implementation notes**
-  - Backend helper should live near the existing diagnostics code and use `dbstat` when `sqlite_compileoption_used('ENABLE_DBSTAT_VTAB') = 1`.
-  - Keep the route read-only and cheap enough for occasional operator use; this does not need live polling.
-  - Surface the same summary through a terminal built-in later if it fits naturally with `stats`, `retention`, or `limits`.
-
-### External intel provider enhancements
-- **Lower-priority candidates**
-  - **MISP** for operator-owned intel. Treat it as a self-hosted integration with `MISP_URL` plus `MISP_API_KEY`, not as a globally available default.
-  - BuiltWith Pro and other commercial tech-fingerprint services until local/lightweight tech detection proves insufficient.
-  - DeHashed, IntelligenceX, PassiveTotal/Defender TI, and DNSDB until entity storage, provider-status UI, and operator policy controls exist.
-  - More vendor CLIs unless the CLI adds a materially better workflow than an app-native REST call.
-- **Provider management follow-up**
-  - Add an optional operator provider denylist if deployments need to block outbound calls to specific vendors.
-  - Revisit mutating provider flows, such as urlscan.io scan submission, only after privacy, terms, visibility, and user-confirmation rules are explicit.
-
 ### Session Entity Atlas (entity-first triage surface)
 - **Scope**
   - Top-level Atlas surface with first-class chrome treatment: desktop left-rail entry between History and Workflows, mobile menu item, dedicated keyboard shortcut. Not a stacked modal.
@@ -51,7 +29,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Schema cleanup is destructive. The run-centric `findings`, project-scoped `project_targets`, and `finding_targets` tables are dropped and replaced by an entity-first schema. Pre-release single-user app — no backwards-compatibility shim, no dual-write phase, no data backfill from legacy rows. The Findings triage inbox's `findings_inbox` table is also collapsed into the unified entity-owned `findings` table here.
   - Hard dependencies: entity-aware classifier hooks are landed; encrypted secrets vault is landed for intel refresh actions.
 - **Current implementation status**
-  - Landed: Phase 1 backend contracts and storage, including the destructive project/finding/target rewrite onto `entities`, `project_links(entity_type='atlas_entity')`, unified `findings`, and `findings_occurrences`; run-finalize entity/finding materialization; `/atlas` summary/list/detail/refresh/project-link routes; and shared label/note/project-link support for `atlas_entity`.
+  - Landed: Phase 1 backend contracts and storage, including the destructive project/finding/target rewrite onto `entities`, `project_links(entity_type='atlas_entity')`, unified `findings`, and `findings_occurrences`; Phase 2 run-finalize entity/finding materialization and retention pruning rules; `/atlas` summary/list/detail/refresh/project-link routes; and shared label/note/project-link support for `atlas_entity`.
   - Still pending: browser Atlas surface, transcript token wiring, richer Atlas list filters, and the later UI/export work described below.
 - **Phase 0 - Existing-code integration check (complete)**
   - Confirm classifier entity metadata (`entities: [{type, value, canonical_value, confidence, source_line}]`) is landed.
@@ -114,7 +92,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - `DELETE /atlas/entities/<id>/project_links/<project_id>` unpromotes.
     - Findings-status routes live next to the rewritten Projects findings routes — there is one `findings` table, one set of status routes, used by both Atlas and Projects surfaces.
   - **Audit log:** `ATLAS_ENTITY_MATERIALIZED`, `ATLAS_INTEL_REFRESH`, `ATLAS_PROJECT_LINK_ADDED` (extends the existing `PROJECT_LINK_ADDED` family with `entity_type='atlas_entity'`), `ATLAS_PROJECT_LINK_REMOVED`.
-- **Phase 2 - Materialization**
+- **Phase 2 - Materialization (complete)**
   - Hook into the run-finalize path in `app/blueprints/run.py` after classification. Lazy extraction — only process classified entity events, never raw output lines, so cost scales with distinct entities rather than output volume.
   - No backfill is shipped. Pre-release single-user app drops all historic findings/targets in Phase 1 and starts the entity store fresh from the first new run finalized after the migration. Saved runs from before the migration have no Atlas entities; entity-tab counts simply omit them.
   - Retention pruning rule: `entity_run_links` and `findings_occurrences` rows follow their source run; `entities` and `findings` rows survive after the last link is pruned so the historical pattern is preserved.
@@ -184,6 +162,228 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Side-by-side entity comparison (their runs, findings, intel snapshots).
   - Cross-session Atlas view for operators managing multiple sessions or shared infrastructure.
   - Atlas import from external triage tools.
+
+### Table-size diagnostics in `/diag`
+- **Scope**
+  - Add a full storage breakdown panel to the `/diag` page so an operator can answer "which table or column is driving DB growth?" in one glance, without leaving the diagnostics surface.
+  - Capture three orthogonal views per table: **allocated bytes** (page-level cost, from `dbstat`), **payload bytes** (logical row cost, from `SUM(LENGTH(col))` across the widest columns), and **row count** (volume).
+  - Include every user table created by `_create_schema` and `_create_project_workspace_schema`, every FTS5 virtual table, every FTS shadow table grouped back under its parent virtual table, and every index — not just the historically-noisy ones. Sparse coverage hides regressions in the next-fastest-growing table.
+  - Surface content-size estimates for the fields most likely to grow quickly so operators can correlate row growth with bytes: `runs.output`, `runs.output_preview`, `runs.output_search_text`, `snapshots.content`, `entity_intel_snapshots.data_json`, `findings.raw_line`, `evidence_packages.manifest`, `project_links.source_detail`, and `run_output_artifacts.byte_size` (sum, since it's already bytes).
+  - Group tables into operator-meaningful buckets so the panel scans quickly: **Runs & transcripts** (`runs`, `run_output_artifacts`, `runs_fts*`), **Snapshots & permalinks** (`snapshots`), **Atlas & findings** (`entities`, `entity_run_links`, `entity_intel_snapshots`, `findings`, `findings_occurrences`, `entity_labels`, `entity_notes`), **Projects & workspace** (`projects`, `project_links`, `run_file_artifacts`, `evidence_packages`), **Session state** (`session_tokens`, `session_preferences`, `starred_commands`, `session_variables`, `user_workflows`, `recent_domains`), and **Security** (`secrets`).
+  - When `dbstat` is unavailable (compile-option missing), still render row counts and payload-byte estimates and surface a clear "table page-size breakdown unavailable — rebuild SQLite with `SQLITE_ENABLE_DBSTAT_VTAB`" banner inside the new panel only, so the rest of `/diag` is unaffected.
+- **Backend implementation**
+  - Add a new helper `_diag_table_storage_breakdown()` in `app/blueprints/assets.py` next to the existing `_diag_db_stats()`. It must reuse the safe-identifier wrapper `_diag_sqlite_identifier` for every name pulled from `sqlite_master` and never bind table names as parameters.
+  - Detect `dbstat` availability once per request via `SELECT sqlite_compileoption_used('ENABLE_DBSTAT_VTAB')`; cache the result on `result["db"]` as `dbstat_available` so the template can branch without re-probing.
+  - Per-table page-level metrics, when `dbstat` is available, in a single pass: `SELECT name, SUM(pgsize) AS allocated, SUM(payload) AS payload, SUM(pgsize - payload - unused) AS overhead, SUM(unused) AS unused, COUNT(*) AS pages FROM dbstat GROUP BY name`. Join the result against `sqlite_master` to classify each name as `table`, `index`, or `virtual-shadow`, and to recover the parent virtual table for FTS shadow tables.
+  - Roll FTS shadow tables (`runs_fts_data`, `runs_fts_idx`, `runs_fts_content`, `runs_fts_docsize`, `runs_fts_config`) up under their parent `runs_fts` entry with a `shadows: [{name, allocated, payload, pages}]` array so the operator sees both the aggregate and the breakdown. Use the same parent-detection logic already in `_diag_db_stats()` for shadow names.
+  - Per-table payload-byte estimates from the live data, executed even when `dbstat` is missing, one query per table chosen for cost (no `LENGTH(*)`):
+    - `runs`: `SUM(LENGTH(output))`, `SUM(LENGTH(output_preview))`, `SUM(LENGTH(output_search_text))`, `SUM(LENGTH(command))`, plus row count and average row size.
+    - `snapshots`: `SUM(LENGTH(content))`, `SUM(LENGTH(label))`, row count.
+    - `entity_intel_snapshots`: `SUM(LENGTH(data_json))`, `SUM(LENGTH(summary))`, row count, breakdown by `provider` (`GROUP BY provider`) so a single noisy provider is visible.
+    - `findings`: `SUM(LENGTH(raw_line))`, `SUM(LENGTH(title))`, row count.
+    - `findings_occurrences`: `SUM(LENGTH(snippet))`, row count.
+    - `evidence_packages`: `SUM(LENGTH(manifest))`, `SUM(LENGTH(description))`, row count.
+    - `project_links`: `SUM(LENGTH(source_detail))`, row count.
+    - `run_output_artifacts`: `SUM(byte_size)`, row count (this is on-disk gzip; clarify in the rendered label).
+    - `run_file_artifacts`: `SUM(byte_size)`, row count, breakdown by `kind`.
+    - Every other table: row count and average row size only (avoids a full scan on small-row tables like `session_variables`).
+  - Per-index sizing (allocated bytes, page count, parent table) so an index that has quietly grown larger than its table — common with FTS shadows and `idx_findings_*` — is visible. Order indexes within each parent table by allocated bytes descending.
+  - Include three top-level summary fields on the new payload: `total_allocated_bytes`, `total_payload_bytes`, and `wasted_bytes = total_allocated - total_payload - freelist_count * page_size`. The wasted-bytes field is the single number an operator watches before running `VACUUM`.
+  - Add a `largest_runs` probe — `SELECT id, started, LENGTH(output) + LENGTH(COALESCE(output_search_text,'')) AS size FROM runs ORDER BY size DESC LIMIT 10` — so a single oversized run (typical cause of unexpected DB growth) is named, not just sized in aggregate.
+  - Wrap each subsection in its own `try/except` matching the surrounding `_diag_db_stats` pattern; one failing pragma or missing table never blanks the whole panel.
+  - Keep the route read-only and cheap enough for occasional operator use. The new payload-byte sums on `runs` and `snapshots` will scan the table once each; document the expected ms cost on a 1 GB database in the function docstring and gate the largest_runs probe behind `dbstat_available or table_row_count('runs') < 100000` so it never lands as the new slowest part of `/diag`.
+- **Frontend rendering**
+  - Add a new section in `app/templates/diag.html` after the existing Database Details card, titled **Storage breakdown**. Render one collapsible group per operator bucket, with the bucket header showing aggregate allocated bytes and a sparkline-style bar across the page for visual scale.
+  - Within each bucket render a table with columns: name, kind (table/index/fts-shadow), allocated, payload, overhead, unused, rows, avg row, notable columns (e.g. `output: 312 MB`, `output_search_text: 41 MB`).
+  - Sort tables within each bucket by allocated bytes descending. FTS shadow tables render indented under their parent virtual table with the existing `.diag-muted` styling.
+  - When `dbstat_available` is false, render the entire allocated/payload/overhead/unused/pages columns as `—` and show the rebuild banner once at the top of the section.
+  - Add a single top-line callout above the buckets: "Database file 4.2 GB · 1.1 GB reclaimable (`VACUUM`) · 312 MB largest table: `runs.output`".
+  - Reuse `_diag_fmt_bytes` for every byte value and the existing `.diag-section-title`, `.diag-muted`, and `.diag-ok`/`.diag-fail` classes so the new panel matches the rest of `/diag` without new CSS.
+- **Terminal integration (follow-up, not blocking)**
+  - Expose the same summary through a terminal built-in once the panel is stable — natural homes are the existing `stats`, `retention`, or `limits` commands in `app/services/commands/builtins_runtime.py`. Reuse the helper directly rather than re-querying so SQL changes only land in one place.
+- **Tests**
+  - Add `tests/py/test_diag_storage_breakdown.py` covering: `dbstat` available path renders allocated bytes; `dbstat` missing path falls back gracefully without 500s; FTS shadow tables roll up under `runs_fts`; payload-byte sums match `SUM(LENGTH(col))` on a seeded fixture; `largest_runs` returns sorted rows; the bucket grouping covers every table that `_create_schema` and `_create_project_workspace_schema` create (drift guard so new tables can't silently appear "uncategorized").
+  - Add a Playwright smoke test that loads `/diag` against a seeded DB and asserts the **Storage breakdown** section renders with at least one row and the rebuild banner is absent when SQLite has `dbstat`.
+
+### Prometheus `/metrics` endpoint
+- **Scope**
+  - Add a new IP-gated `/metrics` route that exposes OpenMetrics-format text suitable for Prometheus scrape and Grafana dashboards. Gated by the same `diagnostics_allowed_cidrs` config key as `/diag` so it is never internet-exposed by default.
+  - First-pass metric set is broad on purpose — operators should be able to answer the common questions (active load, failure rate, per-tool latency, queue depth, cache hit rate, storage growth, rate-limit pressure, intel-provider health) without a follow-up release.
+  - All metric names are prefixed `darklab_` and use Prometheus base units (seconds, bytes, ratio). Label cardinality is bounded — `tool` is the normalized command root, never the full command string; `provider` is the registered intel provider key; `route` for HTTP metrics is the Flask endpoint name, never the raw path.
+- **Library and process model**
+  - Add `prometheus_client` to `app/requirements.txt`.
+  - Use the `prometheus_client.multiprocess` collector so counters and histograms aggregate correctly across Gunicorn workers. The collector requires a writable shared directory.
+  - New config key `prometheus_multiproc_dir` defaulting to `/tmp/darklab_shell-prom`. Set `PROMETHEUS_MULTIPROC_DIR` from this value at process boot in `app.py` before any metric is registered, and create the directory if missing.
+  - Update `docker-compose.yml` / `Dockerfile` to ensure the multiproc dir lives on a tmpfs (small, ephemeral, per-container) so dead-worker cleanup is automatic on container restart.
+  - Add the `MultiProcessCollector` registry inside the `/metrics` handler; per-worker counters are still defined as module-level globals (one definition site, exported through `app/services/metrics/__init__.py`).
+- **Initial metric set**
+  - **Application/build info**
+    - `darklab_build_info{version,git_sha,python_version}` — gauge fixed at 1; cheap way to correlate metric series with a release.
+    - `darklab_app_start_time_seconds` — gauge set once at boot; uptime is `time() - app_start_time_seconds` in Grafana.
+  - **Runs (external + builtin)**
+    - `darklab_active_runs` — gauge of currently-tracked active runs (read from `active_runs_for_session` aggregated across sessions, or maintained inline at `active_run_register` / `active_run_remove`).
+    - `darklab_runs_started_total{tool,run_kind}` — counter; `run_kind` is `external`/`builtin`, `tool` is the normalized command root.
+    - `darklab_runs_finished_total{tool,run_kind,exit_code_class}` — counter; `exit_code_class` is `success` (0), `error` (>0), `signal` (negative or `>=128`), or `timeout` (the graceful-termination exit code constant in `core/helpers.GRACEFUL_TERMINATION_EXIT_CODE`). Keep the raw exit code out of the label to bound cardinality.
+    - `darklab_run_duration_seconds{tool,run_kind}` — histogram; buckets at `0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 900, 1800, 3600`. Tools like nmap and ffuf stretch the long end; the buckets reflect that.
+    - `darklab_run_output_bytes{tool}` — histogram; buckets at `1KB, 10KB, 100KB, 1MB, 10MB, 100MB`. Measures captured output before gzip.
+    - `darklab_run_output_truncated_total{tool}` — counter; incremented when `preview_truncated` or `full_output_truncated` is true at finalize.
+    - `darklab_run_finalize_errors_total{stage}` — counter; `stage` is one of `capture`, `db_write`, `artifact_write`, `entity_materialize`.
+    - Instrumentation point: `app/blueprints/run.py::_finalize_completed_run` and `_persist_completed_pty_run`. Add a single helper in the new metrics module so both call sites stay one-liners.
+  - **PTY**
+    - `darklab_pty_active` — gauge of live PTY sessions.
+    - `darklab_pty_started_total{tool}` — counter.
+    - `darklab_pty_duration_seconds{tool}` — histogram; same long-tail buckets as run duration.
+    - `darklab_pty_input_bytes_total` — counter; total bytes that the browser sent into PTYs.
+    - `darklab_pty_input_dropped_bytes_total{reason}` — counter; `reason` is `rate_limit`, `oversize`, `not_owner`, `closed`.
+    - `darklab_pty_control_queue_depth` — gauge sampled at reader-loop tick.
+    - `darklab_pty_snapshot_age_seconds` — histogram; how stale a reattach snapshot was when served.
+    - Instrumentation point: `app/services/pty/service.py` around input rate-limit checks, snapshot store/load, and lifecycle hooks.
+  - **Rate limiting**
+    - `darklab_rate_limit_rejections_total{route,scope}` — counter; `route` is the Flask endpoint name, `scope` is `global`, `secrets`, `pty_input`, or `intel`. Updated from the `@app.errorhandler(429)` handler in `app.py` and from the per-feature manual rate limiters in `secrets.py`, `run.py`, and the intel rate limiter.
+    - `darklab_intel_provider_rate_limit_waits_seconds{provider}` — histogram of how long a provider call was deferred by the token-bucket limiter in `services/intel/rate_limiter.py`.
+  - **HTTP request volume and latency** (lightweight, every request)
+    - `darklab_http_requests_total{method,endpoint,status_class}` — counter; `status_class` is `2xx`/`3xx`/`4xx`/`5xx`. Use Flask endpoint, never raw path, to bound cardinality.
+    - `darklab_http_request_duration_seconds{endpoint}` — histogram; buckets at `0.005, 0.01, 0.05, 0.1, 0.5, 1, 5`.
+    - Instrumentation point: `@app.before_request` records start time; `@app.after_request` records the metric.
+  - **Run broker (Redis or in-process)**
+    - `darklab_broker_mode_info{mode}` — gauge fixed at 1, where `mode` is `redis`/`in_process` (mirrors the `/diag` value).
+    - `darklab_broker_events_published_total{event_type}` — counter; `event_type` is `output`/`status`/`heartbeat`/`pty_output`/`pty_input`/`pty_control`.
+    - `darklab_broker_subscribers` — gauge of attached SSE subscribers.
+    - `darklab_broker_publish_errors_total{cause}` — counter; `cause` is `redis_unavailable`, `serialize`, `unknown`.
+  - **Database (SQLite)**
+    - `darklab_db_size_bytes` — gauge (file size).
+    - `darklab_db_wal_size_bytes` — gauge.
+    - `darklab_db_reclaimable_bytes` — gauge (freelist × page size). Operators alert when reclaimable crosses a threshold to schedule `VACUUM`.
+    - `darklab_db_table_rows{table}` — gauge per user table; sampled at scrape time by the same helper that powers `/diag` table rows.
+    - `darklab_db_table_allocated_bytes{table}` — gauge per user table, only when `dbstat` is available (reuses the helper from the Table-size diagnostics plan above).
+    - `darklab_db_fts_orphans` — gauge.
+    - `darklab_db_query_duration_seconds{operation}` — histogram; `operation` covers `run_insert`, `run_finalize`, `history_list`, `atlas_summary`, `atlas_detail`, `fts_search`. Instrument the small number of hot paths, not every connection.
+  - **Redis (when configured)**
+    - `darklab_redis_up` — gauge (0/1 from a ping at scrape time).
+    - `darklab_redis_ping_seconds` — gauge of last ping latency.
+    - `darklab_redis_keys{prefix}` — gauge per known prefix (`runstream`, `proc`, `procmeta`, `sessionprocs`). Reuses the existing `/diag` SCAN helper with the same capped bounds.
+    - `darklab_redis_stream_length{prefix}` — gauge sampled across the existing capped sample set.
+    - `darklab_redis_connected_clients` — gauge.
+  - **Workspace storage**
+    - `darklab_workspace_bytes_used` — gauge (sum across all sessions).
+    - `darklab_workspace_quota_bytes` — gauge from `workspace_quota_mb` × 1MB.
+    - `darklab_workspace_files` — gauge of file count.
+    - `darklab_workspace_evictions_total{reason}` — counter; `reason` is `quota`, `inactive`, `manual`.
+    - `darklab_workspace_quota_rejections_total` — counter; incremented in `services/workspace/files.py` where a write is rejected for exceeding quota.
+  - **Intel providers**
+    - `darklab_intel_requests_total{provider,outcome}` — counter; `outcome` is `success`, `cache_hit`, `error`, `missing_secret`, `rate_limited`, `disabled`.
+    - `darklab_intel_request_duration_seconds{provider}` — histogram.
+    - `darklab_intel_cache_entries{provider}` — gauge.
+    - `darklab_intel_provider_secret_missing{provider}` — gauge (1 if the provider is registered but its secret is absent). Drives a "configuration drift" Grafana alert.
+    - Instrumentation point: `services/intel/lookup.py` and the per-provider client wrappers.
+  - **Atlas entities and findings**
+    - `darklab_atlas_entities{type}` — gauge of distinct entities per type (`ip`, `domain`, `url`, `hash`, `cve`); cheap `GROUP BY type` at scrape time.
+    - `darklab_findings_total{severity,status}` — gauge.
+    - `darklab_findings_materialized_total{run_kind}` — counter incremented from `services/atlas/materializer.py` per run finalize.
+  - **Snapshots and shares**
+    - `darklab_snapshots_total` — gauge.
+    - `darklab_snapshot_creates_total{trigger}` — counter; `trigger` is `manual`, `permalink`, `auto`.
+    - `darklab_snapshot_views_total{redacted}` — counter; `redacted` is `true`/`false`.
+  - **Health and errors**
+    - `darklab_health_status{component}` — gauge per component (`db`, `redis`); 1 = ok, 0 = down/degraded. Sampled at scrape time so it tracks the same surface as `/health`.
+    - `darklab_client_errors_total{context}` — counter incremented from the existing `/log` browser-error endpoint; `context` is bounded by an allowlist in the handler to stop a malicious client from inflating cardinality.
+    - `darklab_unhandled_exceptions_total{endpoint}` — counter incremented from the Flask `errorhandler(500)`.
+- **Architecture**
+  - New `app/services/metrics/__init__.py` is the single definition site for every metric: counters, histograms, gauges, label sets, and bucket choices. Every blueprint imports from here so a metric is registered exactly once even with the multiprocess collector.
+  - New `app/services/metrics/collectors.py` houses scrape-time gauges that read from the DB and Redis (table row counts, table bytes, workspace bytes, redis key counts, atlas entity counts, findings totals). Implemented as `prometheus_client.Collector` subclasses so they only execute when Prometheus actually scrapes — not on every request.
+  - `/metrics` route lives next to `/diag` in `app/blueprints/assets.py`. It calls `ip_is_in_cidrs(get_client_ip(), CFG.get("diagnostics_allowed_cidrs") or [])` first, returns 404 on deny (matches `/diag`), then renders the multiprocess registry with `generate_latest(registry)` and `Content-Type: text/plain; version=0.0.4; charset=utf-8`.
+  - Histograms and counters update at the existing instrumentation points listed per-metric above. Adding a new instrumented call site is a one-liner against the metrics module — no per-call-site registry plumbing.
+  - For the multiprocess collector, gauges declared as "scrape-time samples" use `multiprocess_mode='livesum'` or `'liveall'` as appropriate; document the choice next to each gauge definition.
+- **Configuration**
+  - New config keys, defaults sensible for a single-host deploy:
+    - `metrics_enabled: true` — when false, the route returns 404 even if the IP is in `diagnostics_allowed_cidrs`.
+    - `prometheus_multiproc_dir: "/tmp/darklab_shell-prom"`.
+    - `metrics_histogram_buckets_run_duration` and `metrics_histogram_buckets_http_duration` — operator overrides for the duration buckets; defaults baked in.
+  - Document `metrics_enabled`, `prometheus_multiproc_dir`, and the IP-gate behavior in CONFIGURATION.md alongside the existing `/diag` section. Include a sample `scrape_configs` block for Prometheus and a starter Grafana dashboard JSON in `docs/grafana/darklab-overview.json`.
+- **Operational concerns**
+  - Scrape cost: the scrape-time collectors run ~6 grouped SQL queries plus 4 Redis SCANs. Cap the SCANs with the existing `_DIAG_REDIS_SCAN_KEY_CAP` constant so a malicious or runaway key namespace cannot stall a scrape.
+  - Multiproc-dir cleanup: on app startup, remove stale `*.db` files matching the dead-worker pattern so an unclean shutdown doesn't double-count.
+  - Cardinality guard: add a startup assertion that walks the metrics module and refuses to boot if any metric declares a label set whose enumerable values aren't bounded (e.g. unrestricted `tool` strings). The check uses the same command-root normalizer as the existing classifier.
+- **Tests**
+  - Add `tests/py/test_metrics_endpoint.py` covering: IP-gate denies non-allowlisted callers; allowlisted callers get a 200 with `text/plain; version=0.0.4`; every metric documented above appears in the rendered output on a seeded fixture; a run-finalize emits `darklab_runs_finished_total{tool,run_kind,exit_code_class}` with the right labels; a 429 from the rate limiter increments `darklab_rate_limit_rejections_total`; an intel call increments `darklab_intel_requests_total` with the right `outcome`.
+  - Add a drift guard test that imports the metrics module and asserts every metric name starts with `darklab_` and every histogram declares explicit buckets (no implicit defaults).
+  - Update the existing Docker integration smoke test to assert the multiproc directory is writable from the gunicorn worker.
+  - Cardinality guard: add a startup assertion that walks the metrics module and refuses to boot if any metric declares a label set whose enumerable values aren't bounded (e.g. unrestricted `tool` strings). The check uses the same command-root normalizer as the existing classifier.
+- **Tests**
+  - Add `tests/py/test_metrics_endpoint.py` covering: IP-gate denies non-allowlisted callers; allowlisted callers get a 200 with `text/plain; version=0.0.4`; every metric documented above appears in the rendered output on a seeded fixture; a run-finalize emits `darklab_runs_finished_total{tool,run_kind,exit_code_class}` with the right labels; a 429 from the rate limiter increments `darklab_rate_limit_rejections_total`; an intel call increments `darklab_intel_requests_total` with the right `outcome`.
+  - Add a drift guard test that imports the metrics module and asserts every metric name starts with `darklab_` and every histogram declares explicit buckets (no implicit defaults).
+  - Update the existing Docker integration smoke test to assert the multiproc directory is writable from the gunicorn worker.
+  - Cardinality guard: add a startup assertion that walks the metrics module and refuses to boot if any metric declares a label set whose enumerable values aren't bounded (e.g. unrestricted `tool` strings). The check uses the same command-root normalizer as the existing classifier.
+- **Tests**
+  - Add `tests/py/test_metrics_endpoint.py` covering: IP-gate denies non-allowlisted callers; allowlisted callers get a 200 with `text/plain; version=0.0.4`; every metric documented above appears in the rendered output on a seeded fixture; a run-finalize emits `darklab_runs_finished_total{tool,run_kind,exit_code_class}` with the right labels; a 429 from the rate limiter increments `darklab_rate_limit_rejections_total`; an intel call increments `darklab_intel_requests_total` with the right `outcome`.
+  - Add a drift guard test that imports the metrics module and asserts every metric name starts with `darklab_` and every histogram declares explicit buckets (no implicit defaults).
+  - Update the existing Docker integration smoke test to assert the multiproc directory is writable from the gunicorn worker.
+  - Cardinality guard: add a startup assertion that walks the metrics module and refuses to boot if any metric declares a label set whose enumerable values aren't bounded (e.g. unrestricted `tool` strings). The check uses the same command-root normalizer as the existing classifier.
+- **Tests**
+  - Add `tests/py/test_metrics_endpoint.py` covering: IP-gate denies non-allowlisted callers; allowlisted callers get a 200 with `text/plain; version=0.0.4`; every metric documented above appears in the rendered output on a seeded fixture; a run-finalize emits `darklab_runs_finished_total{tool,run_kind,exit_code_class}` with the right labels; a 429 from the rate limiter increments `darklab_rate_limit_rejections_total`; an intel call increments `darklab_intel_requests_total` with the right `outcome`.
+  - Add a drift guard test that imports the metrics module and asserts every metric name starts with `darklab_` and every histogram declares explicit buckets (no implicit defaults).
+  - Update the existing Docker integration smoke test to assert the multiproc directory is writable from the gunicorn worker.
+
+### Postgres production backend and storage scaling plan
+- **Decision frame**
+  - Pre-condition: this plan converts the existing Research entry into an implementation track. The decision the work converges on is **keep SQLite as the default local/single-user backend** and **add Postgres as the recommended backend for heavy multi-user deployments**, with no flag day — both backends ship side by side and an operator chooses at deploy time.
+  - Hard constraint: every query path the app uses today must run unmodified on SQLite. Postgres support is additive; SQLite is not deprecated.
+  - Soft constraint: write new query code in a portable subset from the start. The Atlas, intel, and findings tables added since v1.5 are the natural baseline because they already exist in `app/core/database.py` and have not yet sprouted SQLite-only optimizations beyond the FTS5 virtual table.
+- **Phase 0 — Measure current pressure (one-time research, blocking)**
+  - Run the new Storage breakdown panel (see plan above) on a seeded production-shape database and capture: per-table allocated bytes, per-column payload bytes, FTS shadow-table cost, and the largest-run distribution.
+  - Project one-year growth at 10, 30, and 100 heavy users using the captured per-run averages (output bytes, search-text bytes, artifact bytes, entity-row count, finding-row count, snapshot bytes). Multiply by the configured `permalink_retention_days` and pruning policy.
+  - Identify the candidate "fat" columns for offload to filesystem/object storage: `runs.output`, `runs.output_search_text`, `snapshots.content` for very long shares, and `entity_intel_snapshots.data_json` for raw provider payloads.
+  - Output of this phase is a short `docs/storage-scaling.md` with the measured numbers and a sizing recommendation per deployment tier. Without this, the rest of the plan is guesswork.
+- **Phase 1 — Storage abstraction in `app/core/database.py`**
+  - Introduce a thin `DatabaseBackend` enum (`sqlite`, `postgres`) selected at boot from a new config key `database_backend` (default `sqlite`).
+  - Move every `sqlite3`-specific call (`db_connect`, pragmas, `sqlite_compileoption_used`, `dbstat`) behind a backend-aware module. SQLite path keeps its current behavior bit-for-bit; the Postgres path stays unimplemented in this phase but the interface lands.
+  - Replace bare `?` parameter placeholders with a backend-aware paramstyle helper (`?` for SQLite, `%s` for Postgres) or migrate to named placeholders (`:name`) which both backends support — the named-placeholder route is preferred because it survives `INSERT ... RETURNING` rewrites.
+  - Define a small "dialect" module covering: `JSON` column type (TEXT for SQLite, JSONB for Postgres), `now()`/`datetime('now')`, upsert syntax (`ON CONFLICT ... DO UPDATE` works on both — confirm Postgres ≥ 9.5), boolean handling (INTEGER 0/1 vs BOOLEAN), `RETURNING` support, and substring/concat operators. Document each chosen idiom in the dialect module so call sites don't reinvent them.
+  - Audit every existing `db_connect()` call site against the dialect rules. Today's hot paths in `services/projects/workspace.py`, `services/runs/comparison.py`, `services/atlas/lookup.py`, `services/atlas/materializer.py`, and `blueprints/run.py` are the priority — collectively they own most of the schema's writes and reads.
+- **Phase 2 — Schema portability for the new tables**
+  - Apply the dialect to the schema definitions in `_create_schema` and `_create_project_workspace_schema`. Concrete deltas:
+    - Replace `INTEGER` boolean columns with portable equivalents: keep `INTEGER NOT NULL DEFAULT 0` everywhere since both backends accept it and it preserves on-disk shape for SQLite users.
+    - Switch JSON-bearing TEXT columns (`session_preferences.preferences`, `user_workflows.inputs`, `user_workflows.steps`, `entity_intel_snapshots.data_json`, `project_links.source_detail`, `evidence_packages.manifest`) to a portable `JSON_COLUMN` macro that resolves to `TEXT` on SQLite and `JSONB` on Postgres.
+    - Audit every `UNIQUE (...)` and `PRIMARY KEY (...)` constraint for case-sensitivity differences — Postgres collations affect index reuse where SQLite is byte-exact.
+    - FTS: do not attempt to port FTS5 to Postgres. Instead, behind the backend flag, build the search path on Postgres using `tsvector` + GIN indexes maintained by an `AFTER INSERT` trigger on `runs`. The application API (`search_runs(query)`) stays unchanged; only the implementation diverges.
+  - Migrations: introduce `app/core/migrations/` with numbered, idempotent migration files. SQLite continues to run schema creation on boot; Postgres runs migrations on boot guarded by an advisory lock so concurrent gunicorn workers don't race. The first migration codifies the current schema as the v1 baseline; new tables land as additional numbered migrations.
+- **Phase 3 — Large-body offload (independent of backend choice)**
+  - Add a configurable filesystem-backed body store for `runs.output_search_text` (already lossy-ok), `snapshots.content` (when above a configurable threshold), and `entity_intel_snapshots.data_json` raw payloads. The DB keeps a pointer (`rel_path`, `byte_size`, `sha256`) like `run_output_artifacts` already does.
+  - Configurable thresholds: `runs_search_text_inline_max_bytes`, `snapshots_inline_max_bytes`, `intel_payload_inline_max_bytes`. Below the threshold, content stays in the column; above it, the column stores the pointer and a short preview.
+  - This phase is independent of Postgres — it reduces SQLite pressure on its own and reduces Postgres row width if/when the swap happens. Document in `docs/storage-scaling.md` which deployments benefit most from offload alone vs. needing Postgres.
+- **Phase 4 — Postgres adapter and Docker Compose service**
+  - Add `psycopg[binary]` to `app/requirements.txt` (gated import; only loaded when `database_backend == "postgres"`).
+  - Implement the Postgres dialect concretely: connection pool via `psycopg_pool`, transaction-per-request, the FTS replacement, advisory-lock-guarded migrations, and per-backend retry behavior for transient errors.
+  - Reuse the existing `_diag_db_stats` and Storage breakdown plan against `pg_class`, `pg_indexes`, and `pg_stat_user_tables` so `/diag` remains useful on Postgres without a parallel UI.
+  - New Docker Compose service `postgres:` with a named volume, version-pinned image, healthcheck, and `depends_on` from the app service. Document Compose overrides for operators who already run their own Postgres.
+  - New config keys: `database_backend`, `database_url` (DSN for Postgres), `database_pool_min`, `database_pool_max`. SQLite path ignores all of them and continues to use `DB_PATH`.
+- **Phase 5 — Migration helper**
+  - New `python -m core.migrate_sqlite_to_postgres` command that streams every table from a source SQLite file into a fresh Postgres database, preserving primary keys, foreign relationships, and JSON column values. Idempotent (`INSERT ... ON CONFLICT DO NOTHING`) so an interrupted migration resumes cleanly.
+  - The migration helper does NOT rebuild FTS data — it stops with a clear message after the metadata copy, then runs the Postgres-side `tsvector` trigger to backfill search rows. This avoids reimplementing FTS5 tokenization in Python.
+  - Document a recommended cutover procedure in `docs/postgres-migration.md`: snapshot the SQLite file, run the migration helper into a staging Postgres, validate row counts via the new `/diag` storage panel against both backends, switch `database_backend` and `database_url`, restart.
+- **Phase 6 — Test matrix**
+  - Parameterize `tests/py/conftest.py` so the existing backend-module and route tests run against both SQLite (default) and Postgres (when `DARKLAB_TEST_POSTGRES_DSN` is set in the environment). CI runs both lanes; local dev runs SQLite only unless the env var is set.
+  - Add a per-backend smoke test exercising: run insert + finalize, FTS-equivalent search, Atlas materialize, project link, intel snapshot insert with a JSON payload, snapshot create.
+  - Add the migration-helper integration test: build a SQLite fixture, run the migration, query the Postgres database, assert row-count equality and JSON-column equality table by table.
+- **Documentation**
+  - Add `docs/storage-scaling.md` (deliverable from Phase 0) and `docs/postgres-migration.md` (deliverable from Phase 5).
+  - Update CONFIGURATION.md with the new keys (`database_backend`, `database_url`, `database_pool_min`, `database_pool_max`, the offload thresholds), the Docker Compose `postgres:` service shape, and the supported version matrix.
+  - Update ARCHITECTURE.md with the new dialect module, the FTS divergence, and the offload-store concept so future contributors don't reinvent either piece.
+  - Update CHANGELOG.md and the v2.x release notes in `docs/release-drafts/` as each phase lands; the merge-request draft tracks the cross-phase rollout so reviewers see the staged plan.
+- **Non-goals**
+  - No multi-master, no read replicas. The first Postgres release targets the same single-writer-with-many-readers shape the app already assumes.
+  - No automatic backend selection by load. The deployment-time config key is the only switch.
+  - No backward compatibility wrappers in Python data classes for SQLite vs. Postgres row shapes — every row reader uses keyed access (`row["column"]`) already, which works on both backends.
+
+### External intel provider enhancements
+- **Lower-priority candidates**
+  - **MISP** for operator-owned intel. Treat it as a self-hosted integration with `MISP_URL` plus `MISP_API_KEY`, not as a globally available default.
+  - BuiltWith Pro and other commercial tech-fingerprint services until local/lightweight tech detection proves insufficient.
+  - DeHashed, IntelligenceX, PassiveTotal/Defender TI, and DNSDB until entity storage, provider-status UI, and operator policy controls exist.
+  - More vendor CLIs unless the CLI adds a materially better workflow than an app-native REST call.
+- **Provider management follow-up**
+  - Add an optional operator provider denylist if deployments need to block outbound calls to specific vendors.
+  - Revisit mutating provider flows, such as urlscan.io scan submission, only after privacy, terms, visibility, and user-confirmation rules are explicit.
 
 ### Findings triage inbox
 
@@ -327,30 +527,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 
 ## Research
 
-### Postgres production backend and storage scaling plan
-- **Question**
-  - Should darklab_shell keep SQLite as the only supported persistence backend, or add Postgres as the recommended backend for heavy multi-user deployments?
-- **Why this matters**
-  - A single-user dev database can grow quickly when saved run output, FTS/search data, workspace artifacts, findings, projects, and future Atlas/intel rows all accumulate.
-  - SQLite can handle large files, but heavy shared deployments are more likely to feel pain from single-writer contention, pruning/vacuum cost, backup/restore ergonomics, and one large mutable database file.
-  - Features already planned in this TODO, especially Session Entity Atlas, Findings triage, external intel snapshots, schedulers, watchers, and notifications, will increase write volume and relational query complexity.
-- **Research tasks**
-  - Measure the current dev database by table and index size, including FTS tables, `runs.output`, output previews, artifacts, findings, snapshots, and project metadata.
-  - Estimate one-year growth for 10, 30, and 100 heavy users using current retention settings and realistic scanner-output sizes.
-  - Identify which data should stay relational and which data should move to file/object storage, such as full transcripts, large raw intel payloads, package exports, and bulky artifacts.
-  - Compare three storage models:
-    - SQLite-only with stronger pruning, compression, vacuum, and table-size diagnostics.
-    - Hybrid SQLite metadata plus filesystem/object storage for large transcript and artifact bodies.
-    - Postgres production backend with SQLite retained as the default local/dev/single-user backend.
-  - Review query and schema differences needed for Postgres compatibility: FTS/search, JSON payloads, upserts, timestamp handling, migrations, row locking, and test fixtures.
-  - Decide whether new large features, especially Atlas and intel snapshots, should be written in a Postgres-compatible style from the start.
-  - Define the migration and deployment story: config keys, Docker Compose service shape, backup/restore docs, local dev defaults, and an optional SQLite-to-Postgres migration helper.
-- **Initial recommendation**
-  - Keep SQLite as the default local and single-user backend for now.
-  - Plan Postgres as the preferred production backend for heavy multi-user deployments.
-  - Before a database swap, reduce storage pressure by separating metadata/search from large transcript, artifact, and raw intel bodies where practical.
-
----
+No research items are currently tracked.
 
 ## Known Issues
 
@@ -512,22 +689,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Adds `GET/POST /projects/<id>/report` to `app/blueprints/projects.py`.
   - Browser surface: a "Report" tab inside the existing Projects modal; renderer reuses `export_html.js` and `export_pdf.js`.
   - Honors share-redaction defaults; the draft is always previewed before download so this stays additive to evidence packages, not a replacement.
-
-### Prometheus `/metrics` endpoint
-- Operator observability beyond `/diag`: active-run gauge, exit-code distribution, per-tool runtime histograms, rate-limit rejections — scrapeable for Grafana.
-- **Entry-level scope:**
-  - New IP-gated `/metrics` route exposing OpenMetrics-format text. Same IP allowlist as `/diag` so it is not internet-exposed by default.
-  - Initial metric set:
-    - `darklab_active_runs`
-    - `darklab_run_total{tool,exit_code}`
-    - `darklab_run_duration_seconds{tool}` (histogram)
-    - `darklab_rate_limit_rejections_total`
-    - `darklab_pty_active`
-    - `darklab_workspace_quota_bytes{state}`
-- **Architecture:**
-  - Use the `prometheus_client` Python library with a multiprocess collector compatible with Gunicorn workers (`PROMETHEUS_MULTIPROC_DIR` writable inside the container).
-  - Counters/histograms are updated from the run-finalize path in `app/blueprints/run.py`, the rate limiter in `app/extensions.py`, and the PTY service.
-  - Route lives next to `/diag` in `app/blueprints/assets.py`; documented in CONFIGURATION.md alongside the existing diagnostics surface.
 
 ### Findings triage inbox
 - Folded into the Session Entity Atlas idea below as phase 4 (the Findings tab becomes the inbox surface). Kept here so the standalone scope/architecture stays reviewable if the Atlas does not land first.
