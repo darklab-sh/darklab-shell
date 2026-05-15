@@ -410,6 +410,8 @@ commands:
             run:
               description: "Link a run"
               arguments:
+                - value: last
+                  description: "Link the latest run in this tab"
                 - value: "<run-id>"
                   hint_only: true
                   description: "Run id"

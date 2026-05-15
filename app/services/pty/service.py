@@ -130,6 +130,7 @@ class PtyRun:
     max_runtime_seconds: int
     brokered: bool
     terminal_capture: PtyTerminalCapture
+    owner_tab_id: str = ""
     completion_callback: Callable[["PtyRun", str, int, Sequence[dict[str, str]]], dict[str, object]] | None = None
     events: deque[PtyEvent] = field(default_factory=lambda: deque(maxlen=_PTY_BUFFER_LIMIT))
     seq: int = 0
@@ -768,6 +769,7 @@ def start_pty_run(
             max_runtime_seconds=max_runtime_seconds,
             brokered=bool(redis_client),
             terminal_capture=PtyTerminalCapture(rows_i, cols_i, terminal_history_lines),
+            owner_tab_id=owner_tab_id,
             completion_callback=completion_callback,
         )
         with _runs_lock:

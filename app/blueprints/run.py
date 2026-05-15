@@ -272,6 +272,7 @@ def _save_completed_run(
     workspace_artifacts=None,
     link_active_project=True,
     run_kind=RUN_KIND_EXTERNAL,
+    owner_tab_id="",
 ):
     # Persist preview text and artifact metadata together so history/permalink
     # readers never observe half-written run state.
@@ -299,14 +300,15 @@ def _save_completed_run(
             conn.execute(
                 "INSERT INTO runs "
                 "("
-                "id, session_id, run_kind, command, started, finished, exit_code, output, output_preview, "
+                "id, session_id, run_kind, owner_tab_id, command, started, finished, exit_code, output, output_preview, "
                 "preview_truncated, output_line_count, full_output_available, full_output_truncated, "
                 "output_search_text"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     run_id,
                     session_id,
                     run_kind,
+                    owner_tab_id,
                     command,
                     run_started,
                     finished_iso,
@@ -452,6 +454,7 @@ def _finalize_completed_run(
     *,
     cmd_type="real",
     workspace_artifacts=None,
+    owner_tab_id="",
 ):
     finished = datetime.now(timezone.utc)
     elapsed = round((finished - datetime.fromisoformat(run_started)).total_seconds(), 1)
@@ -466,6 +469,7 @@ def _finalize_completed_run(
         workspace_artifacts=workspace_artifacts,
         link_active_project=cmd_type == "real",
         run_kind=run_kind_for_cmd_type(cmd_type),
+        owner_tab_id=owner_tab_id,
     )
     return {"elapsed": elapsed, "active_project_link": active_project_link}
 
@@ -478,6 +482,7 @@ def _persist_completed_pty_run(
     synthesized_lines,
     *,
     transcript_mode: object = "final_frame",
+    owner_tab_id: str = "",
 ):
     capture = _run_output_capture(run.run_id)
     signal_classifier = OutputSignalClassifier(execution_command, cmd_type="real")
@@ -497,6 +502,7 @@ def _persist_completed_pty_run(
         exit_code,
         capture,
         run_kind=RUN_KIND_EXTERNAL,
+        owner_tab_id=owner_tab_id or str(getattr(run, "owner_tab_id", "") or ""),
     )
     return {
         "preview_truncated": capture.preview_truncated,
@@ -568,14 +574,15 @@ def save_client_side_run():
         conn.execute(
             "INSERT INTO runs "
             "("
-            "id, session_id, run_kind, command, started, finished, exit_code, output, output_preview, "
+            "id, session_id, run_kind, owner_tab_id, command, started, finished, exit_code, output, output_preview, "
             "preview_truncated, output_line_count, full_output_available, full_output_truncated, "
             "output_search_text"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run_id,
                 session_id,
                 RUN_KIND_BUILTIN,
+                _active_run_owner_value(data.get("tab_id", "")),
                 command,
                 started.isoformat(),
                 finished.isoformat(),
@@ -1215,7 +1222,16 @@ def _publish_broker_captured_line(
     )
 
 
-def _brokered_synthetic_run(original_command, session_id, client_ip, events, exit_code=0, *, cmd_type="builtin"):
+def _brokered_synthetic_run(
+    original_command,
+    session_id,
+    client_ip,
+    events,
+    exit_code=0,
+    *,
+    cmd_type="builtin",
+    owner_tab_id="",
+):
     run_id = str(uuid.uuid4())
     run_started = datetime.now(timezone.utc).isoformat()
     capture = _run_output_capture(run_id)
@@ -1260,6 +1276,7 @@ def _brokered_synthetic_run(original_command, session_id, client_ip, events, exi
             finished.isoformat(), exit_code, capture,
             link_active_project=cmd_type == "real",
             run_kind=run_kind_for_cmd_type(cmd_type),
+            owner_tab_id=owner_tab_id,
         )
     except Exception as exc:
         log.error("RUN_BROKER_SYNTHETIC_ERROR", exc_info=True, extra={
@@ -1286,6 +1303,7 @@ def _brokered_real_run_worker(
     rewrite_notice,
     workspace_notices,
     workspace_artifacts,
+    owner_tab_id,
 ):
     command_timeout = CFG["command_timeout_seconds"] or None
     heartbeat_interval = CFG.get("run_broker_heartbeat_seconds") or CFG["heartbeat_interval_seconds"]
@@ -1388,6 +1406,7 @@ def _brokered_real_run_worker(
             exit_code,
             capture,
             workspace_artifacts=workspace_artifacts,
+            owner_tab_id=owner_tab_id,
         )
         elapsed = finalize_info["elapsed"]
         active_project_link = finalize_info.get("active_project_link")
@@ -1689,9 +1708,16 @@ def start_brokered_run():
         return jsonify({"error": "No command provided"}), 400
 
     if resolves_exact_special_builtin_command(original_command):
-        events, exit_code = execute_builtin_command(original_command, session_id)
+        events, exit_code = execute_builtin_command(original_command, session_id, tab_id=owner_tab_id)
         storage_command = _history_safe_command_for_storage(original_command)
-        run_id = _brokered_synthetic_run(storage_command, session_id, client_ip, events, exit_code)
+        run_id = _brokered_synthetic_run(
+            storage_command,
+            session_id,
+            client_ip,
+            events,
+            exit_code,
+            owner_tab_id=owner_tab_id,
+        )
         return jsonify({"run_id": run_id, "stream": f"/runs/{run_id}/stream"}), 202
 
     try:
@@ -1700,14 +1726,25 @@ def start_brokered_run():
         return _preparation_error_response(exc)
 
     if resolve_builtin_command(prepared_input.execution_command):
-        events, exit_code = execute_builtin_command(prepared_input.execution_command, session_id)
+        events, exit_code = execute_builtin_command(
+            prepared_input.execution_command,
+            session_id,
+            tab_id=owner_tab_id,
+        )
         filtered_events = _filter_builtin_command_events(
             events,
             prepared_input.variable_notice,
             prepared_input.postfilter,
         )
         storage_command = _history_safe_command_for_storage(original_command)
-        run_id = _brokered_synthetic_run(storage_command, session_id, client_ip, filtered_events, exit_code)
+        run_id = _brokered_synthetic_run(
+            storage_command,
+            session_id,
+            client_ip,
+            filtered_events,
+            exit_code,
+            owner_tab_id=owner_tab_id,
+        )
         return jsonify({"run_id": run_id, "stream": f"/runs/{run_id}/stream"}), 202
 
     try:
@@ -1722,7 +1759,15 @@ def start_brokered_run():
         return _preparation_error_response(exc)
     if prepared_real.missing_runtime:
         events = [{"type": "output", "text": runtime_missing_command_message(prepared_real.missing_runtime)}]
-        run_id = _brokered_synthetic_run(original_command, session_id, client_ip, events, 127, cmd_type="missing")
+        run_id = _brokered_synthetic_run(
+            original_command,
+            session_id,
+            client_ip,
+            events,
+            127,
+            cmd_type="missing",
+            owner_tab_id=owner_tab_id,
+        )
         return jsonify({"run_id": run_id, "stream": f"/runs/{run_id}/stream"}), 202
 
     try:
@@ -1758,6 +1803,7 @@ def start_brokered_run():
                 prepared_real.validation,
                 session_id,
             ),
+            "owner_tab_id": owner_tab_id,
         },
         name=f"run-broker-{started.run_id[:8]}",
         daemon=True,

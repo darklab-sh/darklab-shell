@@ -77,6 +77,7 @@ const RECENT_DOMAIN_VALUE_TYPES = ['domain', 'host', 'target'];
 let acRecentDomains = [];
 const acRecentDomainPersistPromises = new Set();
 let acProjectTargets = [];
+let acProjects = [];
 
 function _readRecentDomains() {
   return acRecentDomains.slice(0, RECENT_DOMAIN_LIMIT);
@@ -84,6 +85,10 @@ function _readRecentDomains() {
 
 function _readProjectTargets() {
   return acProjectTargets.slice(0, 200);
+}
+
+function _readAutocompleteProjects() {
+  return acProjects.slice(0, 200);
 }
 
 function setRecentDomains(items) {
@@ -114,9 +119,41 @@ function setProjectAutocompleteTargets(items) {
   return _readProjectTargets();
 }
 
+function setProjectAutocompleteProjects(items) {
+  const seen = new Set();
+  acProjects = (Array.isArray(items) ? items : [])
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const slug = String(item.slug || '').trim();
+      const name = String(item.name || '').trim();
+      const id = String(item.id || '').trim();
+      const value = slug || name || id;
+      if (!value) return null;
+      return {
+        value,
+        slug,
+        name,
+        id,
+        status: String(item.status || '').trim().toLowerCase(),
+      };
+    })
+    .filter((item) => {
+      if (!item || !item.value) return false;
+      const key = item.value.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 200);
+  return _readAutocompleteProjects();
+}
+
 function loadProjectAutocompleteTargets() {
   if (typeof apiFetch !== 'function') return Promise.resolve(_readProjectTargets());
-  return apiFetch('/projects/active', { cache: 'no-store' })
+  const projectListRequest = apiFetch('/projects?include_archived=1', { cache: 'no-store' })
+    .then(resp => (resp && resp.ok && typeof resp.json === 'function' ? resp.json() : { projects: [] }))
+    .then(data => setProjectAutocompleteProjects(data && data.projects));
+  const activeTargetRequest = apiFetch('/projects/active', { cache: 'no-store' })
     .then(resp => (resp && resp.ok && typeof resp.json === 'function' ? resp.json() : { project: null }))
     .then((data) => {
       const project = data && data.project && typeof data.project === 'object' ? data.project : null;
@@ -126,7 +163,10 @@ function loadProjectAutocompleteTargets() {
         .then(resp => (resp && resp.ok && typeof resp.json === 'function' ? resp.json() : { targets: [] }))
         .then(targetData => setProjectAutocompleteTargets(targetData && targetData.targets));
     })
+  return Promise.all([projectListRequest, activeTargetRequest])
+    .then(() => _readProjectTargets())
     .catch((err) => {
+      setProjectAutocompleteProjects([]);
       setProjectAutocompleteTargets([]);
       if (typeof logClientError === 'function') logClientError('failed to load project autocomplete targets', err);
       return _readProjectTargets();

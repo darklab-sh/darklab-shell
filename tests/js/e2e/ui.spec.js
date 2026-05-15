@@ -523,14 +523,11 @@ test.describe('project workspace modal', () => {
   }
 
   async function linkExternalRunToOpenProject(page, testInfo) {
-    await page.locator('.project-workspace-close').click()
-    await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
     const sessionId = await browserSessionId(page)
     const [seededRun] = seedExternalHistoryRuns(testInfo, {
       sessionId,
       commands: [PROJECT_LINK_RUN_COMMAND],
     })
-    await openProjectsModal(page)
     await page.locator('[data-project-tab="runs"]').click()
     await page.locator('[data-project-action="link-last-run"]').click()
     await expect(page.locator('#permalink-toast')).toContainText('Last run linked to this project.')

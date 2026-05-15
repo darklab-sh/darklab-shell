@@ -90,6 +90,7 @@ def _create_schema(conn):
             id         TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
             run_kind   TEXT NOT NULL DEFAULT 'external',
+            owner_tab_id TEXT NOT NULL DEFAULT '',
             command    TEXT NOT NULL,
             started    TEXT NOT NULL,
             finished   TEXT,
@@ -643,6 +644,7 @@ def _migrate_schema(conn):
         pass  # Column already exists
     for stmt in (
         "ALTER TABLE runs ADD COLUMN run_kind TEXT NOT NULL DEFAULT 'external'",
+        "ALTER TABLE runs ADD COLUMN owner_tab_id TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE runs ADD COLUMN output_preview TEXT",
         "ALTER TABLE runs ADD COLUMN preview_truncated INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE runs ADD COLUMN output_line_count INTEGER NOT NULL DEFAULT 0",

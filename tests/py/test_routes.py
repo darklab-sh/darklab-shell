@@ -317,13 +317,23 @@ class TestProjectRoutes:
         assert resp.status_code == 201
         return json.loads(resp.data)["project"]
 
-    def _seed_run(self, session_id, command="nmap darklab.sh", *, run_id=None, run_kind="external"):
+    def _seed_run(
+        self,
+        session_id,
+        command="nmap darklab.sh",
+        *,
+        run_id=None,
+        run_kind="external",
+        owner_tab_id="",
+        started="datetime('now')",
+    ):
         run_id = run_id or "run-" + uuid.uuid4().hex
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_line_count) "
-                "VALUES (?, ?, ?, ?, datetime('now'), ?, 0)",
-                (run_id, session_id, run_kind, command, "[]"),
+                "INSERT INTO runs "
+                "(id, session_id, run_kind, owner_tab_id, command, started, output_preview, output_line_count) "
+                f"VALUES (?, ?, ?, ?, ?, {started}, ?, 0)",
+                (run_id, session_id, run_kind, owner_tab_id, command, "[]"),
             )
             conn.commit()
         return run_id
@@ -748,6 +758,25 @@ class TestProjectRoutes:
 
         use_lines, _ = execute_builtin_command("project use cli-case", cli_session)
         assert "active project is CLI Case" in use_lines[0]["text"]
+
+        tab_one_run = self._seed_run(
+            cli_session,
+            "sleep 10",
+            run_id="run-tab-one-" + uuid.uuid4().hex,
+            owner_tab_id="tab-1",
+            started="'2026-05-15T00:00:00+00:00'",
+        )
+        tab_two_run = self._seed_run(
+            cli_session,
+            "dig darklab.sh",
+            run_id="run-tab-two-" + uuid.uuid4().hex,
+            owner_tab_id="tab-2",
+            started="'2026-05-15T00:01:00+00:00'",
+        )
+        link_last_lines, _ = execute_builtin_command("project link run last", cli_session, tab_id="tab-1")
+        assert f"linked run {tab_one_run}" in link_last_lines[0]["text"]
+        link_session_last_lines, _ = execute_builtin_command("project link last", cli_session)
+        assert f"linked run {tab_two_run}" in link_session_last_lines[0]["text"]
 
         target_lines, _ = execute_builtin_command("project target add domain darklab.sh", cli_session)
         assert target_lines[0]["text"] == "project: target added domain darklab.sh"
@@ -5111,7 +5140,7 @@ class TestRunRoute:
         assert args[0] == "nmap -sV darklab.sh"
         assert args[3] == [{"type": "output", "text": "Command is not installed on this instance: nmap"}]
         assert args[4] == 127
-        assert synthetic.call_args.kwargs == {"cmd_type": "missing"}
+        assert synthetic.call_args.kwargs == {"cmd_type": "missing", "owner_tab_id": ""}
         popen.assert_not_called()
 
     def test_brokered_run_rejects_invalid_command_payloads(self):

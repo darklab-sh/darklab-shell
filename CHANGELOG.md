@@ -111,6 +111,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Project CLI “last run” is tab-aware** — terminal `project link last` and `project link run last` now resolve the latest eligible external run from the current terminal tab, while the session-wide fallback remains available when the command runs without a tab context. Project `use`, `delete`, `archive`, and `unarchive` autocomplete now suggests available project slugs from the current session.
+  - **Tests:** updated project CLI route coverage for tab-scoped last-run linking and browser autocomplete coverage for project ref suggestions.
 - **Atlas toolbar controls are grouped by task** — the Atlas header now gives search its own row, keeps filters separate from export/refresh actions, collapses CSV/JSONL into one Export menu, narrows the orphan-source filter to its content, and moves the selected-count text below the select-mode action row.
 - **Atlas opens on Findings by default** — opening Atlas from the rail, mobile menu, shortcut, History, or Projects now starts on the Findings tab unless the caller is targeting a specific entity tab. Atlas delete confirmations also give same-run cleanup notes more breathing room.
 - **Atlas pagination unlocks after list loading** — entity tabs now enable Previous/Next as soon as the list response arrives, even if the selected entity detail panel is still loading. Large tabs, such as Domains after a noisy crawl, no longer show a valid `1-50 of N` range while keeping Next disabled, and quick tab switches ignore stale list responses from the previous tab.

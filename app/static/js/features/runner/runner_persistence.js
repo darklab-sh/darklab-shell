@@ -25,7 +25,7 @@ window.DarklabRunnerPersistence = (() => {
       return statusValue === 'fail' ? 1 : 0;
     }
 
-    function persistClientSideRun(command, lineItems, statusValue) {
+    function persistClientSideRun(command, lineItems, statusValue, tabId = '') {
       const safeCommand = historySafeCommand(command);
       if (!safeCommand || typeof apiFetch !== 'function') return;
       const lines = (Array.isArray(lineItems) ? lineItems : []).map((line) => ({
@@ -39,6 +39,7 @@ window.DarklabRunnerPersistence = (() => {
           command: safeCommand,
           exit_code: exitCodeFromStatus(statusValue),
           lines,
+          tab_id: String(tabId || ''),
         }),
       }).then((resp) => {
         if (!resp || !resp.ok) throw new Error(String(resp && resp.status || 'unknown'));

@@ -2481,9 +2481,10 @@ class TestDerivedCommandRegistry:
         assert domain_add_context["arg_hints"]["__positional__"][0]["value"] == "<domain>"
         assert domain_add_context["arg_hints"]["__positional__"][0]["value_type"] == "domain"
         assert project_context["subcommands"]["link"]["arg_hints"]["__positional__"][1]["value"] == "run"
-        assert project_context["subcommands"]["link"]["subcommands"]["run"]["arg_hints"]["__positional__"][0][
-            "value"
-        ] == "<run-id>"
+        assert [
+            item["value"]
+            for item in project_context["subcommands"]["link"]["subcommands"]["run"]["arg_hints"]["__positional__"][:2]
+        ] == ["last", "<run-id>"]
         assert [item["value"] for item in context["var"]["arg_hints"]["__positional__"]] == [
             "list",
             "set",
@@ -6892,6 +6893,7 @@ class TestDatabaseInit:
 
         assert "session_id" in columns
         assert "run_kind" in columns
+        assert "owner_tab_id" in columns
         assert session_id == ""
         assert run_kinds == {"legacy-run": "external", "legacy-builtin": "builtin"}
         assert "projects" in tables

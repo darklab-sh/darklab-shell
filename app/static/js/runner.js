@@ -1265,7 +1265,7 @@ function _finalizeClientSideCommandStatus(tabId, statusValue) {
 }
 
 function _persistClientSideRun(command, lineItems, statusValue) {
-  _runnerPersistenceHelpers().persistClientSideRun(command, lineItems, statusValue);
+  _runnerPersistenceHelpers().persistClientSideRun(command, lineItems, statusValue, activeTabId);
 }
 
 function _persistSessionTokenRun(command, lineItems, statusValue = 'ok') {

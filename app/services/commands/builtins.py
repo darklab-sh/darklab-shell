@@ -359,7 +359,7 @@ _BUILTIN_COMMAND_DISPATCH = {
 }
 
 
-def execute_builtin_command(command: str, session_id: str) -> tuple[list[dict[str, str]], int]:
+def execute_builtin_command(command: str, session_id: str, *, tab_id: str = "") -> tuple[list[dict[str, str]], int]:
     # Built-in commands still return the same [{text, class}, ...], exit_code shape
     # as real runs so the frontend path is identical.
     _sync_builtin_module_hooks()
@@ -367,6 +367,9 @@ def execute_builtin_command(command: str, session_id: str) -> tuple[list[dict[st
     handler = _BUILTIN_COMMAND_DISPATCH.get(root) if root is not None else None
     if handler is None:
         return [{"type": "output", "text": f"Unsupported built-in command: {command.strip()}"}], 1
+    if root == "project":
+        result = _run_builtin_project(command, session_id, tab_id=tab_id)
+        return result, 0
     result = handler(command, session_id)
     if isinstance(result, tuple):
         return result

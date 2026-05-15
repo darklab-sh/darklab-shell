@@ -550,6 +550,46 @@ function _runtimeWordlistContext() {
   });
 }
 
+function _runtimeProjectRefHints(statuses = []) {
+  const wanted = new Set((Array.isArray(statuses) ? statuses : []).map(status => String(status || '').toLowerCase()));
+  const projects = typeof _readAutocompleteProjects === 'function' ? _readAutocompleteProjects() : [];
+  return projects
+    .filter((project) => {
+      const status = String(project && project.status || '').toLowerCase();
+      return !wanted.size || wanted.has(status);
+    })
+    .map((project) => {
+      const value = String(project && project.value || '').trim();
+      if (!value) return null;
+      const name = String(project && project.name || '').trim();
+      const status = String(project && project.status || '').trim();
+      const suffix = status ? ` · ${status}` : '';
+      return _runtimeHint(value, `${name || value}${suffix}`);
+    })
+    .filter(Boolean);
+}
+
+function _runtimeProjectContext(baseSpec = {}) {
+  const spec = _cloneRuntimeSpec(baseSpec);
+  spec.subcommands = spec.subcommands && typeof spec.subcommands === 'object' ? spec.subcommands : {};
+  const setProjectHints = (name, hints) => {
+    const subSpec = spec.subcommands[name] && typeof spec.subcommands[name] === 'object'
+      ? _cloneRuntimeSpec(spec.subcommands[name])
+      : {};
+    if (hints.length) {
+      subSpec.arg_hints = Object.assign({}, subSpec.arg_hints || {}, { __positional__: hints });
+      spec.subcommands[name] = subSpec;
+    } else {
+      spec.subcommands[name] = _runtimeMergeContextSpec(subSpec, _runtimeContextSpec());
+    }
+  };
+  setProjectHints('use', _runtimeProjectRefHints(['active']));
+  setProjectHints('archive', _runtimeProjectRefHints(['active']));
+  setProjectHints('unarchive', _runtimeProjectRefHints(['archived']));
+  setProjectHints('delete', _runtimeProjectRefHints());
+  return spec;
+}
+
 function getRuntimeAutocompleteContext(baseRegistry = {}) {
   const context = {};
   _runtimeActiveBuiltinRoots(baseRegistry).forEach((root) => {
@@ -566,6 +606,9 @@ function getRuntimeAutocompleteContext(baseRegistry = {}) {
   }
   if (baseRegistry.workflow) {
     context.workflow = _runtimeMergeContextSpec(baseRegistry.workflow, _runtimeWorkflowContext());
+  }
+  if (baseRegistry.project) {
+    context.project = _runtimeProjectContext(baseRegistry.project);
   }
   if (isWorkspaceFeatureEnabled() && baseRegistry.file) {
     context.file = _runtimeMergeContextSpec(baseRegistry.file, _runtimeWorkspaceContext());

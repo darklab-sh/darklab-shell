@@ -538,6 +538,7 @@ describe('client-side UI command pipe helpers', () => {
         { text: 'Available themes:', cls: 'builtin-section' },
         { text: 'Dark themes:', cls: 'builtin-section' },
       ],
+      tab_id: 'tab-1',
     })
   })
 

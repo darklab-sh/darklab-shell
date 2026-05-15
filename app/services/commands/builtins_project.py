@@ -96,20 +96,34 @@ def _resolve_project_ref(
     return name_matches[0] if name_matches else None
 
 
-def _latest_run_id(session_id: str) -> str:
+def _latest_run_id(session_id: str, *, tab_id: str = "") -> str:
     with db_connect() as conn:
-        row = conn.execute(
-            "SELECT id FROM runs WHERE session_id = ? ORDER BY started DESC LIMIT 1",
-            (session_id,),
-        ).fetchone()
+        if tab_id:
+            row = conn.execute(
+                "SELECT id FROM runs "
+                "WHERE session_id = ? AND run_kind = 'external' AND owner_tab_id = ? "
+                "ORDER BY started DESC LIMIT 1",
+                (session_id, tab_id),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT id FROM runs "
+                "WHERE session_id = ? AND run_kind = 'external' "
+                "ORDER BY started DESC LIMIT 1",
+                (session_id,),
+            ).fetchone()
     return str(row["id"] or "") if row else ""
 
 
-def _project_link_payload(parts: list[str], session_id: str) -> tuple[str, str]:
-    if len(parts) >= 3 and parts[2].lower() == "last":
-        run_id = _latest_run_id(session_id)
+def _project_link_payload(parts: list[str], session_id: str, *, tab_id: str = "") -> tuple[str, str]:
+    if len(parts) >= 3 and (
+        parts[2].lower() == "last"
+        or (len(parts) >= 4 and parts[2].lower() == "run" and parts[3].lower() == "last")
+    ):
+        run_id = _latest_run_id(session_id, tab_id=tab_id)
         if not run_id:
-            raise ProjectWorkspaceError("no recent run is available to link")
+            scope = " in this tab" if tab_id else ""
+            raise ProjectWorkspaceError(f"no recent run is available to link{scope}")
         return "run", run_id
     if len(parts) < 4:
         raise ProjectWorkspaceError("usage: project link|unlink run <run-id>")
@@ -201,7 +215,7 @@ def _run_project_target_command(parts: list[str], session_id: str) -> list[dict[
     return [output_line(f"project: unknown target action '{action}'")]
 
 
-def run_builtin_project(command: str, session_id: str) -> list[dict[str, str]]:
+def run_builtin_project(command: str, session_id: str, *, tab_id: str = "") -> list[dict[str, str]]:
     parts = split_command_argv(command)
     subcommand = parts[1].lower() if len(parts) > 1 else "current"
     try:
@@ -302,7 +316,7 @@ def run_builtin_project(command: str, session_id: str) -> list[dict[str, str]]:
             if not project:
                 return [output_line("project: no active project; run `project use <name-or-id>` first")]
             project = cast(dict[str, object], project)
-            entity_type, entity_id = _project_link_payload(parts, session_id)
+            entity_type, entity_id = _project_link_payload(parts, session_id, tab_id=tab_id)
             payload = {"entity_type": entity_type, "entity_id": entity_id, "source": "manual"}
             if subcommand == "link":
                 link = link_project_entity(session_id, str(project["id"]), payload)

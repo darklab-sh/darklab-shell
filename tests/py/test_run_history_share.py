@@ -673,6 +673,7 @@ class TestRunStreaming:
                 rewrite_notice="rewritten for safety",
                 workspace_notices=["[workspace] writing scan.txt"],
                 workspace_artifacts=[],
+                owner_tab_id="tab-worker",
             )
         capture.finalize()
 
@@ -725,6 +726,7 @@ class TestRunStreaming:
                 rewrite_notice="",
                 workspace_notices=[],
                 workspace_artifacts=[],
+                owner_tab_id="",
             )
         capture.finalize()
 
@@ -764,6 +766,7 @@ class TestRunStreaming:
                 rewrite_notice="",
                 workspace_notices=[],
                 workspace_artifacts=[],
+                owner_tab_id="",
             )
 
         assert published == [("run-broker-error", "error", {"text": "Process stdout pipe was not created"})]

@@ -950,8 +950,14 @@ describe('autocomplete helpers', () => {
   })
 
   it('walks nested subcommands before suggesting the next project argument', () => {
-    const { getAutocompleteMatches } = fromDomScripts(
-      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
+    const { getAutocompleteMatches, setProjectAutocompleteProjects } = fromDomScripts(
+      [
+        'app/static/js/core/utils.js',
+        'app/static/js/core/autocomplete_core.js',
+        'app/static/js/features/autocomplete/suggestions.js',
+        'app/static/js/features/autocomplete/runtime_context.js',
+        'app/static/js/autocomplete.js',
+      ],
       {
         document,
         cmdInput: document.getElementById('cmd'),
@@ -959,6 +965,10 @@ describe('autocomplete helpers', () => {
         mobileComposerHost: document.getElementById('mobile-composer-host'),
         mobileCmdInput: document.getElementById('mobile-cmd'),
         getComposerValue: () => '',
+        allowedCommandsFaqData: { commands: [] },
+        _cliThemeEntries: () => [],
+        _cliConfigEntries: () => [],
+        sessionVariables: [],
         acSuggestions: [],
         acContextRegistry: {
           project: {
@@ -971,6 +981,30 @@ describe('autocomplete helpers', () => {
               ],
             },
             subcommands: {
+              use: {
+                flags: [],
+                expects_value: [],
+                arg_hints: { __positional__: [{ value: '<name-or-id>', hintOnly: true, description: 'Project name, slug, or id' }] },
+                subcommands: {},
+              },
+              archive: {
+                flags: [],
+                expects_value: [],
+                arg_hints: { __positional__: [{ value: '<name-or-id>', hintOnly: true, description: 'Project name, slug, or id' }] },
+                subcommands: {},
+              },
+              unarchive: {
+                flags: [],
+                expects_value: [],
+                arg_hints: { __positional__: [{ value: '<name-or-id>', hintOnly: true, description: 'Project name, slug, or id' }] },
+                subcommands: {},
+              },
+              delete: {
+                flags: [],
+                expects_value: [],
+                arg_hints: { __positional__: [{ value: '<name-or-id>', hintOnly: true, description: 'Project name, slug, or id' }] },
+                subcommands: {},
+              },
               link: {
                 flags: [],
                 expects_value: [],
@@ -983,7 +1017,12 @@ describe('autocomplete helpers', () => {
                   run: {
                     flags: [],
                     expects_value: [],
-                    arg_hints: { __positional__: [{ value: '<run-id>', hintOnly: true, description: 'Run id' }] },
+                    arg_hints: {
+                      __positional__: [
+                        { value: 'last', description: 'Link the latest run in this tab' },
+                        { value: '<run-id>', hintOnly: true, description: 'Run id' },
+                      ],
+                    },
                     close_after: { run: 1 },
                     subcommands: {},
                   },
@@ -1029,14 +1068,23 @@ describe('autocomplete helpers', () => {
       },
       `{
       getAutocompleteMatches,
+      setProjectAutocompleteProjects,
     }`,
     )
 
+    setProjectAutocompleteProjects([
+      { id: 'prj_active', slug: 'active-case', name: 'Active Case', status: 'active' },
+      { id: 'prj_archived', slug: 'archived-case', name: 'Archived Case', status: 'archived' },
+    ])
     expect(getAutocompleteMatches('project target add ', 19).map(item => item.value)).toEqual(['domain', 'url'])
     expect(getAutocompleteMatches('project target add domain ', 26).map(item => item.value)).toEqual(['<domain>'])
     expect(getAutocompleteMatches('project target add domain darklab.sh ', 37)).toEqual([])
-    expect(getAutocompleteMatches('project link run ', 17).map(item => item.value)).toEqual(['<run-id>'])
+    expect(getAutocompleteMatches('project link run ', 17).map(item => item.value)).toEqual(['last', '<run-id>'])
     expect(getAutocompleteMatches('project link run run-1 ', 23)).toEqual([])
+    expect(getAutocompleteMatches('project use ', 12).map(item => item.value)).toEqual(['active-case'])
+    expect(getAutocompleteMatches('project archive ', 16).map(item => item.value)).toEqual(['active-case'])
+    expect(getAutocompleteMatches('project unarchive ', 18).map(item => item.value)).toEqual(['archived-case'])
+    expect(getAutocompleteMatches('project delete ', 15).map(item => item.value)).toEqual(['active-case', 'archived-case'])
   })
 
   it('tracks recent domains from structured flag and positional slots, capped in memory', () => {
@@ -1188,6 +1236,12 @@ describe('autocomplete helpers', () => {
 
   it('reloads active project targets after a same-session project workspace storage signal', async () => {
     const apiFetch = vi.fn((url) => {
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects: [] }),
+        })
+      }
       if (url === '/projects/active') {
         return Promise.resolve({
           ok: true,
