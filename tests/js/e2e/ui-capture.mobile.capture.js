@@ -111,9 +111,26 @@ async function openMobileAtlasWithCaptureData(page) {
   await openMenu(page)
   await page.locator('#mobile-menu-sheet [data-menu-action="atlas"]').click()
   await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
-  await page.locator('[data-atlas-tab="ip"]').click()
-  await expect(page.locator('#atlas-list')).toContainText('107.178.109.44')
-  await expect(page.locator('#atlas-detail')).toContainText('Shodan')
+  await expect(page.locator('#atlas-mobile-root')).toBeVisible()
+
+  await page.locator('#atlas-mobile-filters-panel').waitFor({ state: 'attached' })
+  await page.locator('.atlas-mobile-filters-toggle').click()
+  await expect(page.locator('#atlas-mobile-filters-panel')).toBeVisible()
+
+  await page.locator('.atlas-mobile-overflow-btn').click()
+  await expect(page.locator('#action-sheet-overlay')).toHaveClass(/\bopen\b/)
+  await expect(page.locator('#action-sheet')).toContainText('Select mode')
+  await page.locator('#action-sheet-overlay').click({ position: { x: 10, y: 10 } })
+  await expect(page.locator('#action-sheet-overlay')).not.toHaveClass(/\bopen\b/)
+
+  await page.locator('#atlas-mobile-tabs [data-atlas-mobile-tab="ip"]').click()
+  const hostRow = page.locator('#atlas-mobile-list .atlas-mobile-row').filter({ hasText: '107.178.109.44' }).first()
+  await expect(hostRow).toBeVisible()
+  await hostRow.click()
+  await expect(page.locator('#atlas-mobile-entity-view')).toBeVisible()
+  await expect(page.locator('#atlas-mobile-entity-body')).toContainText('Shodan')
+  await page.locator('#atlas-mobile-entity-body .atlas-intel-card-toggle').filter({ hasText: 'Shodan' }).click()
+  await expect(page.locator('#atlas-mobile-entity-body .atlas-intel-card.is-open')).toContainText(/ports/i)
 }
 
 const scenes = [

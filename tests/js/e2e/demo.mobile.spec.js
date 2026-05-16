@@ -402,12 +402,34 @@ async function openProjectsPanelForDemo(page, runId) {
 async function openAtlasPanelForDemo(page) {
   await openMobileMenuAction(page, 'atlas')
   await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+  await expect(page.locator('#atlas-mobile-root')).toBeVisible()
   await page.waitForTimeout(900)
-  await page.locator('[data-atlas-tab="ip"]').click()
-  await expect(page.locator('#atlas-list')).toContainText('107.178.109.44')
-  await expect(page.locator('#atlas-detail')).toContainText('Shodan')
+
+  await page.locator('.atlas-mobile-filters-toggle').click()
+  await expect(page.locator('#atlas-mobile-filters-panel')).toBeVisible()
+  await page.waitForTimeout(1_000)
+
+  await page.locator('.atlas-mobile-overflow-btn').click()
+  await expect(page.locator('#action-sheet-overlay')).toHaveClass(/\bopen\b/)
+  await page.waitForTimeout(1_100)
+  await page.locator('#action-sheet-overlay').click({ position: { x: 10, y: 10 } })
+  await expect(page.locator('#action-sheet-overlay')).not.toHaveClass(/\bopen\b/)
+  await page.waitForTimeout(650)
+
+  await page.locator('#atlas-mobile-tabs [data-atlas-mobile-tab="ip"]').click()
+  const hostRow = page.locator('#atlas-mobile-list .atlas-mobile-row').filter({ hasText: '107.178.109.44' }).first()
+  await expect(hostRow).toBeVisible()
+  await page.waitForTimeout(850)
+  await hostRow.click()
+  await expect(page.locator('#atlas-mobile-entity-view')).toBeVisible()
+  await expect(page.locator('#atlas-mobile-entity-body')).toContainText('Shodan')
+  await page.waitForTimeout(900)
+  await page.locator('#atlas-mobile-entity-body .atlas-intel-card-toggle').filter({ hasText: 'Shodan' }).click()
+  await expect(page.locator('#atlas-mobile-entity-body .atlas-intel-card.is-open')).toContainText(/ports/i)
   await page.waitForTimeout(3_200)
-  await page.locator('.atlas-close').click()
+  await page.evaluate(() => {
+    if (typeof closeAtlas === 'function') closeAtlas({ refocus: false })
+  })
   await expect(page.locator('#atlas-overlay')).not.toHaveClass(/\bopen\b/)
   await page.waitForTimeout(1_000)
 }
@@ -870,24 +892,26 @@ test('demo-mobile', async ({ page }) => {
   await page.locator('#status-monitor').waitFor({ state: 'hidden', timeout: 10_000 })
   await page.waitForTimeout(1_000)
 
-  // ── History drawer ────────────────────────────────────────────────────────
+  // ── History panel ─────────────────────────────────────────────────────────
   await page.waitForTimeout(900)
   await openMobileMenuAction(page, 'history')
-  await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
+  await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
   await page
-    .locator('#mobile-recents-list .sheet-item')
+    .locator('#history-list .history-entry')
     .first()
     .waitFor({ state: 'visible', timeout: 10_000 })
   // Pause so the viewer can read the top of the list before scrolling.
   await page.waitForTimeout(3_200)
   // Smooth scroll down then back up at a natural reading pace.
-  await smoothScroll(page, '#mobile-recents-list', 425, { durationMs: 1_700 })
+  await smoothScroll(page, '.history-panel-body', 425, { durationMs: 1_700 })
   await page.waitForTimeout(1_250)
-  await smoothScroll(page, '#mobile-recents-list', 0, { durationMs: 1_250 })
+  await smoothScroll(page, '.history-panel-body', 0, { durationMs: 1_250 })
   await page.waitForTimeout(1_200)
 
-  await page.locator('#mobile-recents-sheet .sheet-grab').click()
-  await expect(page.locator('#mobile-recents-sheet')).toBeHidden()
+  await page.evaluate(() => {
+    if (typeof hideHistoryPanel === 'function') hideHistoryPanel()
+  })
+  await expect(page.locator('#history-panel')).not.toHaveClass(/\bopen\b/)
   await page.waitForTimeout(1_100)
 
   // ── Theme switching ───────────────────────────────────────────────────────

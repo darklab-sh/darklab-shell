@@ -1341,7 +1341,15 @@ test.beforeEach(async ({ page }) => {
 
     await page.locator('#atlas-mobile-tools .atlas-mobile-overflow-btn').click()
     await expect(page.locator('#action-sheet-overlay')).toHaveClass(/\bopen\b/)
-    await page.locator('#action-sheet .action-sheet-item').filter({ hasText: 'Select mode' }).click()
+    const selectModeAction = page.locator('#action-sheet .action-sheet-item').filter({ hasText: 'Select mode' })
+    await expect.poll(
+      async () => {
+        const box = await selectModeAction.boundingBox()
+        return Math.round(box?.height || 0)
+      },
+      { message: 'Atlas mobile action-sheet rows stay content-sized' },
+    ).toBeLessThan(90)
+    await selectModeAction.click()
     await expect(page.locator('#atlas-mobile-bulk-bar')).toBeVisible()
     await row.click()
     await expect(page.locator('#atlas-mobile-bulk-bar')).toContainText('1 selected')
