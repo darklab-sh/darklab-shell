@@ -26,6 +26,7 @@ const tabsScrollRightBtn = document.getElementById('tabs-scroll-right');
 const searchPrevBtn = document.getElementById('search-prev');
 const searchNextBtn = document.getElementById('search-next');
 const searchCloseBtn = document.getElementById('search-close-btn');
+const optionsTabs = document.getElementById('options-tabs');
 const optionsTsSelect = document.getElementById('options-ts-select');
 const optionsLnToggle = document.getElementById('options-ln-toggle');
 const optionsWelcomeSelect = document.getElementById('options-welcome-select');

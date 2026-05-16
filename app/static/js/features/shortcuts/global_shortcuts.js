@@ -34,6 +34,10 @@ function _handleSurfaceTabShortcut(e) {
       isOpen: typeof isProjectWorkspaceOpen === 'function' ? isProjectWorkspaceOpen : null,
       cycle: typeof cycleProjectWorkspaceTab === 'function' ? cycleProjectWorkspaceTab : null,
     },
+    {
+      isOpen: typeof isOptionsOverlayOpen === 'function' ? isOptionsOverlayOpen : null,
+      cycle: typeof cycleOptionsTab === 'function' ? cycleOptionsTab : null,
+    },
   ];
   const surface = surfaces.find(item => item.isOpen && item.isOpen() && item.cycle);
   if (!surface || !surface.cycle(offset)) return false;

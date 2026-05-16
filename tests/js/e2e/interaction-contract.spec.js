@@ -146,17 +146,26 @@ test.describe('UI interaction contract — modal focus trap', () => {
       // test so the test is independent of network timing. Visibility filter
       // mirrors ui_focus_trap.js so the test and the trap agree on which
       // element is "last": hidden attribute, [hidden] ancestor, and
-      // display:none.
+      // CSS-hidden ancestors such as closed app-select menus.
       await expect
         .poll(async () => {
           return page.evaluate((selector) => {
             const card = document.querySelector(selector)
             if (!card) return 0
             const SEL = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+            const isVisible = (el) => {
+              if (el.hidden) return false
+              if (typeof el.closest === 'function' && el.closest('[hidden]')) return false
+              let node = el
+              while (node && node.nodeType === 1) {
+                const style = window.getComputedStyle(node)
+                if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return false
+                node = node.parentElement
+              }
+              return true
+            }
             return Array.from(card.querySelectorAll(SEL))
-              .filter((el) => !el.hidden
-                && !(typeof el.closest === 'function' && el.closest('[hidden]'))
-                && window.getComputedStyle(el).display !== 'none')
+              .filter(isVisible)
               .length
           }, modal.modal)
         })
@@ -165,10 +174,19 @@ test.describe('UI interaction contract — modal focus trap', () => {
       await page.evaluate((selector) => {
         const card = document.querySelector(selector)
         const SEL = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        const isVisible = (el) => {
+          if (el.hidden) return false
+          if (typeof el.closest === 'function' && el.closest('[hidden]')) return false
+          let node = el
+          while (node && node.nodeType === 1) {
+            const style = window.getComputedStyle(node)
+            if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return false
+            node = node.parentElement
+          }
+          return true
+        }
         const list = Array.from(card.querySelectorAll(SEL))
-          .filter((el) => !el.hidden
-            && !(typeof el.closest === 'function' && el.closest('[hidden]'))
-            && window.getComputedStyle(el).display !== 'none')
+          .filter(isVisible)
         card.querySelectorAll('[data-focustest-first], [data-focustest-last]').forEach((el) => {
           delete el.dataset.focustestFirst
           delete el.dataset.focustestLast

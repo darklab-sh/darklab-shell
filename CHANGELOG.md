@@ -68,6 +68,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Options now separates preferences from secrets** — the Options modal now has a Preferences tab for display, identity, run, and compare controls plus a Secrets tab for Provider Status, add/refresh actions, and saved API keys.
+  - **Why:** long secret lists could push normal preference controls beyond the viewport, and the old flat list mixed unrelated controls in one scan path.
+  - **What:** added section dividers inside Preferences, moved encrypted secret management into its own tab, saved the last selected Options tab with session preferences, and kept mobile desktop-only visibility rules in place.
+  - **Tests:** updated session preference route coverage, app unit coverage for tab persistence and desktop-only placement, and Playwright coverage for reopening Options on the saved tab with secrets kept out of Preferences.
 - **Python linting now uses Ruff** — `npm run lint:py`, GitLab CI, and the tracked pre-commit hook now run `ruff check` with the project config in `.tooling/ruff.toml` instead of the previous Python lint tool. The Ruff rules mirror the previous line length and local ignores while keeping Python lint config with the rest of the tooling files.
 - **Project CLI “last run” is tab-aware** — terminal `project link last` and `project link run last` now resolve the latest eligible external run from the current terminal tab, while the session-wide fallback remains available when the command runs without a tab context. Project `use`, `delete`, `archive`, and `unarchive` autocomplete now suggests available project slugs from the current session.
   - **Tests:** updated project CLI route coverage for tab-scoped last-run linking and browser autocomplete coverage for project ref suggestions.

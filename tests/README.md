@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,778
+- behavior tests: 2,781
 - docs/inventory meta-tests: 32
 - `pytest`: 1413 (1381 behavior + 32 meta)
-- `vitest`: 1148
-- `playwright`: 249
-- total: 2,810
+- `vitest`: 1150
+- `playwright`: 250
+- total: 2,813
 
 This document is organized in two parts:
 
@@ -1623,6 +1623,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `applies the saved theme at startup` | Verifies that applies the saved theme at startup. |
 | `applies saved timestamp, line number, HUD clock, and compare preferences from cookies at startup` | Verifies that saved timestamp, line number, HUD clock, and compare preferences are applied from cookies at startup. |
 | `applies saved session preferences on startup over stale local cookies` | Verifies that session-scoped preferences loaded from `/session/preferences` override stale browser-local cookies during boot. |
+| `persists the selected options tab and keeps desktop-only controls in the preferences panel` | Verifies that the selected Options tab is saved with session preferences and desktop-only fields stay inside the Preferences panel. |
 | `switches the visible prompt into confirmation mode when requested` | Verifies that the composer prompt swaps from the normal shell prompt to the transcript-owned `[yes/no]:` confirmation prompt while a terminal confirm is pending. |
 | `applies the saved prompt username preference to the live prompt` | Verifies that the saved prompt username option updates the live shell prompt and persists through the session preference path. |
 | `shows live validation for invalid prompt username input without saving it` | Verifies that invalid prompt username characters show an inline Options error and do not overwrite the saved prompt username. |
@@ -1740,7 +1741,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `supports Alt+ArrowLeft and Alt+ArrowRight to move by word` | Verifies that terminal-style Option/Alt+ArrowLeft and Option/Alt+ArrowRight move the prompt caret by word without cycling tabs. |
 | `supports Shift+Alt+ArrowLeft and Shift+Alt+ArrowRight to cycle between tabs` | Verifies that Shift+Alt+ArrowLeft and Shift+Alt+ArrowRight cycle between tabs. |
 | `routes Option+Tab through open modal tab sets before terminal tabs` | Verifies that Option+Tab and Shift+Option+Tab cycle an open tabbed modal before switching terminal tabs. |
-| `cycles project modal tabs from non-terminal inputs` | Verifies that Option+Tab still cycles Projects modal tabs when focus is inside a modal input. |
+| `cycles modal tabs from non-terminal inputs` | Verifies that Option+Tab still cycles modal tabs when focus is inside a modal input. |
 | `uses the top open modal tab set when multiple tabbed surfaces are present` | Verifies that stacked tabbed modals route Option+Tab to the topmost tab set first. |
 | `supports Alt+digit to jump directly to a tab` | Verifies that supports Alt+digit to jump directly to a tab. |
 | `supports macOS Option+digit tab jumps via physical key code` | Verifies that supports macOS Option+digit tab jumps via physical key code. |
@@ -2755,6 +2756,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `dispose removes the keydown handler and clears the bound flag` | Verifies the disposable contract unwinds the listener and the idempotency marker. |
 | `skips hidden focusables inside the container` | Verifies `[hidden]` descendants are excluded from the focus list. |
 | `skips focusables with inline display:none (options-modal session-token buttons pattern)` | Verifies elements hidden via `style.display = 'none'` are excluded so Tab from the actual visible last focusable wraps instead of leaking past a non-focusable boundary element. |
+| `skips focusables inside a CSS-hidden ancestor` | Verifies descendants of a CSS-hidden container are excluded from the focus list. |
 | `does not intercept arrow keys unless explicitly enabled` | Verifies the shared trap leaves arrow-key behavior alone on normal modal surfaces unless callers opt in. |
 | `cycles forward with ArrowRight and ArrowDown when arrow keys are enabled` | Verifies opt-in arrow-key mode advances focus through the current trap order. |
 | `cycles backward with ArrowLeft and ArrowUp when arrow keys are enabled` | Verifies opt-in arrow-key mode reverses focus through the current trap order. |
@@ -3285,6 +3287,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 | `run all executes rendered workflow steps sequentially in the same tab` | Verifies that `Run all` executes the rendered workflow commands sequentially in the active tab instead of opening separate tabs. |
 | `clicking a rail workflow opens the scoped modal without collapsing the rail list` | Verifies that clicking a workflow entry in the desktop rail opens a one-workflow modal view without replacing the full rail workflow list. |
 | `persists theme, timestamps, line number, and HUD clock preferences across reload` | Verifies that persists theme, timestamps, line number, and HUD clock preferences across reload. |
+| `persists the selected Options tab and keeps secrets out of preferences` | Verifies that the Options modal remembers the selected Secrets tab and keeps stored secret rows out of the Preferences tab. |
 
 #### `welcome-context.spec.js`
 

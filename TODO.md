@@ -1,18 +1,49 @@
 # TODO
 
-This file tracks open work, known issues, technical debt, and product ideas for darklab_shell. Open TODOs, known issues, and technical debt are confirmed items. Ideas are possible future work, not committed plans.
+This file tracks open work, feature enhancements, known issues, technical debt, research items, and product ideas for darklab_shell. Open TODOs, known issues, and technical debt are confirmed items. Feature enhancements, ideas, and research are possible future work, not committed plans.
 
 ---
 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
-- [Feature Enhancements](#feature-enhancements)
-- [Research](#research)
+  - [Table-size diagnostics in `/diag`](#table-size-diagnostics-in-diag)
+  - [Prometheus `/metrics` endpoint](#prometheus-metrics-endpoint)
+  - [Postgres production backend and storage scaling plan](#postgres-production-backend-and-storage-scaling-plan)
+  - [High-volume output handling](#high-volume-output-handling)
+  - [FAQ modal section grouping](#faq-modal-section-grouping)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
+- [Feature Enhancements](#feature-enhancements)
+  - [Run comparison follow-ups](#run-comparison-follow-ups)
+  - [Atlas Enhancements](#atlas-enhancements)
+  - [External intel provider enhancements](#external-intel-provider-enhancements)
+  - [Future Project Workspace enhancements](#future-project-workspace-enhancements)
+  - [Future interactive PTY enhancements](#future-interactive-pty-enhancements)
+  - [Active run reattachment improvements](#active-run-reattachment-improvements)
+- [Research](#research)
 - [Ideas](#ideas)
+  - [Tool-specific guidance](#tool-specific-guidance)
+  - [Command catalog future-state](#command-catalog-future-state)
+  - [Command outcome summaries](#command-outcome-summaries)
+  - [Transcript noise classification](#transcript-noise-classification)
+  - [Run comparison enhancements](#run-comparison-enhancements)
+  - [Bulk history export and share](#bulk-history-export-and-share)
+  - [Autocomplete suggestions from output context](#autocomplete-suggestions-from-output-context)
+  - [Mobile share ergonomics](#mobile-share-ergonomics)
+  - [Scheduled and recurring runs](#scheduled-and-recurring-runs)
+  - [Watchers (change-detection monitors)](#watchers-change-detection-monitors)
+  - [Outbound notifications (webhooks, Slack, Discord, email)](#outbound-notifications-webhooks-slack-discord-email)
+  - [Headless API and CLI client](#headless-api-and-cli-client)
+  - [PWA install and service-worker push](#pwa-install-and-service-worker-push)
+  - [Engagement report builder](#engagement-report-builder)
+  - [Session Entity Atlas (entity-first triage surface)](#session-entity-atlas-entity-first-triage-surface)
 - [Architecture](#architecture)
+  - [Structured output model](#structured-output-model)
+  - [Unified terminal built-in lifecycle](#unified-terminal-built-in-lifecycle)
+  - [Plugin-style helper command registry](#plugin-style-helper-command-registry)
+  - [Lightweight Jinja base template](#lightweight-jinja-base-template)
+  - [Interactive PTY transport future-state](#interactive-pty-transport-future-state)
 
 ---
 
@@ -237,30 +268,6 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 - Surface the mode in the run UI and history preview so users can tell the command is still running and producing output even though the transcript is intentionally throttled.
 - Add regression coverage with synthetic noisy output to verify the browser does not become unresponsive, the line count continues increasing, the kill button still works, and the completed run records the correct `output_line_count` plus truncation state.
 
-### Options modal grouping and Secrets tab
-- **Scope**
-  - The Options modal is a flat list of 12 controls today (`app/templates/index.html` around the `#options-modal` block). The Secrets row is the only item whose vertical size grows with user data — 10+ secrets push the modal well past one viewport — and the remaining 11 controls have no visual grouping despite covering four different mental categories (display, identity, run handling, comparison).
-  - Restructure the modal into a two-tab layout with the first tab carrying labeled sections. Secrets gets its own tab so its dynamic growth no longer pushes everything else off-screen.
-- **Tab and section layout**
-  - **Tab 1 — Preferences** (sections rendered as static dividers in this order):
-    - **Display** — Timestamps, Line Numbers, HUD Clock (desktop-only), Welcome Intro.
-    - **Identity** — Prompt Name, Session Token (the full status / Copy / Generate / Set / Rotate / Clear block lives here).
-    - **Runs** — Project Run Capture, Run Notifications (desktop-only), Share Snapshot Redaction.
-    - **Compare** — Compare View, Compare Context. Pairing these fixes the current scanning hazard where they sit between unrelated controls.
-  - **Tab 2 — Secrets** — Provider Status button, Add secret, Refresh, and the dynamic secrets list. Nothing else lives here.
-  - Reject the three-tab variant (Preferences / Session / Secrets) for v1. Session Token is one logical control with one block of explanatory copy; it doesn't earn its own tab the way Secrets does. Revisit only if Identity-section growth (e.g. encryption-key management, recovery flow) materializes.
-- **Implementation notes**
-  - Reuse the existing in-modal tab strip pattern from the projects modal (`project-mobile-tabs` markup + `features/projects/*` styling) rather than inventing a new tabs primitive — matches the shared-helper guidance and keeps mobile/desktop styling consistent.
-  - Section headers are static dividers (rule + small-caps label, ~24px tall), not collapsible disclosure rows. Collapsing inside the Preferences tab would hide controls behind two interactions and adds nothing for 12 fields.
-  - The `options-desktop-only` class continues to gate per-field visibility inside whichever section the field ends up in — no new visibility plumbing needed.
-  - Rewire `ui_focus_trap.js` to scope its trap to the active tab's panel, not the whole modal, so Tab/Shift-Tab moves within the visible tab. Escape still closes the modal. Arrow keys on the tab strip move between tabs the same way the projects modal does today.
-  - Persist the last-selected tab on the session preferences row so reopening the modal returns to Secrets when that's where the operator was working.
-  - Verify on a 720px laptop screen that the new tab strip plus section headers fit without scroll inside Preferences; if tight, drop section headers to a thin "rule + label" treatment rather than full headers.
-- **Tests**
-  - Update `tests/py/test_session_routes.py` (and the preferences integration tests) for the new `options_modal_last_tab` preference key.
-  - Add a Playwright case: open Options, switch to Secrets, close, reopen — Secrets stays selected. Switch back to Preferences, add a secret, reopen — Secrets is still where the new row lives, no overflow on the Preferences tab.
-  - Add a Vitest/JSDOM case asserting `options-desktop-only` fields still hide on mobile inside their new section.
-
 ### FAQ modal section grouping
 - **Scope**
   - The FAQ modal renders ~20 top-level Q&A items in a single flat scroll list (`_builtin_faq()` in `app/services/commands/registry.py`, rendered by `renderFaqItems()` in `app/static/js/features/command-registry/command_registry.js`). With more items planned (Atlas, intel providers, PTY transport notes), the flat list is already a scanning hazard.
@@ -281,6 +288,16 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - Drift guard: add `tests/py/test_faq_categories.py` asserting every entry returned by `load_all_faq()` carries a category present in `FAQ_CATEGORY_ORDER` (or the explicit `"Other"` fallback). Prevents new entries from quietly landing under Other when they belong in a real section.
 - **When to revisit**
   - If the FAQ grows past ~30 entries, flip section headers to collapsible disclosure rows (collapsed by default for everything except "Getting started"). Don't pay that cost yet — at 20 entries the all-open scroll is still the right call.
+
+## Known Issues
+
+No known issues are currently tracked.
+
+---
+
+## Technical Debt
+
+---
 
 ## Feature Enhancements
 
@@ -381,16 +398,6 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 ## Research
 
 No research items are currently tracked.
-
-## Known Issues
-
-No known issues are currently tracked.
-
----
-
-## Technical Debt
-
----
 
 ## Ideas
 

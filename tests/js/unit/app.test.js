@@ -236,6 +236,7 @@ describe('app helpers', () => {
       'pref_prompt_username',
       'pref_compare_view_mode',
       'pref_compare_context',
+      'pref_options_modal_last_tab',
       'pref_tour_seen_version',
     ].forEach((name) => {
       document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
@@ -337,6 +338,7 @@ describe('app helpers', () => {
               pref_hud_clock: 'local',
               pref_compare_view_mode: 'changes_only',
               pref_compare_context: 'all',
+              pref_options_modal_last_tab: 'secrets',
               pref_tour_seen_version: 3,
             },
           }),
@@ -375,6 +377,7 @@ describe('app helpers', () => {
       getProjectAutoLinkExternalRunsPreference,
       getCompareViewModePreference,
       getCompareContextPreference,
+      getOptionsModalLastTabPreference,
     } = await loadAppFns({
       apiFetch,
       cookies: { pref_timestamps: 'off', pref_line_numbers: 'off', pref_hud_clock: 'utc' },
@@ -413,11 +416,55 @@ describe('app helpers', () => {
     expect(document.getElementById('options-hud-clock-select').value).toBe('local')
     expect(document.getElementById('options-compare-view-mode-select').value).toBe('changes_only')
     expect(document.getElementById('options-compare-context-select').value).toBe('all')
+    expect(document.getElementById('options-tab-secrets').classList.contains('is-active')).toBe(true)
+    expect(document.getElementById('options-panel-secrets').hidden).toBe(false)
+    expect(document.getElementById('options-panel-preferences').hidden).toBe(true)
     expect(document.getElementById('options-project-auto-link-external-runs-toggle').checked).toBe(false)
     expect(getHudClockPreference()).toBe('local')
     expect(getProjectAutoLinkExternalRunsPreference()).toBe('off')
     expect(getCompareViewModePreference()).toBe('changes_only')
     expect(getCompareContextPreference()).toBe('all')
+    expect(getOptionsModalLastTabPreference()).toBe('secrets')
+  })
+
+  it('persists the selected options tab and keeps desktop-only controls in the preferences panel', async () => {
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/session/preferences' && opts.method === 'POST') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+      }
+      if (url === '/session/preferences') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ preferences: {} }) })
+      }
+      if (url === '/session/secrets') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ secrets: [] }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { activateOptionsTab, cycleOptionsTab, getOptionsModalLastTabPreference } = await loadAppFns({ apiFetch })
+
+    activateOptionsTab('secrets')
+
+    expect(document.getElementById('options-tab-secrets').getAttribute('aria-selected')).toBe('true')
+    expect(document.getElementById('options-panel-secrets').hidden).toBe(false)
+    expect(document.getElementById('options-panel-preferences').hidden).toBe(true)
+    expect(getOptionsModalLastTabPreference()).toBe('secrets')
+    expect(document.cookie).toContain('pref_options_modal_last_tab=secrets')
+    await vi.waitFor(() => {
+      const calls = apiFetch.mock.calls.filter(([url, opts]) => url === '/session/preferences' && opts?.method === 'POST')
+      expect(calls.length).toBeGreaterThan(0)
+      const payload = JSON.parse(calls.at(-1)[1].body)
+      expect(payload.preferences.pref_options_modal_last_tab).toBe('secrets')
+    })
+
+    activateOptionsTab('preferences')
+
+    expect(document.getElementById('options-tab-preferences').getAttribute('aria-selected')).toBe('true')
+    expect(document.querySelectorAll('#options-panel-preferences .options-desktop-only')).toHaveLength(2)
+    expect(document.getElementById('options-panel-secrets').hidden).toBe(true)
+
+    expect(cycleOptionsTab(-1)).toBe(true)
+    expect(document.getElementById('options-tab-secrets').getAttribute('aria-selected')).toBe('true')
+    expect(document.activeElement?.matches('[data-options-tab]')).toBe(false)
   })
 
   it('switches the visible prompt into confirmation mode when requested', async () => {
@@ -3761,7 +3808,7 @@ describe('app helpers', () => {
     expect(activateTab).not.toHaveBeenCalled()
   })
 
-  it('cycles project modal tabs from non-terminal inputs', async () => {
+  it('cycles modal tabs from non-terminal inputs', async () => {
     const activateTab = vi.fn()
     const cycleProjectWorkspaceTab = vi.fn(() => true)
     const { handleTabShortcut } = await loadAppFns({
@@ -3788,6 +3835,32 @@ describe('app helpers', () => {
 
     expect(cycleProjectWorkspaceTab).toHaveBeenCalledWith(1)
     expect(activateTab).not.toHaveBeenCalled()
+
+    const activateTabForOptions = vi.fn()
+    const { handleTabShortcut: handleOptionsTabShortcut } = await loadAppFns({
+      activateTab: activateTabForOptions,
+      activeTabId: 'tab-1',
+      tabs: [
+        { id: 'tab-1', st: 'idle' },
+        { id: 'tab-2', st: 'idle' },
+      ],
+    })
+    document.getElementById('options-overlay').classList.add('open')
+    const preventDefault = vi.fn()
+
+    handleOptionsTabShortcut({
+      key: 'Tab',
+      altKey: true,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: true,
+      target: modalInput,
+      preventDefault,
+    })
+
+    expect(document.getElementById('options-tab-secrets').getAttribute('aria-selected')).toBe('true')
+    expect(preventDefault).toHaveBeenCalled()
+    expect(activateTabForOptions).not.toHaveBeenCalled()
   })
 
   it('uses the top open modal tab set when multiple tabbed surfaces are present', async () => {

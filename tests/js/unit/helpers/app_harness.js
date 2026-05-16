@@ -215,21 +215,72 @@ export async function loadAppFns({
     <button class="theme-close"></button>
     <div id="theme-modal"></div>
     <div id="theme-select" tabindex="-1"></div>
-    <div id="options-overlay"></div>
-    <button class="options-close"></button>
-    <div id="options-modal"></div>
-    <span id="options-session-token-status"></span>
-    <button id="options-session-token-generate-btn"></button>
-    <button id="options-session-token-set-btn"></button>
-    <button id="options-session-token-rotate-btn"></button>
-    <button id="options-session-token-clear-btn"></button>
-    <button id="options-session-token-copy-btn"></button>
-    <div id="options-session-token-msg"></div>
-    <button id="options-provider-status-btn"></button>
-    <button id="options-secret-new-btn"></button>
-    <button id="options-secrets-refresh-btn"></button>
-    <div id="options-secrets-msg"></div>
-    <div id="options-secrets-list"></div>
+    <div id="options-overlay">
+      <button class="options-close"></button>
+      <div id="options-modal">
+        <div id="options-tabs" role="tablist">
+          <button id="options-tab-preferences" data-options-tab="preferences" class="is-active" role="tab" aria-selected="true" aria-controls="options-panel-preferences">Preferences</button>
+          <button id="options-tab-secrets" data-options-tab="secrets" role="tab" aria-selected="false" aria-controls="options-panel-secrets">Secrets</button>
+        </div>
+        <div id="options-panel-preferences" data-options-panel="preferences" role="tabpanel" aria-labelledby="options-tab-preferences">
+          <select id="options-ts-select">
+            <option value="off">off</option>
+            <option value="elapsed">elapsed</option>
+            <option value="clock">clock</option>
+          </select>
+          <input id="options-ln-toggle" type="checkbox" />
+          <select id="options-welcome-select">
+            <option value="animated">animated</option>
+            <option value="disable_animation">disable_animation</option>
+            <option value="remove">remove</option>
+          </select>
+          <select id="options-share-redaction-select">
+            <option value="unset">unset</option>
+            <option value="redacted">redacted</option>
+            <option value="raw">raw</option>
+          </select>
+          <label class="options-desktop-only">
+            <input id="options-notify-toggle" type="checkbox" />
+          </label>
+          <input id="options-project-auto-link-external-runs-toggle" type="checkbox" />
+          <label class="options-desktop-only">
+            <select id="options-hud-clock-select">
+              <option value="utc">utc</option>
+              <option value="local">local</option>
+            </select>
+          </label>
+          <select id="options-compare-view-mode-select">
+            <option value="auto">auto</option>
+            <option value="side_by_side">side_by_side</option>
+            <option value="unified">unified</option>
+            <option value="changes_only">changes_only</option>
+            <option value="findings_only">findings_only</option>
+          </select>
+          <select id="options-compare-context-select">
+            <option value="3">3</option>
+            <option value="10">10</option>
+            <option value="all">all</option>
+          </select>
+          <input id="options-prompt-username-input" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Prompt name" data-bwignore="true" data-1p-ignore="true" data-lpignore="true" />
+          <div id="options-prompt-username-error" class="u-hidden"></div>
+          <div id="options-prompt-username-saved" class="u-hidden"></div>
+          <span id="options-session-token-status"></span>
+          <button id="options-session-token-generate-btn"></button>
+          <button id="options-session-token-set-btn"></button>
+          <button id="options-session-token-rotate-btn"></button>
+          <button id="options-session-token-clear-btn"></button>
+          <button id="options-session-token-copy-btn"></button>
+          <div id="options-session-token-msg"></div>
+        </div>
+        <div id="options-panel-secrets" data-options-panel="secrets" role="tabpanel" aria-labelledby="options-tab-secrets" hidden>
+          <button id="options-provider-status-btn"></button>
+          <button id="options-secret-new-btn"></button>
+          <button id="options-secrets-refresh-btn"></button>
+          <div id="options-secrets-msg"></div>
+          <div id="options-secrets-list"></div>
+        </div>
+      </div>
+    </div>
     <div id="provider-status-overlay" class="u-hidden" aria-hidden="true">
       <div id="provider-status-modal">
         <button type="button" class="provider-status-close"></button>
@@ -238,43 +289,6 @@ export async function loadAppFns({
     </div>
     <div id="workflows-overlay"></div>
     <button class="workflows-close"></button>
-    <select id="options-ts-select">
-      <option value="off">off</option>
-      <option value="elapsed">elapsed</option>
-      <option value="clock">clock</option>
-      </select>
-      <input id="options-ln-toggle" type="checkbox" />
-      <select id="options-welcome-select">
-        <option value="animated">animated</option>
-        <option value="disable_animation">disable_animation</option>
-        <option value="remove">remove</option>
-      </select>
-      <select id="options-share-redaction-select">
-        <option value="unset">unset</option>
-        <option value="redacted">redacted</option>
-        <option value="raw">raw</option>
-      </select>
-      <input id="options-notify-toggle" type="checkbox" />
-      <input id="options-project-auto-link-external-runs-toggle" type="checkbox" />
-      <select id="options-hud-clock-select">
-        <option value="utc">utc</option>
-        <option value="local">local</option>
-      </select>
-      <select id="options-compare-view-mode-select">
-        <option value="auto">auto</option>
-        <option value="side_by_side">side_by_side</option>
-        <option value="unified">unified</option>
-        <option value="changes_only">changes_only</option>
-        <option value="findings_only">findings_only</option>
-      </select>
-      <select id="options-compare-context-select">
-        <option value="3">3</option>
-        <option value="10">10</option>
-        <option value="all">all</option>
-      </select>
-      <input id="options-prompt-username-input" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Prompt name" data-bwignore="true" data-1p-ignore="true" data-lpignore="true" />
-      <div id="options-prompt-username-error" class="u-hidden"></div>
-      <div id="options-prompt-username-saved" class="u-hidden"></div>
       <div id="shell-input-row" data-mobile-label="$">
         <input id="cmd" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="none" />
       </div>
@@ -367,6 +381,7 @@ export async function loadAppFns({
     searchPrevBtn: document.getElementById('search-prev'),
     searchNextBtn: document.getElementById('search-next'),
     searchCloseBtn: document.getElementById('search-close-btn'),
+    optionsTabs: document.getElementById('options-tabs'),
     optionsTsSelect: document.getElementById('options-ts-select'),
     optionsLnToggle: document.getElementById('options-ln-toggle'),
     optionsWelcomeSelect: document.getElementById('options-welcome-select'),
@@ -687,6 +702,7 @@ export async function loadAppFns({
     getPromptUsernamePreference,
     getCompareViewModePreference,
     getCompareContextPreference,
+    getOptionsModalLastTabPreference,
     getTourSeenVersionPreference,
     recordTourOpened,
     applyRunNotifyPreference,
@@ -695,6 +711,8 @@ export async function loadAppFns({
     applyCompareViewModePreference,
     applyCompareContextPreference,
     applyPromptUsernamePreference,
+    activateOptionsTab,
+    cycleOptionsTab,
     syncOptionsControls,
     refreshOptionsSecrets,
     invalidateOptionsSecrets,

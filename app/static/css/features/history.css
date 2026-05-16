@@ -566,6 +566,7 @@ body #history-panel { background: var(--theme-chrome-bg); }
   background: transparent;
   color: var(--theme-tab-hover-text);
   opacity: 0.96;
+  outline: none;
 }
 
 .history-run-tabs .history-run-tab.toggle-btn.is-active,

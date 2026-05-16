@@ -15,6 +15,7 @@
     'pref_prompt_username',
     'pref_compare_view_mode',
     'pref_compare_context',
+    'pref_options_modal_last_tab',
     'pref_tour_seen_version',
   ]);
   const WELCOME_INTRO_MODES = Object.freeze(['animated', 'disable_animation', 'remove']);
@@ -22,6 +23,7 @@
   const HUD_CLOCK_MODES = Object.freeze(['utc', 'local']);
   const COMPARE_VIEW_MODES = Object.freeze(['auto', 'side_by_side', 'unified', 'changes_only', 'findings_only']);
   const COMPARE_CONTEXT_MODES = Object.freeze(['3', '10', 'all']);
+  const OPTIONS_MODAL_TABS = Object.freeze(['preferences', 'secrets']);
 
   function _coerceMode(value, modes, fallback) {
     return modes.includes(value) ? value : fallback;
@@ -60,6 +62,11 @@
     return _coerceMode(normalized, COMPARE_CONTEXT_MODES, '3');
   }
 
+  function coerceOptionsModalTab(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return _coerceMode(normalized, OPTIONS_MODAL_TABS, 'preferences');
+  }
+
   function normalizePromptUsername(value) {
     const username = String(value || '').trim();
     return /^[A-Za-z0-9._-]{1,32}$/.test(username) ? username : '';
@@ -85,6 +92,7 @@
       pref_prompt_username: '',
       pref_compare_view_mode: 'auto',
       pref_compare_context: '3',
+      pref_options_modal_last_tab: 'preferences',
       pref_tour_seen_version: '',
     };
   }
@@ -108,6 +116,7 @@
     prefs.pref_prompt_username = normalizePromptUsername(source.pref_prompt_username);
     prefs.pref_compare_view_mode = coerceCompareViewMode(source.pref_compare_view_mode);
     prefs.pref_compare_context = coerceCompareContextMode(source.pref_compare_context);
+    prefs.pref_options_modal_last_tab = coerceOptionsModalTab(source.pref_options_modal_last_tab);
     prefs.pref_tour_seen_version = coerceTourSeenVersion(source.pref_tour_seen_version);
     return prefs;
   }
@@ -123,6 +132,7 @@
     HUD_CLOCK_MODES,
     COMPARE_VIEW_MODES,
     COMPARE_CONTEXT_MODES,
+    OPTIONS_MODAL_TABS,
     coerceTimestampMode,
     coerceLineNumberMode,
     coerceWelcomeIntroMode,
@@ -131,6 +141,7 @@
     coerceHudClockMode,
     coerceCompareViewMode,
     coerceCompareContextMode,
+    coerceOptionsModalTab,
     normalizePromptUsername,
     coerceTourSeenVersion,
     defaultSessionPreferences,

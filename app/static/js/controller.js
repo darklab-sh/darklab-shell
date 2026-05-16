@@ -353,6 +353,25 @@ _uiOverlayRefs.mobileMenu?.querySelectorAll('button[data-menu-action]').forEach(
 // Theme + Options: backdrop + close button dismissal is registered via
 // bindDismissible in setupDismissibleOverlays(); only the open triggers
 // live here.
+optionsTabs?.addEventListener('click', e => {
+  const tab = e.target.closest?.('[data-options-tab]');
+  if (!tab) return;
+  activateOptionsTab(tab.dataset.optionsTab, { persist: true, focus: true });
+});
+optionsTabs?.addEventListener('keydown', e => {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+  const tabs = Array.from(optionsTabs.querySelectorAll('[data-options-tab]'));
+  const currentIndex = tabs.indexOf(document.activeElement);
+  if (!tabs.length || currentIndex < 0) return;
+  e.preventDefault();
+  let nextIndex = currentIndex;
+  if (e.key === 'Home') nextIndex = 0;
+  else if (e.key === 'End') nextIndex = tabs.length - 1;
+  else if (e.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length;
+  else nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+  const nextTab = tabs[nextIndex];
+  activateOptionsTab(nextTab.dataset.optionsTab, { persist: true, focus: true });
+});
 optionsTsSelect?.addEventListener('change', e => {
   applyTimestampPreference(e.target.value);
 });

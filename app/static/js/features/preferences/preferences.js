@@ -96,6 +96,7 @@ function _buildCurrentSessionPreferenceSnapshot() {
     pref_prompt_username: getPromptUsernamePreference(),
     pref_compare_view_mode: getCompareViewModePreference(),
     pref_compare_context: getCompareContextPreference(),
+    pref_options_modal_last_tab: getOptionsModalLastTabPreference(),
     pref_tour_seen_version: getTourSeenVersionPreference(),
   };
   const activeProject = typeof globalThis.getActiveProjectContext === 'function'
@@ -212,6 +213,57 @@ function getTourSeenVersionPreference() {
   return PreferenceCore.coerceTourSeenVersion(getPreference('pref_tour_seen_version'));
 }
 
+function getOptionsModalLastTabPreference() {
+  return PreferenceCore.coerceOptionsModalTab(getPreference('pref_options_modal_last_tab'));
+}
+
+function _optionsTabButtons() {
+  return Array.from(document.querySelectorAll('[data-options-tab]'));
+}
+
+function _optionsTabPanels() {
+  return Array.from(document.querySelectorAll('[data-options-panel]'));
+}
+
+function activateOptionsTab(tab, { persist = true, focus = false } = {}) {
+  const nextTab = PreferenceCore.coerceOptionsModalTab(tab);
+  _optionsTabButtons().forEach((button) => {
+    const active = button.dataset.optionsTab === nextTab;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-selected', active ? 'true' : 'false');
+    button.setAttribute('tabindex', active ? '0' : '-1');
+  });
+  _optionsTabPanels().forEach((panel) => {
+    const active = panel.dataset.optionsPanel === nextTab;
+    panel.hidden = !active;
+  });
+  if (focus) {
+    const activeButton = document.querySelector(`[data-options-tab="${nextTab}"]`);
+    if (activeButton && typeof activeButton.focus === 'function') activeButton.focus();
+  }
+  _primePreferenceValue('pref_options_modal_last_tab', nextTab);
+  if (persist) {
+    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist options tab preference', err); }
+  }
+  return nextTab;
+}
+
+function cycleOptionsTab(offset = 1) {
+  const buttons = _optionsTabButtons();
+  if (!buttons.length) return false;
+  const currentIndex = buttons.findIndex(button => button.getAttribute('aria-selected') === 'true');
+  const startIndex = currentIndex >= 0 ? currentIndex : 0;
+  const nextIndex = (startIndex + offset + buttons.length) % buttons.length;
+  const nextTab = buttons[nextIndex]?.dataset?.optionsTab;
+  if (!nextTab) return false;
+  activateOptionsTab(nextTab, { persist: true, focus: false });
+  return true;
+}
+
+function syncOptionsTabFromPreference() {
+  activateOptionsTab(getOptionsModalLastTabPreference(), { persist: false });
+}
+
 async function recordTourOpened() {
   const resp = await apiFetch('/session/tour-seen', {
     method: 'POST',
@@ -296,6 +348,7 @@ function applyHudClockPreference(mode, persist = true) {
 }
 
 function syncOptionsControls() {
+  syncOptionsTabFromPreference();
   const tsSelect = optionsTsSelect;
   if (tsSelect) tsSelect.value = typeof tsMode === 'string' ? tsMode : 'off';
   const lnToggle = optionsLnToggle;

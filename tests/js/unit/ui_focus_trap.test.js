@@ -154,6 +154,24 @@ describe('bindFocusTrap', () => {
     expect(document.activeElement).toBe(first)
   })
 
+  it('skips focusables inside a CSS-hidden ancestor', () => {
+    const card = makeCard({ buttons: 2 })
+    const hiddenMenu = document.createElement('div')
+    hiddenMenu.style.display = 'none'
+    const hiddenOption = document.createElement('button')
+    hiddenOption.textContent = 'hidden-option'
+    hiddenMenu.appendChild(hiddenOption)
+    card.appendChild(hiddenMenu)
+    const [first, last] = Array.from(card.querySelectorAll('button'))
+      .filter(button => button !== hiddenOption)
+    g.bindFocusTrap(card)
+    last.focus()
+    const ev = tabEvent()
+    card.dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(first)
+  })
+
   it('does not intercept arrow keys unless explicitly enabled', () => {
     const card = makeCard({ buttons: 2 })
     const [first] = card.querySelectorAll('button')

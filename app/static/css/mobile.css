@@ -217,6 +217,9 @@
     border-bottom: 1px solid transparent;
     box-shadow: none !important;
   }
+  body.mobile-terminal-mode .terminal-bar .tab:hover:not(.active) {
+    color: var(--green);
+  }
   body.mobile-terminal-mode .terminal-bar .tab.active {
     color: var(--green);
     background: var(--theme-tab-active-bg);

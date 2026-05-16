@@ -949,137 +949,151 @@
       <span class="faq-title">OPTIONS</span>
       <button type="button" class="close-btn options-close" aria-label="Close options">✕</button>
     </div>
+    <div class="project-mobile-tabs-wrap options-tabs-wrap">
+      <div id="options-tabs" class="project-mobile-tabs options-tabs" role="tablist" aria-label="Options sections">
+        <button type="button" id="options-tab-preferences" class="project-mobile-tab nav-item is-active" data-options-tab="preferences" role="tab" aria-selected="true" aria-controls="options-panel-preferences">Preferences</button>
+        <button type="button" id="options-tab-secrets" class="project-mobile-tab nav-item" data-options-tab="secrets" role="tab" aria-selected="false" aria-controls="options-panel-secrets">Secrets</button>
+      </div>
+    </div>
     <div class="faq-body options-body nice-scroll">
-      <div class="faq-item">
-        <div class="faq-q">Timestamps</div>
-        <div class="faq-a">
-          <select id="options-ts-select" class="form-select" aria-label="Timestamp mode">
-            <option value="off">Off</option>
-            <option value="elapsed">Elapsed</option>
-            <option value="clock">Clock</option>
-          </select>
-        </div>
-      </div>
-      <div class="faq-item">
-        <div class="faq-q">Line Numbers</div>
-        <div class="faq-a form-fieldset">
-          <label class="form-check">
-            <input type="checkbox" id="options-ln-toggle">
-            <span>Show line numbers beside output and the live prompt</span>
-          </label>
-        </div>
-      </div>
-      <div class="faq-item">
-        <div class="faq-q">Welcome Intro</div>
-        <div class="faq-a">
-          <select id="options-welcome-select" class="form-select" aria-label="Welcome intro mode">
-            <option value="animated">Animated</option>
-            <option value="disable_animation">Disable Animation</option>
-            <option value="remove">Remove Completely</option>
-          </select>
-        </div>
-      </div>
-      <div class="faq-item">
-        <div class="faq-q">Share Snapshot Redaction</div>
-        <div class="faq-a">
-          <select id="options-share-redaction-select" class="form-select" aria-label="Share snapshot redaction default">
-            <option value="unset">Prompt Until Set</option>
-            <option value="redacted">Default To Redacted</option>
-            <option value="raw">Default To Raw</option>
-          </select>
-        </div>
-      </div>
-      <div class="faq-item options-desktop-only">
-        <div class="faq-q">Run Notifications</div>
-        <div class="faq-a form-fieldset">
-          <label class="form-check">
-            <input type="checkbox" id="options-notify-toggle">
-            <span>Notify when a run completes or is killed</span>
-          </label>
-        </div>
-      </div>
-      <div class="faq-item">
-        <div class="faq-q">Project Run Capture</div>
-        <div class="faq-a form-fieldset">
-          <label class="form-check">
-            <input type="checkbox" id="options-project-auto-link-external-runs-toggle">
-            <span>Add external command runs to the active project</span>
-          </label>
-          <div class="options-session-token-desc">Built-in administrative commands are never added as project runs.</div>
-        </div>
-      </div>
-      <div class="faq-item options-desktop-only">
-        <div class="faq-q">HUD Clock</div>
-        <div class="faq-a">
-          <select id="options-hud-clock-select" class="form-select" aria-label="HUD clock timezone mode">
-            <option value="utc">UTC</option>
-            <option value="local">Local Time</option>
-          </select>
-        </div>
-      </div>
-      <div class="faq-item">
-        <div class="faq-q">Compare View</div>
-        <div class="faq-a">
-          <select id="options-compare-view-mode-select" class="form-select" aria-label="Run comparison view mode">
-            <option value="auto">Automatic for This Screen</option>
-            <option value="side_by_side">Side-by-side</option>
-            <option value="unified">Unified</option>
-            <option value="changes_only">Changes Only</option>
-            <option value="findings_only">Findings Only</option>
-          </select>
-        </div>
-      </div>
-      <div class="faq-item">
-        <div class="faq-q">Compare Context</div>
-        <div class="faq-a">
-          <select id="options-compare-context-select" class="form-select" aria-label="Run comparison context">
-            <option value="3">±3 Lines</option>
-            <option value="10">±10 Lines</option>
-            <option value="all">All Lines</option>
-          </select>
-        </div>
-      </div>
-      <div class="faq-item">
-        <div class="faq-q options-field-heading">
-          <span>Prompt Name</span>
-          <span id="options-prompt-username-saved" class="field-save-status u-hidden" role="status" aria-live="polite">saved</span>
-        </div>
-        <div class="faq-a form-fieldset">
-          <input id="options-prompt-username-input" class="form-control" type="text" maxlength="32" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Prompt name" placeholder="Use server default" data-bwignore="true" data-1p-ignore="true" data-lpignore="true">
-          <div class="options-session-token-desc">Letters, numbers, dots, underscores, and dashes. Leave blank to use the server default.</div>
-          <div id="options-prompt-username-error" class="form-error options-prompt-username-error u-hidden" role="alert">Invalid characters detected</div>
-        </div>
-      </div>
-      <div class="faq-item">
-        <div class="faq-q">Session Token</div>
-        <div class="faq-a form-fieldset">
-          <div class="options-session-token-desc">Carry your run history, starred commands and user options across browsers and devices without a login. Generate a token once, then use it on any other device to resume where you left off.</div>
-          <div class="options-session-token-status-row">
-            <div id="options-session-token-status" class="options-session-token-status"></div>
-            <button id="options-session-token-copy-btn" class="btn btn-secondary btn-compact" type="button" style="display:none" title="Copy session token to clipboard">Copy</button>
+      <div id="options-panel-preferences" class="options-tab-panel" data-options-panel="preferences" role="tabpanel" aria-labelledby="options-tab-preferences">
+        <div class="options-section-heading">Display</div>
+        <div class="faq-item">
+          <div class="faq-q">Timestamps</div>
+          <div class="faq-a">
+            <select id="options-ts-select" class="form-select" aria-label="Timestamp mode">
+              <option value="off">Off</option>
+              <option value="elapsed">Elapsed</option>
+              <option value="clock">Clock</option>
+            </select>
           </div>
-          <div class="options-session-token-actions">
-            <button id="options-session-token-generate-btn" class="btn btn-secondary btn-compact" type="button">Generate</button>
-            <button id="options-session-token-set-btn" class="btn btn-secondary btn-compact" type="button">Set</button>
-            <button id="options-session-token-rotate-btn" class="btn btn-secondary btn-warning btn-compact" type="button">Rotate</button>
-            <button id="options-session-token-clear-btn" class="btn btn-secondary btn-compact" type="button">Clear</button>
+        </div>
+        <div class="faq-item">
+          <div class="faq-q">Line Numbers</div>
+          <div class="faq-a form-fieldset">
+            <label class="form-check">
+              <input type="checkbox" id="options-ln-toggle">
+              <span>Show line numbers beside output and the live prompt</span>
+            </label>
           </div>
-          <div id="options-session-token-msg" class="options-session-token-msg" style="display:none"></div>
+        </div>
+        <div class="faq-item options-desktop-only">
+          <div class="faq-q">HUD Clock</div>
+          <div class="faq-a">
+            <select id="options-hud-clock-select" class="form-select" aria-label="HUD clock timezone mode">
+              <option value="utc">UTC</option>
+              <option value="local">Local Time</option>
+            </select>
+          </div>
+        </div>
+        <div class="faq-item">
+          <div class="faq-q">Welcome Intro</div>
+          <div class="faq-a">
+            <select id="options-welcome-select" class="form-select" aria-label="Welcome intro mode">
+              <option value="animated">Animated</option>
+              <option value="disable_animation">Disable Animation</option>
+              <option value="remove">Remove Completely</option>
+            </select>
+          </div>
+        </div>
+        <div class="options-section-heading">Identity</div>
+        <div class="faq-item">
+          <div class="faq-q options-field-heading">
+            <span>Prompt Name</span>
+            <span id="options-prompt-username-saved" class="field-save-status u-hidden" role="status" aria-live="polite">saved</span>
+          </div>
+          <div class="faq-a form-fieldset">
+            <input id="options-prompt-username-input" class="form-control" type="text" maxlength="32" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Prompt name" placeholder="Use server default" data-bwignore="true" data-1p-ignore="true" data-lpignore="true">
+            <div class="options-session-token-desc">Letters, numbers, dots, underscores, and dashes. Leave blank to use the server default.</div>
+            <div id="options-prompt-username-error" class="form-error options-prompt-username-error u-hidden" role="alert">Invalid characters detected</div>
+          </div>
+        </div>
+        <div class="faq-item">
+          <div class="faq-q">Session Token</div>
+          <div class="faq-a form-fieldset">
+            <div class="options-session-token-desc">Carry your run history, starred commands and user options across browsers and devices without a login. Generate a token once, then use it on any other device to resume where you left off.</div>
+            <div class="options-session-token-status-row">
+              <div id="options-session-token-status" class="options-session-token-status"></div>
+              <button id="options-session-token-copy-btn" class="btn btn-secondary btn-compact" type="button" style="display:none" title="Copy session token to clipboard">Copy</button>
+            </div>
+            <div class="options-session-token-actions">
+              <button id="options-session-token-generate-btn" class="btn btn-secondary btn-compact" type="button">Generate</button>
+              <button id="options-session-token-set-btn" class="btn btn-secondary btn-compact" type="button">Set</button>
+              <button id="options-session-token-rotate-btn" class="btn btn-secondary btn-warning btn-compact" type="button">Rotate</button>
+              <button id="options-session-token-clear-btn" class="btn btn-secondary btn-compact" type="button">Clear</button>
+            </div>
+            <div id="options-session-token-msg" class="options-session-token-msg" style="display:none"></div>
+          </div>
+        </div>
+        <div class="options-section-heading">Runs</div>
+        <div class="faq-item">
+          <div class="faq-q">Project Run Capture</div>
+          <div class="faq-a form-fieldset">
+            <label class="form-check">
+              <input type="checkbox" id="options-project-auto-link-external-runs-toggle">
+              <span>Add external command runs to the active project</span>
+            </label>
+            <div class="options-session-token-desc">Built-in administrative commands are never added as project runs.</div>
+          </div>
+        </div>
+        <div class="faq-item options-desktop-only">
+          <div class="faq-q">Run Notifications</div>
+          <div class="faq-a form-fieldset">
+            <label class="form-check">
+              <input type="checkbox" id="options-notify-toggle">
+              <span>Notify when a run completes or is killed</span>
+            </label>
+          </div>
+        </div>
+        <div class="faq-item">
+          <div class="faq-q">Share Snapshot Redaction</div>
+          <div class="faq-a">
+            <select id="options-share-redaction-select" class="form-select" aria-label="Share snapshot redaction default">
+              <option value="unset">Prompt Until Set</option>
+              <option value="redacted">Default To Redacted</option>
+              <option value="raw">Default To Raw</option>
+            </select>
+          </div>
+        </div>
+        <div class="options-section-heading">Compare</div>
+        <div class="faq-item">
+          <div class="faq-q">Compare View</div>
+          <div class="faq-a">
+            <select id="options-compare-view-mode-select" class="form-select" aria-label="Run comparison view mode">
+              <option value="auto">Automatic for This Screen</option>
+              <option value="side_by_side">Side-by-side</option>
+              <option value="unified">Unified</option>
+              <option value="changes_only">Changes Only</option>
+              <option value="findings_only">Findings Only</option>
+            </select>
+          </div>
+        </div>
+        <div class="faq-item">
+          <div class="faq-q">Compare Context</div>
+          <div class="faq-a">
+            <select id="options-compare-context-select" class="form-select" aria-label="Run comparison context">
+              <option value="3">±3 Lines</option>
+              <option value="10">±10 Lines</option>
+              <option value="all">All Lines</option>
+            </select>
+          </div>
         </div>
       </div>
-      <div class="faq-item">
-        <div class="faq-q options-field-heading">
-          <span>Secrets</span>
-          <button id="options-secrets-refresh-btn" class="btn btn-ghost btn-icon-only btn-compact" type="button" aria-label="Refresh secrets" title="Refresh secrets">⟳</button>
-        </div>
-        <div class="faq-a form-fieldset">
-          <div class="options-session-token-desc">Store per-session API keys for tools that need them. Values are encrypted, passed to matching commands as environment variables, and never shown again.</div>
-          <div class="options-session-token-actions">
-            <button id="options-provider-status-btn" class="btn btn-secondary btn-compact" type="button">Provider Status</button>
-            <button id="options-secret-new-btn" class="btn btn-secondary btn-compact" type="button">Add secret</button>
+      <div id="options-panel-secrets" class="options-tab-panel" data-options-panel="secrets" role="tabpanel" aria-labelledby="options-tab-secrets" hidden>
+        <div class="faq-item">
+          <div class="faq-q options-field-heading">
+            <span>Secrets</span>
+            <button id="options-secrets-refresh-btn" class="btn btn-ghost btn-icon-only btn-compact" type="button" aria-label="Refresh secrets" title="Refresh secrets">⟳</button>
           </div>
-          <div id="options-secrets-msg" class="options-session-token-msg" role="status" aria-live="polite" style="display:none"></div>
-          <div id="options-secrets-list" class="options-secrets-list" aria-live="polite"></div>
+          <div class="faq-a form-fieldset">
+            <div class="options-session-token-desc">Store per-session API keys for tools that need them. Values are encrypted, passed to matching commands as environment variables, and never shown again.</div>
+            <div class="options-session-token-actions">
+              <button id="options-provider-status-btn" class="btn btn-secondary btn-compact" type="button">Provider Status</button>
+              <button id="options-secret-new-btn" class="btn btn-secondary btn-compact" type="button">Add secret</button>
+            </div>
+            <div id="options-secrets-msg" class="options-session-token-msg" role="status" aria-live="polite" style="display:none"></div>
+            <div id="options-secrets-list" class="options-secrets-list" aria-live="polite"></div>
+          </div>
         </div>
       </div>
     </div>

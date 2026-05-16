@@ -1335,6 +1335,7 @@ class TestSessionPreferences:
                 "pref_prompt_username": "operator_1",
                 "pref_compare_view_mode": "unified",
                 "pref_compare_context": "10",
+                "pref_options_modal_last_tab": "secrets",
             }
         }
         save_resp = client.post("/session/preferences", json=payload, headers={"X-Session-ID": session_id})
@@ -1356,6 +1357,7 @@ class TestSessionPreferences:
                     "pref_prompt_username": "../bad",
                     "pref_compare_view_mode": "split",
                     "pref_compare_context": "0",
+                    "pref_options_modal_last_tab": "advanced",
                     "pref_unknown": "x",
                 }
             },

@@ -1010,11 +1010,12 @@ wget -q -O /dev/null --server-response https://example.com
 
 ## Options Modal
 
-**Purpose:** display and sharing preferences (timestamps, line numbers, HUD clock mode, welcome intro, redaction default, run notifications) that follow the active session identity while still caching locally for fast reloads.
+**Purpose:** session-owned controls for presentation, run behavior, session identity, and provider secrets that follow the active session identity while still caching locally for fast reloads.
 
 **Behavior:**
 
 - Click **≡ options** in the desktop rail (or the **☰** menu on mobile) to open the modal.
+- The modal has two tabs: **Preferences** for display, identity, run, and compare controls, and **Secrets** for provider readiness plus stored API keys. The last tab you used is remembered with the rest of your session preferences.
 - Run `config`, `config list`, `config get <option>`, or `config set <option> <value>` in the terminal to inspect or update the same user options without opening the modal. Option names are suggested after `config get` or `config set`, and option values are suggested after a selected option.
 - Timestamp and line-number settings mirror the tabbar quick toggles — changing either surface updates the other immediately.
 - The HUD clock setting chooses whether the desktop `CLOCK` pill renders in `UTC` or browser-local time. This control is intentionally hidden from the mobile Options sheet because the HUD itself is desktop-only.
@@ -1022,7 +1023,7 @@ wget -q -O /dev/null --server-response https://example.com
 - The share-snapshot redaction setting selects the default redaction choice (prompt / redacted / raw) so the share prompt is skipped once a preference is saved.
 - Run notifications fire a browser desktop notification each time a run exits or is killed; the title shows only the command root (`$ curl`) and the body shows exit code and elapsed time. Enabling triggers the native permission prompt; if notifications are blocked, the toggle reverts with a toast. This toggle is intentionally hidden from the mobile Options sheet because the feature is treated as desktop-oriented chrome behavior.
 - Preferences are stored server-side per session and mirrored into browser cookies/local storage for reload continuity, so a named session token restores the same option set across browsers and devices.
-- The same Options surface includes session-token shortcuts and encrypted secret management so mobile and desktop have one place for session-owned controls.
+- The **Secrets** tab includes Provider Status, Add secret, Refresh, and the stored secret list so a long list of saved keys does not push the preference controls out of view.
 
 **Limits:** anonymous UUID sessions remain browser-local by design, so only named session tokens carry preferences across devices. Blocked notification permission cannot be re-prompted by the toggle — it must be re-enabled in browser settings.
 

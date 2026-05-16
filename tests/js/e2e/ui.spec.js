@@ -456,6 +456,12 @@ test.describe('project workspace modal', () => {
     }, { id: projectId, targetValue: value }), { timeout: 15_000 }).toBe(true)
   }
 
+  async function switchProjectTab(page, tabId) {
+    const tab = page.locator(`[data-project-tab="${tabId}"]`)
+    await tab.click()
+    await expect(tab).toHaveClass(/\bis-active\b/, { timeout: 15_000 })
+  }
+
   async function expectProjectTargetEditorReady(page, submitText) {
     const editor = page.locator('#project-target-editor-overlay')
     await expect(editor).toHaveClass(/\bopen\b/)
@@ -528,7 +534,7 @@ test.describe('project workspace modal', () => {
       sessionId,
       commands: [PROJECT_LINK_RUN_COMMAND],
     })
-    await page.locator('[data-project-tab="runs"]').click()
+    await switchProjectTab(page, 'runs')
     await page.locator('[data-project-action="link-last-run"]').click()
     await expect(page.locator('#confirm-host')).toContainText('Add the last run to this project?')
     await page.locator('#confirm-host [data-confirm-action-id="add"]').click()
@@ -550,14 +556,14 @@ test.describe('project workspace modal', () => {
     await expect(page.locator('#project-labels-save-status')).toBeVisible()
     await expect(page.locator('.project-label-chips')).toContainText('e2e')
     await page.locator('#project-notes-input').fill('Project notes from Playwright')
-    await page.locator('[data-project-tab="runs"]').click()
+    await switchProjectTab(page, 'runs')
     await expect.poll(async () => page.evaluate(async (id) => {
       const resp = await apiFetch(`/projects/${encodeURIComponent(id)}`, { cache: 'no-store' })
       const data = await resp.json()
       return data.project?.note?.body || ''
     }, projectId)).toBe('Project notes from Playwright')
 
-    await page.locator('[data-project-tab="details"]').click()
+    await switchProjectTab(page, 'details')
     await page.locator('#project-explorer-body [data-project-action="new-target"]').click()
     await expectProjectTargetEditorReady(page, 'Add Target')
     await fillProjectTargetEditor(page, {
@@ -614,7 +620,7 @@ test.describe('project workspace modal', () => {
       /note|Run triaged from Playwright/,
     )
 
-    await page.locator('[data-project-tab="details"]').click()
+    await switchProjectTab(page, 'details')
     const updatedTargetRow = page.locator('.project-target-row').filter({ hasText: 'projects.playwright.example' })
     await updatedTargetRow.locator('[data-project-action="delete-target"]').click()
     await expect(page.locator('#confirm-host')).toBeVisible()
@@ -656,7 +662,7 @@ test.describe('project workspace modal', () => {
     const projectId = await createActiveProject(page, `Playwright Package ${Date.now()}`)
     await linkExternalRunToOpenProject(page, testInfo)
 
-    await page.locator('[data-project-tab="packages"]').click()
+    await switchProjectTab(page, 'packages')
     await page.locator('[data-project-action="package-wizard-open"]').click()
     const wizard = page.locator('#project-package-wizard-overlay')
     await expect(wizard).toHaveClass(/\bopen\b/)
@@ -739,7 +745,7 @@ test.describe('project workspace modal', () => {
     await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
     await openProjectsModal(page)
 
-    await page.locator('[data-project-tab="findings"]').click()
+    await switchProjectTab(page, 'findings')
     const findingRow = page.locator('.project-explorer-item').filter({ hasText: '80/tcp open http' }).first()
     await expect(findingRow).toBeVisible()
     await findingRow.locator('[data-project-action="edit-finding-metadata"]').click()
@@ -756,7 +762,7 @@ test.describe('project workspace modal', () => {
     await expect(findingRow).toContainText('triaged', { timeout: 15_000 })
     await expect(findingRow).toContainText('note')
 
-    await page.locator('[data-project-tab="artifacts"]').click()
+    await switchProjectTab(page, 'artifacts')
     const artifactRow = page.locator('.project-explorer-item').filter({ hasText: 'evidence.txt' }).first()
     await expect(artifactRow).toBeVisible()
     await artifactRow.locator('[data-project-action="edit-artifact-metadata"]').click()
@@ -811,7 +817,7 @@ test.describe('project workspace modal', () => {
     expect(persisted.artifactLabels).toEqual(expect.arrayContaining(['evidence', 'reviewed']))
     expect(persisted.artifactNote).toBe('Artifact note from Playwright')
 
-    await page.locator('[data-project-tab="runs"]').click()
+    await switchProjectTab(page, 'runs')
     const evidenceRunRow = page.locator('.project-explorer-item').filter({ hasText: 'nmap -oN reports/evidence.txt' }).first()
     await expect(evidenceRunRow).toBeVisible()
     await evidenceRunRow.locator('[data-project-action="filter-run-findings"]').click()
@@ -819,7 +825,7 @@ test.describe('project workspace modal', () => {
     await expect(page.locator('[data-project-run-filter-clear]')).toContainText('run:')
     await expect(page.locator('.project-explorer-item').filter({ hasText: '80/tcp open http' }).first()).toBeVisible()
 
-    await page.locator('[data-project-tab="runs"]').click()
+    await switchProjectTab(page, 'runs')
     await page.locator('[data-project-filter-clear-all]').click()
     await expect(evidenceRunRow).toBeVisible()
     await evidenceRunRow.locator('[data-project-action="filter-run-artifacts"]').click()
@@ -827,7 +833,7 @@ test.describe('project workspace modal', () => {
     await expect(page.locator('[data-project-run-filter-clear]')).toContainText('run:')
     await expect(page.locator('.project-explorer-item').filter({ hasText: 'evidence.txt' }).first()).toBeVisible()
 
-    await page.locator('[data-project-tab="runs"]').click()
+    await switchProjectTab(page, 'runs')
     await page.locator('[data-project-filter-clear-all]').click()
     await evidenceRunRow.locator('[data-project-action="unlink-run"]').click()
     await expect(page.locator('#confirm-host')).toBeVisible()
@@ -1275,5 +1281,40 @@ test.describe('options modal', () => {
     await expect(page.locator('#ln-btn')).toHaveText('line numbers: on')
     await expect(page.locator('#hud-clock')).not.toContainText('UTC')
     await expect(page.locator('#hud-clock')).toHaveAttribute('title', /local time/i)
+  })
+
+  test('persists the selected Options tab and keeps secrets out of preferences', async ({ page }) => {
+    await page.locator('.rail-nav [data-action="options"]').click()
+    await expect(page.locator('#options-overlay')).toHaveClass(/open/)
+
+    await page.locator('[data-options-tab="secrets"]').click()
+    await expect(page.locator('[data-options-tab="secrets"]')).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('#options-panel-secrets')).toBeVisible()
+    await page.locator('.options-close').click()
+    await expect(page.locator('#options-overlay')).not.toHaveClass(/open/)
+
+    await page.locator('.rail-nav [data-action="options"]').click()
+    await expect(page.locator('[data-options-tab="secrets"]')).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('#options-panel-secrets')).toBeVisible()
+
+    await page.locator('[data-options-tab="preferences"]').click()
+    await expect(page.locator('[data-options-tab="preferences"]')).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('#options-panel-preferences')).not.toContainText('SHODAN_API_KEY')
+
+    await page.locator('[data-options-tab="secrets"]').click()
+    await page.locator('#options-secret-new-btn').click()
+    const confirmHost = page.locator('#confirm-host')
+    await expect(confirmHost).toBeVisible()
+    await confirmHost.locator('.options-secret-field').filter({ hasText: 'Secret' }).locator('select').selectOption('SHODAN_API_KEY')
+    await confirmHost.locator('.options-secret-field').filter({ hasText: 'API key or token' }).locator('input').fill('playwright-shodan-key')
+    await confirmHost.locator('[data-confirm-action-id="save"]').click()
+    await expect(confirmHost).toBeHidden()
+    await expect(page.locator('#options-secrets-list')).toContainText('SHODAN_API_KEY')
+    await expect(page.locator('#options-panel-preferences')).not.toContainText('SHODAN_API_KEY')
+
+    await page.locator('.options-close').click()
+    await page.locator('.rail-nav [data-action="options"]').click()
+    await expect(page.locator('[data-options-tab="secrets"]')).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('#options-secrets-list')).toContainText('SHODAN_API_KEY')
   })
 })

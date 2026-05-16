@@ -39,15 +39,19 @@
     if (!el) return false;
     if (el.hidden) return false;
     if (typeof el.closest === 'function' && el.closest('[hidden]')) return false;
-    // display:none check — the options modal toggles session-token buttons
-    // between visible and `style="display:none"` based on token state. If
-    // the trap includes a display:none button as its last focusable, Tab
-    // from the *actual* last visible button won't match `active === last`
-    // and focus leaks out of the card. Works in both jsdom (style.display
-    // is reflected in getComputedStyle) and real browsers.
+    // display/visibility checks include ancestors. Closed app-select menus
+    // hide the menu container with CSS while the option buttons remain
+    // individually displayable; those buttons are not reachable by Tab and
+    // must not become the trap boundary.
     if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
-      const style = window.getComputedStyle(el);
-      if (style && style.display === 'none') return false;
+      let node = el;
+      while (node && node.nodeType === 1) {
+        const style = window.getComputedStyle(node);
+        if (style && (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse')) {
+          return false;
+        }
+        node = node.parentElement;
+      }
     }
     return true;
   }

@@ -705,7 +705,9 @@
   color: var(--muted);
 }
 
-
+.project-mobile-tabs .project-mobile-tab.nav-item:focus-visible {
+  outline: none;
+}
 
 .project-mobile-tabs .project-mobile-tab.nav-item.is-active:hover:not([aria-disabled="true"]):not(:disabled),
 .project-mobile-tabs .project-mobile-tab.nav-item.is-active:active:not([aria-disabled="true"]):not(:disabled) {

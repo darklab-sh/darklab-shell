@@ -149,7 +149,12 @@
 }
 .tab.tab-drop-before::before { left: -5px; }
 .tab.tab-drop-after::after { right: -5px; }
-.tab:hover { color: var(--theme-tab-hover-text); opacity: 0.96; }
+.tab:hover:not(.active) { color: var(--green); opacity: 0.96; }
+.tab:focus,
+.tab:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
 .tab.active {
   color: var(--green);
   background: var(--surface);

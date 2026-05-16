@@ -45,12 +45,14 @@ _SESSION_PREFERENCE_KEYS = {
     "pref_prompt_username",
     "pref_compare_view_mode",
     "pref_compare_context",
+    "pref_options_modal_last_tab",
     "pref_tour_seen_version",
 }
 
 _PROMPT_USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
 _COMPARE_VIEW_MODES = {"auto", "side_by_side", "unified", "changes_only", "findings_only"}
 _COMPARE_CONTEXT_MODES = {"3", "10", "all"}
+_OPTIONS_MODAL_TABS = {"preferences", "secrets"}
 
 _RECENT_VALUE_LIMIT = 10
 _RECENT_VALUE_KINDS = ("domain", "ip", "url", "port_set")
@@ -100,6 +102,10 @@ def _normalize_session_preferences(raw):
         if key == "pref_compare_context":
             value = value.lower()
             if value not in _COMPARE_CONTEXT_MODES:
+                continue
+        if key == "pref_options_modal_last_tab":
+            value = value.lower()
+            if value not in _OPTIONS_MODAL_TABS:
                 continue
         prefs[key] = value
     return prefs
