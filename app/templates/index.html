@@ -452,6 +452,27 @@
       <button type="button" class="close-btn atlas-close" aria-label="Close Atlas">✕</button>
     </div>
     <div id="atlas-tabs" class="atlas-tabs tab-strip" role="tablist" aria-label="Atlas entity types"></div>
+    <section id="atlas-mobile-root" class="atlas-mobile-root u-hidden" aria-label="Mobile Atlas">
+      <div id="atlas-mobile-list-view" class="atlas-mobile-list-view">
+        <div class="atlas-mobile-tabs-wrap">
+          <div id="atlas-mobile-tabs" class="atlas-mobile-tabs tab-strip" role="tablist" aria-label="Atlas entity types"></div>
+        </div>
+        <div id="atlas-mobile-tools" class="atlas-mobile-tools"></div>
+        <div id="atlas-mobile-bulk-bar" class="atlas-mobile-bulk-bar u-hidden" aria-live="polite"></div>
+        <div id="atlas-mobile-list" class="atlas-mobile-list nice-scroll" aria-live="polite"></div>
+        <div id="atlas-mobile-pagination" class="atlas-mobile-pagination u-hidden" aria-live="polite"></div>
+      </div>
+      <div id="atlas-mobile-entity-view" class="atlas-mobile-detail-view u-hidden" role="region" aria-label="Atlas entity detail">
+        <div id="atlas-mobile-entity-topbar" class="atlas-mobile-detail-topbar"></div>
+        <div id="atlas-mobile-entity-body" class="atlas-mobile-detail-body nice-scroll" aria-live="polite"></div>
+        <div id="atlas-mobile-entity-footer" class="atlas-mobile-detail-footer"></div>
+      </div>
+      <div id="atlas-mobile-finding-view" class="atlas-mobile-detail-view u-hidden" role="region" aria-label="Atlas finding detail">
+        <div id="atlas-mobile-finding-topbar" class="atlas-mobile-detail-topbar"></div>
+        <div id="atlas-mobile-finding-body" class="atlas-mobile-detail-body nice-scroll" aria-live="polite"></div>
+        <div id="atlas-mobile-finding-footer" class="atlas-mobile-detail-footer"></div>
+      </div>
+    </section>
     <div class="atlas-shell">
       <div class="atlas-main">
         <div class="atlas-toolbar">
@@ -513,7 +534,7 @@
       <button id="history-mobile-filters-toggle" class="history-action-btn history-mobile-filters-toggle btn btn-secondary btn-compact" type="button" aria-expanded="false" aria-controls="history-search-input history-advanced-filters">history tools</button>
       <input id="history-search-input" class="form-control form-control-compact" type="text" placeholder="search history" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search history">
       <div id="history-advanced-filters" class="history-advanced-filters">
-        <select id="history-type-filter" aria-label="Filter by history item type">
+        <select id="history-type-filter" class="form-select form-control-compact" aria-label="Filter by history item type">
           <option value="all">type: all</option>
           <option value="runs">runs: all</option>
           <option value="runs_builtin">runs: built-in</option>
@@ -524,20 +545,20 @@
           <input id="history-root-input" class="form-control form-control-compact" type="text" placeholder="command name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Filter by command name">
           <div id="history-root-dropdown" class="ac-dropdown dropdown-surface history-root-dropdown nice-scroll u-hidden"></div>
         </div>
-        <select id="history-exit-filter" aria-label="Filter by exit code">
+        <select id="history-exit-filter" class="form-select form-control-compact" aria-label="Filter by exit code">
           <option value="all">exit: all</option>
           <option value="0">exit: 0</option>
           <option value="nonzero">exit: failed</option>
           <option value="-15">exit: terminated</option>
           <option value="incomplete">exit: incomplete</option>
         </select>
-        <select id="history-date-filter" aria-label="Filter by recent date range">
+        <select id="history-date-filter" class="form-select form-control-compact" aria-label="Filter by recent date range">
           <option value="all">date: all</option>
           <option value="24h">date: 24h</option>
           <option value="7d">date: 7d</option>
           <option value="30d">date: 30d</option>
         </select>
-        <select id="history-project-filter" aria-label="Filter by project">
+        <select id="history-project-filter" class="form-select form-control-compact" aria-label="Filter by project">
           <option value="all">project: all</option>
         </select>
         <label class="history-filter-toggle control-row form-control-compact">
@@ -1125,9 +1146,12 @@
 <script src="/static/js/ui/ui_disclosure.js"></script>
 <script src="/static/js/ui/ui_dismissible.js"></script>
 <script src="/static/js/ui/ui_focus_trap.js"></script>
+<script src="/static/js/ui/mobile_sheet.js"></script>
+<script src="/static/js/ui/ui_action_sheet.js"></script>
 <script src="/static/js/ui/ui_confirm.js"></script>
 <script src="/static/js/ui/ui_outside_click.js"></script>
 <script src="/static/js/ui/ui_entity_metadata.js"></script>
+<script src="/static/js/ui/ui_tab_strip_edges.js"></script>
 <script src="/static/js/export_pdf.js"></script>
 <script src="/static/js/tabs.js"></script>
 <script src="/static/js/features/tabs/tab_exports.js"></script>
@@ -1170,6 +1194,7 @@
 <script src="/static/js/features/atlas/atlas_tabs.js"></script>
 <script src="/static/js/features/atlas/atlas_entity_detail.js"></script>
 <script src="/static/js/features/atlas/atlas_overlay.js"></script>
+<script src="/static/js/features/atlas/atlas_mobile.js"></script>
 <script src="/static/js/core/runner_core.js"></script>
 <script src="/static/js/features/runner/runner_active_restore.js"></script>
 <script src="/static/js/features/runner/runner_persistence.js"></script>
@@ -1196,7 +1221,6 @@
 <script src="/static/js/features/shortcuts/shortcuts_key_handler.js"></script>
 <script src="/static/js/features/projects/project_target_validation.js"></script>
 <script src="/static/js/tour_modal.js"></script>
-<script src="/static/js/ui/mobile_sheet.js"></script>
 <script src="/static/js/controller.js"></script>
 <script src="/static/js/features/terminal/composer_controller.js"></script>
 <script src="/static/js/shell_chrome.js"></script>

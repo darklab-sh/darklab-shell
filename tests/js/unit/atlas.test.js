@@ -59,8 +59,8 @@ function setupAtlasDom() {
         <div id="atlas-subtitle"></div>
         <div id="atlas-tabs" class="atlas-tabs tab-strip"></div>
         <input id="atlas-search" />
-        <select id="atlas-finding-status-filter" class="u-hidden"></select>
-        <select id="atlas-orphan-filter"></select>
+        <select id="atlas-finding-status-filter" class="form-select form-control-compact u-hidden"></select>
+        <select id="atlas-orphan-filter" class="form-select form-control-compact"></select>
         <button id="atlas-export-csv-btn" type="button">csv</button>
         <button id="atlas-export-jsonl-btn" type="button">jsonl</button>
         <button id="atlas-refresh-btn" type="button">refresh</button>
@@ -70,7 +70,7 @@ function setupAtlasDom() {
             <span id="atlas-finding-selection-summary"></span>
             <button id="atlas-finding-select-all" type="button">select all</button>
             <button id="atlas-finding-clear-selection" type="button">clear</button>
-            <select id="atlas-finding-bulk-status"></select>
+            <select id="atlas-finding-bulk-status" class="form-select form-control-compact"></select>
             <button id="atlas-finding-bulk-apply" type="button">apply</button>
             <button id="atlas-bulk-delete" type="button">delete</button>
           </div>
@@ -91,9 +91,11 @@ function loadAtlas({
   activeProject = null,
   apiFetchImpl = null,
   showConfirmImpl = vi.fn(() => Promise.resolve('cancel')),
+  useRealSelectEnhancer = false,
 } = {}) {
   const showToast = vi.fn()
   const syncAppSelect = vi.fn()
+  const enhanceAppSelects = vi.fn()
   const downloadBlobAsAttachment = vi.fn()
   const storage = new MemoryStorage()
   const projectEvents = []
@@ -218,6 +220,8 @@ function loadAtlas({
         showToast,
         showConfirm: showConfirmImpl,
         syncAppSelect,
+        enhanceAppSelects,
+        useRealSelectEnhancer,
         localStorage: storage,
         URLSearchParams,
         setTimeout,
@@ -245,7 +249,10 @@ function loadAtlas({
         window.apiFetch = apiFetch;
         window.showToast = showToast;
         window.showConfirm = showConfirm;
-        window.syncAppSelect = syncAppSelect;
+        if (!useRealSelectEnhancer) {
+          window.syncAppSelect = syncAppSelect;
+          window.enhanceAppSelects = enhanceAppSelects;
+        }
         window.emitUiEvent = emitUiEvent;
         window.getActiveProjectContext = getActiveProjectContext;
         window.refreshActiveProjectContext = refreshActiveProjectContext;
@@ -257,6 +264,7 @@ function loadAtlas({
     showConfirm: showConfirmImpl,
     showToast,
     syncAppSelect,
+    enhanceAppSelects,
     downloadBlobAsAttachment,
     projectEvents,
     storage,
@@ -277,6 +285,25 @@ describe('Atlas overlay', () => {
     expect(document.querySelector('[data-atlas-tab="findings"]')?.getAttribute('aria-pressed')).toBe('true')
     expect(document.querySelector('.atlas-shell')?.dataset.atlasMode).toBe('findings')
     expect(document.getElementById('atlas-list')?.textContent).toContain('443/tcp open https')
+  })
+
+  it('syncs populated filter selects and enhances dynamic detail selects', async () => {
+    const { openAtlas } = loadAtlas({ useRealSelectEnhancer: true })
+
+    await openAtlas({ source: 'test' })
+
+    const filter = document.getElementById('atlas-finding-status-filter')
+    expect(filter.classList.contains('app-select-native')).toBe(true)
+    expect(filter.nextElementSibling?.classList.contains('app-select')).toBe(true)
+    expect(filter.nextElementSibling?.textContent).toContain('All findings')
+    expect(filter.nextElementSibling?.querySelectorAll('.dropdown-item')).toHaveLength(6)
+
+    const review = document.querySelector('#atlas-detail .atlas-finding-review')
+    expect(review).not.toBeNull()
+    expect(review.classList.contains('app-select-native')).toBe(true)
+    expect(review.nextElementSibling?.classList.contains('app-select')).toBe(true)
+    expect(review.nextElementSibling?.querySelector('.app-select-trigger')?.textContent).toContain('New')
+    expect(review.nextElementSibling?.querySelectorAll('.dropdown-item')).toHaveLength(5)
   })
 
   it('opens as a first-class surface and renders entity detail', async () => {

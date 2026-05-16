@@ -746,7 +746,7 @@ test.beforeEach(async ({ page }) => {
     await expect(page.locator('#project-mobile-detail-body .project-mobile-run-row')).toContainText(seededRun.command)
 
     await page.locator('#project-mobile-detail-body .project-mobile-run-row .project-mobile-row-menu-trigger').click()
-    const actionSheet = page.locator('#project-mobile-action-sheet-overlay')
+    const actionSheet = page.locator('#action-sheet-overlay')
     await expect(actionSheet).toHaveClass(/\bopen\b/)
     await expect(actionSheet.locator('.sheet-grab.gesture-handle')).toBeVisible()
     await expect(actionSheet.locator('[data-project-action="edit-run-metadata"]')).toBeVisible()
@@ -1249,5 +1249,101 @@ test.beforeEach(async ({ page }) => {
     const composerBox = await page.locator('#mobile-composer').boundingBox()
     expect(composerBox).not.toBeNull()
     expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(MOBILE.height)
+  })
+
+  test('mobile Atlas opens list/detail flow and select mode', async ({ page }) => {
+    await page.route(/https?:\/\/[^/]+\/atlas(?:\?|\/|$)/, async (route) => {
+      const url = new URL(route.request().url())
+      const entity = {
+        id: 'ent_mobile',
+        session_id: 'mobile-session',
+        type: 'ip',
+        canonical_value: '107.178.109.44',
+        first_seen_at: '2026-05-15T00:00:00Z',
+        last_seen_at: '2026-05-15T00:01:00Z',
+        occurrence_count: 2,
+        created: '2026-05-15T00:00:00Z',
+        run_count: 1,
+        labels: [{ id: 'lbl_mobile', label: 'mobile', source: 'manual', created: '2026-05-15T00:01:00Z' }],
+        note: null,
+        project_links: [],
+        project_link_count: 0,
+        run_links: [{ run_id: 'run_mobile', command: 'nmap 107.178.109.44' }],
+      }
+      if (url.pathname === '/atlas') {
+        await route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            total: 1,
+            counts: { ip: 1, domain: 0, hash: 0, cve: 0, url: 0 },
+            findings: 0,
+          }),
+        })
+        return
+      }
+      if (url.pathname === '/atlas/entities/ent_mobile') {
+        await route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            entity,
+            intel_snapshots: [],
+            intel_summary: { status: 'none', providers_with_data: [], highlights: [] },
+            runs: [{ run_id: 'run_mobile', command: 'nmap 107.178.109.44', occurrence_count: 2 }],
+            findings: [],
+          }),
+        })
+        return
+      }
+      if (url.pathname === '/atlas/entities') {
+        await route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ entities: [entity], total: 1, limit: 50, offset: 0 }),
+        })
+        return
+      }
+      if (url.pathname === '/atlas/findings') {
+        await route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            findings: [],
+            total: 0,
+            limit: 50,
+            offset: 0,
+            counts: { new: 0, reviewed: 0, important: 0, false_positive: 0, needs_followup: 0 },
+          }),
+        })
+        return
+      }
+      await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not found' }) })
+    })
+    await page.setViewportSize(MOBILE)
+    await page.goto('/')
+    await page.evaluate(() => window.dispatchEvent(new Event('resize')))
+    await expect
+      .poll(async () =>
+        page.evaluate(() => document.body.classList.contains('mobile-terminal-mode')),
+      )
+      .toBe(true)
+
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="atlas"]').click()
+    await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#atlas-mobile-root')).toBeVisible()
+    await page.locator('#atlas-mobile-tabs [data-atlas-mobile-tab="ip"]').click()
+    const row = page.locator('#atlas-mobile-list .atlas-mobile-row').filter({ hasText: '107.178.109.44' })
+    await expect(row).toBeVisible({ timeout: 15_000 })
+
+    await row.click()
+    await expect(page.locator('#atlas-mobile-entity-view')).toBeVisible()
+    await expect(page.locator('#atlas-mobile-entity-topbar')).toContainText('107.178.109.44')
+    await page.locator('#atlas-mobile-entity-topbar .atlas-mobile-back-btn').click()
+    await expect(page.locator('#atlas-mobile-list-view')).toBeVisible()
+
+    await page.locator('#atlas-mobile-tools .atlas-mobile-overflow-btn').click()
+    await expect(page.locator('#action-sheet-overlay')).toHaveClass(/\bopen\b/)
+    await page.locator('#action-sheet .action-sheet-item').filter({ hasText: 'Select mode' }).click()
+    await expect(page.locator('#atlas-mobile-bulk-bar')).toBeVisible()
+    await row.click()
+    await expect(page.locator('#atlas-mobile-bulk-bar')).toContainText('1 selected')
   })
 })

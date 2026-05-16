@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,799
+- behavior tests: 2,813
 - docs/inventory meta-tests: 32
 - `pytest`: 1432 (1400 behavior + 32 meta)
-- `vitest`: 1150
-- `playwright`: 251
-- total: 2,833
+- `vitest`: 1161
+- `playwright`: 252
+- total: 2,845
 
 This document is organized in two parts:
 
@@ -1835,6 +1835,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | Test | Description |
 | --- | --- |
 | `opens to the Findings tab by default` | Verifies that opening Atlas without a target starts on the Findings tab. |
+| `syncs populated filter selects and enhances dynamic detail selects` | Verifies that Atlas syncs populated Findings filters and enhances the finding review-state picker after it renders. |
 | `opens as a first-class surface and renders entity detail` | Verifies that the Atlas overlay opens, loads entity rows, and renders entity detail content. |
 | `cycles Atlas tabs forward and backward for modal keyboard shortcuts` | Verifies that the Atlas tab cycler moves forward and backward through the modal tab row. |
 | `renders an empty Atlas without warning when no saved runs have entities` | Verifies that empty Atlas state is normal and does not show an error toast. |
@@ -1849,6 +1850,16 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `bulk-deletes selected Atlas entities from entity tabs` | Verifies that select mode can bulk-delete visible-page Atlas entities and reports attached finding removal. |
 | `bulk-deletes selected Atlas findings from the Findings tab` | Verifies that select mode can bulk-delete selected Atlas findings from the Findings tab. |
 | `exports filtered entity rows without leaving the Atlas surface` | Verifies that Atlas entity exports use the active type, search, and project filters and start a browser download. |
+
+#### `atlas_mobile.test.js`
+
+| Test | Description |
+| --- | --- |
+| `renders mobile tabs and drills into entity detail with Back preserving the list` | Verifies that Mobile Atlas renders its tab row and entity list, drills into entity detail, and returns to the list with Back. |
+| `syncs filter disclosure controls and clears selected rows before refreshing` | Verifies that Mobile Atlas filter controls update shared state, clear selected rows, refresh the list, and render the orphan-only clear chip. |
+| `enters select mode from the action sheet and uses row taps for bulk selection` | Verifies that the Mobile Atlas overflow action sheet enters select mode, shows the sticky bulk bar, and turns row taps into selection toggles. |
+| `opens finding detail and keeps review updates in the sticky footer` | Verifies that Mobile Atlas opens finding detail and routes the footer review-state picker through the shared finding update handler. |
+| `honors forceView detail requests once the selected entity is resolved` | Verifies that Mobile Atlas opens directly to entity detail when a caller requests detail view and the selected entity is already resolved. |
 
 #### `autocomplete.test.js`
 
@@ -1947,6 +1958,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `no source file references retired class 'modal-secondary-warning'` | Regression guard: fails if the retired `modal-secondary-warning` class reappears in app source. |
 | `no source file references retired class 'modal-secondary-neutral'` | Regression guard: fails if the retired `modal-secondary-neutral` class reappears in app source. |
 | `no source file references retired class 'search-toggle'` | Regression guard: fails if the retired `search-toggle` class reappears in app source. Uses token-boundary matching so `search-toggles` and `#search-toggle-btn` stay valid. |
+| `native select elements compose the form-select primitive` | Regression guard: fails if app source adds native select markup or JS-created selects without the shared `.form-select` primitive. |
 
 #### `button_primitives_allowlist.test.js`
 
@@ -2673,6 +2685,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `stacks when the viewport is <=480px even with 2 actions` | Verifies modal-actions-stacked is applied on narrow viewports for a 2-action dialog. |
 | `does not stack for 2 actions on wide viewports` | Verifies the default side-by-side layout for 2 actions above the breakpoint. |
 | `renders a single Node into the content slot` | Verifies a DOM Node passed as `content` is appended to the `[data-confirm-content]` slot. |
+| `enhances form-select controls in the content slot` | Verifies confirmation-modal form selects are passed through the app-native select enhancer after mounting. |
+| `focuses the app-native select trigger when defaultFocus is an enhanced select` | Verifies confirmation modals focus the generated app-native select trigger instead of the hidden native select when defaultFocus points at an enhanced select. |
 | `renders an array of Nodes into the content slot in order` | Verifies an array of Nodes is appended into the content slot preserving order. |
 | `skips non-Node items in an array silently` | Verifies non-Node items in the content array are ignored rather than throwing. |
 | `clears the content slot on resolve` | Verifies caller-supplied content is removed when the confirm promise settles. |
@@ -2768,7 +2782,9 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `blurs the focused element and returns true` | Verifies blurActiveElement blurs the currently-focused element. |
 | `keeps the native select as state while rendering a themed trigger` | Verifies app-native select enhancement keeps the original select as the state owner. |
 | `dispatches normal change events when choosing an app-native option` | Verifies app-native select option clicks emit regular select change events. |
+| `portals modal selects so menus escape clipped dialog bodies` | Verifies app-native select menus inside dialogs portal to the page layer and flip above controls near the viewport edge. |
 | `refreshes custom menu options when native select options change` | Verifies app-native select menus rebuild when async code updates the native select option list. |
+| `enhances form-select controls inserted after startup` | Verifies dynamically inserted form-select controls become app-native dropdowns automatically. |
 
 #### `ui_focus_trap.test.js`
 
@@ -3113,6 +3129,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `mobile keyboard helper moves the caret and deletes a word` | Verifies character moves, word jumps, and delete-word behavior through the real mobile helper row. |
 | `mobile output wraps inside the transcript when timestamps and line numbers are on` | Regression for mobile output overflow: injects a long prefixed line with `body.ln-on` and `body.ts-clock` active and asserts `.line-content`'s right edge stays within `.output`'s right edge at mobile viewport width. |
 | `mobile long commands keep the composer usable` | Verifies that mobile long commands keep the composer usable. |
+| `mobile Atlas opens list/detail flow and select mode` | Verifies that mobile Atlas opens from the mobile menu, switches entity tabs, drills into entity detail, returns with Back, and uses overflow select mode for row selection. |
 
 #### `output.spec.js`
 

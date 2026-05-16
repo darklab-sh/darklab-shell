@@ -365,6 +365,23 @@ async function openProjectsPanelForDemo(page, runId) {
   await page.waitForTimeout(1_000)
 }
 
+async function openAtlasPanelForDemo(page) {
+  await page.locator('.rail-nav [data-action="atlas"]').hover()
+  await page.waitForTimeout(650)
+  await page.locator('.rail-nav [data-action="atlas"]').click()
+  await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+  await page.waitForTimeout(900)
+  await page.locator('[data-atlas-tab="ip"]').click()
+  await expect(page.locator('#atlas-list')).toContainText('107.178.109.44')
+  await expect(page.locator('#atlas-detail')).toContainText('Shodan')
+  await page.waitForTimeout(3_400)
+  await page.locator('.atlas-close').hover()
+  await page.waitForTimeout(600)
+  await page.locator('.atlas-close').click()
+  await expect(page.locator('#atlas-overlay')).not.toHaveClass(/\bopen\b/)
+  await page.waitForTimeout(1_000)
+}
+
 async function openRunComparisonForDemo(page) {
   await openCaptureRunComparison(page)
   await page.locator('#history-compare-overlay').waitFor({ state: 'visible', timeout: 10_000 })
@@ -656,6 +673,9 @@ test('demo', async ({ page }) => {
   // ── Projects panel: active project with a linked run ─────────────────────
   await openProjectsPanelForDemo(page, workspaceRunId)
 
+  // ── Atlas: entity-first triage with intel context ────────────────────────
+  await openAtlasPanelForDemo(page)
+
   // ── Run comparison: side-by-side output and changed findings ─────────────
   await openRunComparisonForDemo(page)
 
@@ -720,24 +740,24 @@ test('demo', async ({ page }) => {
   await page.locator('.theme-body').evaluate((el) => {
     el.scrollTop = 0
   })
-  await page.waitForTimeout(3_400)
+  await page.waitForTimeout(1_800)
   // Compute actual card positions now that the grid is rendered.
   const charcoalTop = await centeredScrollTop(page, DEMO_THEME_NAME)
-  await smoothScroll(page, '.theme-body', 250, { durationMs: 1_150 }) // scrolling down
-  await page.waitForTimeout(1_000)
-  await smoothScroll(page, '.theme-body', Math.max(charcoalTop + 130, 620), { durationMs: 1_350 }) // past the card
-  await page.waitForTimeout(1_000)
-  await smoothScroll(page, '.theme-body', charcoalTop, { durationMs: 950 }) // settle on card
-  await page.waitForTimeout(1_700) // hover — deciding
+  await smoothScroll(page, '.theme-body', 220, { durationMs: 900 }) // scrolling down
+  await page.waitForTimeout(650)
+  await smoothScroll(page, '.theme-body', Math.max(charcoalTop + 90, 520), { durationMs: 1_050 }) // past the card
+  await page.waitForTimeout(650)
+  await smoothScroll(page, '.theme-body', charcoalTop, { durationMs: 800 }) // settle on card
+  await page.waitForTimeout(1_000) // hover — deciding
   await page.locator(`[data-theme-name="${DEMO_THEME_NAME}"]`).hover()
-  await page.waitForTimeout(900)
+  await page.waitForTimeout(650)
   await switchTheme(page, DEMO_THEME_NAME)
   await page
     .locator(`[data-theme-name="${DEMO_THEME_NAME}"].theme-card-active`)
     .waitFor({ state: 'attached', timeout: 5_000 })
-  await page.waitForTimeout(1_200)
+  await page.waitForTimeout(850)
   await page.locator('.theme-close').hover()
-  await page.waitForTimeout(700)
+  await page.waitForTimeout(500)
   await page.locator('.theme-close').click()
   await page.locator('#theme-overlay').waitFor({ state: 'hidden' })
   await page.waitForTimeout(1_000)

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
 const ENTITY_METADATA_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_entity_metadata.js'), 'utf8')
+const UI_ACTION_SHEET_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_action_sheet.js'), 'utf8')
 const PROJECT_TARGET_VALIDATION_SRC = readFileSync(
   resolve(REPO_ROOT, 'app/static/js/features/projects/project_target_validation.js'),
   'utf8',
@@ -274,7 +275,14 @@ function loadShellChrome({
     `
       const globalThis = global;
       const APP_CONFIG = global.APP_CONFIG || {};
+      window.bindPressable = bindPressable;
+      window.bindDismissible = global.bindDismissible;
+      window.bindMobileSheet = global.bindMobileSheet;
+      window.enhanceAppSelects = global.enhanceAppSelects;
       ${ENTITY_METADATA_SRC}
+      ${UI_ACTION_SHEET_SRC}
+      global.openActionSheet = window.openActionSheet;
+      global.closeActionSheet = window.closeActionSheet;
       ${PROJECT_TARGET_VALIDATION_SRC}
       ${SHELL_CHROME_SRC}
     `,
@@ -628,10 +636,10 @@ describe('shell chrome project workspace', () => {
 
       document.querySelector('[data-project-mobile-action="project-menu"][data-project-id="project-1"]').click()
       await tick()
-      const actionSheet = document.getElementById('project-mobile-action-sheet-overlay')
+      const actionSheet = document.getElementById('action-sheet-overlay')
       expect(actionSheet.classList.contains('open')).toBe(true)
       expect(actionSheet.textContent).toContain('Edit metadata')
-      const actionSheetItems = actionSheet.querySelector('.project-mobile-action-sheet-items')
+      const actionSheetItems = actionSheet.querySelector('.action-sheet-items')
       expect(actionSheetItems.classList.contains('bottom-sheet-body')).toBe(true)
       expect(actionSheetItems.classList.contains('nice-scroll')).toBe(true)
       actionSheet.querySelector('[data-project-action="edit-project-metadata"]').click()
@@ -936,7 +944,7 @@ describe('shell chrome project workspace', () => {
       expect(runMenu.textContent).toBe('☰')
       runMenu.click()
       await tick()
-      const actionSheet = document.getElementById('project-mobile-action-sheet-overlay')
+      const actionSheet = document.getElementById('action-sheet-overlay')
       expect(actionSheet.classList.contains('open')).toBe(true)
       expect(actionSheet.querySelector('[data-project-action="edit-run-metadata"]')).not.toBeNull()
       expect(actionSheet.querySelector('[data-project-action="open-run"]')).not.toBeNull()
@@ -956,7 +964,7 @@ describe('shell chrome project workspace', () => {
       await tick()
       const reviewSelect = actionSheet.querySelector('[data-project-review-state]')
       expect(reviewSelect).not.toBeNull()
-      const actionSheetItems = actionSheet.querySelector('.project-mobile-action-sheet-items')
+      const actionSheetItems = actionSheet.querySelector('.action-sheet-items')
       expect(actionSheetItems.classList.contains('bottom-sheet-body')).toBe(true)
       expect(actionSheetItems.classList.contains('nice-scroll')).toBe(true)
       expect(shell.enhanceAppSelects).toHaveBeenCalledWith(actionSheetItems)

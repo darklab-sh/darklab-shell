@@ -669,17 +669,61 @@
   };
   const _appSelects = new Map();
   // Portals an open dropdown menu to document.body so it escapes ancestor
-  // stacking contexts. Needed when an ancestor (e.g. .mobile-sheet-overlay
-  // with backdrop-filter) or a sticky descendant (e.g. .history-compare-pane-title
-  // promoted by iOS Safari) can paint above the menu. Opt-in via
-  // select.dataset.portalMenu = 'true' at enhancement time.
+  // stacking contexts and clipped modal bodies. Callers can opt in with
+  // select.dataset.portalMenu = 'true', and modal/sheet selects opt in
+  // automatically because those surfaces commonly scroll or clip overflow.
+  function _viewportBounds() {
+    const vv = global.visualViewport;
+    if (vv && Number.isFinite(vv.width) && Number.isFinite(vv.height)) {
+      return {
+        top: Number(vv.offsetTop) || 0,
+        left: Number(vv.offsetLeft) || 0,
+        width: Number(vv.width) || 0,
+        height: Number(vv.height) || 0,
+      };
+    }
+    const docEl = document.documentElement || {};
+    return {
+      top: 0,
+      left: 0,
+      width: global.innerWidth || docEl.clientWidth || 0,
+      height: global.innerHeight || docEl.clientHeight || 0,
+    };
+  }
+
+  function _clampNumber(value, min, max) {
+    if (max < min) return min;
+    return Math.min(Math.max(value, min), max);
+  }
+
   function _portalAppSelectMenu(wrap, trigger, menu) {
     if (wrap.dataset.portalMenu !== 'true') return;
-    if (menu.dataset.appSelectPortaled === 'true') return;
     const rect = trigger.getBoundingClientRect();
-    menu._portalReturnTo = wrap;
-    menu.dataset.appSelectPortaled = 'true';
-    document.body.appendChild(menu);
+    const viewport = _viewportBounds();
+    const margin = 8;
+    // Portaled menus sit on document.body without the surrounding context
+    // (border, shadow, parent panel) that the non-portaled CSS rules in
+    // shell.css use to bridge their 4px gap. Setting gap = 0 here makes
+    // the menu visually attach to the trigger so the dropdown reads as
+    // one connected control rather than two disconnected surfaces.
+    const gap = 0;
+    const viewportTop = viewport.top;
+    const viewportLeft = viewport.left;
+    const viewportBottom = viewport.top + viewport.height;
+    const viewportRight = viewport.left + viewport.width;
+    const spaceBelow = Math.max(0, viewportBottom - rect.bottom - gap - margin);
+    const spaceAbove = Math.max(0, rect.top - viewportTop - gap - margin);
+    const desiredHeight = 240;
+    const openAbove = spaceBelow < desiredHeight && spaceAbove > spaceBelow;
+    const availableHeight = openAbove ? spaceAbove : spaceBelow;
+    const maxHeight = Math.min(320, Math.max(48, availableHeight));
+    const width = Math.min(rect.width, Math.max(0, viewport.width - margin * 2));
+    const left = _clampNumber(rect.left, viewportLeft + margin, viewportRight - width - margin);
+    if (menu.dataset.appSelectPortaled !== 'true') {
+      menu._portalReturnTo = wrap;
+      menu.dataset.appSelectPortaled = 'true';
+      document.body.appendChild(menu);
+    }
     // The wrap.open menu { display: flex } selectors don't match once the
     // menu is reparented to body, so apply visibility inline here.
     menu.style.display = 'flex';
@@ -689,10 +733,28 @@
     // otherwise both top and bottom apply and the element ends up zero-height.
     menu.style.bottom = 'auto';
     menu.style.right = 'auto';
-    menu.style.left = rect.left + 'px';
-    menu.style.top = (rect.bottom + 4) + 'px';
-    menu.style.width = rect.width + 'px';
+    menu.style.left = left + 'px';
+    menu.style.width = width + 'px';
     menu.style.zIndex = '10000';
+    menu.style.maxHeight = maxHeight + 'px';
+    menu.style.overflowY = 'auto';
+    const renderedHeight = menu.getBoundingClientRect?.().height || menu.offsetHeight || 0;
+    const contentHeight = menu.scrollHeight || renderedHeight || maxHeight;
+    const menuHeight = Math.min(maxHeight, Math.max(48, contentHeight));
+    const top = openAbove
+      ? Math.max(rect.top - gap - menuHeight, viewportTop + margin)
+      : _clampNumber(rect.bottom + gap, viewportTop + margin, viewportBottom - menuHeight - margin);
+    menu.style.top = top + 'px';
+    // dropdown-up is used only as a visual/state hint for portaled menus;
+    // inline positioning above handles the actual placement.
+    menu.classList.toggle('dropdown-up', openAbove);
+  }
+  function _shouldPortalAppSelect(select) {
+    if (!select || typeof select.closest !== 'function') return false;
+    if (select.dataset.portalMenu === 'true') return true;
+    return !!select.closest(
+      '.mobile-sheet-surface, .bottom-sheet, .modal, [role="dialog"], [aria-modal="true"]'
+    );
   }
   function _unportalAppSelectMenu(menu) {
     if (!menu || menu.dataset.appSelectPortaled !== 'true') return;
@@ -708,6 +770,11 @@
     menu.style.top = '';
     menu.style.width = '';
     menu.style.zIndex = '';
+    menu.style.maxHeight = '';
+    menu.style.overflowY = '';
+    // dropdown-up is added by _portalAppSelectMenu when flipping above the
+    // trigger; clear it on close so a future open recomputes placement.
+    menu.classList.remove('dropdown-up');
     if (returnTo) returnTo.appendChild(menu);
   }
   function _closeAppSelects(exceptWrap = null) {
@@ -765,7 +832,13 @@
     return btn;
   }
   function _enhanceAppSelect(select) {
-    if (!select || _appSelects.has(select) || select.dataset.appSelectEnhanced === 'true') return;
+    if (!select || _appSelects.has(select)) return;
+    if (select.dataset.appSelectEnhanced === 'true') {
+      const staleWrap = select.nextElementSibling;
+      if (staleWrap && staleWrap.classList?.contains('app-select')) staleWrap.remove();
+      select.classList.remove('app-select-native');
+      delete select.dataset.appSelectEnhanced;
+    }
     const wrap = document.createElement('div');
     wrap.className = 'app-select';
     const trigger = document.createElement('button');
@@ -791,7 +864,7 @@
     select.insertAdjacentElement('afterend', wrap);
     select.classList.add('app-select-native');
     select.dataset.appSelectEnhanced = 'true';
-    if (select.dataset.portalMenu === 'true') wrap.dataset.portalMenu = 'true';
+    if (_shouldPortalAppSelect(select)) wrap.dataset.portalMenu = 'true';
     _appSelects.set(select, { wrap, trigger, valueEl, menu, options });
     trigger.addEventListener('click', () => {
       if (select.disabled) return;
@@ -822,13 +895,48 @@
       }
       wrap.classList.add('open');
       trigger.setAttribute('aria-expanded', 'true');
+      _portalAppSelectMenu(wrap, trigger, menu);
     });
     select.addEventListener('change', () => _syncAppSelect(select));
     _syncAppSelect(select);
   }
+  const APP_SELECT_SELECTOR = 'select.form-select, .history-panel-filters select';
+  function _enhanceAppSelectTree(root) {
+    if (!root || typeof root.querySelectorAll !== 'function') return;
+    if (typeof root.matches === 'function' && root.matches(APP_SELECT_SELECTOR)) {
+      _enhanceAppSelect(root);
+    }
+    root.querySelectorAll(APP_SELECT_SELECTOR).forEach(_enhanceAppSelect);
+  }
   function enhanceAppSelects(root = document) {
     if (!root || typeof root.querySelectorAll !== 'function') return;
-    root.querySelectorAll('select.form-select, .history-panel-filters select').forEach(_enhanceAppSelect);
+    _enhanceAppSelectTree(root);
+  }
+  function observeAppSelects() {
+    if (
+      typeof MutationObserver === 'undefined'
+      || !document.body
+      || document.body.nodeType !== 1
+    ) return;
+    if (global.__darklabAppSelectObserver && typeof global.__darklabAppSelectObserver.disconnect === 'function') {
+      global.__darklabAppSelectObserver.disconnect();
+    }
+    const observer = new MutationObserver((records) => {
+      records.forEach((record) => {
+        if (record.type === 'attributes') {
+          _enhanceAppSelectTree(record.target);
+          return;
+        }
+        record.addedNodes.forEach((node) => _enhanceAppSelectTree(node));
+      });
+    });
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+    global.__darklabAppSelectObserver = observer;
   }
   global.syncAppSelect = (select) => _syncAppSelect(select);
   global.enhanceAppSelects = enhanceAppSelects;
@@ -837,6 +945,7 @@
   // that need the same body-portal escape from ancestor stacking contexts.
   global.portalDropdownMenu = (wrap, trigger, menu) => _portalAppSelectMenu(wrap, trigger, menu);
   global.unportalDropdownMenu = (menu) => _unportalAppSelectMenu(menu);
+  observeAppSelects();
   enhanceAppSelects();
   if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
     document.addEventListener('click', (event) => {

@@ -132,6 +132,14 @@ async function openProjectsModalWithCaptureProject(page, themeName) {
   await expect(page.locator('#project-explorer-body')).toContainText('capture.darklab.sh')
 }
 
+async function openAtlasModalWithCaptureData(page) {
+  await page.locator('.rail-nav [data-action="atlas"]').click()
+  await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+  await page.locator('[data-atlas-tab="ip"]').click()
+  await expect(page.locator('#atlas-list')).toContainText('107.178.109.44')
+  await expect(page.locator('#atlas-detail')).toContainText('Shodan')
+}
+
 const scenes = [
   {
     slug: 'main-welcome-settled',
@@ -346,6 +354,15 @@ const scenes = [
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
       await openProjectsModalWithCaptureProject(page, themeName)
+    },
+  },
+  {
+    slug: 'atlas-modal',
+    title: 'Main UI - Session Entity Atlas modal',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await openAtlasModalWithCaptureData(page)
     },
   },
   {

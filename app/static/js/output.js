@@ -520,6 +520,7 @@ function _openAtlasForOutputEntity(token, options = {}) {
     tab,
     entityType,
     entityValue,
+    forceView: 'detail',
     refreshIntel: !!options.refreshIntel,
     addActiveProject: !!options.addActiveProject,
   });

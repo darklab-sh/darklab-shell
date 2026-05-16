@@ -134,6 +134,13 @@
     _actionsEl.classList.toggle('modal-actions-stacked', _shouldStack(actionCount));
   }
 
+  function _resolveDefaultFocusTarget(target) {
+    if (!target || !target.classList || !target.classList.contains('app-select-native')) return target;
+    const wrap = target.nextElementSibling;
+    if (!wrap || !wrap.classList || !wrap.classList.contains('app-select')) return target;
+    return wrap.querySelector('.app-select-trigger') || target;
+  }
+
   function _cleanup(state) {
     if (!_host) return;
     if (state && state.mqList && typeof state.mqList.remove === 'function') state.mqList.remove();
@@ -176,6 +183,9 @@
     const host = _getHost();
     if (!host) return Promise.reject(new Error('showConfirm: #confirm-host not present'));
     if (_isOpen()) return Promise.reject(new Error('showConfirm: another confirm is already open'));
+    if (typeof global.closeActionSheet === 'function') {
+      global.closeActionSheet({ restoreFocus: false });
+    }
 
     const body = opts && opts.body !== undefined ? opts.body : '';
     const content = opts && opts.content !== undefined ? opts.content : null;
@@ -185,6 +195,12 @@
 
     _renderBody(_bodyEl, body);
     if (_contentEl) _renderContent(_contentEl, content);
+    if (_contentEl && typeof global.enhanceAppSelects === 'function') {
+      _contentEl.querySelectorAll('select.form-select').forEach((select) => {
+        select.dataset.portalMenu = 'true';
+      });
+      global.enhanceAppSelects(_contentEl);
+    }
     _card.classList.remove('modal-card-danger', 'modal-card-warning');
     if (tone === 'danger') _card.classList.add('modal-card-danger');
     else if (tone === 'warning') _card.classList.add('modal-card-warning');
@@ -288,7 +304,7 @@
     //      focus applies.
     let focusTarget = null;
     if (opts.defaultFocus instanceof Node) {
-      focusTarget = opts.defaultFocus;
+      focusTarget = _resolveDefaultFocusTarget(opts.defaultFocus);
     } else if (typeof opts.defaultFocus === 'string' && opts.defaultFocus) {
       const explicit = buttons.find(({ action }) => action.id === opts.defaultFocus);
       if (explicit) focusTarget = explicit.btn;

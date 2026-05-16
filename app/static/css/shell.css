@@ -1295,6 +1295,9 @@ body.mobile-terminal-mode .output-follow-btn {
   top: calc(100% + 4px);
   z-index: 360;
   border-radius: 6px;
+  max-height: min(320px, 58dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .app-select-menu.dropdown-up {

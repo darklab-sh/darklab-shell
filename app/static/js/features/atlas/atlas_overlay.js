@@ -56,6 +56,8 @@
     loading: false,
     selectedId: '',
     requestedEntityValue: '',
+    requestedView: '',
+    requestedViewStarted: 0,
     refreshIntelOnSelect: false,
     addActiveProjectOnSelect: false,
     detail: null,
@@ -146,6 +148,10 @@
     state.projectId = String(options && options.projectId || '');
     state.projectName = String(options && options.projectName || '').trim();
     state.requestedEntityValue = String(options && options.entityValue || '').trim();
+    state.requestedView = ['detail', 'list'].includes(String(options && options.forceView || ''))
+      ? String(options.forceView)
+      : 'list';
+    state.requestedViewStarted = state.requestedView === 'detail' ? Date.now() : 0;
     state.refreshIntelOnSelect = !!(options && options.refreshIntel);
     state.addActiveProjectOnSelect = !!(options && options.addActiveProject);
     if (state.requestedEntityValue) {
@@ -159,6 +165,9 @@
     state.selectedFindingId = '';
     resetSelection({ selectMode: false, render: false });
     state.detail = null;
+    if (global.DarklabAtlasMobile && typeof global.DarklabAtlasMobile.resetTransientState === 'function') {
+      global.DarklabAtlasMobile.resetTransientState();
+    }
     show();
     if (typeof global.markInteractionSurfaceReady === 'function') {
       global.markInteractionSurfaceReady('atlas', overlay, surface);
@@ -168,6 +177,8 @@
   }
 
   function closeAtlas(options = {}) {
+    state.requestedView = '';
+    state.requestedViewStarted = 0;
     hide(options);
   }
 
@@ -238,6 +249,8 @@
     state.selectedFindingId = '';
     resetSelection({ selectMode: state.selectMode, render: false });
     state.requestedEntityValue = '';
+    state.requestedView = '';
+    state.requestedViewStarted = 0;
     state.refreshIntelOnSelect = false;
     state.addActiveProjectOnSelect = false;
     state.detail = null;
@@ -615,6 +628,13 @@
     });
   }
 
+  const mobileRenderers = [];
+
+  function registerMobileRenderer(fn) {
+    if (typeof fn !== 'function') return;
+    if (!mobileRenderers.includes(fn)) mobileRenderers.push(fn);
+  }
+
   function render() {
     renderShellMode();
     renderSubtitle();
@@ -623,6 +643,11 @@
     renderList();
     renderPagination();
     renderDetail();
+    for (const fn of mobileRenderers) {
+      try { fn(state, atlasController); } catch (err) {
+        if (typeof global.logClientError === 'function') global.logClientError('atlas mobile render failed', err);
+      }
+    }
   }
 
   function renderShellMode() {
@@ -770,8 +795,8 @@
     }
   }
 
-  async function bulkUpdateFindings() {
-    const reviewState = String(findingBulkStatus?.value || '').trim();
+  async function bulkUpdateFindings(reviewStateOverride = '') {
+    const reviewState = String(reviewStateOverride || findingBulkStatus?.value || '').trim();
     const findingIds = [...state.selectedFindingIds];
     if (!findingIds.length || !reviewState) return;
     try {
@@ -1240,6 +1265,47 @@
 
   bindEvents();
 
+  // Controller surface exposed to companion modules (atlas_mobile.js).
+  // The surface intentionally hides DOM-binding helpers and keeps the
+  // mutation API around state, navigation, actions, and re-render hooks.
+  const atlasController = {
+    state,
+    tabsApi,
+    detailApi,
+    metadataApi,
+    findingStates,
+    isOpen,
+    currentTab,
+    setActiveAtlasTab,
+    cycleAtlasTab,
+    selectEntity,
+    selectFinding,
+    refreshAtlas,
+    refreshIntel,
+    addToActiveProject,
+    removeProjectLink,
+    saveMetadata,
+    confirmDeleteEntity,
+    confirmDeleteFinding,
+    updateFindingReviewState,
+    openEntityFromFinding,
+    openSourceRun,
+    exportEntities,
+    setSelectMode,
+    selectAllVisibleItems,
+    bulkUpdateFindings,
+    bulkDeleteSelectedItems,
+    activeSelectionSet,
+    visibleSelectableItems,
+    toggleItemSelection,
+    rowMessage,
+    badge,
+    text,
+    countLabel,
+    registerMobileRenderer,
+  };
+
+  global.DarklabAtlasOverlay = atlasController;
   global.openAtlas = openAtlas;
   global.closeAtlas = closeAtlas;
   global.isAtlasOverlayOpen = isOpen;

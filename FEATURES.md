@@ -393,6 +393,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 
 - Open **Atlas** from the desktop rail, mobile menu, `Alt+A`, History row actions, Run Details, or a project filtered view.
 - Atlas groups saved entities by **Findings**, **Hosts/IPs**, **Domains**, **Hashes**, **CVEs**, and **URLs**. Entity rows show the canonical value, hit count, source-run count, project links, and labels.
+- On mobile, Atlas uses a list/detail flow with Back navigation, compact filters, bottom-sheet actions, and select mode from the overflow menu so entity triage fits the same touch pattern as Projects and History.
 - The **Findings** tab works as the cross-run triage queue. It lists deduped findings, supports text/project/review-state filters, opens finding detail with source-run and entity navigation, and can update or delete selected visible findings in bulk.
 - Selecting an entity opens a detail side sheet with first/last seen times, project links, labels, notes, cached intel snapshots, source runs, and related findings.
 - Select mode adds checkboxes on the visible page for any Atlas tab. You can delete selected findings directly, or delete selected entities and their attached findings in one confirmed action.
@@ -406,7 +407,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 
 **Configuration:** Atlas uses existing history retention, intel cache, and provider-secret settings. Provider keys are managed through Options → Secrets or `secret set NAME`.
 
-**Related files:** `app/blueprints/atlas.py`, `app/services/atlas/`, `app/static/js/features/atlas/`, `app/static/css/features/atlas.css`, `app/core/output_signals.py`.
+**Related files:** `app/blueprints/atlas.py`, `app/services/atlas/`, `app/static/js/features/atlas/`, `app/static/css/features/atlas.css`, `app/static/css/features/atlas-mobile.css`, `app/core/output_signals.py`.
 
 ---
 

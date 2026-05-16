@@ -49,6 +49,11 @@ function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+function hasFormSelectClass(attrText) {
+  const match = /\bclass\s*=\s*["']([^"']*)["']/.exec(attrText)
+  return !!match && match[1].split(/\s+/).includes('form-select')
+}
+
 describe('button primitive regression guard', () => {
   const files = SCAN_DIRS.flatMap(d => walk(d))
 
@@ -69,4 +74,33 @@ describe('button primitive regression guard', () => {
       expect(hits).toEqual([])
     })
   }
+
+  it('native select elements compose the form-select primitive', () => {
+    const hits = []
+    for (const f of files.filter(file => /\.(js|html)$/.test(file))) {
+      const src = readFileSync(f, 'utf8')
+      const lines = src.split('\n')
+
+      lines.forEach((line, i) => {
+        const htmlSelectRe = /<select\b([^>]*)>/gi
+        for (const match of line.matchAll(htmlSelectRe)) {
+          if (!hasFormSelectClass(match[1])) {
+            hits.push(`${f.replace(REPO_ROOT + '/', '')}:${i + 1}: ${line.trim()}`)
+          }
+        }
+
+        const createRe = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*document\.createElement\(['"]select['"]\)/g
+        for (const match of line.matchAll(createRe)) {
+          const varName = match[1]
+          const lookahead = lines.slice(i, i + 9).join('\n')
+          const classNameRe = new RegExp(`${escapeRegex(varName)}\\.className\\s*=\\s*['"\`][^'"\`]*\\bform-select\\b`)
+          const classListRe = new RegExp(`${escapeRegex(varName)}\\.classList\\.add\\([^)]*['"]form-select['"]`)
+          if (!classNameRe.test(lookahead) && !classListRe.test(lookahead)) {
+            hits.push(`${f.replace(REPO_ROOT + '/', '')}:${i + 1}: ${line.trim()}`)
+          }
+        }
+      })
+    }
+    expect(hits).toEqual([])
+  })
 })

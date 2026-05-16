@@ -143,11 +143,6 @@
   let projectMobileCreateOpen = false;
   let projectMobileView = 'list';
   let projectMobileArchivedOpen = false;
-  let projectMobileActionSheetOverlay = null;
-  let projectMobileActionSheet = null;
-  let projectMobileActionSheetTitle = null;
-  let projectMobileActionSheetItems = null;
-  let projectMobileActionSheetReturnFocus = null;
   let projectMobileCompareOverlay = null;
   let projectMobileCompareSheet = null;
   let projectMobileCompareTitle = null;
@@ -4138,28 +4133,18 @@
     ].filter(Boolean);
   }
 
+  const _PROJECT_MOBILE_TAB_EDGE_OPTS = { wrapSelector: '.project-mobile-tabs-wrap' };
+
   function _syncProjectMobileActiveTabScroll() {
-    if (!projectMobileTabs) return;
-    const active = projectMobileTabs.querySelector('.is-active');
-    if (!active) {
-      _syncProjectMobileTabEdges();
-      return;
+    if (typeof window.syncActiveTabStripScroll === 'function') {
+      window.syncActiveTabStripScroll(projectMobileTabs, _PROJECT_MOBILE_TAB_EDGE_OPTS);
     }
-    window.setTimeout(() => {
-      const targetLeft = active.offsetLeft - Math.max(0, (projectMobileTabs.clientWidth - active.offsetWidth) / 2);
-      projectMobileTabs.scrollLeft = Math.max(0, targetLeft);
-      _syncProjectMobileTabEdges();
-    }, 0);
   }
 
   function _syncProjectMobileTabEdges() {
-    if (!projectMobileTabs) return;
-    const wrap = projectMobileTabs.closest?.('.project-mobile-tabs-wrap');
-    if (!wrap) return;
-    const maxScroll = Math.max(0, projectMobileTabs.scrollWidth - projectMobileTabs.clientWidth);
-    const scrollLeft = Math.max(0, projectMobileTabs.scrollLeft || 0);
-    wrap.classList.toggle('has-left-overflow', scrollLeft > 2);
-    wrap.classList.toggle('has-right-overflow', scrollLeft < maxScroll - 2);
+    if (typeof window.syncTabStripEdges === 'function') {
+      window.syncTabStripEdges(projectMobileTabs, _PROJECT_MOBILE_TAB_EDGE_OPTS);
+    }
   }
 
   function _renderProjectMobileListRow(project, activeId) {
@@ -4499,83 +4484,11 @@
   }
 
   function _ensureProjectMobileActionSheet() {
-    if (projectMobileActionSheetOverlay && projectMobileActionSheet && projectMobileActionSheetItems) {
-      return projectMobileActionSheetOverlay;
-    }
-    const overlay = document.createElement('div');
-    overlay.id = 'project-mobile-action-sheet-overlay';
-    overlay.className = 'modal-overlay mobile-sheet-overlay project-mobile-action-sheet-overlay u-hidden';
-    overlay.setAttribute('aria-hidden', 'true');
-    const sheet = document.createElement('section');
-    sheet.id = 'project-mobile-action-sheet';
-    sheet.className = 'modal-card mobile-sheet-surface project-mobile-action-sheet';
-    sheet.setAttribute('role', 'dialog');
-    sheet.setAttribute('aria-modal', 'true');
-    sheet.setAttribute('aria-labelledby', 'project-mobile-action-sheet-title');
-    const grab = document.createElement('div');
-    grab.className = 'sheet-grab gesture-handle';
-    grab.setAttribute('role', 'button');
-    grab.tabIndex = 0;
-    grab.setAttribute('aria-label', 'Close project action sheet');
-    const header = document.createElement('div');
-    header.className = 'project-mobile-action-sheet-header';
-    const title = document.createElement('h2');
-    title.id = 'project-mobile-action-sheet-title';
-    title.textContent = 'Actions';
-    header.appendChild(title);
-    const items = document.createElement('div');
-    items.className = 'project-mobile-action-sheet-items bottom-sheet-body nice-scroll';
-    sheet.append(grab, header, items);
-    overlay.appendChild(sheet);
-    (projectWorkspaceModal || document.body).appendChild(overlay);
-
-    projectMobileActionSheetOverlay = overlay;
-    projectMobileActionSheet = sheet;
-    projectMobileActionSheetTitle = title;
-    projectMobileActionSheetItems = items;
-
-    overlay.addEventListener('click', (event) => {
-      if (event.target === overlay) _closeProjectMobileActionSheet();
-    });
-    items.addEventListener('click', (event) => {
-      if (event.target.closest?.('[data-project-action]')) {
-        _closeProjectMobileActionSheet({ restoreFocus: false });
-      }
-    });
-    const bindDismissibleFn = global && typeof global.bindDismissible === 'function'
-      ? global.bindDismissible
-      : (typeof bindDismissible === 'function' ? bindDismissible : null);
-    if (bindDismissibleFn) {
-      bindDismissibleFn(overlay, {
-        level: 'sheet',
-        isOpen: () => !!(projectMobileActionSheetOverlay && projectMobileActionSheetOverlay.classList.contains('open')),
-        onClose: () => _closeProjectMobileActionSheet(),
-        backdropEl: overlay,
-      });
-    }
-    const bindMobileSheetFn = global && typeof global.bindMobileSheet === 'function'
-      ? global.bindMobileSheet
-      : (typeof bindMobileSheet === 'function' ? bindMobileSheet : null);
-    if (bindMobileSheetFn) bindMobileSheetFn(sheet, { onClose: () => _closeProjectMobileActionSheet() });
-    return overlay;
+    return null;
   }
 
   function _closeProjectMobileActionSheet({ restoreFocus = true } = {}) {
-    if (!projectMobileActionSheetOverlay) return;
-    projectMobileActionSheetOverlay.classList.add('u-hidden');
-    projectMobileActionSheetOverlay.classList.remove('open');
-    projectMobileActionSheetOverlay.setAttribute('aria-hidden', 'true');
-    if (projectMobileActionSheetItems) projectMobileActionSheetItems.replaceChildren();
-    if (
-      restoreFocus
-      && projectMobileActionSheetReturnFocus
-      && projectMobileActionSheetReturnFocus.isConnected
-      && typeof projectMobileActionSheetReturnFocus.focus === 'function'
-    ) {
-      const focusTarget = projectMobileActionSheetReturnFocus;
-      window.setTimeout(() => focusTarget.focus(), 0);
-    }
-    projectMobileActionSheetReturnFocus = null;
+    if (typeof global.closeActionSheet === 'function') global.closeActionSheet({ restoreFocus });
   }
 
   function _projectMobileActionSheetItem(projectId, item) {
@@ -4596,6 +4509,7 @@
     if (item.tone === 'danger' || item.variant === 'destructive') btn.classList.add('is-danger');
     if (item.disabled) btn.disabled = true;
     if (item.title) btn.title = item.title;
+    btn.addEventListener('click', () => _closeProjectMobileActionSheet({ restoreFocus: false }));
     Object.entries(item.dataset || {}).forEach(([key, value]) => {
       btn.dataset[key] = String(value || '');
     });
@@ -4605,24 +4519,16 @@
   function _openProjectMobileActionSheet(projectId, label, actions = [], returnFocus = null) {
     const filteredActions = actions.filter(Boolean);
     if (!filteredActions.length) return;
-    _ensureProjectMobileActionSheet();
-    if (!projectMobileActionSheetOverlay || !projectMobileActionSheetItems) return;
-    projectMobileActionSheetReturnFocus = returnFocus || document.activeElement || null;
-    if (projectMobileActionSheetTitle) projectMobileActionSheetTitle.textContent = label || 'Actions';
-    projectMobileActionSheetItems.replaceChildren();
-    projectMobileActionSheetItems.scrollTop = 0;
-    filteredActions.forEach(item => {
-      projectMobileActionSheetItems.appendChild(_projectMobileActionSheetItem(projectId, item));
-    });
-    if (typeof global.enhanceAppSelects === 'function') {
-      global.enhanceAppSelects(projectMobileActionSheetItems);
+    if (typeof global.openActionSheet !== 'function') {
+      _ensureProjectMobileActionSheet();
+      return;
     }
-    projectMobileActionSheetOverlay.classList.remove('u-hidden');
-    projectMobileActionSheetOverlay.classList.add('open');
-    projectMobileActionSheetOverlay.setAttribute('aria-hidden', 'false');
-    window.setTimeout(() => {
-      projectMobileActionSheetItems.querySelector('button, select, input, textarea')?.focus();
-    }, 0);
+    global.openActionSheet({
+      title: label || 'Actions',
+      container: projectWorkspaceModal || document.body,
+      returnFocus,
+      items: filteredActions.map(item => ({ node: _projectMobileActionSheetItem(projectId, item) })),
+    });
   }
 
   function _projectMobileCompareRuns(projectId) {
@@ -5786,6 +5692,7 @@
       projectName: project ? _projectDisplayName(project) : '',
       tab: tab ? tab.id : String(entity.type || ''),
       entityValue: String(entity.canonical_value || entity.value || ''),
+      forceView: 'detail',
     });
   }
 

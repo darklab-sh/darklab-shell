@@ -42,7 +42,7 @@ EOF
 
 cd "$APP_DIR"
 if [[ "$SLOT" == capture-* ]]; then
-  APP_DATA_DIR="$DATA_DIR" "$PYTHON_BIN" -c "import database" >/dev/null
+  APP_DATA_DIR="$DATA_DIR" "$PYTHON_BIN" -c "import app" >/dev/null
   APP_DATA_DIR="$DATA_DIR" "$PYTHON_BIN" "$REPO_ROOT/scripts/seed_history.py" \
     --fixture visual-flows \
     --token "$CAPTURE_SESSION_TOKEN" \

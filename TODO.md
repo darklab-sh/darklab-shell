@@ -49,17 +49,18 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ### Postgres production backend and storage scaling plan
 - **Decision frame**
   - Pre-condition: this plan converts the existing Research entry into an implementation track. The decision the work converges on is **keep SQLite as the default local/single-user backend** and **add Postgres as the recommended backend for heavy multi-user deployments**, with no flag day — both backends ship side by side and an operator chooses at deploy time.
-  - Hard constraint: every query path the app uses today must run unmodified on SQLite. Postgres support is additive; SQLite is not deprecated.
+  - Hard constraint: every feature and route the app uses today keeps the same behavior on SQLite. Postgres support is additive; SQLite is not deprecated.
   - Soft constraint: write new query code in a portable subset from the start. The Atlas, intel, and findings tables added since v1.5 are the natural baseline because they already exist in `app/core/database.py` and have not yet sprouted SQLite-only optimizations beyond the FTS5 virtual table.
 - **Phase 0 — Measure current pressure (one-time research, blocking)**
   - Run the `/diag` Storage breakdown panel on a seeded production-shape database and capture: per-table allocated bytes, per-column payload bytes, FTS shadow-table cost, and the largest-run distribution.
   - Project one-year growth at 10, 30, and 100 heavy users using the captured per-run averages (output bytes, search-text bytes, artifact bytes, entity-row count, finding-row count, snapshot bytes). Multiply by the configured `permalink_retention_days` and pruning policy.
   - Identify the candidate "fat" columns for offload to filesystem/object storage: `runs.output`, `runs.output_search_text`, `snapshots.content` for very long shares, and `entity_intel_snapshots.data_json` for raw provider payloads.
   - Output of this phase is a short `docs/storage-scaling.md` with the measured numbers and a sizing recommendation per deployment tier. Without this, the rest of the plan is guesswork.
-- **Phase 1 — Storage abstraction in `app/core/database.py`**
+- **Phase 1 — Backend interface and SQL portability inventory**
   - Introduce a thin `DatabaseBackend` enum (`sqlite`, `postgres`) selected at boot from a new config key `database_backend` (default `sqlite`).
   - Move every `sqlite3`-specific call (`db_connect`, pragmas, `sqlite_compileoption_used`, `dbstat`) behind a backend-aware module. SQLite path keeps its current behavior bit-for-bit; the Postgres path stays unimplemented in this phase but the interface lands.
-  - Replace bare `?` parameter placeholders with a backend-aware paramstyle helper (`?` for SQLite, `%s` for Postgres) or migrate to named placeholders (`:name`) which both backends support — the named-placeholder route is preferred because it survives `INSERT ... RETURNING` rewrites.
+  - Inventory direct `sqlite3.connect(DB_PATH)` use in app code and tests. Move app code to the backend interface and either wrap or clearly mark test-only SQLite fixture setup so future Postgres coverage does not silently bypass the adapter.
+  - Replace bare `?` parameter placeholders with a backend-aware query helper. Do not assume one placeholder syntax is accepted by both drivers: SQLite supports `?` and `:name`, while psycopg uses `%s` / `%(name)s`. The helper should render the right placeholder style and keep call sites from hand-writing driver-specific SQL for common reads/writes.
   - Define a small "dialect" module covering: `JSON` column type (TEXT for SQLite, JSONB for Postgres), `now()`/`datetime('now')`, upsert syntax (`ON CONFLICT ... DO UPDATE` works on both — confirm Postgres ≥ 9.5), boolean handling (INTEGER 0/1 vs BOOLEAN), `RETURNING` support, and substring/concat operators. Document each chosen idiom in the dialect module so call sites don't reinvent them.
   - Audit every existing `db_connect()` call site against the dialect rules. Today's hot paths in `services/projects/workspace.py`, `services/runs/comparison.py`, `services/atlas/lookup.py`, `services/atlas/materializer.py`, and `blueprints/run.py` are the priority — collectively they own most of the schema's writes and reads.
 - **Phase 2 — Schema portability for the new tables**
@@ -67,7 +68,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
     - Replace `INTEGER` boolean columns with portable equivalents: keep `INTEGER NOT NULL DEFAULT 0` everywhere since both backends accept it and it preserves on-disk shape for SQLite users.
     - Switch JSON-bearing TEXT columns (`session_preferences.preferences`, `user_workflows.inputs`, `user_workflows.steps`, `entity_intel_snapshots.data_json`, `project_links.source_detail`, `evidence_packages.manifest`) to a portable `JSON_COLUMN` macro that resolves to `TEXT` on SQLite and `JSONB` on Postgres.
     - Audit every `UNIQUE (...)` and `PRIMARY KEY (...)` constraint for case-sensitivity differences — Postgres collations affect index reuse where SQLite is byte-exact.
-    - FTS: do not attempt to port FTS5 to Postgres. Instead, behind the backend flag, build the search path on Postgres using `tsvector` + GIN indexes maintained by an `AFTER INSERT` trigger on `runs`. The application API (`search_runs(query)`) stays unchanged; only the implementation diverges.
+    - FTS: do not attempt to port FTS5 to Postgres. Instead, behind the backend flag, build a Postgres search implementation that preserves the current command/output substring behavior for domains, IPs, hashes, command fragments, and scanner output. Prefer `pg_trgm` GIN indexes, optionally paired with `tsvector`, rather than plain `tsvector` alone. The application API (`search_runs(query)`) stays unchanged; only the implementation diverges.
   - Migrations: introduce `app/core/migrations/` with numbered, idempotent migration files. SQLite continues to run schema creation on boot; Postgres runs migrations on boot guarded by an advisory lock so concurrent gunicorn workers don't race. The first migration codifies the current schema as the v1 baseline; new tables land as additional numbered migrations.
 - **Phase 3 — Large-body offload (independent of backend choice)**
   - Add a configurable filesystem-backed body store for `runs.output_search_text` (already lossy-ok), `snapshots.content` (when above a configurable threshold), and `entity_intel_snapshots.data_json` raw payloads. The DB keeps a pointer (`rel_path`, `byte_size`, `sha256`) like `run_output_artifacts` already does.
@@ -75,18 +76,23 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - This phase is independent of Postgres — it reduces SQLite pressure on its own and reduces Postgres row width if/when the swap happens. Document in `docs/storage-scaling.md` which deployments benefit most from offload alone vs. needing Postgres.
 - **Phase 4 — Postgres adapter and Docker Compose service**
   - Add `psycopg[binary]` to `app/requirements.txt` (gated import; only loaded when `database_backend == "postgres"`).
-  - Implement the Postgres dialect concretely: connection pool via `psycopg_pool`, transaction-per-request, the FTS replacement, advisory-lock-guarded migrations, and per-backend retry behavior for transient errors.
+  - Implement the Postgres dialect concretely: connection pool via `psycopg_pool`, transaction-per-request, the `pg_trgm` / optional `tsvector` search replacement, advisory-lock-guarded migrations, and per-backend retry behavior for transient errors.
   - Reuse the existing `_diag_db_stats` and storage breakdown helper against `pg_class`, `pg_indexes`, and `pg_stat_user_tables` so `/diag` remains useful on Postgres without a parallel UI.
   - New Docker Compose service `postgres:` with a named volume, version-pinned image, healthcheck, and `depends_on` from the app service. Document Compose overrides for operators who already run their own Postgres.
   - New config keys: `database_backend`, `database_url` (DSN for Postgres), `database_pool_min`, `database_pool_max`. SQLite path ignores all of them and continues to use `DB_PATH`.
-- **Phase 5 — Migration helper**
-  - New `python -m core.migrate_sqlite_to_postgres` command that streams every table from a source SQLite file into a fresh Postgres database, preserving primary keys, foreign relationships, and JSON column values. Idempotent (`INSERT ... ON CONFLICT DO NOTHING`) so an interrupted migration resumes cleanly.
-  - The migration helper does NOT rebuild FTS data — it stops with a clear message after the metadata copy, then runs the Postgres-side `tsvector` trigger to backfill search rows. This avoids reimplementing FTS5 tokenization in Python.
-  - Document a recommended cutover procedure in `docs/postgres-migration.md`: snapshot the SQLite file, run the migration helper into a staging Postgres, validate row counts via the new `/diag` storage panel against both backends, switch `database_backend` and `database_url`, restart.
+- **Phase 5 — Offline migration helper**
+  - New `scripts/migrate_sqlite_to_postgres.py` helper that streams every table from a source SQLite file into a fresh Postgres database, preserving primary keys, app-owned relationships, and JSON column values. Use shared app helpers only where it reduces duplication; keep the operator entry point under `scripts/` so backend conversion is an explicit offline cutover, not app startup work.
+  - Suggested command shape:
+    `python scripts/migrate_sqlite_to_postgres.py --sqlite-db /data/history.db --artifact-root /data --database-url "$DATABASE_URL" --validate`
+  - Make the helper resumable only when explicitly requested (`--resume`), using `INSERT ... ON CONFLICT DO NOTHING` plus validation output. Default behavior should require an empty destination or an explicit confirmation flag so operators do not accidentally merge unrelated databases.
+  - Copy or verify file-backed state as part of the cutover: existing run-output artifacts, workspace file metadata roots, and any Phase 3 offloaded snapshot/search/intel payloads. The database copy is incomplete if pointers move without their files.
+  - Secrets migration copies ciphertext, nonce, metadata, and consumer envs as-is, but only works when the Postgres deployment uses the same `SECRETS_MASTER_KEY` or app-owned key file. The helper and docs should preflight that requirement and warn loudly before cutover.
+  - The migration helper does NOT recreate SQLite FTS data. After the metadata copy, it runs the Postgres search backfill for the `pg_trgm` / optional `tsvector` indexes and reports the backfill status. This avoids reimplementing FTS5 tokenization in Python.
+  - Document a recommended cutover procedure in `docs/postgres-migration.md`: stop writes or pause the app, snapshot the SQLite file and artifact directory, run the migration helper into staging Postgres, validate row counts and representative JSON/file checksums, switch `database_backend` and `database_url`, restart, and keep the untouched SQLite snapshot as the rollback path.
 - **Phase 6 — Test matrix**
   - Parameterize `tests/py/conftest.py` so the existing backend-module and route tests run against both SQLite (default) and Postgres (when `DARKLAB_TEST_POSTGRES_DSN` is set in the environment). CI runs both lanes; local dev runs SQLite only unless the env var is set.
   - Add a per-backend smoke test exercising: run insert + finalize, FTS-equivalent search, Atlas materialize, project link, intel snapshot insert with a JSON payload, snapshot create.
-  - Add the migration-helper integration test: build a SQLite fixture, run the migration, query the Postgres database, assert row-count equality and JSON-column equality table by table.
+  - Add the migration-helper integration test: build a SQLite fixture with artifacts, secrets metadata, JSON columns, and representative search text, run the offline migration script, query the Postgres database, assert row-count equality, JSON-column equality table by table, artifact/payload pointer validity, and Postgres search parity for command/output fragments.
 - **Documentation**
   - Add `docs/storage-scaling.md` (deliverable from Phase 0) and `docs/postgres-migration.md` (deliverable from Phase 5).
   - Update CONFIGURATION.md with the new keys (`database_backend`, `database_url`, `database_pool_min`, `database_pool_max`, the offload thresholds), the Docker Compose `postgres:` service shape, and the supported version matrix.
@@ -95,6 +101,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 - **Non-goals**
   - No multi-master, no read replicas. The first Postgres release targets the same single-writer-with-many-readers shape the app already assumes.
   - No automatic backend selection by load. The deployment-time config key is the only switch.
+  - No automatic SQLite-to-Postgres conversion during app startup. Startup may apply schema migrations for the selected backend, but backend conversion is an explicit offline operator action through `scripts/migrate_sqlite_to_postgres.py`.
   - No backward compatibility wrappers in Python data classes for SQLite vs. Postgres row shapes — every row reader uses keyed access (`row["column"]`) already, which works on both backends.
 
 ### High-volume output handling

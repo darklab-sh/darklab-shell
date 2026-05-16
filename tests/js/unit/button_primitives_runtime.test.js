@@ -34,8 +34,8 @@ function mountHistoryHarness() {
     <div id="history-advanced-filters"></div>
     <input id="history-root-input" />
     <div id="history-root-dropdown"></div>
-    <select id="history-exit-filter"></select>
-    <select id="history-date-filter"></select>
+    <select id="history-exit-filter" class="form-select form-control-compact"></select>
+    <select id="history-date-filter" class="form-select form-control-compact"></select>
     <input id="history-starred-toggle" type="checkbox" />
     <button id="history-clear-filters"></button>
     <div id="history-active-filters"></div>

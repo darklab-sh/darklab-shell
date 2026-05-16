@@ -334,32 +334,6 @@
       node('div', 'atlas-detail-type', text(finding.kind, 'FINDING').toUpperCase()),
       node('div', 'atlas-detail-value', text(finding.title || finding.raw_line, finding.id)),
     );
-    const actions = node('div', 'atlas-detail-actions');
-    actions.appendChild(reviewStateSelect(finding.review_state || finding.status, (reviewState) => {
-      handlers.onReviewState?.(finding, reviewState);
-    }));
-    if (finding.run_id) {
-      const run = document.createElement('button');
-      run.type = 'button';
-      run.className = 'btn btn-secondary btn-compact';
-      run.textContent = 'See in run';
-      run.addEventListener('click', () => handlers.onSeeRun?.(finding));
-      actions.appendChild(run);
-    }
-    if (finding.entity_id) {
-      const entity = document.createElement('button');
-      entity.type = 'button';
-      entity.className = 'btn btn-secondary btn-compact';
-      entity.textContent = 'Open entity';
-      entity.addEventListener('click', () => handlers.onOpenEntity?.(finding));
-      actions.appendChild(entity);
-    }
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'btn btn-secondary btn-danger btn-compact';
-    deleteBtn.textContent = 'Delete';
-    deleteBtn.addEventListener('click', () => handlers.onDeleteFinding?.(finding));
-    actions.appendChild(deleteBtn);
     const meta = node('div', 'atlas-detail-meta');
     meta.append(
       metaRow('Status', text(finding.review_state || finding.status, 'new')),
@@ -370,7 +344,40 @@
       metaRow('Last seen', formatDate(finding.last_seen_at)),
     );
     const raw = node('code', 'atlas-finding-raw', text(finding.raw_line, finding.title || finding.id));
-    container.append(header, actions, meta, section('Evidence', raw));
+    container.append(header);
+    if (!handlers.hideInlineActions) {
+      const actions = node('div', 'atlas-detail-actions');
+      actions.appendChild(reviewStateSelect(finding.review_state || finding.status, (reviewState) => {
+        handlers.onReviewState?.(finding, reviewState);
+      }));
+      if (finding.run_id) {
+        const run = document.createElement('button');
+        run.type = 'button';
+        run.className = 'btn btn-secondary btn-compact';
+        run.textContent = 'See in run';
+        run.addEventListener('click', () => handlers.onSeeRun?.(finding));
+        actions.appendChild(run);
+      }
+      if (finding.entity_id) {
+        const entity = document.createElement('button');
+        entity.type = 'button';
+        entity.className = 'btn btn-secondary btn-compact';
+        entity.textContent = 'Open entity';
+        entity.addEventListener('click', () => handlers.onOpenEntity?.(finding));
+        actions.appendChild(entity);
+      }
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'btn btn-secondary btn-danger btn-compact';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.addEventListener('click', () => handlers.onDeleteFinding?.(finding));
+      actions.appendChild(deleteBtn);
+      container.append(actions);
+      if (typeof global.enhanceAppSelects === 'function') {
+        global.enhanceAppSelects(actions);
+      }
+    }
+    container.append(meta, section('Evidence', raw));
   }
 
   function renderMetadataEditor(entity, handlers = {}) {
@@ -420,28 +427,6 @@
       node('div', 'atlas-detail-value', text(entity.canonical_value, entity.id)),
     );
 
-    const actions = node('div', 'atlas-detail-actions');
-    const refresh = document.createElement('button');
-    refresh.type = 'button';
-    refresh.className = 'btn btn-secondary btn-compact';
-    refresh.textContent = 'Refresh intel';
-    refresh.addEventListener('click', () => handlers.onRefreshIntel?.(entity));
-    actions.appendChild(refresh);
-    if (handlers.activeProject && !handlers.isLinkedToActiveProject?.(entity)) {
-      const promote = document.createElement('button');
-      promote.type = 'button';
-      promote.className = 'btn btn-secondary btn-compact';
-      promote.textContent = 'Add to active project';
-      promote.addEventListener('click', () => handlers.onAddToActiveProject?.(entity));
-      actions.appendChild(promote);
-    }
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'btn btn-secondary btn-danger btn-compact';
-    deleteBtn.textContent = 'Delete';
-    deleteBtn.addEventListener('click', () => handlers.onDeleteEntity?.(entity));
-    actions.appendChild(deleteBtn);
-
     const meta = node('div', 'atlas-detail-meta');
     meta.append(
       metaRow('Occurrences', Number(entity.occurrence_count || 0).toLocaleString()),
@@ -449,7 +434,32 @@
       metaRow('Last seen', formatDate(entity.last_seen_at)),
     );
 
-    container.append(header, actions, meta);
+    container.append(header);
+    if (!handlers.hideInlineActions) {
+      const actions = node('div', 'atlas-detail-actions');
+      const refresh = document.createElement('button');
+      refresh.type = 'button';
+      refresh.className = 'btn btn-secondary btn-compact';
+      refresh.textContent = 'Refresh intel';
+      refresh.addEventListener('click', () => handlers.onRefreshIntel?.(entity));
+      actions.appendChild(refresh);
+      if (handlers.activeProject && !handlers.isLinkedToActiveProject?.(entity)) {
+        const promote = document.createElement('button');
+        promote.type = 'button';
+        promote.className = 'btn btn-secondary btn-compact';
+        promote.textContent = 'Add to active project';
+        promote.addEventListener('click', () => handlers.onAddToActiveProject?.(entity));
+        actions.appendChild(promote);
+      }
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'btn btn-secondary btn-danger btn-compact';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.addEventListener('click', () => handlers.onDeleteEntity?.(entity));
+      actions.appendChild(deleteBtn);
+      container.append(actions);
+    }
+    container.append(meta);
     const intelSummary = renderIntelSummary(detail.intel_summary);
     if (intelSummary) container.append(section('Intel summary', intelSummary));
     container.append(section('Projects', renderProjectLinks(entity.project_links, handlers.onRemoveProjectLink)));
@@ -469,6 +479,7 @@
   global.DarklabAtlasDetail = {
     renderDetail,
     renderFindingDetail,
+    reviewStateSelect,
     formatCount,
     formatDate,
     text,

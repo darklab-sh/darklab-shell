@@ -23,6 +23,116 @@ export const WORKSPACE_CAPTURE_CMD = 'curl -L -o response.html https://noc.darkl
 export const COMPARE_CAPTURE_LEFT_ID = 'capture-compare-left'
 export const COMPARE_CAPTURE_RIGHT_ID = 'capture-compare-right'
 
+export const CAPTURE_ATLAS_DATA = {
+  summary: {
+    total: 5,
+    counts: { ip: 2, domain: 2, hash: 0, cve: 1, url: 0 },
+    findings: 2,
+  },
+  findingCounts: { new: 1, reviewed: 1, important: 0, false_positive: 0, needs_followup: 0 },
+  findings: [
+    {
+      id: 'capture-finding-443',
+      title: '443/tcp open https',
+      raw_line: '443/tcp open https nginx',
+      review_state: 'new',
+      status: 'new',
+      severity: 'medium',
+      tool_root: 'nmap',
+      entity_id: 'capture-ent-ip',
+      entity_type: 'ip',
+      entity_value: '107.178.109.44',
+      run_id: 'capture-run-nmap',
+      run_command: 'nmap -sV 107.178.109.44',
+      occurrence_count: 2,
+      last_seen_at: '2026-05-15T00:01:00Z',
+    },
+    {
+      id: 'capture-finding-cve',
+      title: 'CVE-2026-0001 mentioned in service banner',
+      raw_line: 'nginx banner references CVE-2026-0001',
+      review_state: 'reviewed',
+      status: 'reviewed',
+      severity: 'low',
+      tool_root: 'nuclei',
+      entity_id: 'capture-ent-cve',
+      entity_type: 'cve',
+      entity_value: 'CVE-2026-0001',
+      run_id: 'capture-run-nuclei',
+      run_command: 'nuclei -u https://darklab.sh',
+      occurrence_count: 1,
+      last_seen_at: '2026-05-15T00:03:00Z',
+    },
+  ],
+  entities: [
+    {
+      id: 'capture-ent-ip',
+      type: 'ip',
+      canonical_value: '107.178.109.44',
+      occurrence_count: 4,
+      run_count: 2,
+      project_link_count: 1,
+      project_links: [{ project_id: 'capture-project', project_name: 'Capture Investigation' }],
+      labels: [{ label: 'edge' }],
+      note: { body: 'Public edge host gathered during capture setup.' },
+      first_seen_at: '2026-05-15T00:00:00Z',
+      last_seen_at: '2026-05-15T00:04:00Z',
+    },
+    {
+      id: 'capture-ent-ip-v6',
+      type: 'ip',
+      canonical_value: '2606:4700:3033::6815:423',
+      occurrence_count: 2,
+      run_count: 1,
+      project_link_count: 0,
+      project_links: [],
+      labels: [],
+      note: null,
+      first_seen_at: '2026-05-15T00:02:00Z',
+      last_seen_at: '2026-05-15T00:04:00Z',
+    },
+    {
+      id: 'capture-ent-domain',
+      type: 'domain',
+      canonical_value: 'darklab.sh',
+      occurrence_count: 5,
+      run_count: 3,
+      project_link_count: 1,
+      project_links: [{ project_id: 'capture-project', project_name: 'Capture Investigation' }],
+      labels: [{ label: 'primary' }],
+      note: null,
+      first_seen_at: '2026-05-15T00:00:00Z',
+      last_seen_at: '2026-05-15T00:05:00Z',
+    },
+    {
+      id: 'capture-ent-domain-noc',
+      type: 'domain',
+      canonical_value: 'noc.darklab.sh',
+      occurrence_count: 3,
+      run_count: 2,
+      project_link_count: 1,
+      project_links: [{ project_id: 'capture-project', project_name: 'Capture Investigation' }],
+      labels: [],
+      note: null,
+      first_seen_at: '2026-05-15T00:01:00Z',
+      last_seen_at: '2026-05-15T00:05:00Z',
+    },
+    {
+      id: 'capture-ent-cve',
+      type: 'cve',
+      canonical_value: 'CVE-2026-0001',
+      occurrence_count: 1,
+      run_count: 1,
+      project_link_count: 0,
+      project_links: [],
+      labels: [],
+      note: null,
+      first_seen_at: '2026-05-15T00:03:00Z',
+      last_seen_at: '2026-05-15T00:03:00Z',
+    },
+  ],
+}
+
 export const CAPTURE_COMPARE_DATA = {
   left_run_id: COMPARE_CAPTURE_LEFT_ID,
   right_run_id: COMPARE_CAPTURE_RIGHT_ID,
@@ -751,7 +861,16 @@ export async function saveCapture(page, manifest, {
 
 export async function installCommonCaptureMocks(page) {
   await page.addInitScript(
-    ({ longCmd, fastCmd, interactiveCmd, mockRuns, compareData, compareLeftId, compareRightId }) => {
+    ({
+      longCmd,
+      fastCmd,
+      interactiveCmd,
+      mockRuns,
+      compareData,
+      compareLeftId,
+      compareRightId,
+      atlasData,
+    }) => {
       const originalFetch = window.fetch.bind(window)
       const encoder = new TextEncoder()
       let mockRunIndex = 0
@@ -759,6 +878,10 @@ export async function installCommonCaptureMocks(page) {
       const mockStreams = new Map()
 
       const sseEvent = (payload) => `data: ${JSON.stringify(payload)}\n\n`
+      const jsonResponse = (payload) => new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
       const mockRunResponse = (mock) => {
         mockRunIndex += 1
         const runId = `capture-mock-run-${mockRunIndex}`
@@ -789,6 +912,113 @@ export async function installCommonCaptureMocks(page) {
         const url = typeof input === 'string' ? input : input?.url || ''
         const method = String(init?.method || 'GET').toUpperCase()
         const rawBody = typeof init?.body === 'string' ? init.body : ''
+        const parsedUrl = (() => {
+          try {
+            return new URL(url, window.location.href)
+          } catch (_) {
+            return null
+          }
+        })()
+        const path = parsedUrl?.pathname || url.split('?')[0]
+
+        if (method === 'GET' && path === '/atlas') {
+          return jsonResponse(atlasData.summary)
+        }
+
+        if (method === 'GET' && path === '/atlas/findings') {
+          return jsonResponse({
+            findings: atlasData.findings,
+            total: atlasData.findings.length,
+            limit: 50,
+            offset: 0,
+            counts: atlasData.findingCounts,
+          })
+        }
+
+        if (method === 'GET' && path === '/atlas/entities') {
+          const entityType = String(parsedUrl?.searchParams.get('type') || '')
+          const entities = atlasData.entities.filter(entity => !entityType || entity.type === entityType)
+          return jsonResponse({
+            entities,
+            total: entities.length,
+            limit: 50,
+            offset: 0,
+          })
+        }
+
+        if (method === 'GET' && path.startsWith('/atlas/entities/')) {
+          const entityId = decodeURIComponent(path.replace('/atlas/entities/', '').split('/')[0])
+          const entity = atlasData.entities.find(item => item.id === entityId)
+          if (!entity) {
+            return new Response(JSON.stringify({ error: 'entity not found' }), {
+              status: 404,
+              headers: { 'Content-Type': 'application/json' },
+            })
+          }
+          return jsonResponse({
+            entity,
+            intel_snapshots: entity.type === 'ip'
+              ? [{
+                  provider: 'Shodan',
+                  status: 'ok',
+                  summary: '2 open ports and 1 hostname',
+                  data: {
+                    providers: {
+                      shodan: {
+                        ports: [80, 443],
+                        hostnames: ['edge.darklab.sh'],
+                        cves: ['CVE-2026-0001'],
+                        services: [
+                          { port: 443, transport: 'tcp', product: 'nginx' },
+                        ],
+                      },
+                    },
+                  },
+                  fetched_at: '2026-05-15T00:06:00Z',
+                }]
+              : [],
+            intel_summary: entity.type === 'ip'
+              ? {
+                  status: 'available',
+                  providers_with_data: ['shodan', 'censys'],
+                  highlight_count: 3,
+                  highlights: [
+                    {
+                      label: 'Open ports',
+                      value: '80, 443',
+                      provider: 'shodan',
+                      provider_label: 'Shodan',
+                      tone: 'neutral',
+                    },
+                    {
+                      label: 'Hostname',
+                      value: 'edge.darklab.sh',
+                      provider: 'shodan',
+                      provider_label: 'Shodan',
+                      tone: 'neutral',
+                    },
+                    {
+                      label: 'CVEs',
+                      value: 'CVE-2026-0001',
+                      provider: 'shodan',
+                      provider_label: 'Shodan',
+                      tone: 'warning',
+                    },
+                  ],
+                  updated_at: '2026-05-15T00:06:00Z',
+                }
+              : { status: 'none', providers_with_data: [], highlight_count: 0, highlights: [] },
+            runs: [
+              {
+                run_id: 'capture-run-nmap',
+                command: 'nmap -sV 107.178.109.44',
+                occurrence_count: 2,
+                last_seen_at: '2026-05-15T00:04:00Z',
+              },
+            ],
+            findings: atlasData.findings.filter(finding => finding.entity_id === entity.id),
+          })
+        }
 
         if (url.endsWith('/config')) {
           const original = await originalFetch(input, init)
@@ -1023,6 +1253,7 @@ export async function installCommonCaptureMocks(page) {
       compareData: CAPTURE_COMPARE_DATA,
       compareLeftId: COMPARE_CAPTURE_LEFT_ID,
       compareRightId: COMPARE_CAPTURE_RIGHT_ID,
+      atlasData: CAPTURE_ATLAS_DATA,
     },
   )
 }
