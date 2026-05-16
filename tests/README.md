@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,782
+- behavior tests: 2,788
 - docs/inventory meta-tests: 32
-- `pytest`: 1414 (1382 behavior + 32 meta)
+- `pytest`: 1419 (1387 behavior + 32 meta)
 - `vitest`: 1150
-- `playwright`: 250
-- total: 2,814
+- `playwright`: 251
+- total: 2,820
 
 This document is organized in two parts:
 
@@ -1085,6 +1085,11 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestDiagRoute.test_db_section_reports_journal_mode` | Checks that the database section reports `journal_mode` as one of SQLite's documented values (`delete`, `truncate`, `persist`, `memory`, `wal`, `off`). |
 | `TestDiagRoute.test_db_section_reports_freelist_and_reclaimable_bytes` | Checks that `page_count`, `page_size`, `freelist_count`, and `reclaimable_size = freelist × page_size` are surfaced for VACUUM-headroom visibility. |
 | `TestDiagRoute.test_db_section_reports_per_table_row_counts` | Checks that the per-table row count list is populated, includes the `runs` table, and excludes `sqlite_*` internal tables and FTS5 shadow tables (`runs_fts_*`). |
+| `TestDiagRoute.test_db_storage_breakdown_reports_buckets` | Checks that `/diag` JSON includes storage buckets, run-table row counts, and logical payload estimates. |
+| `TestDiagRoute.test_db_storage_breakdown_sums_payload_and_artifact_bytes` | Checks that storage payload estimates include wide run text fields and numeric artifact byte sizes. |
+| `TestDiagRoute.test_db_storage_breakdown_rolls_up_fts_shadow_tables` | Checks that FTS5 shadow tables are grouped under the `runs_fts` virtual table when `dbstat` is available. |
+| `TestDiagRoute.test_db_storage_breakdown_falls_back_without_dbstat` | Checks that storage diagnostics keep row counts and logical payloads when SQLite lacks `dbstat`. |
+| `TestDiagRoute.test_html_response_renders_storage_breakdown_section` | Checks that the HTML diagnostics page renders the Storage breakdown panel and run sizing hints. |
 | `TestDiagRoute.test_db_section_quotes_metadata_table_names_for_row_counts` | Verifies that diagnostics quote and escape SQLite metadata-derived table names before row-count probes. |
 | `TestDiagRoute.test_diag_sqlite_identifier_rejects_empty_or_nul_names` | Checks that the diagnostics SQLite identifier helper escapes double quotes and rejects empty or NUL-containing names. |
 | `TestDiagRoute.test_db_section_runs_and_snapshots_remain_at_top_level` | Backward-compat check: the original /diag schema's `runs` and `snapshots` top-level keys are still present and match the new `tables` row counts. |
@@ -3044,6 +3049,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | --- | --- |
 | `back button is visible at mobile viewport width` | Verifies that back button is visible at mobile viewport width. |
 | `back button navigates back to the shell` | Verifies that back button navigates back to the shell. |
+| `storage breakdown renders table sizing diagnostics` | Verifies that the diagnostics Storage breakdown panel renders with at least one table-sizing row. |
 | `back button is visible at 850px touch viewport (shell threshold)` | Verifies that the diagnostics back button appears at 850px on a touch device — the shell's mobile-mode threshold — so chrome parity holds beyond the old 760px breakpoint. |
 | `back button is hidden at 850px non-touch viewport` | Verifies that the diagnostics back button is hidden at 850px on a non-touch (pointer: fine) device, where the shell stays in desktop mode. |
 | `mobile startup uses the mobile welcome and keeps the composer visible` | Verifies that mobile startup uses the mobile welcome and keeps the composer visible. |

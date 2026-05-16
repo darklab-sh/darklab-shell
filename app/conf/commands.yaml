@@ -3597,34 +3597,34 @@ commands:
           hint_only: true
           value_type: ip
           description: Public IP address to query
-  - root: urlscan
+  - root: urlscan-cli
     description: Submits URLs to urlscan.io, retrieves scan results, and searches urlscan data.
     category: External Intelligence
     policy:
       allow:
-        - urlscan --help
-        - urlscan scan submit
-        - urlscan scan result
-        - urlscan search
+        - urlscan-cli --help
+        - urlscan-cli scan submit
+        - urlscan-cli scan result
+        - urlscan-cli search
       deny:
-        - urlscan key
-        - urlscan config
-        - urlscan completion
-        - urlscan --api-key
-        - urlscan --apikey
-        - urlscan --token
-        - urlscan -k
-        - urlscan scan submit -
-        - urlscan scan result -
+        - urlscan-cli key
+        - urlscan-cli config
+        - urlscan-cli completion
+        - urlscan-cli --api-key
+        - urlscan-cli --apikey
+        - urlscan-cli --token
+        - urlscan-cli -k
+        - urlscan-cli scan submit -
+        - urlscan-cli scan result -
     requires_secrets:
       - env: URLSCAN_API_KEY
     autocomplete:
       examples:
-        - value: urlscan --help
+        - value: urlscan-cli --help
           description: Show help and usage
-        - value: urlscan scan submit https://darklab.sh/
+        - value: urlscan-cli scan submit https://darklab.sh/
           description: Submit a URL for scanning
-        - value: urlscan search domain:darklab.sh
+        - value: urlscan-cli search domain:darklab.sh
           description: Search urlscan results
       subcommands:
         scan:
@@ -3633,7 +3633,7 @@ commands:
             submit:
               description: Submit a URL for scanning
               examples:
-                - value: urlscan scan submit https://darklab.sh/
+                - value: urlscan-cli scan submit https://darklab.sh/
                   description: Submit a URL for scanning
               arguments:
                 - placeholder: <url>
@@ -3643,7 +3643,7 @@ commands:
             result:
               description: Retrieve a scan result by UUID
               examples:
-                - value: urlscan scan result 00000000-0000-0000-0000-000000000000
+                - value: urlscan-cli scan result 00000000-0000-0000-0000-000000000000
                   description: Retrieve a scan result by UUID
               arguments:
                 - placeholder: <uuid>
@@ -3652,7 +3652,7 @@ commands:
         search:
           description: Search urlscan indexed results
           examples:
-            - value: urlscan search domain:darklab.sh
+            - value: urlscan-cli search domain:darklab.sh
               description: Search urlscan results
           arguments:
             - placeholder: <query>

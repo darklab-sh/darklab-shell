@@ -688,7 +688,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - `intel cve <CVE-ID>` queries NVD and Vulners, then shows severity, score, publish/modified dates, summary, references, exploit counts, and exploitability context when provider data is available.
 - Each provider pane reports whether it came from cache, was rate-limited, hit quota backoff, or is missing a required encrypted secret.
 - Private, loopback, and other non-public IPs are blocked by default because vendor intel on those addresses is not useful. `--include-private` allows an explicit override.
-- The external `shodan`, `vt`, `greynoise`, `ipinfo`, `urlscan`, and `chaos` CLI wrappers remain available for users who want provider-native output.
+- The external `shodan`, `vt`, `greynoise`, `ipinfo`, `urlscan-cli`, and `chaos` CLI wrappers remain available for users who want provider-native output.
 
 **Limits:** Shodan, Censys, VirusTotal, GreyNoise, AlienVault OTX, AbuseIPDB, URLhaus, ThreatFox, Vulners, urlscan.io, and SecurityTrails require user-provided provider keys. SecurityTrails currently requires a paid account. Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, and RouteViews work without saved keys but still use the app's per-session rate limiting and cache layer to avoid accidental bursts. Provider terms and quotas are still enforced by each vendor.
 
@@ -1196,7 +1196,8 @@ diagnostics_allowed_cidrs:
 | Section | Content |
 |---------|---------|
 | **App** | App version and configured name |
-| **Database** | Connection status (`online` / `error`), total run and snapshot counts |
+| **Database** | Connection status (`online` / `error`), total run and snapshot counts, file/WAL size, reclaimable space, table row counts, and FTS orphan checks |
+| **Storage breakdown** | Table and index storage grouped by runs, snapshots, Atlas/findings, projects, session data, and secrets. Shows allocated bytes when SQLite has `dbstat`, logical payload estimates either way, FTS shadow tables grouped under their parent, and the largest saved runs. |
 | **Redis** | Whether Redis is configured, and connection status when it is |
 | **Vendor Assets** | Whether `ansi_up.js`, `jspdf.umd.min.js`, and the font files are present (`loaded`) or missing (`missing`) from `app/static/` |
 | **Config** | All operational config values: rate limits, timeouts, output caps, retention, proxy CIDRs, log settings |

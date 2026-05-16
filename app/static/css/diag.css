@@ -131,6 +131,7 @@ body.diag-page::before { display: none; }
   grid-template-areas:
     "app      db       redis    assets"
     "dbd      dbd      redisd   redisd"
+    "storage  storage  storage  storage"
     "cfg      cfg      cfg      cfg"
     "usage    usage    outcomes outcomes"
     "cmds     cmds     cmds     cmds"
@@ -156,6 +157,7 @@ body.diag-page::before { display: none; }
 .diag-section.s-assets   { grid-area: assets; }
 .diag-section.s-db-details { grid-area: dbd; }
 .diag-section.s-redis-details { grid-area: redisd; }
+.diag-section.s-storage { grid-area: storage; }
 .diag-section.s-config   { grid-area: cfg; }
 .diag-section.s-usage    { grid-area: usage; }
 .diag-section.s-outcomes { grid-area: outcomes; }
@@ -264,6 +266,18 @@ body.diag-page::before { display: none; }
 .diag-table td:last-child {
   color: var(--text);
   word-break: break-word;
+}
+.diag-table th {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--theme-panel-border);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: left;
+}
+.diag-table th:not(:first-child) {
+  text-align: right;
 }
 
 /* Status values */
@@ -423,6 +437,81 @@ body.diag-page::before { display: none; }
   color: var(--muted);
   margin-bottom: 10px;
 }
+.diag-storage-banner {
+  padding: 10px 12px;
+  border-top: 1px solid var(--theme-panel-border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.diag-storage-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 12px 0;
+}
+.diag-storage-summary span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--theme-panel-border) 84%, transparent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--theme-chrome-bg) 72%, transparent);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.2;
+}
+.diag-storage-groups {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+.diag-storage-group {
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.diag-storage-group summary {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(140px, auto) 1fr;
+  gap: 8px 14px;
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.diag-storage-group summary::-webkit-details-marker {
+  display: none;
+}
+.diag-storage-group-name {
+  color: var(--green);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 800;
+}
+.diag-storage-bar {
+  grid-column: 1 / -1;
+  height: 3px;
+  background: var(--theme-panel-border);
+}
+.diag-storage-bar::before {
+  display: block;
+  width: var(--diag-storage-bar-width, 0%);
+  height: 100%;
+  background: var(--green);
+  content: "";
+}
+.diag-storage-table td,
+.diag-storage-table th {
+  white-space: nowrap;
+}
+.diag-storage-shadow td:first-child {
+  padding-left: 24px;
+}
+.diag-storage-largest {
+  padding: 0 12px 12px;
+}
 .diag-chips {
   display: flex;
   flex-wrap: wrap;
@@ -510,6 +599,7 @@ body.diag-page::before { display: none; }
       "redis     assets"
       "dbd       dbd"
       "redisd    redisd"
+      "storage   storage"
       "cfg       cfg"
       "usage     outcomes"
       "cmds      cmds"

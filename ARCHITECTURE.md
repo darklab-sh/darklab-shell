@@ -782,7 +782,7 @@ Without the `killed` flag, the `-15` exit code causes the exit handler to set st
 
 The encrypted-secrets vault is the single boundary between user-supplied API keys and the processes that consume them. Vault behavior is consumed by external command CLIs that declare `requires_secrets` in the registry and by the app-native `intel` built-in; both routes resolve secrets through the same code path before launch.
 
-`/runs` resolves the original command root's secret declarations against the current session vault before validation-owned runtime wrappers can change the executed shell text. Required missing secrets or missing session identity block the launch; optional missing secrets log a warning. Found values are decrypted in memory and passed through `subprocess.Popen(env=...)`, never inserted into the shell command text. A declaration can look up one or more vault names and inject the value under a different runtime env name, which is how the VirusTotal CLI accepts either `VT_API_KEY` or `VTCLI_APIKEY` while receiving `VTCLI_APIKEY` in the child process. Optional declarations cover tools such as `ipinfo`, where unauthenticated output can still work but `IPINFO_TOKEN` unlocks richer account-backed results. The urlscan and Chaos CLI wrappers use the same boundary for `URLSCAN_API_KEY` and `PDCP_API_KEY`, with setup/key-writing commands blocked by policy so keys stay in the app vault instead of vendor config files or argv. The command catalog exposes this metadata without values so the Options Secrets picker can suggest known tool keys before falling back to a custom name. In the container scanner path, sudo preserves only the declared secret env names so the scanner process receives them without exposing values in argv or preserving unrelated app env. Interactive PTY registry entries cannot also declare `requires_secrets`; registry loading rejects that combination because the PTY path does not inject secret environment variables. Successful secret use emits one `SECRET_INJECTED` audit event for the run with env names only.
+`/runs` resolves the original command root's secret declarations against the current session vault before validation-owned runtime wrappers can change the executed shell text. Required missing secrets or missing session identity block the launch; optional missing secrets log a warning. Found values are decrypted in memory and passed through `subprocess.Popen(env=...)`, never inserted into the shell command text. A declaration can look up one or more vault names and inject the value under a different runtime env name, which is how the VirusTotal CLI accepts either `VT_API_KEY` or `VTCLI_APIKEY` while receiving `VTCLI_APIKEY` in the child process. Optional declarations cover tools such as `ipinfo`, where unauthenticated output can still work but `IPINFO_TOKEN` unlocks richer account-backed results. The urlscan-cli and Chaos CLI wrappers use the same boundary for `URLSCAN_API_KEY` and `PDCP_API_KEY`, with setup/key-writing commands blocked by policy so keys stay in the app vault instead of vendor config files or argv. The command catalog exposes this metadata without values so the Options Secrets picker can suggest known tool keys before falling back to a custom name. In the container scanner path, sudo preserves only the declared secret env names so the scanner process receives them without exposing values in argv or preserving unrelated app env. Interactive PTY registry entries cannot also declare `requires_secrets`; registry loading rejects that combination because the PTY path does not inject secret environment variables. Successful secret use emits one `SECRET_INJECTED` audit event for the run with env names only.
 
 Storage shape, encryption, and master-key bootstrap are described under the `secrets` table in **State And Persistence**: AES-GCM ciphertext, per-row nonce, `(session_token, name)` uniqueness, and a `consumer_envs` binding that prevents two secrets from claiming the same runtime env name in one session. The wrapping key comes from `SECRETS_MASTER_KEY` or `<data_dir>/.secrets_master_key`, with HKDF-SHA256 deriving the row-encryption key; the file is created or repaired at `0600` when used.
 
@@ -818,7 +818,7 @@ The provider table covers both app-native `intel` providers and provider CLI wra
 | IPinfo | `ip`, `ipinfo` CLI | Optional | `IPINFO_TOKEN` | Free unauthenticated basics; account token optional | IP geolocation, ASN, ownership, hostname, and account-backed context through app-native lookups and the `ipinfo` CLI |
 | VirusTotal | `domain`, `hash`, `vt` CLI | Yes | `VT_API_KEY`, `VTCLI_APIKEY` | Free signup; paid tiers | Domain reputation, analysis stats, recent URLs, WHOIS summary, and file/hash reputation |
 | crt.sh | `domain` | No | None | Free public lookup | Certificate Transparency certificate names, issuers, and first/last sightings |
-| urlscan.io | `domain`, `url`, `urlscan` CLI | Yes | `URLSCAN_API_KEY` | Free signup; paid tiers | Read-only search/result context for observed pages and verdicts; app-native scan submission is not enabled |
+| urlscan.io | `domain`, `url`, `urlscan-cli` CLI | Yes | `URLSCAN_API_KEY` | Free signup; paid tiers | Read-only search/result context for observed pages and verdicts; app-native scan submission is not enabled |
 | URLhaus | `ip`, `domain`, `url`, `hash` | Yes | `URLHAUS_AUTH_KEY` | Free abuse.ch Auth-Key | Malware URL, host, and payload-hash status from abuse.ch |
 | ThreatFox | `ip`, `domain`, `url`, `hash` | Yes | `THREATFOX_AUTH_KEY` | Free abuse.ch Auth-Key | IOC and malware context for hosts, URLs, IPs, and hashes |
 | SecurityTrails | `domain` | Yes | `SECURITYTRAILS_API_KEY` | Paid account required | DNS records, WHOIS summary, and subdomain pivots |
@@ -1306,7 +1306,7 @@ The current event inventory is:
 
 - `/health` remains the load-balancer contract and reports whether DB and Redis are healthy, with degraded states surfacing through status code.
 - `/status` is intentionally a softer browser-HUD contract and always responds 200 so status-pill polling never causes UI flapping or reconnect churn.
-- `/diag` is the operator-facing structured view that surfaces runtime config, service health, asset presence, tool availability, and activity summaries without opening a shell session.
+- `/diag` is the operator-facing structured view that surfaces runtime config, service health, asset presence, SQLite storage breakdowns, tool availability, and activity summaries without opening a shell session.
 
 These three surfaces share the same runtime health model, but they target different consumers: infrastructure checks, browser chrome, and operator diagnostics.
 
@@ -1318,6 +1318,7 @@ Operationally, `/diag` sits on top of the same underlying sources described earl
 
 - Redis and SQLite health come from the same runtime boundary described in **System Structure**
 - run counts, top commands, and stored artifacts come from the persistence layer described in **State And Persistence**
+- table/index storage, logical payload estimates, FTS shadow-table rollups, and largest saved-run hints come from the same SQLite connection as the Database card; allocated byte counts appear when SQLite was built with `SQLITE_ENABLE_DBSTAT_VTAB`, while row counts and logical payload estimates still render without it
 - config values reflect the browser/backend config split described in **Configuration Surfaces**
 - access control and denied-access logging reuse the same client-IP trust model described in **Security Model** and **Logging**
 
@@ -1387,12 +1388,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,781
+- behavior tests: 2,788
 - docs/inventory meta-tests: 32
-- `pytest`: 1414 (1382 behavior + 32 meta)
+- `pytest`: 1419 (1387 behavior + 32 meta)
 - `vitest`: 1150
-- `playwright`: 250
-- total: 2,814
+- `playwright`: 251
+- total: 2,820
 
 ### Testing Architecture
 

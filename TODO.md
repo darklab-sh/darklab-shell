@@ -7,7 +7,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
-  - [Table-size diagnostics in `/diag`](#table-size-diagnostics-in-diag)
   - [Prometheus `/metrics` endpoint](#prometheus-metrics-endpoint)
   - [Postgres production backend and storage scaling plan](#postgres-production-backend-and-storage-scaling-plan)
   - [High-volume output handling](#high-volume-output-handling)
@@ -47,48 +46,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ---
 
 ## Open TODOs
-
-### Table-size diagnostics in `/diag`
-- **Scope**
-  - Add a full storage breakdown panel to the `/diag` page so an operator can answer "which table or column is driving DB growth?" in one glance, without leaving the diagnostics surface.
-  - Capture three orthogonal views per table: **allocated bytes** (page-level cost, from `dbstat`), **payload bytes** (logical row cost, from `SUM(LENGTH(col))` across the widest columns), and **row count** (volume).
-  - Include every user table created by `_create_schema` and `_create_project_workspace_schema`, every FTS5 virtual table, every FTS shadow table grouped back under its parent virtual table, and every index — not just the historically-noisy ones. Sparse coverage hides regressions in the next-fastest-growing table.
-  - Surface content-size estimates for the fields most likely to grow quickly so operators can correlate row growth with bytes: `runs.output`, `runs.output_preview`, `runs.output_search_text`, `snapshots.content`, `entity_intel_snapshots.data_json`, `findings.raw_line`, `evidence_packages.manifest`, `project_links.source_detail`, and `run_output_artifacts.byte_size` (sum, since it's already bytes).
-  - Group tables into operator-meaningful buckets so the panel scans quickly: **Runs & transcripts** (`runs`, `run_output_artifacts`, `runs_fts*`), **Snapshots & permalinks** (`snapshots`), **Atlas & findings** (`entities`, `entity_run_links`, `entity_intel_snapshots`, `findings`, `findings_occurrences`, `entity_labels`, `entity_notes`), **Projects & workspace** (`projects`, `project_links`, `run_file_artifacts`, `evidence_packages`), **Session state** (`session_tokens`, `session_preferences`, `starred_commands`, `session_variables`, `user_workflows`, `recent_values`), and **Security** (`secrets`).
-  - When `dbstat` is unavailable (compile-option missing), still render row counts and payload-byte estimates and surface a clear "table page-size breakdown unavailable — rebuild SQLite with `SQLITE_ENABLE_DBSTAT_VTAB`" banner inside the new panel only, so the rest of `/diag` is unaffected.
-- **Backend implementation**
-  - Add a new helper `_diag_table_storage_breakdown()` in `app/blueprints/assets.py` next to the existing `_diag_db_stats()`. It must reuse the safe-identifier wrapper `_diag_sqlite_identifier` for every name pulled from `sqlite_master` and never bind table names as parameters.
-  - Detect `dbstat` availability once per request via `SELECT sqlite_compileoption_used('ENABLE_DBSTAT_VTAB')`; cache the result on `result["db"]` as `dbstat_available` so the template can branch without re-probing.
-  - Per-table page-level metrics, when `dbstat` is available, in a single pass: `SELECT name, SUM(pgsize) AS allocated, SUM(payload) AS payload, SUM(pgsize - payload - unused) AS overhead, SUM(unused) AS unused, COUNT(*) AS pages FROM dbstat GROUP BY name`. Join the result against `sqlite_master` to classify each name as `table`, `index`, or `virtual-shadow`, and to recover the parent virtual table for FTS shadow tables.
-  - Roll FTS shadow tables (`runs_fts_data`, `runs_fts_idx`, `runs_fts_content`, `runs_fts_docsize`, `runs_fts_config`) up under their parent `runs_fts` entry with a `shadows: [{name, allocated, payload, pages}]` array so the operator sees both the aggregate and the breakdown. Use the same parent-detection logic already in `_diag_db_stats()` for shadow names.
-  - Per-table payload-byte estimates from the live data, executed even when `dbstat` is missing, one query per table chosen for cost (no `LENGTH(*)`):
-    - `runs`: `SUM(LENGTH(output))`, `SUM(LENGTH(output_preview))`, `SUM(LENGTH(output_search_text))`, `SUM(LENGTH(command))`, plus row count and average row size.
-    - `snapshots`: `SUM(LENGTH(content))`, `SUM(LENGTH(label))`, row count.
-    - `entity_intel_snapshots`: `SUM(LENGTH(data_json))`, `SUM(LENGTH(summary))`, row count, breakdown by `provider` (`GROUP BY provider`) so a single noisy provider is visible.
-    - `findings`: `SUM(LENGTH(raw_line))`, `SUM(LENGTH(title))`, row count.
-    - `findings_occurrences`: `SUM(LENGTH(snippet))`, row count.
-    - `evidence_packages`: `SUM(LENGTH(manifest))`, `SUM(LENGTH(description))`, row count.
-    - `project_links`: `SUM(LENGTH(source_detail))`, row count.
-    - `run_output_artifacts`: `SUM(byte_size)`, row count (this is on-disk gzip; clarify in the rendered label).
-    - `run_file_artifacts`: `SUM(byte_size)`, row count, breakdown by `kind`.
-    - Every other table: row count and average row size only (avoids a full scan on small-row tables like `session_variables`).
-  - Per-index sizing (allocated bytes, page count, parent table) so an index that has quietly grown larger than its table — common with FTS shadows and `idx_findings_*` — is visible. Order indexes within each parent table by allocated bytes descending.
-  - Include three top-level summary fields on the new payload: `total_allocated_bytes`, `total_payload_bytes`, and `wasted_bytes = total_allocated - total_payload - freelist_count * page_size`. The wasted-bytes field is the single number an operator watches before running `VACUUM`.
-  - Add a `largest_runs` probe — `SELECT id, started, LENGTH(output) + LENGTH(COALESCE(output_search_text,'')) AS size FROM runs ORDER BY size DESC LIMIT 10` — so a single oversized run (typical cause of unexpected DB growth) is named, not just sized in aggregate.
-  - Wrap each subsection in its own `try/except` matching the surrounding `_diag_db_stats` pattern; one failing pragma or missing table never blanks the whole panel.
-  - Keep the route read-only and cheap enough for occasional operator use. The new payload-byte sums on `runs` and `snapshots` will scan the table once each; document the expected ms cost on a 1 GB database in the function docstring and gate the largest_runs probe behind `dbstat_available or table_row_count('runs') < 100000` so it never lands as the new slowest part of `/diag`.
-- **Frontend rendering**
-  - Add a new section in `app/templates/diag.html` after the existing Database Details card, titled **Storage breakdown**. Render one collapsible group per operator bucket, with the bucket header showing aggregate allocated bytes and a sparkline-style bar across the page for visual scale.
-  - Within each bucket render a table with columns: name, kind (table/index/fts-shadow), allocated, payload, overhead, unused, rows, avg row, notable columns (e.g. `output: 312 MB`, `output_search_text: 41 MB`).
-  - Sort tables within each bucket by allocated bytes descending. FTS shadow tables render indented under their parent virtual table with the existing `.diag-muted` styling.
-  - When `dbstat_available` is false, render the entire allocated/payload/overhead/unused/pages columns as `—` and show the rebuild banner once at the top of the section.
-  - Add a single top-line callout above the buckets: "Database file 4.2 GB · 1.1 GB reclaimable (`VACUUM`) · 312 MB largest table: `runs.output`".
-  - Reuse `_diag_fmt_bytes` for every byte value and the existing `.diag-section-title`, `.diag-muted`, and `.diag-ok`/`.diag-fail` classes so the new panel matches the rest of `/diag` without new CSS.
-- **Terminal integration (follow-up, not blocking)**
-  - Expose the same summary through a terminal built-in once the panel is stable — natural homes are the existing `stats`, `retention`, or `limits` commands in `app/services/commands/builtins_runtime.py`. Reuse the helper directly rather than re-querying so SQL changes only land in one place.
-- **Tests**
-  - Add `tests/py/test_diag_storage_breakdown.py` covering: `dbstat` available path renders allocated bytes; `dbstat` missing path falls back gracefully without 500s; FTS shadow tables roll up under `runs_fts`; payload-byte sums match `SUM(LENGTH(col))` on a seeded fixture; `largest_runs` returns sorted rows; the bucket grouping covers every table that `_create_schema` and `_create_project_workspace_schema` create (drift guard so new tables can't silently appear "uncategorized").
-  - Add a Playwright smoke test that loads `/diag` against a seeded DB and asserts the **Storage breakdown** section renders with at least one row and the rebuild banner is absent when SQLite has `dbstat`.
 
 ### Prometheus `/metrics` endpoint
 - **Scope**
@@ -140,7 +97,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
     - `darklab_db_wal_size_bytes` — gauge.
     - `darklab_db_reclaimable_bytes` — gauge (freelist × page size). Operators alert when reclaimable crosses a threshold to schedule `VACUUM`.
     - `darklab_db_table_rows{table}` — gauge per user table; sampled at scrape time by the same helper that powers `/diag` table rows.
-    - `darklab_db_table_allocated_bytes{table}` — gauge per user table, only when `dbstat` is available (reuses the helper from the Table-size diagnostics plan above).
+    - `darklab_db_table_allocated_bytes{table}` — gauge per user table, only when `dbstat` is available (reuses the `/diag` storage breakdown helper).
     - `darklab_db_fts_orphans` — gauge.
     - `darklab_db_query_duration_seconds{operation}` — histogram; `operation` covers `run_insert`, `run_finalize`, `history_list`, `atlas_summary`, `atlas_detail`, `fts_search`. Instrument the small number of hot paths, not every connection.
   - **Redis (when configured)**
@@ -215,7 +172,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - Hard constraint: every query path the app uses today must run unmodified on SQLite. Postgres support is additive; SQLite is not deprecated.
   - Soft constraint: write new query code in a portable subset from the start. The Atlas, intel, and findings tables added since v1.5 are the natural baseline because they already exist in `app/core/database.py` and have not yet sprouted SQLite-only optimizations beyond the FTS5 virtual table.
 - **Phase 0 — Measure current pressure (one-time research, blocking)**
-  - Run the new Storage breakdown panel (see plan above) on a seeded production-shape database and capture: per-table allocated bytes, per-column payload bytes, FTS shadow-table cost, and the largest-run distribution.
+  - Run the `/diag` Storage breakdown panel on a seeded production-shape database and capture: per-table allocated bytes, per-column payload bytes, FTS shadow-table cost, and the largest-run distribution.
   - Project one-year growth at 10, 30, and 100 heavy users using the captured per-run averages (output bytes, search-text bytes, artifact bytes, entity-row count, finding-row count, snapshot bytes). Multiply by the configured `permalink_retention_days` and pruning policy.
   - Identify the candidate "fat" columns for offload to filesystem/object storage: `runs.output`, `runs.output_search_text`, `snapshots.content` for very long shares, and `entity_intel_snapshots.data_json` for raw provider payloads.
   - Output of this phase is a short `docs/storage-scaling.md` with the measured numbers and a sizing recommendation per deployment tier. Without this, the rest of the plan is guesswork.
@@ -239,7 +196,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 - **Phase 4 — Postgres adapter and Docker Compose service**
   - Add `psycopg[binary]` to `app/requirements.txt` (gated import; only loaded when `database_backend == "postgres"`).
   - Implement the Postgres dialect concretely: connection pool via `psycopg_pool`, transaction-per-request, the FTS replacement, advisory-lock-guarded migrations, and per-backend retry behavior for transient errors.
-  - Reuse the existing `_diag_db_stats` and Storage breakdown plan against `pg_class`, `pg_indexes`, and `pg_stat_user_tables` so `/diag` remains useful on Postgres without a parallel UI.
+  - Reuse the existing `_diag_db_stats` and storage breakdown helper against `pg_class`, `pg_indexes`, and `pg_stat_user_tables` so `/diag` remains useful on Postgres without a parallel UI.
   - New Docker Compose service `postgres:` with a named volume, version-pinned image, healthcheck, and `depends_on` from the app service. Document Compose overrides for operators who already run their own Postgres.
   - New config keys: `database_backend`, `database_url` (DSN for Postgres), `database_pool_min`, `database_pool_max`. SQLite path ignores all of them and continues to use `DB_PATH`.
 - **Phase 5 — Migration helper**

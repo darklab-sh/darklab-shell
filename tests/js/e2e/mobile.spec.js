@@ -101,6 +101,14 @@ test.describe('diagnostics page on mobile', () => {
     await expect(page.locator('#hamburger-btn')).toBeVisible()
   })
 
+  test('storage breakdown renders table sizing diagnostics', async ({ page }) => {
+    await page.setViewportSize(MOBILE)
+    await page.goto('/diag')
+    const storage = page.locator('.diag-section.s-storage')
+    await expect(storage).toContainText('Storage breakdown')
+    await expect(storage.locator('.diag-storage-table tbody tr').first()).toBeVisible()
+  })
+
   // Verify parity at the shell's mobile-mode threshold (900px + touch).
   // A touch device at 850px gets the mobile shell, so the diag back button
   // must also appear. The breakpoint was previously 760px which missed this.

@@ -3307,6 +3307,147 @@ class TestDiagRoute:
             assert isinstance(entry["name"], str) and entry["name"]
             assert isinstance(entry["rows"], int) and entry["rows"] >= 0
 
+    def test_db_storage_breakdown_reports_buckets(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        storage = data["db"]["storage"]
+        assert isinstance(storage["dbstat_available"], bool)
+        assert storage["buckets"]
+        bucket_names = {bucket["name"] for bucket in storage["buckets"]}
+        assert "Runs and transcripts" in bucket_names
+        run_bucket = next(bucket for bucket in storage["buckets"] if bucket["name"] == "Runs and transcripts")
+        run_entry = next(row for row in run_bucket["rows"] if row["name"] == "runs")
+        assert isinstance(run_entry["rows"], int)
+        assert isinstance(run_entry["logical_payload"], int)
+        assert run_entry["logical_payload_human"]
+
+    def test_db_storage_breakdown_sums_payload_and_artifact_bytes(self, tmp_path):
+        db_path = tmp_path / "diag_storage_payload.db"
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                "CREATE TABLE runs ("
+                "id TEXT PRIMARY KEY, command TEXT NOT NULL, output TEXT, "
+                "output_preview TEXT, output_search_text TEXT)"
+            )
+            conn.execute(
+                "CREATE TABLE run_output_artifacts ("
+                "run_id TEXT PRIMARY KEY, rel_path TEXT NOT NULL, compression TEXT NOT NULL, byte_size INTEGER NOT NULL)"
+            )
+            conn.execute(
+                "INSERT INTO runs (id, command, output, output_preview, output_search_text) "
+                "VALUES (?, ?, ?, ?, ?)",
+                ("run-a", "dig darklab.sh", "abc", "de", "fghi"),
+            )
+            conn.execute(
+                "INSERT INTO run_output_artifacts (run_id, rel_path, compression, byte_size) "
+                "VALUES (?, ?, ?, ?)",
+                ("run-a", "out.gz", "gzip", 128),
+            )
+            conn.commit()
+            storage = shell_assets._diag_table_storage_breakdown(conn, {
+                "runs": 1,
+                "run_output_artifacts": 1,
+            })
+
+        run_entry = next(
+            row for bucket in storage["buckets"] for row in bucket["rows"]
+            if row["name"] == "runs"
+        )
+        artifact_entry = next(
+            row for bucket in storage["buckets"] for row in bucket["rows"]
+            if row["name"] == "run_output_artifacts"
+        )
+        assert run_entry["logical_payload"] == len("dig darklab.sh") + len("abc") + len("de") + len("fghi")
+        assert artifact_entry["logical_payload"] == len("out.gz") + len("gzip") + 128
+        assert storage["largest_runs"][0]["id"] == "run-a"
+
+    def test_db_storage_breakdown_rolls_up_fts_shadow_tables(self, tmp_path):
+        db_path = tmp_path / "diag_storage_fts.db"
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                "CREATE TABLE runs ("
+                "id TEXT PRIMARY KEY, command TEXT NOT NULL, output TEXT, "
+                "output_preview TEXT, output_search_text TEXT)"
+            )
+            conn.execute(
+                "CREATE VIRTUAL TABLE runs_fts USING fts5("
+                "command, output_search_text, content=runs, content_rowid=rowid)"
+            )
+            conn.execute(
+                "INSERT INTO runs (id, command, output, output_preview, output_search_text) "
+                "VALUES (?, ?, ?, ?, ?)",
+                ("run-fts", "host darklab.sh", "", "", "104.21.4.35"),
+            )
+            rowid = conn.execute("SELECT rowid FROM runs WHERE id = ?", ("run-fts",)).fetchone()[0]
+            conn.execute(
+                "INSERT INTO runs_fts(rowid, command, output_search_text) VALUES (?, ?, ?)",
+                (rowid, "host darklab.sh", "104.21.4.35"),
+            )
+            conn.commit()
+            storage = shell_assets._diag_table_storage_breakdown(conn, {"runs": 1, "runs_fts": 1})
+
+        if not storage["dbstat_available"]:
+            pytest.skip("SQLite dbstat virtual table is unavailable")
+        fts_entry = next(
+            row for bucket in storage["buckets"] for row in bucket["rows"]
+            if row["name"] == "runs_fts"
+        )
+        assert fts_entry["kind"] == "virtual-table"
+        assert {shadow["name"] for shadow in fts_entry["shadows"]} >= {
+            "runs_fts_data",
+            "runs_fts_idx",
+        }
+
+    def test_db_storage_breakdown_falls_back_without_dbstat(self, tmp_path):
+        class _FakeCursor:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def fetchone(self):
+                return self._rows[0] if self._rows else None
+
+        class _NoDbstatConn:
+            def __init__(self, conn):
+                self._conn = conn
+
+            def execute(self, sql, params=()):
+                if "sqlite_compileoption_used('ENABLE_DBSTAT_VTAB')" in sql:
+                    return _FakeCursor([(0,)])
+                assert "FROM dbstat" not in sql
+                return self._conn.execute(sql, params)
+
+        db_path = tmp_path / "diag_storage_no_dbstat.db"
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                "CREATE TABLE runs ("
+                "id TEXT PRIMARY KEY, command TEXT NOT NULL, output TEXT, "
+                "output_preview TEXT, output_search_text TEXT)"
+            )
+            conn.execute(
+                "INSERT INTO runs (id, command, output, output_preview, output_search_text) "
+                "VALUES (?, ?, ?, ?, ?)",
+                ("run-no-dbstat", "whois darklab.sh", "abc", "", "abc"),
+            )
+            conn.commit()
+            storage = shell_assets._diag_table_storage_breakdown(_NoDbstatConn(conn), {"runs": 1})
+
+        run_entry = next(
+            row for bucket in storage["buckets"] for row in bucket["rows"]
+            if row["name"] == "runs"
+        )
+        assert storage["dbstat_available"] is False
+        assert run_entry["allocated_human"] == "—"
+        assert run_entry["logical_payload"] == len("whois darklab.sh") + len("abc") + len("abc")
+
+    def test_html_response_renders_storage_breakdown_section(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            body = client.get("/diag").get_data(as_text=True)
+        assert "Storage breakdown" in body
+        assert "Runs and transcripts" in body
+        assert "Largest saved runs" in body or "Largest saved runs skipped" in body
+
     def test_db_section_quotes_metadata_table_names_for_row_counts(self, tmp_path):
         db_path = tmp_path / "diag_tables.db"
         with sqlite3.connect(db_path) as conn:

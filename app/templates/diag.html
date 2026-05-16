@@ -202,6 +202,115 @@
     </table>
   </section>
 
+  {# ── Storage Breakdown ─────────────────────────────────────────────────── #}
+  {% set storage = data.db.storage or {} %}
+  {% set storage_buckets = storage.buckets or [] %}
+  {% set max_bucket_allocated = storage_buckets | map(attribute='allocated') | max if storage_buckets else 0 %}
+  <section class="diag-section s-storage">
+    <div class="diag-section-title">
+      Storage breakdown
+      {% if data.db.dbstat_available is sameas false %}
+      <span class="diag-section-title-count diag-warn">page sizes unavailable</span>
+      {% endif %}
+    </div>
+    {% if data.db.ok and storage %}
+      {% if data.db.dbstat_available is sameas false %}
+      <div class="diag-storage-banner diag-warn">
+        table page-size breakdown unavailable — rebuild SQLite with <code>SQLITE_ENABLE_DBSTAT_VTAB</code>.
+      </div>
+      {% endif %}
+      <div class="diag-storage-summary">
+        <span>Database file {{ data.db.size_human or '—' }}</span>
+        <span>{{ data.db.reclaimable_size_human or '0 B' }} reclaimable</span>
+        <span>{{ storage.total_logical_payload_bytes_human or '0 B' }} logical payload</span>
+        {% if storage.largest_object %}
+        <span>largest object <code>{{ storage.largest_object.name }}</code></span>
+        {% endif %}
+      </div>
+      {% if storage_buckets %}
+      <div class="diag-storage-groups">
+        {% for bucket in storage_buckets %}
+        {% set width = ((bucket.allocated / max_bucket_allocated) * 100) if max_bucket_allocated else 0 %}
+        <details class="diag-storage-group" open>
+          <summary>
+            <span class="diag-storage-group-name">{{ bucket.name }}</span>
+            <span class="diag-muted">
+              {% if data.db.dbstat_available %}{{ bucket.allocated_human }} allocated · {{ bucket.payload_human }} payload · {% endif %}
+              {{ bucket.logical_payload_human }} logical · {{ bucket.rows|length }} objects
+            </span>
+            <span class="diag-storage-bar" style="--diag-storage-bar-width: {{ '%0.2f'|format(width) }}%"></span>
+          </summary>
+          <table class="diag-table diag-storage-table">
+            <thead>
+              <tr>
+                <th>object</th>
+                <th>rows</th>
+                <th>allocated</th>
+                <th>payload</th>
+                <th>overhead</th>
+                <th>unused</th>
+                <th>logical</th>
+                <th>avg row</th>
+                <th>pages</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in bucket.rows %}
+              <tr>
+                <td>
+                  <span>{{ row.name }}</span>
+                  <span class="diag-muted">· {{ row.kind }}</span>
+                  {% if row.payload_error %}<span class="diag-warn"> · payload unavailable</span>{% endif %}
+                </td>
+                <td>{{ '{:,}'.format(row.rows) if row.rows is not none else '—' }}</td>
+                <td>{{ row.allocated_human if data.db.dbstat_available else '—' }}</td>
+                <td>{{ row.payload_human if data.db.dbstat_available else '—' }}</td>
+                <td>{{ row.overhead_human if data.db.dbstat_available else '—' }}</td>
+                <td>{{ row.unused_human if data.db.dbstat_available else '—' }}</td>
+                <td>{{ row.logical_payload_human }}</td>
+                <td>{{ row.avg_row_payload_human }}</td>
+                <td>{{ '{:,}'.format(row.pages) if data.db.dbstat_available and row.pages is not none else '—' }}</td>
+              </tr>
+              {% for shadow in row.shadows %}
+              <tr class="diag-storage-shadow">
+                <td><span class="diag-muted">↳ {{ shadow.name }}</span></td>
+                <td>—</td>
+                <td>{{ shadow.allocated_human if data.db.dbstat_available else '—' }}</td>
+                <td>{{ shadow.payload_human if data.db.dbstat_available else '—' }}</td>
+                <td>—</td>
+                <td>—</td>
+                <td>—</td>
+                <td>—</td>
+                <td>{{ '{:,}'.format(shadow.pages) if data.db.dbstat_available and shadow.pages is not none else '—' }}</td>
+              </tr>
+              {% endfor %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </details>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if storage.largest_runs %}
+      <div class="diag-storage-largest">
+        <div class="diag-tools-sublabel">Largest saved runs</div>
+        <table class="diag-table">
+          {% for run in storage.largest_runs %}
+          <tr>
+            <td class="diag-cmd-cell" tabindex="0" role="button" aria-expanded="false" title="{{ run.command }}">{{ run.command }}</td>
+            <td>{{ run.payload_human }}</td>
+          </tr>
+          {% endfor %}
+        </table>
+      </div>
+      {% elif storage.largest_runs_skipped %}
+      <div class="diag-storage-banner diag-muted">Largest saved runs skipped: {{ storage.largest_runs_skipped }}.</div>
+      {% endif %}
+    {% else %}
+      <div class="diag-empty">Storage details unavailable.</div>
+    {% endif %}
+  </section>
+
   {# ── Redis Details ─────────────────────────────────────────────────────── #}
   <section class="diag-section s-redis-details">
     <div class="diag-section-title">Redis Details</div>
