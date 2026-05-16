@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import json
 import sqlite3
-from typing import Any
+from typing import Any, Iterable
 
 
 class DatabaseBackend(str, Enum):
@@ -35,16 +36,56 @@ class DatabaseDialect:
     current_timestamp_sql: str
     supports_returning: bool
 
+    def quote_identifier(self, identifier: str) -> str:
+        return quote_identifier(identifier, self.backend)
+
+    def placeholder_sql(self, sql: str) -> str:
+        if self.placeholder == "?":
+            return sql
+        return convert_positional_placeholders(sql, self.placeholder)
+
     def placeholders(self, count: int) -> str:
         if count <= 0:
             return ""
         return ", ".join(self.placeholder for _ in range(count))
+
+    def in_clause(self, column_sql: str, values: Iterable[Any]) -> tuple[str, tuple[Any, ...]]:
+        params = tuple(values)
+        if not params:
+            return "1 = 0", ()
+        return f"{column_sql} IN ({self.placeholders(len(params))})", params
+
+    def limit_offset_clause(self, *, limit: int | None = None, offset: int | None = None) -> tuple[str, tuple[int, ...]]:
+        parts: list[str] = []
+        params: list[int] = []
+        if limit is not None:
+            parts.append(f"LIMIT {self.placeholder}")
+            params.append(max(0, int(limit)))
+        if offset is not None:
+            parts.append(f"OFFSET {self.placeholder}")
+            params.append(max(0, int(offset)))
+        return " ".join(parts), tuple(params)
 
     def json_literal(self, value: str) -> str:
         literal = "'" + str(value).replace("'", "''") + "'"
         if self.backend == DatabaseBackend.POSTGRES:
             return f"{literal}::jsonb"
         return literal
+
+    def json_param(self, value: Any) -> Any:
+        if isinstance(value, str):
+            payload = value
+        else:
+            payload = json.dumps(value, separators=(",", ":"), sort_keys=True)
+        if self.backend != DatabaseBackend.POSTGRES:
+            return payload
+        try:
+            from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+        except ImportError as exc:
+            raise PostgresConnectionError(
+                "Postgres JSON parameters require the 'psycopg[binary,pool]' dependency"
+            ) from exc
+        return Jsonb(json.loads(payload))
 
     def json_column_definition(self, default: str | None = None, *, nullable: bool = False) -> str:
         parts = [self.json_column]
@@ -62,15 +103,41 @@ class DatabaseDialect:
             default_sql = "1" if default else "0"
         return f"{self.boolean_column}{null_sql} DEFAULT {default_sql}"
 
+    def boolean_param(self, value: Any) -> bool | int:
+        normalized = bool(value)
+        if self.backend == DatabaseBackend.POSTGRES:
+            return normalized
+        return 1 if normalized else 0
+
     def text_search_expr(self, column_sql: str) -> str:
         if self.backend == DatabaseBackend.POSTGRES:
             return f"COALESCE({column_sql}, '') ILIKE {self.placeholder}"
         return f"LOWER(COALESCE({column_sql}, '')) LIKE LOWER({self.placeholder})"
 
+    def text_search_param(self, value: Any) -> str:
+        return f"%{str(value or '').strip()}%"
+
     def concat_expr(self, *parts: str) -> str:
         if self.backend == DatabaseBackend.POSTGRES:
             return "CONCAT(" + ", ".join(parts) + ")"
         return " || ".join(parts)
+
+    def excluded_value(self, column_name: str) -> str:
+        return f"excluded.{self.quote_identifier(column_name)}"
+
+    def upsert_update_clause(self, conflict_columns: Iterable[str], update_columns: Iterable[str]) -> str:
+        conflict = tuple(conflict_columns)
+        updates = tuple(update_columns)
+        if not conflict:
+            raise ValueError("upsert conflict columns are required")
+        if not updates:
+            return "ON CONFLICT DO NOTHING"
+        conflict_sql = ", ".join(self.quote_identifier(column) for column in conflict)
+        update_sql = ", ".join(
+            f"{self.quote_identifier(column)} = {self.excluded_value(column)}"
+            for column in updates
+        )
+        return f"ON CONFLICT({conflict_sql}) DO UPDATE SET {update_sql}"  # nosec B608
 
 
 SQLITE_DIALECT = DatabaseDialect(
@@ -100,6 +167,8 @@ _POSTGRES_POOL_CONFIG: tuple[str, int, int] | None = None
 
 
 def parse_database_backend(value: Any) -> DatabaseBackend:
+    if isinstance(value, DatabaseBackend):
+        return value
     raw = str(value or DatabaseBackend.SQLITE.value).strip().lower()
     try:
         return DatabaseBackend(raw)
@@ -204,6 +273,95 @@ def quote_postgres_identifier(identifier: str) -> str:
     if not value or "\x00" in value:
         raise ValueError("invalid Postgres identifier")
     return '"' + value.replace('"', '""') + '"'
+
+
+def quote_identifier(identifier: str, backend: DatabaseBackend | str) -> str:
+    parsed_backend = parse_database_backend(backend)
+    if parsed_backend == DatabaseBackend.POSTGRES:
+        return quote_postgres_identifier(identifier)
+    return quote_sqlite_identifier(identifier)
+
+
+def convert_positional_placeholders(sql: str, placeholder: str) -> str:
+    """Convert SQLite-style positional placeholders without touching literals.
+
+    This is intentionally narrow: it only rewrites ``?`` placeholders outside
+    string literals and comments. It does not support named parameters or
+    driver-specific operators. New portable call sites should still prefer
+    dialect-owned SQL assembly over broad SQL rewriting.
+    """
+    if placeholder == "?":
+        return sql
+    result: list[str] = []
+    index = 0
+    in_single = False
+    in_double = False
+    in_line_comment = False
+    in_block_comment = False
+    while index < len(sql):
+        char = sql[index]
+        next_char = sql[index + 1] if index + 1 < len(sql) else ""
+        if in_line_comment:
+            result.append(char)
+            if char == "\n":
+                in_line_comment = False
+            index += 1
+            continue
+        if in_block_comment:
+            result.append(char)
+            if char == "*" and next_char == "/":
+                result.append(next_char)
+                in_block_comment = False
+                index += 2
+            else:
+                index += 1
+            continue
+        if in_single:
+            result.append(char)
+            if char == "'" and next_char == "'":
+                result.append(next_char)
+                index += 2
+                continue
+            if char == "'":
+                in_single = False
+            index += 1
+            continue
+        if in_double:
+            result.append(char)
+            if char == '"' and next_char == '"':
+                result.append(next_char)
+                index += 2
+                continue
+            if char == '"':
+                in_double = False
+            index += 1
+            continue
+        if char == "-" and next_char == "-":
+            result.extend((char, next_char))
+            in_line_comment = True
+            index += 2
+            continue
+        if char == "/" and next_char == "*":
+            result.extend((char, next_char))
+            in_block_comment = True
+            index += 2
+            continue
+        if char == "'":
+            result.append(char)
+            in_single = True
+            index += 1
+            continue
+        if char == '"':
+            result.append(char)
+            in_double = True
+            index += 1
+            continue
+        if char == "?":
+            result.append(placeholder)
+        else:
+            result.append(char)
+        index += 1
+    return "".join(result)
 
 
 def postgres_advisory_lock_id(namespace: str = "darklab_shell") -> int:

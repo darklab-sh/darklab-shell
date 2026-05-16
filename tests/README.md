@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,834
+- behavior tests: 2,835
 - docs/inventory meta-tests: 32
-- `pytest`: 1453 (1421 behavior + 32 meta)
+- `pytest`: 1454 (1422 behavior + 32 meta)
 - `vitest`: 1161
 - `playwright`: 252
-- total: 2,866
+- total: 2,867
 
 This document is organized in two parts:
 
@@ -397,6 +397,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseBackend.test_postgres_pool_uses_psycopg_pool_lazily` | Verifies the Postgres pool is imported lazily, cached by pool settings, and closed cleanly. |
 | `TestDatabaseBackend.test_postgres_requires_database_url` | Verifies the Postgres adapter rejects missing `database_url` before opening a pool. |
 | `TestDatabaseBackend.test_postgres_identifier_quoting_and_advisory_lock_are_stable` | Verifies Postgres identifier quoting and advisory-lock IDs are deterministic. |
+| `TestDatabaseBackend.test_positional_placeholder_conversion_skips_literals_and_comments` | Verifies legacy SQLite-style positional placeholder conversion leaves string literals and SQL comments unchanged. |
 | `TestDatabaseBackend.test_unknown_backend_is_rejected_with_supported_values` | Verifies unsupported database backend names are rejected with the accepted backend list. |
 | `TestPostgresMigrationHelper.test_discovers_app_tables_and_skips_sqlite_fts_shadow_tables` | Verifies the offline Postgres migration helper copies app tables while skipping SQLite FTS internals. |
 | `TestPostgresMigrationHelper.test_create_table_sql_maps_json_columns_and_primary_key` | Verifies migration-created Postgres tables preserve primary keys and JSON column types. |

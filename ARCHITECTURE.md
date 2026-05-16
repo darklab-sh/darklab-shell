@@ -950,7 +950,7 @@ That split is what allows the app to keep the interactive shell fast while still
 
 ### Database
 
-`<data_dir>/history.db` — SQLite, WAL mode. Twenty-two persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable. The server also has a `database_backend` selector and a database backend/dialect helper for connection setup, JSON column types, boolean storage, timestamps, placeholders, text search expressions, concatenation, SQLite diagnostics, Postgres identifier quoting, advisory-lock IDs, lazy psycopg pool setup, `pg_trgm` availability checks, and Postgres storage rows. `sqlite` is the active app query path today. The Postgres dependency, pool helper, config surface, and optional Compose service are available for the production-backend track, while SQLite-specific routes still fail fast under `postgres` until the portability and migration work lands.
+`<data_dir>/history.db` — SQLite, WAL mode. Twenty-two persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable. The server also has a `database_backend` selector and a database backend/dialect helper for connection setup, JSON column types and parameters, boolean storage and parameters, timestamps, placeholders, `IN` clauses, limit/offset clauses, upsert clauses, text search expressions, concatenation, SQLite diagnostics, Postgres identifier quoting, advisory-lock IDs, lazy psycopg pool setup, `pg_trgm` availability checks, and Postgres storage rows. `sqlite` is the active app query path today. The Postgres dependency, pool helper, config surface, and optional Compose service are available for the production-backend track, while SQLite-specific routes still fail fast under `postgres` until the portability and migration work lands.
 
 Logical relationships are owned by the app rather than SQLite foreign-key constraints. Anonymous browser sessions can appear as `session_id` values without a matching `session_tokens` row.
 
@@ -1436,12 +1436,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,834
+- behavior tests: 2,835
 - docs/inventory meta-tests: 32
-- `pytest`: 1453 (1421 behavior + 32 meta)
+- `pytest`: 1454 (1422 behavior + 32 meta)
 - `vitest`: 1161
 - `playwright`: 252
-- total: 2,866
+- total: 2,867
 
 ### Testing Architecture
 

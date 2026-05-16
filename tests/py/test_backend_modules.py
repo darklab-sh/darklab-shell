@@ -370,7 +370,17 @@ class TestDatabaseBackend:
         assert dialect.json_column == "TEXT"
         assert dialect.json_column_definition("{}") == "TEXT NOT NULL DEFAULT '{}'"
         assert dialect.boolean_column_definition() == "INTEGER NOT NULL DEFAULT 0"
+        assert dialect.boolean_param(True) == 1
+        assert dialect.json_param({"enabled": True, "theme": "dark"}) == '{"enabled":true,"theme":"dark"}'
         assert dialect.placeholders(3) == "?, ?, ?"
+        assert dialect.quote_identifier('odd"name') == '"odd""name"'
+        assert dialect.in_clause("id", ["a", "b"]) == ("id IN (?, ?)", ("a", "b"))
+        assert dialect.in_clause("id", []) == ("1 = 0", ())
+        assert dialect.limit_offset_clause(limit=10, offset=20) == ("LIMIT ? OFFSET ?", (10, 20))
+        assert dialect.upsert_update_clause(["session_id", "name"], ["value", "updated"]) == (
+            'ON CONFLICT("session_id", "name") DO UPDATE SET '
+            '"value" = excluded."value", "updated" = excluded."updated"'
+        )
 
     def test_postgres_backend_exposes_dialect_and_pool_settings(self):
         cfg = {
@@ -384,10 +394,19 @@ class TestDatabaseBackend:
         assert database_backend.configured_database_backend(cfg) == database_backend.DatabaseBackend.POSTGRES
         assert dialect.json_column_definition("[]") == "JSONB NOT NULL DEFAULT '[]'::jsonb"
         assert dialect.boolean_column_definition(True) == "BOOLEAN NOT NULL DEFAULT TRUE"
+        assert dialect.boolean_param(1) is True
         assert dialect.placeholders(3) == "%s, %s, %s"
+        assert dialect.quote_identifier('odd"name') == '"odd""name"'
+        assert dialect.in_clause("id", ["a", "b"]) == ("id IN (%s, %s)", ("a", "b"))
+        assert dialect.limit_offset_clause(limit=5) == ("LIMIT %s", (5,))
         assert dialect.text_search_expr("runs.output_search_text") == "COALESCE(runs.output_search_text, '') ILIKE %s"
+        assert dialect.text_search_param("darklab") == "%darklab%"
         assert dialect.concat_expr("runs.command", "' '", "runs.output_search_text") == (
             "CONCAT(runs.command, ' ', runs.output_search_text)"
+        )
+        assert dialect.upsert_update_clause(["session_id"], ["preferences", "updated"]) == (
+            'ON CONFLICT("session_id") DO UPDATE SET '
+            '"preferences" = excluded."preferences", "updated" = excluded."updated"'
         )
         assert database_backend.postgres_pool_settings(cfg) == (
             "postgresql://darklab:secret@postgres:5432/darklab_shell",
@@ -443,9 +462,26 @@ class TestDatabaseBackend:
 
     def test_postgres_identifier_quoting_and_advisory_lock_are_stable(self):
         assert database_backend.quote_postgres_identifier('odd"name') == '"odd""name"'
+        assert database_backend.quote_identifier('odd"name', "sqlite") == '"odd""name"'
+        assert database_backend.quote_identifier('odd"name', database_backend.DatabaseBackend.POSTGRES) == '"odd""name"'
         assert database_backend.postgres_advisory_lock_id() == database_backend.postgres_advisory_lock_id()
         with pytest.raises(ValueError):
             database_backend.quote_postgres_identifier("")
+
+    def test_positional_placeholder_conversion_skips_literals_and_comments(self):
+        sql = (
+            "SELECT '?' AS literal, \"?\" AS quoted, value FROM runs "
+            "WHERE session_id = ? AND note = 'it''s ?' "
+            "-- comment ?\n"
+            "AND id = ? /* block ? */"
+        )
+
+        assert database_backend.convert_positional_placeholders(sql, "%s") == (
+            "SELECT '?' AS literal, \"?\" AS quoted, value FROM runs "
+            "WHERE session_id = %s AND note = 'it''s ?' "
+            "-- comment ?\n"
+            "AND id = %s /* block ? */"
+        )
 
     def test_unknown_backend_is_rejected_with_supported_values(self):
         with pytest.raises(database_backend.DatabaseBackendError, match="sqlite, postgres"):
