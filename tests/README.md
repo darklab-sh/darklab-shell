@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,781
+- behavior tests: 2,782
 - docs/inventory meta-tests: 32
-- `pytest`: 1413 (1381 behavior + 32 meta)
+- `pytest`: 1414 (1382 behavior + 32 meta)
 - `vitest`: 1150
 - `playwright`: 250
-- total: 2,813
+- total: 2,814
 
 This document is organized in two parts:
 
@@ -487,6 +487,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestThemeRegistry.test_theme_color_scheme_falls_back_when_color_is_not_parseable` | Checks that theme color scheme falls back when color is not parseable. |
 | `TestThemeRegistry.test_empty_yaml_returns_empty` | Checks that empty YAML returns empty. |
 | `TestThemeRegistry.test_load_all_faq_appends_custom_entries_after_builtin_items` | Checks that load all FAQ appends custom entries after builtin items. |
+| `TestThemeRegistry.test_load_all_faq_normalizes_entry_categories` | Verifies that built-in and custom FAQ entries carry known section categories and fall back to Other for unknown categories. |
 | `TestThemeRegistry.test_load_all_faq_uses_project_readme_in_builtin_answer` | Checks that load all FAQ uses project readme in builtin answer. |
 | `TestThemeRegistry.test_load_all_faq_uses_config_project_readme_by_default` | Checks that load all FAQ uses the config project readme by default. |
 | `TestThemeRegistry.test_load_all_faq_promotes_workspace_builtin_entry_when_enabled` | Verifies that the built-in Files FAQ appears near the top of the FAQ when session Files are enabled. |

@@ -11,7 +11,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Prometheus `/metrics` endpoint](#prometheus-metrics-endpoint)
   - [Postgres production backend and storage scaling plan](#postgres-production-backend-and-storage-scaling-plan)
   - [High-volume output handling](#high-volume-output-handling)
-  - [FAQ modal section grouping](#faq-modal-section-grouping)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
 - [Feature Enhancements](#feature-enhancements)
@@ -267,27 +266,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 - Preserve raw-output fidelity in backend storage according to the existing `persist_full_run_output`, `full_output_max_mb`, `max_output_lines`, and `output_preview_max_mb` settings. High-volume mode should protect the browser, not silently alter the saved-output policy.
 - Surface the mode in the run UI and history preview so users can tell the command is still running and producing output even though the transcript is intentionally throttled.
 - Add regression coverage with synthetic noisy output to verify the browser does not become unresponsive, the line count continues increasing, the kill button still works, and the completed run records the correct `output_line_count` plus truncation state.
-
-### FAQ modal section grouping
-- **Scope**
-  - The FAQ modal renders ~20 top-level Q&A items in a single flat scroll list (`_builtin_faq()` in `app/services/commands/registry.py`, rendered by `renderFaqItems()` in `app/static/js/features/command-registry/command_registry.js`). With more items planned (Atlas, intel providers, PTY transport notes), the flat list is already a scanning hazard.
-  - Introduce **section headers, not tabs**. FAQ is a scan-and-search surface; tabs hide answers behind a click and break in-page Ctrl-F. Section headers keep the entire FAQ in one scrollable stream but give it structure and deep-link anchors.
-- **Section layout** (proposed ordering of existing items)
-  - **Getting started** — "What is this?", "What commands are allowed?", "What built-in shell features are supported?"
-  - **Core features** — "What are Projects?", "What are session Files?", "What is Interactive PTY mode?", "How do tabs and permalinks work?", "How do I save or share my results?"
-  - **Privacy & sessions** — "Are my commands visible to other users?", "How do session tokens work?"
-  - **Keyboard & controls** — "How do I stop a running command?", "Are there keyboard shortcuts?", "How do I rename a tab?", "How do I access search, history and theme on mobile?", "What do the timestamp options do?", "What do the line number options do?"
-  - **Tool-specific behavior** — "What wordlists are available?", "Why does mtr look different here?", "Why does naabu use connect scan mode?"
-  - **Limits & retention** — "What are the retention and limit settings for this instance?" (longest/most-tabular; goes last).
-- **Implementation notes**
-  - Add an optional `category` field on each entry in `_builtin_faq()` and on every `faq.yaml` entry; default to `"Other"` so a missing or typo'd category never silently drops an item from the modal.
-  - In `renderFaqItems()`, group entries by category in the render pass; emit one `.faq-section-header` per group followed by the existing `.faq-item` accordion markup. Category order is controlled by a small `FAQ_CATEGORY_ORDER` constant; unknown categories fall to the bottom under "Other".
-  - Section headers are static dividers — not collapsible. The individual Q&A rows remain accordion-style (current behavior) so Ctrl-F still finds an answer inside a collapsed row via the existing always-rendered markup.
-  - Wire `#faq=<question-slug>` and `#faq-section=<category-slug>` hash sync so the tour, mobile menu, and onboarding flows can deep-link straight to a question or section. Stable slugs come from the question text (kebab-case) and category name; hash sync updates on open/close without polluting browser history.
-  - Sticky section header behavior: on desktop, headers stay pinned to the top of `.faq-body` while their section is in view (use `position: sticky` inside the scroll container). On mobile, drop the sticky behavior — extra vertical chrome on a sheet modal is more cost than scanning value.
-  - Drift guard: add `tests/py/test_faq_categories.py` asserting every entry returned by `load_all_faq()` carries a category present in `FAQ_CATEGORY_ORDER` (or the explicit `"Other"` fallback). Prevents new entries from quietly landing under Other when they belong in a real section.
-- **When to revisit**
-  - If the FAQ grows past ~30 entries, flip section headers to collapsible disclosure rows (collapsed by default for everything except "Getting started"). Don't pay that cost yet — at 20 entries the all-open scroll is still the right call.
 
 ## Known Issues
 

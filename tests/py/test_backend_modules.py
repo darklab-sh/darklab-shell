@@ -55,6 +55,7 @@ from services.commands.registry import (
     load_container_smoke_test_interactive_commands, load_allow_grouping_flags, load_commands_registry, load_workflows,
     interactive_pty_specs_from_registry,
     command_catalog_entry, command_catalog_from_registry, command_secret_consumers, is_command_allowed, rewrite_command,
+    FAQ_CATEGORY_ORDER,
 )
 from services.history.permalinks import (
     _expiry_note,
@@ -3480,6 +3481,31 @@ class TestThemeRegistry:
         assert result[0]["question"] == "What is this?"
         assert result[-1]["question"] == "Custom question?"
         assert result[-1]["answer"] == "Custom answer."
+
+    def test_load_all_faq_normalizes_entry_categories(self):
+        yaml_content = textwrap.dedent(
+            """
+            - question: Custom question?
+              category: Core features
+              answer: Custom answer.
+            - question: Unknown category?
+              category: Surprise
+              answer: Fallback answer.
+            """
+        )
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            path = f.name
+        try:
+            with mock.patch("services.commands.registry.FAQ_FILE", path):
+                result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
+        finally:
+            os.unlink(path)
+        categories = {item["question"]: item["category"] for item in result}
+        assert set(categories.values()) <= set(FAQ_CATEGORY_ORDER)
+        assert categories["What is this?"] == "Getting started"
+        assert categories["Custom question?"] == "Core features"
+        assert categories["Unknown category?"] == "Other"
 
     def test_load_all_faq_uses_project_readme_in_builtin_answer(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:

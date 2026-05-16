@@ -1,5 +1,7 @@
 # Custom FAQ entries for this instance.
 # Each entry requires a 'question' and an 'answer' field.
+# Optional: add category: "Core features" to place the item under a FAQ
+# section. Unknown or missing categories appear under "Other".
 # Optional: add feature: workspace to show an entry only when Files/workspace
 # storage is enabled for the instance.
 # Use lightweight markup in 'answer' for formatting:
@@ -11,6 +13,7 @@
 #
 # Example:
 # - question: "Where is this server located?"
+#   category: "Other"
 #   answer: "This server is hosted in **New York, USA** on a 10 Gbps uplink via Cogent and Zayo."
 # - question: "What shortcuts are available?"
 #   answer: |
@@ -19,4 +22,5 @@
 #     - Escape dismisses the FAQ
 
 - question: "Where is this server located?"
+  category: "Other"
   answer: "This 10Gbps dedicated server is located in **Tempe, Arizona, USA** on multihomed 100 Gbps uplinks via NTT, Cogent, Hurricane Electric, GTT, and TATA"

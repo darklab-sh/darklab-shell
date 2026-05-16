@@ -5407,11 +5407,13 @@ describe('app helpers', () => {
               items: [
                 {
                   question: 'What is this?',
+                  category: 'Getting started',
                   answer: 'plain',
                   answer_html: 'Rich <strong>HTML</strong>',
                 },
-                { question: 'Allowed?', answer: 'allowlist', ui_kind: 'allowed_commands' },
-                { question: 'Limits?', answer: 'limits', ui_kind: 'limits' },
+                { question: 'Allowed?', category: 'Getting started', answer: 'allowlist', ui_kind: 'allowed_commands' },
+                { question: 'Limits?', category: 'Limits & retention', answer: 'limits', ui_kind: 'limits' },
+                { question: 'Custom?', category: 'Mystery bucket', answer: 'Other answer' },
               ],
             }),
         })
@@ -5419,15 +5421,33 @@ describe('app helpers', () => {
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
 
-    await loadAppFns({ apiFetch })
+    const { openFaq } = await loadAppFns({ apiFetch })
     await new Promise((resolve) => setImmediate(resolve))
 
     const questions = [...document.querySelectorAll('.faq-q')].map((el) => el.textContent)
     expect(questions).toContain('What is this?')
+    expect([...document.querySelectorAll('.faq-section-header')].map((el) => el.textContent)).toEqual([
+      'Getting started',
+      'Limits & retention',
+      'Other',
+    ])
+    expect([...document.querySelectorAll('.faq-section')].map((section) => (
+      [...section.querySelectorAll('.faq-q')].map((el) => el.textContent)
+    ))).toEqual([
+      ['What is this?', 'Allowed?'],
+      ['Limits?'],
+      ['Custom?'],
+    ])
     expect(document.querySelector('.faq-a strong')?.textContent).toBe('HTML')
     expect(document.getElementById('faq-allowed-text')?.textContent).toContain('Open the Command Registry')
     expect(document.getElementById('faq-limits-text')?.innerHTML).toContain('Command timeout')
     expect(document.querySelectorAll('#faq-allowed-text .allowed-chip')).toHaveLength(0)
+    window.history.replaceState(null, '', '/#faq=limits')
+    openFaq()
+    expect(document.querySelector('[data-faq-question="limits"]')?.classList.contains('faq-open')).toBe(true)
+    document.querySelector('[data-faq-question="custom"] .faq-q')?.click()
+    expect(window.location.hash).toBe('#faq=custom')
+    window.history.replaceState(null, '', '/')
   })
 
   it('renders the FAQ visual tour re-entry link and opens the tour modal', async () => {

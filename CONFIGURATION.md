@@ -214,7 +214,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 |------|---------|
 | `app/conf/config.yaml` | Main application settings |
 | `app/conf/commands.yaml` | Command registry for catalog grouping, autocomplete, allow/deny policy, runtime adaptations, encrypted secret requirements, workspace flags, and smoke-test examples |
-| `app/conf/faq.yaml` | Operator FAQ entries appended to the built-in FAQ |
+| `app/conf/faq.yaml` | Operator FAQ entries appended to the built-in, section-grouped FAQ |
 | `app/conf/welcome.yaml` | Welcome command samples and featured sample metadata |
 | `app/conf/tour.yaml` | Versioned onboarding tour chapters shared by the `tour` command and visual tour |
 | `app/conf/ascii.txt` | Desktop welcome banner art |

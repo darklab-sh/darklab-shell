@@ -193,7 +193,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/commands/catalog` | Returns compact command registry entries for the Command Registry modal and sheet. |
 | `GET` | `/commands/catalog/<root>` | Returns the app-native command reference payload for one supported external command root. |
 | `GET` | `/commands/catalog/<root>/<subcommand>` | Returns a subcommand-scoped command reference payload when the registry has subcommand metadata. |
-| `GET` | `/faq` | Returns built-in FAQ entries plus custom `faq.yaml` entries. |
+| `GET` | `/faq` | Returns built-in FAQ entries plus custom `faq.yaml` entries, including their display sections. |
 | `GET` | `/workflows` | Returns current-session user workflows followed by built-in and custom `workflows.yaml` entries, filtered by feature gates such as Files/workspace support. |
 | `GET` | `/shortcuts` | Returns the keyboard shortcut reference used by the `shortcuts` built-in and the browser overlay. |
 | `GET` | `/autocomplete` | Returns merged external-command and app-owned built-in autocomplete context, built-in command roots, and special command keys. |
@@ -1389,10 +1389,10 @@ Current totals:
 
 - behavior tests: 2,781
 - docs/inventory meta-tests: 32
-- `pytest`: 1413 (1381 behavior + 32 meta)
+- `pytest`: 1414 (1382 behavior + 32 meta)
 - `vitest`: 1150
 - `playwright`: 250
-- total: 2,813
+- total: 2,814
 
 ### Testing Architecture
 

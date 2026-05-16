@@ -52,6 +52,16 @@ COMMANDS_REGISTRY_FILE = os.path.join(_CONF, "commands.yaml")
 BUILTIN_AUTOCOMPLETE_FILE = os.path.join(os.path.dirname(__file__), "builtin_autocomplete.yaml")
 FAQ_FILE              = os.path.join(_CONF, "faq.yaml")
 WORKFLOWS_FILE        = os.path.join(_CONF, "workflows.yaml")
+FAQ_CATEGORY_ORDER = (
+    "Getting started",
+    "Core features",
+    "Privacy & sessions",
+    "Keyboard & controls",
+    "Tool-specific behavior",
+    "Limits & retention",
+    "Other",
+)
+FAQ_CATEGORY_OTHER = "Other"
 WELCOME_FILE          = os.path.join(_CONF, "welcome.yaml")
 TOUR_FILE             = os.path.join(_CONF, "tour.yaml")
 ASCII_FILE            = os.path.join(_CONF, "ascii.txt")
@@ -78,11 +88,25 @@ def _project_readme_url(project_readme=None):
     return project_readme or app_config.PROJECT_README
 
 
+def _normalize_faq_category(value):
+    text = str(value or "").strip()
+    if text in FAQ_CATEGORY_ORDER:
+        return text
+    return FAQ_CATEGORY_OTHER
+
+
+def _normalize_faq_entry(entry):
+    normalized = dict(entry)
+    normalized["category"] = _normalize_faq_category(normalized.get("category"))
+    return normalized
+
+
 def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
     readme_url = _project_readme_url(project_readme)
     entries = [
         {
             "question": "What is this?",
+            "category": "Getting started",
             "answer": (
                 f"{app_name} is a lightweight web interface for running network diagnostic "
                 "and vulnerability scanning commands against remote endpoints, with output streamed "
@@ -101,6 +125,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         },
         {
             "question": "What commands are allowed?",
+            "category": "Getting started",
             "answer": (
                 "Open the Command Registry from the menu, or run commands, commands --external, "
                 "or commands info <command> in the web shell."
@@ -109,6 +134,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         },
         {
             "question": "What are session Files?",
+            "category": "Core features",
             "feature": "workspace",
             "answer": (
                 "Files are app-managed, session-scoped text files for commands that need small inputs "
@@ -127,6 +153,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         },
         {
             "question": "What are Projects?",
+            "category": "Core features",
             "answer": (
                 "Projects collect related runs, targets, findings, artifacts, labels, notes, and "
                 "evidence packages into one workspace."
@@ -145,6 +172,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         },
         {
             "question": "What is Interactive PTY mode?",
+            "category": "Core features",
             "feature": "interactive_pty",
             "answer": (
                 "Interactive PTY mode opens supported interactive tools in a terminal-style window "
@@ -173,6 +201,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         },
         {
             "question": "How do I save or share my results?",
+            "category": "Core features",
             "answer": "Use share snapshot, copy, save .html, or save .txt from the tab action bar.",
             "answer_html": (
                 "There are several options below each tab's output:<br><br>"
@@ -191,6 +220,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         },
         {
             "question": "How do tabs and permalinks work?",
+            "category": "Core features",
             "answer": (
                 "Each command runs in the active tab. Use additional tabs to keep results visible "
                 "side by side."
@@ -215,6 +245,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         },
         {
             "question": "Are my commands visible to other users?",
+            "category": "Privacy & sessions",
             "answer": "No. History and saved data are scoped to your anonymous browser session.",
             "answer_html": (
                 "No. Each browser session is assigned an anonymous ID stored in your browser's local "
@@ -225,6 +256,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         },
         {
             "question": "How do session tokens work?",
+            "category": "Privacy & sessions",
             "answer": (
                 "Without a session token, your history is tied to your current browser — switch browsers "
                 "or workstations and you start fresh. Set a token and any browser that uses the same "
@@ -254,6 +286,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         },
         {
             "question": "What built-in shell features are supported?",
+            "category": "Getting started",
             "answer": (
                 "The shell supports built-in commands plus a narrow set of commands with built-in "
                 "pipe support like grep, head, tail, wc -l, sort, and uniq. For a full list of built-in "
@@ -278,6 +311,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         },
         {
             "question": "How do I stop a running command?",
+            "category": "Keyboard & controls",
             "answer": "Use the Kill button shown or press Ctrl+C while a command is running.",
             "answer_html": (
                 "Click the <strong class=\"faq-kill-verb\">■ Kill</strong> button that appears "
@@ -287,6 +321,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         },
         {
             "question": "Are there keyboard shortcuts?",
+            "category": "Keyboard & controls",
             "answer": (
                 "Press ? from the terminal for the keyboard shortcuts overlay, "
                 "or run 'shortcuts' in the shell for the same reference as a text dump."
@@ -306,6 +341,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         },
         {
             "question": "How do I access search, history and theme on mobile?",
+            "category": "Keyboard & controls",
             "answer": "Use the mobile menu in the top-right corner.",
             "answer_html": (
                 "On small screens the header buttons are replaced by a <strong>☰</strong> menu in the "
@@ -315,6 +351,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         },
         {
             "question": "How do I rename a tab?",
+            "category": "Keyboard & controls",
             "answer": "Double-click the tab label, then press Enter or click away to confirm.",
             "answer_html": (
                 "Double-click the tab label to edit it inline. Press <strong>Enter</strong> or click "
@@ -324,11 +361,13 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         },
         {
             "question": "What are the retention and limit settings for this instance?",
+            "category": "Limits & retention",
             "answer": "See the live retention and limit table in the FAQ modal or run retention in the web shell.",
             "ui_kind": "limits",
         },
         {
             "question": "What do the timestamp options do?",
+            "category": "Keyboard & controls",
             "answer": "They toggle off, elapsed, and clock timestamp display modes for output lines.",
             "answer_html": (
                 "The <strong>timestamps</strong> button in the terminal bar cycles through three modes:"
@@ -342,6 +381,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         },
         {
             "question": "What do the line number options do?",
+            "category": "Keyboard & controls",
             "answer": "They toggle numbered output lines on and off for easier line-by-line reference.",
             "answer_html": (
                 "The <strong>line numbers</strong> button in the terminal bar toggles numbered output "
@@ -352,6 +392,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         },
         {
             "question": "What wordlists are available?",
+            "category": "Tool-specific behavior",
             "answer": "The SecLists collection is installed at /usr/share/wordlists/seclists/.",
             "answer_html": (
                 "The full <a href=\"https://github.com/danielmiessler/SecLists\" target=\"_blank\" "
@@ -365,6 +406,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         },
         {
             "question": "Why does mtr look different here?",
+            "category": "Tool-specific behavior",
             "answer": (
                 "Plain mtr runs are converted to --report-wide mode so the shell can show and save "
                 "readable output. Use mtr --interactive when Interactive PTY is enabled for the live view."
@@ -379,6 +421,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         },
         {
             "question": "Why does naabu use connect scan mode?",
+            "category": "Tool-specific behavior",
             "answer": (
                 "naabu defaults to raw SYN scanning which requires libpcap and elevated privileges "
                 "not reliably available inside the container. It automatically runs with -scan-type c "
@@ -393,7 +436,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
             ),
         },
     ]
-    return [item for item in entries if _faq_entry_enabled(item, cfg)]
+    return [_normalize_faq_entry(item) for item in entries if _faq_entry_enabled(item, cfg)]
 
 _FAQ_CHIP_RE = re.compile(r'\[\[(?:cmd|chip):(.+?)\]\]')
 _FAQ_BOLD_RE = re.compile(r'\*\*(.+?)\*\*')
@@ -1081,6 +1124,7 @@ def load_faq(cfg=None):
             entry["answer_html"] = str(item["answer_html"])
         else:
             entry["answer_html"] = render_faq_markup(entry["answer"])
+        entry["category"] = _normalize_faq_category(item.get("category"))
         result.append(entry)
     return result
 

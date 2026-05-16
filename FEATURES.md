@@ -962,12 +962,14 @@ wget -q -O /dev/null --server-response https://example.com
 
 ## Custom FAQ
 
-**Purpose:** operator-supplied FAQ entries appended to the built-in FAQ, with a safe markup subset for links, formatting, and clickable command chips.
+**Purpose:** operator-supplied FAQ entries appended to the built-in FAQ, with section grouping and a safe markup subset for links, formatting, and clickable command chips.
 
 **Behavior:**
 
 - Entries in `app/conf/faq.yaml` are appended to the built-in FAQ returned by `/faq` and re-read on every request (no restart required).
 - Each entry has a required `question` and one of `answer` (safe markup subset) or `answer_html` (exact HTML).
+- Entries can include `category` to place them under a FAQ section. Missing or unknown categories appear under **Other**, so local entries still show up if a category is mistyped.
+- The FAQ stays in one scrollable modal with section headers instead of tabs, so browser search can still find answers. Links can open a specific answer with `#faq=<question-slug>` or a section with `#faq-section=<section-slug>`.
 - The safe markup subset in `answer` supports `**bold**`, `*italic*`, `__underline__`, `` `inline code` ``, `- list items`, and command chips like `[[cmd:shortcuts]]` or `[[cmd:ping -c 1 127.0.0.1|custom label]]`.
 - Chips behave like the built-in allowlist chips — clicking one loads the command into the prompt without running it.
 - The file is optional — a missing or empty file shows only the built-in FAQ items.
@@ -979,13 +981,15 @@ wget -q -O /dev/null --server-response https://example.com
 
 ```yaml
 - question: "Where is this server located?"
+  category: "Other"
   answer: "This server is hosted in New York, USA on a 10 Gbps uplink via Cogent and Zayo."
 
 - question: "What is the outbound bandwidth?"
+  category: "Other"
   answer: "Outbound traffic is limited to 1 Gbps sustained."
 ```
 
-**Related files:** `app/conf/faq.yaml` (custom entries), `app/blueprints/content.py` (`/faq` endpoint + markup rendering), `app/static/js/shell_chrome.js` (FAQ modal + chip click wiring).
+**Related files:** `app/conf/faq.yaml` (custom entries), `app/blueprints/content.py` (`/faq` endpoint + markup rendering), `app/static/js/features/command-registry/command_registry.js` (FAQ grouping + chip click wiring).
 
 ---
 

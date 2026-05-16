@@ -4,6 +4,75 @@ let allowedCommandsFaqData = null;
 let commandRegistryData = null;
 let commandRegistryCategory = 'All';
 let commandRegistryQuery = '';
+let faqHandleRegistry = [];
+const FAQ_CATEGORY_ORDER = [
+  'Getting started',
+  'Core features',
+  'Privacy & sessions',
+  'Keyboard & controls',
+  'Tool-specific behavior',
+  'Limits & retention',
+  'Other',
+];
+const FAQ_CATEGORY_OTHER = 'Other';
+
+function faqSlug(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'item';
+}
+
+function normalizeFaqCategory(category) {
+  const text = String(category || '').trim();
+  return FAQ_CATEGORY_ORDER.includes(text) ? text : FAQ_CATEGORY_OTHER;
+}
+
+function getFaqHashTarget() {
+  const hash = String(window.location.hash || '').replace(/^#/, '');
+  if (!hash) return null;
+  const params = new URLSearchParams(hash);
+  const question = params.get('faq');
+  const section = params.get('faq-section');
+  if (question) return { kind: 'question', slug: question };
+  if (section) return { kind: 'section', slug: section };
+  return null;
+}
+
+function replaceFaqHash(kind, slug) {
+  if (!window.history || typeof window.history.replaceState !== 'function') return;
+  const base = `${window.location.pathname}${window.location.search}`;
+  window.history.replaceState(null, '', `${base}#${kind}=${encodeURIComponent(slug)}`);
+}
+
+function clearFaqHash() {
+  const target = getFaqHashTarget();
+  if (!target || !window.history || typeof window.history.replaceState !== 'function') return;
+  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+}
+
+function applyFaqHashTarget() {
+  if (!faqBody) return false;
+  const target = getFaqHashTarget();
+  if (!target) return false;
+  if (target.kind === 'question') {
+    const matched = faqHandleRegistry.find(handle => handle.panel.dataset.faqQuestion === target.slug);
+    if (!matched) return false;
+    matched.open();
+    if (typeof matched.panel.scrollIntoView === 'function') matched.panel.scrollIntoView({ block: 'start' });
+    return true;
+  }
+  if (target.kind === 'section') {
+    const section = [...faqBody.querySelectorAll('[data-faq-section]')]
+      .find(el => el.dataset.faqSection === target.slug);
+    if (!section) return false;
+    if (typeof section.scrollIntoView === 'function') section.scrollIntoView({ block: 'start' });
+    return true;
+  }
+  return false;
+}
 
 function _buildFaqLimitsContent(cfg) {
   if (!cfg) return '';
@@ -547,6 +616,7 @@ function appendVisualTourFaqLink() {
     if (typeof openTourModal === 'function') {
       const opened = openTourModal({ source: 'faq' });
       if (opened && typeof isFaqOverlayOpen === 'function' && isFaqOverlayOpen()) {
+        clearFaqHash();
         hideFaqOverlay();
       }
     }
@@ -599,46 +669,81 @@ function renderFaqItems(items) {
   if (!faqBody) return;
   faqBody.innerHTML = '';
   const faqHandles = [];
+  const grouped = new Map(FAQ_CATEGORY_ORDER.map(category => [category, []]));
   (items || []).forEach(item => {
-    const div = document.createElement('div');
-    div.className = 'faq-item';
-
-    const q = document.createElement('div');
-    q.className = 'faq-q';
-    q.textContent = item.question || '';
-
-    const a = document.createElement('div');
-    a.className = 'faq-a';
-    if (item.ui_kind === 'allowed_commands') {
-      a.id = 'faq-allowed-text';
-      a.textContent = 'Loading…';
-    } else if (item.ui_kind === 'limits') {
-      a.id = 'faq-limits-text';
-      a.textContent = 'Loading…';
-    } else if (item.answer_html) {
-      a.innerHTML = item.answer_html;
-    } else {
-      a.textContent = item.answer || '';
-    }
-
-    q.setAttribute('role', 'button');
-    q.setAttribute('tabindex', '0');
-    // FAQ question is a disclosure trigger. role="button" divs never receive
-    // DOM focus from click, so the pressable's blur is a no-op — the
-    // disclosure helper inherits clearPressStyle to punch through sticky
-    // :hover highlights.
-    faqHandles.push(bindDisclosure(q, {
-      panel: div,
-      openClass: 'faq-open',
-      clearPressStyle: true,
-    }));
-
-    div.appendChild(q);
-    div.appendChild(a);
-    faqBody.appendChild(div);
+    if (!item || typeof item !== 'object') return;
+    const category = normalizeFaqCategory(item && item.category);
+    grouped.get(category).push(item);
   });
 
-  if (faqHandles[0]) faqHandles[0].open();
+  FAQ_CATEGORY_ORDER.forEach(category => {
+    const sectionItems = grouped.get(category) || [];
+    if (!sectionItems.length) return;
+
+    const section = document.createElement('section');
+    section.className = 'faq-section';
+    section.id = `faq-section-${faqSlug(category)}`;
+    section.dataset.faqSection = faqSlug(category);
+
+    const header = document.createElement('div');
+    header.className = 'faq-section-header';
+    header.textContent = category;
+    header.setAttribute('tabindex', '-1');
+    section.appendChild(header);
+
+    sectionItems.forEach(item => {
+      const div = document.createElement('div');
+      div.className = 'faq-item';
+      const questionSlug = faqSlug(item.question);
+      div.id = `faq-${questionSlug}`;
+      div.dataset.faqQuestion = questionSlug;
+
+      const q = document.createElement('div');
+      q.className = 'faq-q';
+      q.textContent = item.question || '';
+
+      const a = document.createElement('div');
+      a.className = 'faq-a';
+      if (item.ui_kind === 'allowed_commands') {
+        a.id = 'faq-allowed-text';
+        a.textContent = 'Loading…';
+      } else if (item.ui_kind === 'limits') {
+        a.id = 'faq-limits-text';
+        a.textContent = 'Loading…';
+      } else if (item.answer_html) {
+        a.innerHTML = item.answer_html;
+      } else {
+        a.textContent = item.answer || '';
+      }
+
+      q.setAttribute('role', 'button');
+      q.setAttribute('tabindex', '0');
+      // FAQ question is a disclosure trigger. role="button" divs never receive
+      // DOM focus from click, so the pressable's blur is a no-op — the
+      // disclosure helper inherits clearPressStyle to punch through sticky
+      // :hover highlights.
+      const handle = bindDisclosure(q, {
+        panel: div,
+        openClass: 'faq-open',
+        clearPressStyle: true,
+        onToggle: (open) => {
+          if (open && typeof isFaqOverlayOpen === 'function' && isFaqOverlayOpen()) {
+            replaceFaqHash('faq', questionSlug);
+          }
+        },
+      });
+      if (handle) faqHandles.push({ ...handle, panel: div });
+
+      div.appendChild(q);
+      div.appendChild(a);
+      section.appendChild(div);
+    });
+    faqBody.appendChild(section);
+  });
+
+  faqHandleRegistry = faqHandles;
+  const openedFromHash = applyFaqHashTarget();
+  if (!openedFromHash && faqHandles[0]) faqHandles[0].open();
 
   appendVisualTourFaqLink();
   renderAllowedCommandsFaq(allowedCommandsFaqData);

@@ -37,12 +37,14 @@ function openFaq() {
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   showFaqOverlay();
+  if (typeof applyFaqHashTarget === 'function') applyFaqHashTarget();
   if (typeof markInteractionSurfaceReady === 'function') {
     markInteractionSurfaceReady('faq', faqOverlay, document.getElementById('faq-modal'));
   }
 }
 
 function closeFaq() {
+  if (typeof clearFaqHash === 'function') clearFaqHash();
   hideFaqOverlay();
   refocusComposerAfterAction({ defer: true });
 }

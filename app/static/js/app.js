@@ -202,7 +202,10 @@ function _closeMajorOverlays() {
     if (typeof closeWorkspace === 'function') closeWorkspace();
     else hideWorkspaceOverlay();
   }
-  if (isFaqOverlayOpen()) hideFaqOverlay();
+  if (isFaqOverlayOpen()) {
+    if (typeof clearFaqHash === 'function') clearFaqHash();
+    hideFaqOverlay();
+  }
   if (isThemeOverlayOpen()) hideThemeOverlay();
   if (isOptionsOverlayOpen()) hideOptionsOverlay();
   if (typeof isShortcutsOverlayOpen === 'function' && isShortcutsOverlayOpen()) {
