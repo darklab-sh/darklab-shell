@@ -4,12 +4,14 @@ Project workspace routes.
 
 import logging
 import os
+import time
 
 from flask import Blueprint, jsonify, request, send_file
 
 from config import CFG
 from extensions import limiter
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
+from services import metrics as app_metrics
 from services.projects.contracts import BULK_AUDIT_FAILURE_LIMIT, MAX_BULK_RUN_ACTION_ITEMS
 from services.projects.workspace import (
     EvidencePackageTooLarge,
@@ -522,13 +524,26 @@ def projects_packages_get(project_id, package_id):
 @limiter.limit(_evidence_package_download_limit)
 def projects_packages_download(project_id, package_id):
     session_id = get_session_id()
+    build_started = time.perf_counter()
     try:
         archive = build_evidence_package_archive(session_id, project_id, package_id)
     except EvidencePackageTooLarge as exc:
+        app_metrics.record_evidence_package_build("too_large", time.perf_counter() - build_started)
         return jsonify({"error": str(exc)}), 413
+    except Exception:
+        app_metrics.record_evidence_package_build("error", time.perf_counter() - build_started)
+        raise
     if archive is None:
+        app_metrics.record_evidence_package_build("not_found", time.perf_counter() - build_started)
         return jsonify({"error": "package not found"}), 404
     metrics = archive.get("metrics") if isinstance(archive.get("metrics"), dict) else {}
+    app_metrics.record_evidence_package_build(
+        "success",
+        time.perf_counter() - build_started,
+        archive_bytes=int(metrics.get("archive_bytes") or archive.get("byte_size") or 0),
+        skipped_artifacts=int(metrics.get("skipped_artifacts") or 0),
+        skipped_items=int(metrics.get("skipped_items") or 0),
+    )
     log_extra = {
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),

@@ -35,6 +35,7 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - APP_PORT=${APP_PORT:-8888}
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/darklab_shell-prom
       # Must match app/conf/config.yaml workspace_root when customized.
       # The entrypoint uses this path to normalize workspace permissions before
       # dropping privileges; the app uses workspace_root for runtime access.

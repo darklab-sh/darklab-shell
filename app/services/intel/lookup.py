@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 from typing import Any, Callable
 
 from config import CFG
 from core import process
+from services import metrics as app_metrics
 from services.intel import audit, cache
 from services.intel.base import (
     IntelProviderError,
@@ -177,9 +179,11 @@ def _lookup_provider(
     cfg: dict[str, Any],
     redis_client,
 ) -> ProviderLookup:
+    started = time.perf_counter()
     try:
         provider.secret_value(session_id)
     except ProviderMissingSecret as exc:
+        app_metrics.record_intel_lookup(provider.name, "missing_secret", time.perf_counter() - started)
         return ProviderLookup(provider.name, status="missing_secret", message=str(exc))
 
     ttl = provider.cache_ttl(entity_type, cfg=cfg)
@@ -194,10 +198,12 @@ def _lookup_provider(
                 run_id=run_id,
                 cache_hit=True,
             )
+            app_metrics.record_intel_lookup(provider.name, "cache_hit", time.perf_counter() - started)
             return ProviderLookup(provider.name, result=result)
 
     quota = cache.get_quota_exhausted(session_id, provider.name, redis_client=redis_client)
     if quota:
+        app_metrics.record_intel_lookup(provider.name, "rate_limited", time.perf_counter() - started)
         return ProviderLookup(
             provider.name,
             status="quota_exhausted",
@@ -207,6 +213,12 @@ def _lookup_provider(
 
     rate_limit = provider.rate_limit(session_id, cfg=cfg, redis_client=redis_client)
     if not rate_limit.allowed:
+        app_metrics.record_intel_lookup(
+            provider.name,
+            "rate_limited",
+            time.perf_counter() - started,
+            retry_after_seconds=rate_limit.retry_after_seconds,
+        )
         return ProviderLookup(
             provider.name,
             status="rate_limited",
@@ -225,16 +237,20 @@ def _lookup_provider(
                 cfg=cfg,
                 redis_client=redis_client,
             )
+            app_metrics.record_intel_lookup(provider.name, "rate_limited", time.perf_counter() - started)
             return ProviderLookup(
                 provider.name,
                 status="quota_exhausted",
                 message=_quota_message(provider.name, quota),
                 reset_at=_float_or_none(quota.get("reset_at")),
             )
+        app_metrics.record_intel_lookup(provider.name, "error", time.perf_counter() - started)
         return ProviderLookup(provider.name, status="error", message=str(exc))
     except ProviderClientUnavailable as exc:
+        app_metrics.record_intel_lookup(provider.name, "error", time.perf_counter() - started)
         return ProviderLookup(provider.name, status="error", message=str(exc))
     except IntelProviderError as exc:
+        app_metrics.record_intel_lookup(provider.name, "error", time.perf_counter() - started)
         return ProviderLookup(provider.name, status="error", message=str(exc))
 
     ttl = provider.cache_ttl(result.entity_type, cfg=cfg)
@@ -264,6 +280,7 @@ def _lookup_provider(
         http_status=result.http_status or "",
         entity_count=1 if result.payload.get("summary", {}).get("has_intel") else 0,
     )
+    app_metrics.record_intel_lookup(provider.name, "success", time.perf_counter() - started)
     return ProviderLookup(provider.name, result=result)
 
 

@@ -24,6 +24,7 @@ import tempfile
 from typing import Any, BinaryIO
 
 from config import CFG
+from services import metrics as app_metrics
 
 log = logging.getLogger(__name__)
 
@@ -590,6 +591,7 @@ def _check_write_limits(
     cfg: dict[str, Any] | None,
 ) -> None:
     if new_size > settings.max_file_bytes:
+        app_metrics.record_workspace_quota_rejection()
         raise WorkspaceQuotaExceeded("file exceeds session max file size")
     usage = workspace_usage(session_id, cfg)
     try:
@@ -601,9 +603,11 @@ def _check_write_limits(
     existing_size = destination_stat.st_size if destination_stat and stat.S_ISREG(destination_stat.st_mode) else 0
     new_file_count = usage.file_count + (0 if destination_stat is not None else 1)
     if new_file_count > settings.max_files:
+        app_metrics.record_workspace_quota_rejection()
         raise WorkspaceQuotaExceeded("session file count limit exceeded")
     projected = usage.bytes_used - existing_size + new_size
     if projected > settings.quota_bytes:
+        app_metrics.record_workspace_quota_rejection()
         raise WorkspaceQuotaExceeded("session file quota exceeded")
 
 
@@ -1057,4 +1061,5 @@ def cleanup_inactive_workspaces(
         if child.stat().st_mtime < cutoff:
             shutil.rmtree(child)
             removed += 1
+    app_metrics.record_workspace_evictions(removed, "inactive")
     return removed

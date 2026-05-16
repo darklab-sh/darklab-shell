@@ -372,6 +372,7 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | `GET` | `/health` | Returns Docker/load-balancer health with DB and optional Redis checks; degraded dependencies return 503. |
 | `GET` | `/status` | Returns lightweight HUD status data for uptime, DB, Redis, and server time; always responds 200. |
 | `GET` | `/diag` | Serves IP-gated operator diagnostics as HTML or JSON; returns 404 outside `diagnostics_allowed_cidrs`. |
+| `GET` | `/metrics` | Serves IP-gated Prometheus text metrics; returns 404 when metrics are disabled or the caller is outside `diagnostics_allowed_cidrs`. |
 
 ---
 
@@ -1307,12 +1308,13 @@ The current event inventory is:
 - `/health` remains the load-balancer contract and reports whether DB and Redis are healthy, with degraded states surfacing through status code.
 - `/status` is intentionally a softer browser-HUD contract and always responds 200 so status-pill polling never causes UI flapping or reconnect churn.
 - `/diag` is the operator-facing structured view that surfaces runtime config, service health, asset presence, SQLite storage breakdowns, tool availability, and activity summaries without opening a shell session.
+- `/metrics` is the Prometheus scrape contract for trendable operational signals, including HTTP traffic, runs, PTYs, rate limits, broker mode/activity, DB/Redis/workspace gauges, selected database hot-path latency, intel provider outcomes/cache size, evidence package builds, findings, snapshots, and error counters.
 
-These three surfaces share the same runtime health model, but they target different consumers: infrastructure checks, browser chrome, and operator diagnostics.
+These surfaces share the same runtime health model, but they target different consumers: infrastructure checks, browser chrome, operator diagnostics, and time-series monitoring.
 
 ### Operator Diagnostics
 
-The diagnostics page lives behind the same trusted-proxy-aware client IP resolution path used by logging and rate limiting. When enabled through `diagnostics_allowed_cidrs`, it exposes a live operator view of the running instance and reuses the same themed header foundation as permalink/export surfaces.
+The diagnostics page and Prometheus metrics endpoint live behind the same trusted-proxy-aware client IP resolution path used by logging and rate limiting. When enabled through `diagnostics_allowed_cidrs`, `/diag` exposes a live operator view of the running instance and reuses the same themed header foundation as permalink/export surfaces. `/metrics` returns Prometheus text for allowlisted callers when `metrics_enabled` is true.
 
 Operationally, `/diag` sits on top of the same underlying sources described earlier in the document:
 
@@ -1321,6 +1323,8 @@ Operationally, `/diag` sits on top of the same underlying sources described earl
 - table/index storage, logical payload estimates, FTS shadow-table rollups, and largest saved-run hints come from the same SQLite connection as the Database card; allocated byte counts appear when SQLite was built with `SQLITE_ENABLE_DBSTAT_VTAB`, while row counts and logical payload estimates still render without it
 - config values reflect the browser/backend config split described in **Configuration Surfaces**
 - access control and denied-access logging reuse the same client-IP trust model described in **Security Model** and **Logging**
+- Prometheus counters, histograms, label normalizers, and multiprocess registry setup live in `app/services/metrics/__init__.py`; scrape-time collectors for database, Redis, broker mode, workspace, intel cache size, Atlas, findings, snapshots, and provider-secret health live in `app/services/metrics/collectors.py`
+- the container entrypoint prepares `PROMETHEUS_MULTIPROC_DIR` under `/tmp/darklab_shell-prom`, clears stale worker shards on startup, and keeps the directory ephemeral with the existing tmpfs runtime
 
 ---
 
@@ -1388,12 +1392,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,788
+- behavior tests: 2,797
 - docs/inventory meta-tests: 32
-- `pytest`: 1419 (1387 behavior + 32 meta)
+- `pytest`: 1428 (1396 behavior + 32 meta)
 - `vitest`: 1150
 - `playwright`: 251
-- total: 2,820
+- total: 2,829
 
 ### Testing Architecture
 

@@ -26,6 +26,16 @@ find "$WORKSPACE_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'sess_*' -exec sh -
 # (nuclei templates, ProjectDiscovery config, etc.) to the tmpfs mount
 chmod 1777 /tmp 2>/dev/null || true
 
+# prometheus_client multiprocess mode stores per-worker metric shards here.
+# The directory is on /tmp tmpfs in Compose; clear stale shards before Gunicorn
+# starts so an unclean container stop cannot double-count old workers.
+PROMETHEUS_MULTIPROC_DIR="${PROMETHEUS_MULTIPROC_DIR:-/tmp/darklab_shell-prom}"
+mkdir -p "$PROMETHEUS_MULTIPROC_DIR" 2>/dev/null || true
+find "$PROMETHEUS_MULTIPROC_DIR" -type f -name '*.db' -delete 2>/dev/null || true
+chown appuser:appuser "$PROMETHEUS_MULTIPROC_DIR" 2>/dev/null || true
+chmod 700 "$PROMETHEUS_MULTIPROC_DIR" 2>/dev/null || true
+export PROMETHEUS_MULTIPROC_DIR
+
 # Pre-create config/cache dirs owned by scanner so tools don't try to create
 # them as root. Covers nuclei, uncover, and other tools that write to ~/.config
 mkdir -p /tmp/.config/nuclei /tmp/.config/uncover /tmp/.cache

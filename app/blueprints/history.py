@@ -7,6 +7,7 @@ import logging
 import math
 import re
 import sqlite3
+import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -36,6 +37,7 @@ from services.projects.workspace import ProjectWorkspaceError, compare_project_r
 from core.redaction import omit_raw_only_line_entries, redact_line_entries
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, builtin_command_roots_for_storage
 from services.runs.output_store import load_full_output_entries
+from services import metrics as app_metrics
 
 APP_VERSION = _config.APP_VERSION
 CFG = _config.CFG
@@ -814,6 +816,7 @@ def _resolve_compare_request(session_id, left_id, right_id, project_id="", basel
 
 
 def _compare_run_rows(session_id, left_id, right_id):
+    query_started = time.perf_counter()
     with db_connect() as conn:
         rows = conn.execute(
             "SELECT runs.*, art.rel_path "
@@ -821,6 +824,7 @@ def _compare_run_rows(session_id, left_id, right_id):
             "WHERE runs.session_id = ? AND runs.id IN (?, ?)",
             (session_id, left_id, right_id),
         ).fetchall()
+    app_metrics.record_db_query("history_compare_run_rows", time.perf_counter() - query_started)
     by_id = {str(row["id"]): dict(row) for row in rows}
     return by_id.get(left_id), by_id.get(right_id)
 
@@ -993,16 +997,26 @@ def get_history():
 
     with db_connect() as conn:
         try:
+            query_started = time.perf_counter()
             items, runs, roots_rows, total_count, page_count, current_page, fts_q = _query_history(conn)
+            app_metrics.record_db_query(
+                "history_list_fts" if fts_q else "history_list",
+                time.perf_counter() - query_started,
+            )
         except sqlite3.OperationalError as exc:
             if query and _build_fts_query(query):
+                app_metrics.record_history_search_fallback(
+                    "missing_fts" if "runs_fts" in str(exc).lower() else "fts_error"
+                )
                 log.warning("FTS_SEARCH_FALLBACK", extra={
                     "session": get_log_session_id(session_id), "q": query, "error": str(exc),
                 })
+                query_started = time.perf_counter()
                 items, runs, roots_rows, total_count, page_count, current_page, fts_q = _query_history(
                     conn,
                     force_like=True,
                 )
+                app_metrics.record_db_query("history_list_like_fallback", time.perf_counter() - query_started)
             else:
                 raise
     for item in items:
@@ -1199,6 +1213,7 @@ def compare_history_runs():
         left_artifact_count = int(project_comparison.get("left", {}).get("artifact_count") or 0)
         right_artifact_count = int(project_comparison.get("right", {}).get("artifact_count") or 0)
     else:
+        query_started = time.perf_counter()
         with db_connect() as conn:
             left_findings, left_persisted_finding_count, left_findings_truncated = (
                 run_comparison.run_finding_compare_items(
@@ -1236,6 +1251,7 @@ def compare_history_runs():
                     include_created=True,
                 )
             )
+        app_metrics.record_db_query("history_compare_objects", time.perf_counter() - query_started)
         finding_objects = run_comparison.compare_items(left_findings, right_findings)
         artifact_objects = run_comparison.compare_items(left_artifacts, right_artifacts)
         if any((
@@ -1718,6 +1734,7 @@ def save_share():
         "ip": get_client_ip(), "session": get_log_session_id(session_id), "share_id": share_id,
         "label": label, "redacted": apply_redaction,
     })
+    app_metrics.record_snapshot_created("manual")
     return jsonify({"id": share_id, "url": f"/share/{share_id}"})
 
 
@@ -1777,6 +1794,7 @@ def get_share(share_id):
         "ip": get_client_ip(), "session": get_log_session_id(), "share_id": share_id,
         "label": snap["label"],
     })
+    app_metrics.record_snapshot_view(bool(snap.get("redacted", False)))
 
     if "json" in request.args:
         snap["content"] = content_lines

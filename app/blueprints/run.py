@@ -88,6 +88,7 @@ from services.projects.workspace import (
     record_run_file_artifacts,
     record_run_findings,
 )
+from services import metrics as app_metrics
 from services.session.variables import SessionVariableError, expand_session_variables
 from services.workspace.files import WorkspaceDisabled, session_workspace_dir
 from services.pty.service import (
@@ -382,6 +383,7 @@ def _save_completed_run(
                 recorded_findings = record_run_findings(conn, session_id, run_id, persisted_entries)
             except Exception:
                 recorded_findings = []
+                app_metrics.record_run_finalize_error("db_write")
                 log.error("PROJECT_RUN_FINDING_CAPTURE_ERROR", exc_info=True, extra={
                     "run_id": run_id,
                     "session": get_log_session_id(session_id),
@@ -397,12 +399,14 @@ def _save_completed_run(
                 )
             except Exception:
                 recorded_entities = []
+                app_metrics.record_run_finalize_error("entity_materialize")
                 log.error("ATLAS_ENTITY_CAPTURE_ERROR", exc_info=True, extra={
                     "run_id": run_id,
                     "session": get_log_session_id(session_id),
                     "cmd": command,
                 })
             conn.commit()
+        app_metrics.record_findings_materialized(run_kind, len(recorded_findings))
         if active_project_link:
             log.info("PROJECT_ACTIVE_RUN_LINKED", extra={
                 "run_id": run_id,
@@ -437,6 +441,7 @@ def _save_completed_run(
             })
         return active_project_link
     except Exception:
+        app_metrics.record_run_finalize_error("db_write")
         log.error("RUN_SAVED_ERROR", exc_info=True, extra={
             "run_id": run_id, "session": get_log_session_id(session_id), "cmd": command,
         })
@@ -471,6 +476,13 @@ def _finalize_completed_run(
         run_kind=run_kind_for_cmd_type(cmd_type),
         owner_tab_id=owner_tab_id,
     )
+    app_metrics.record_completed_run(
+        original_command,
+        run_kind_for_cmd_type(cmd_type),
+        exit_code,
+        elapsed,
+        capture,
+    )
     return {"elapsed": elapsed, "active_project_link": active_project_link}
 
 
@@ -504,6 +516,15 @@ def _persist_completed_pty_run(
         run_kind=RUN_KIND_EXTERNAL,
         owner_tab_id=owner_tab_id or str(getattr(run, "owner_tab_id", "") or ""),
     )
+    try:
+        elapsed = (
+            datetime.fromisoformat(finished_iso) -
+            datetime.fromisoformat(str(run.started))
+        ).total_seconds()
+    except (TypeError, ValueError):
+        elapsed = 0.0
+    app_metrics.record_completed_run(run.command, RUN_KIND_EXTERNAL, exit_code, elapsed, capture)
+    app_metrics.record_completed_pty(run.command, exit_code, elapsed)
     return {
         "preview_truncated": capture.preview_truncated,
         "output_line_count": capture.output_line_count,
@@ -569,6 +590,15 @@ def save_client_side_run():
         "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
         "pid": 0, "cmd": command, "cmd_type": "client-builtin",
     })
+    app_metrics.record_run_started(command, RUN_KIND_BUILTIN, active=False)
+    app_metrics.record_completed_run_values(
+        command,
+        RUN_KIND_BUILTIN,
+        exit_code,
+        0.0,
+        output_bytes=sum(len(str(line.get("text", ""))) for line in lines),
+        truncated=bool(preview_truncated),
+    )
 
     with db_connect() as conn:
         conn.execute(
@@ -1242,6 +1272,11 @@ def _brokered_synthetic_run(
         "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
         "pid": 0, "cmd": original_command, "cmd_type": cmd_type,
     })
+    app_metrics.record_run_started(
+        original_command,
+        run_kind_for_cmd_type(cmd_type),
+        active=False,
+    )
     publish_run_event(run_id, "started", {"run_id": run_id, "started": run_started})
     try:
         for event in events:
@@ -1277,6 +1312,13 @@ def _brokered_synthetic_run(
             link_active_project=cmd_type == "real",
             run_kind=run_kind_for_cmd_type(cmd_type),
             owner_tab_id=owner_tab_id,
+        )
+        app_metrics.record_completed_run(
+            original_command,
+            run_kind_for_cmd_type(cmd_type),
+            exit_code,
+            elapsed,
+            capture,
         )
     except Exception as exc:
         log.error("RUN_BROKER_SYNTHETIC_ERROR", exc_info=True, extra={
@@ -1542,6 +1584,7 @@ def start_interactive_pty_run():
     pty_limit = _interactive_pty_concurrency_limit()
     active_pty_count = _active_interactive_pty_count(session_id)
     if active_pty_count >= pty_limit:
+        app_metrics.record_rate_limit_rejection(request.endpoint or "start_interactive_pty_run", scope="pty_input")
         return jsonify({
             "error": (
                 "Interactive PTY limit reached for this session "

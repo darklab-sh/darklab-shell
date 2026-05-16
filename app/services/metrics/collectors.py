@@ -1,0 +1,402 @@
+"""Scrape-time Prometheus collectors for runtime state."""
+
+from __future__ import annotations
+
+import os
+import re
+import sqlite3
+import time
+from typing import Any
+
+from prometheus_client.core import GaugeMetricFamily
+
+from config import APP_VERSION, CFG
+from core import database, process
+from services.intel.registry import INTEL_PROVIDERS
+from services.metrics import build_info_labels
+from services.workspace.files import workspace_root, workspace_settings
+
+
+_REDIS_SCAN_KEY_CAP = 2000
+_REDIS_PREFIXES = ("runstream", "proc", "procmeta", "sessionprocs", "intel")
+_SQLITE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _db_file_size(path: str) -> int:
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
+def _table_names(conn: sqlite3.Connection) -> list[str]:
+    rows = conn.execute(
+        "SELECT name FROM sqlite_schema "
+        "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' "
+        "ORDER BY name"
+    ).fetchall()
+    return [str(row["name"]) for row in rows]
+
+
+def _count_rows(conn: sqlite3.Connection, table: str) -> int:
+    if not _SQLITE_IDENTIFIER_RE.fullmatch(table):
+        return 0
+    quoted = '"' + table.replace('"', '""') + '"'
+    row = conn.execute(f"SELECT COUNT(*) AS count FROM {quoted}").fetchone()  # nosec B608
+    return _safe_int(row["count"] if row else 0)
+
+
+def _allocated_bytes(conn: sqlite3.Connection) -> dict[str, int]:
+    try:
+        rows = conn.execute(
+            "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY name"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    return {str(row["name"]): _safe_int(row["bytes"]) for row in rows}
+
+
+def _db_freelist_bytes(conn: sqlite3.Connection) -> int:
+    page_size = _safe_int(conn.execute("PRAGMA page_size").fetchone()[0])
+    freelist = _safe_int(conn.execute("PRAGMA freelist_count").fetchone()[0])
+    return page_size * freelist
+
+
+def _fts_orphans(conn: sqlite3.Connection) -> int:
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS count FROM runs_fts "
+            "WHERE rowid NOT IN (SELECT rowid FROM runs)"
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return 0
+    return _safe_int(row["count"] if row else 0)
+
+
+def _workspace_usage() -> tuple[int, int]:
+    settings = workspace_settings(CFG)
+    if not settings.enabled:
+        return 0, 0
+    root = workspace_root(settings)
+    if not root.exists():
+        return 0, 0
+    bytes_used = 0
+    file_count = 0
+    try:
+        for path in root.rglob("*"):
+            try:
+                stat = path.lstat()
+            except OSError:
+                continue
+            if path.is_symlink() or not path.is_file():
+                continue
+            file_count += 1
+            bytes_used += stat.st_size
+    except OSError:
+        return bytes_used, file_count
+    return bytes_used, file_count
+
+
+def _redis_scan_count(client: Any, pattern: str) -> int:
+    cursor = 0
+    count = 0
+    while True:
+        cursor, keys = client.scan(cursor=cursor, match=pattern, count=100)
+        count += len(keys or [])
+        if count >= _REDIS_SCAN_KEY_CAP:
+            return _REDIS_SCAN_KEY_CAP
+        if cursor in (0, "0"):
+            return count
+
+
+def _redis_stream_length_sample(client: Any, prefix: str) -> int:
+    cursor = 0
+    total = 0
+    sampled = 0
+    pattern = f"{prefix}:*"
+    while True:
+        cursor, keys = client.scan(cursor=cursor, match=pattern, count=100)
+        for key in keys or []:
+            try:
+                total += _safe_int(client.xlen(key))
+                sampled += 1
+            except Exception:
+                continue
+            if sampled >= _REDIS_SCAN_KEY_CAP:
+                return total
+        if cursor in (0, "0"):
+            return total
+
+
+def _secret_envs_with_rows(conn: sqlite3.Connection) -> set[str]:
+    try:
+        rows = conn.execute("SELECT name, consumer_envs FROM secrets").fetchall()
+    except sqlite3.OperationalError:
+        return set()
+    envs = set()
+    for row in rows:
+        envs.add(str(row["name"]))
+        raw = str(row["consumer_envs"] or "")
+        for token in raw.replace("[", "").replace("]", "").replace('"', "").split(","):
+            token = token.strip()
+            if token:
+                envs.add(token)
+    return envs
+
+
+class RuntimeStateCollector:
+    """Collects gauges that should be sampled only when Prometheus scrapes."""
+
+    def collect(self):
+        yield from self._collect_build()
+        yield from self._collect_broker()
+        health = GaugeMetricFamily("darklab_health_status", "Component health status, 1 is healthy.", labels=("component",))
+        yield from self._collect_database(health)
+        yield from self._collect_redis(health)
+        yield health
+        yield from self._collect_intel_cache()
+        yield from self._collect_workspace()
+
+    def _collect_build(self):
+        build = GaugeMetricFamily(
+            "darklab_build_info",
+            "Application build and runtime information.",
+            labels=("version", "git_sha", "python_version"),
+        )
+        labels = build_info_labels()
+        build.add_metric([labels["version"], labels["git_sha"], labels["python_version"]], 1)
+        yield build
+
+        start = GaugeMetricFamily(
+            "darklab_app_start_time_seconds",
+            "Unix timestamp when the app process started.",
+        )
+        start.add_metric([], _safe_int(os.environ.get("DARKLAB_APP_START_TIME_SECONDS"), int(time.time())))
+        yield start
+
+        version = GaugeMetricFamily(
+            "darklab_version_info",
+            "Application version marker.",
+            labels=("version",),
+        )
+        version.add_metric([str(APP_VERSION)], 1)
+        yield version
+
+    def _collect_broker(self):
+        broker = GaugeMetricFamily(
+            "darklab_broker_mode_info",
+            "Run broker backend mode marker.",
+            labels=("mode",),
+        )
+        try:
+            from services.runs.broker import broker_mode  # noqa: PLC0415
+            mode = broker_mode()
+        except Exception:
+            mode = "unknown"
+        broker.add_metric([mode], 1)
+        yield broker
+
+    def _collect_database(self, health: GaugeMetricFamily):
+        db_size = GaugeMetricFamily("darklab_db_size_bytes", "SQLite database file size in bytes.")
+        db_size.add_metric([], _db_file_size(database.DB_PATH))
+        yield db_size
+
+        wal_size = GaugeMetricFamily("darklab_db_wal_size_bytes", "SQLite WAL file size in bytes.")
+        wal_size.add_metric([], _db_file_size(f"{database.DB_PATH}-wal"))
+        yield wal_size
+
+        reclaimable = GaugeMetricFamily("darklab_db_reclaimable_bytes", "SQLite freelist bytes.")
+        table_rows = GaugeMetricFamily("darklab_db_table_rows", "SQLite table row counts.", labels=("table",))
+        table_bytes = GaugeMetricFamily(
+            "darklab_db_table_allocated_bytes",
+            "SQLite allocated bytes by object.",
+            labels=("table",),
+        )
+        fts_orphans = GaugeMetricFamily("darklab_db_fts_orphans", "FTS rows without matching runs rows.")
+        atlas_entities = GaugeMetricFamily("darklab_atlas_entities", "Atlas entity counts by type.", labels=("type",))
+        findings = GaugeMetricFamily(
+            "darklab_findings_total",
+            "Finding counts by severity and status.",
+            labels=("severity", "status"),
+        )
+        snapshots = GaugeMetricFamily("darklab_snapshots_total", "Total saved snapshots.")
+        intel_missing = GaugeMetricFamily(
+            "darklab_intel_provider_secret_missing",
+            "1 when a registered keyed provider has no saved secret in any session.",
+            labels=("provider",),
+        )
+
+        try:
+            with database.db_connect() as conn:
+                conn.execute("SELECT 1")
+                health.add_metric(["db"], 1)
+                reclaimable.add_metric([], _db_freelist_bytes(conn))
+                allocated = _allocated_bytes(conn)
+                for name in _table_names(conn):
+                    table_rows.add_metric([name], _count_rows(conn, name))
+                    if name in allocated:
+                        table_bytes.add_metric([name], allocated[name])
+                fts_orphans.add_metric([], _fts_orphans(conn))
+                self._add_atlas(conn, atlas_entities)
+                self._add_findings(conn, findings)
+                self._add_snapshots(conn, snapshots)
+                self._add_intel_missing(conn, intel_missing)
+        except Exception:
+            health.add_metric(["db"], 0)
+            reclaimable.add_metric([], 0)
+            fts_orphans.add_metric([], 0)
+            snapshots.add_metric([], 0)
+        yield reclaimable
+        yield table_rows
+        yield table_bytes
+        yield fts_orphans
+        yield atlas_entities
+        yield findings
+        yield snapshots
+        yield intel_missing
+
+    def _add_atlas(self, conn: sqlite3.Connection, metric: GaugeMetricFamily) -> None:
+        try:
+            rows = conn.execute("SELECT type, COUNT(*) AS count FROM entities GROUP BY type").fetchall()
+        except sqlite3.OperationalError:
+            rows = []
+        for row in rows:
+            metric.add_metric([str(row["type"] or "unknown")], _safe_int(row["count"]))
+
+    def _add_findings(self, conn: sqlite3.Connection, metric: GaugeMetricFamily) -> None:
+        try:
+            rows = conn.execute(
+                "SELECT COALESCE(NULLIF(severity, ''), 'unknown') AS severity, "
+                "COALESCE(NULLIF(status, ''), 'new') AS status, COUNT(*) AS count "
+                "FROM findings GROUP BY severity, status"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            rows = []
+        for row in rows:
+            metric.add_metric([str(row["severity"]), str(row["status"])], _safe_int(row["count"]))
+
+    def _add_snapshots(self, conn: sqlite3.Connection, metric: GaugeMetricFamily) -> None:
+        try:
+            row = conn.execute("SELECT COUNT(*) AS count FROM snapshots").fetchone()
+            metric.add_metric([], _safe_int(row["count"] if row else 0))
+        except sqlite3.OperationalError:
+            metric.add_metric([], 0)
+
+    def _add_intel_missing(self, conn: sqlite3.Connection, metric: GaugeMetricFamily) -> None:
+        configured_envs = _secret_envs_with_rows(conn)
+        for provider in INTEL_PROVIDERS.values():
+            secret_env = str(provider.secret_env or "")
+            if not secret_env:
+                continue
+            metric.add_metric([provider.id], 0 if secret_env in configured_envs else 1)
+
+    def _collect_redis(self, health: GaugeMetricFamily):
+        redis_up = GaugeMetricFamily("darklab_redis_up", "Redis health, 1 is reachable.")
+        redis_ping = GaugeMetricFamily("darklab_redis_ping_seconds", "Redis ping latency in seconds.")
+        redis_keys = GaugeMetricFamily("darklab_redis_keys", "Redis key count by known prefix.", labels=("prefix",))
+        redis_stream = GaugeMetricFamily(
+            "darklab_redis_stream_length",
+            "Redis stream lengths by known prefix.",
+            labels=("prefix",),
+        )
+        redis_clients = GaugeMetricFamily("darklab_redis_connected_clients", "Redis connected client count.")
+        client = process.redis_client
+        if not client:
+            redis_up.add_metric([], 0)
+            redis_ping.add_metric([], 0)
+            redis_clients.add_metric([], 0)
+            health.add_metric(["redis"], 1)
+            yield redis_up
+            yield redis_ping
+            yield redis_keys
+            yield redis_stream
+            yield redis_clients
+            return
+
+        try:
+            start = time.perf_counter()
+            client.ping()
+            ping_seconds = time.perf_counter() - start
+            redis_up.add_metric([], 1)
+            redis_ping.add_metric([], ping_seconds)
+            health.add_metric(["redis"], 1)
+            for prefix in _REDIS_PREFIXES:
+                redis_keys.add_metric([prefix], _redis_scan_count(client, f"{prefix}:*"))
+                if prefix == "runstream":
+                    redis_stream.add_metric([prefix], _redis_stream_length_sample(client, prefix))
+            try:
+                info = client.info()
+                redis_clients.add_metric([], _safe_int(info.get("connected_clients") if isinstance(info, dict) else 0))
+            except Exception:
+                redis_clients.add_metric([], 0)
+        except Exception:
+            redis_up.add_metric([], 0)
+            redis_ping.add_metric([], 0)
+            redis_clients.add_metric([], 0)
+            health.add_metric(["redis"], 0)
+        yield redis_up
+        yield redis_ping
+        yield redis_keys
+        yield redis_stream
+        yield redis_clients
+
+    def _collect_intel_cache(self):
+        cache_entries = GaugeMetricFamily(
+            "darklab_intel_cache_entries",
+            "App-native intel response cache entries by provider.",
+            labels=("provider",),
+        )
+        quota_entries = GaugeMetricFamily(
+            "darklab_intel_quota_cache_entries",
+            "App-native intel quota-exhaustion cache entries by provider.",
+            labels=("provider",),
+        )
+        client = process.redis_client
+        if client:
+            for provider_id in INTEL_PROVIDERS:
+                cache_entries.add_metric([provider_id], _redis_scan_count(client, f"intel:cache:{provider_id}:*"))
+                quota_entries.add_metric([provider_id], _redis_scan_count(client, f"intel:quota:*:{provider_id}"))
+            yield cache_entries
+            yield quota_entries
+            return
+
+        try:
+            from services.intel import cache as intel_cache  # noqa: PLC0415
+            now = time.time()
+            counts = {provider_id: {"cache": 0, "quota": 0} for provider_id in INTEL_PROVIDERS}
+            with intel_cache._MEMORY_LOCK:  # noqa: SLF001
+                for key, (expires_at, _) in list(intel_cache._MEMORY_CACHE.items()):  # noqa: SLF001
+                    if expires_at <= now:
+                        continue
+                    parts = str(key).split(":")
+                    if len(parts) >= 4 and parts[0:2] == ["intel", "cache"] and parts[2] in counts:
+                        counts[parts[2]]["cache"] += 1
+                    elif len(parts) >= 4 and parts[0:2] == ["intel", "quota"] and parts[-1] in counts:
+                        counts[parts[-1]]["quota"] += 1
+        except Exception:
+            counts = {provider_id: {"cache": 0, "quota": 0} for provider_id in INTEL_PROVIDERS}
+        for provider_id, provider_counts in counts.items():
+            cache_entries.add_metric([provider_id], provider_counts["cache"])
+            quota_entries.add_metric([provider_id], provider_counts["quota"])
+        yield cache_entries
+        yield quota_entries
+
+    def _collect_workspace(self):
+        bytes_used, file_count = _workspace_usage()
+        quota = _safe_int(CFG.get("workspace_quota_mb"), 50) * 1024 * 1024
+        workspace_bytes = GaugeMetricFamily("darklab_workspace_bytes_used", "Workspace bytes used across sessions.")
+        workspace_quota = GaugeMetricFamily("darklab_workspace_quota_bytes", "Configured per-session workspace quota in bytes.")
+        workspace_files = GaugeMetricFamily("darklab_workspace_files", "Workspace file count across sessions.")
+        workspace_bytes.add_metric([], bytes_used)
+        workspace_quota.add_metric([], quota)
+        workspace_files.add_metric([], file_count)
+        yield workspace_bytes
+        yield workspace_quota
+        yield workspace_files

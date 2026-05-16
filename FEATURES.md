@@ -1141,7 +1141,7 @@ If a session has run history, workspace files, project workspace records, user w
 
 - `commands.yaml` — dispatch gate (see [Command Allowlist](#command-allowlist)).
 - `trusted_proxy_cidrs` in `config.yaml` — CIDRs whose `X-Forwarded-For` is honored.
-- `diagnostics_allowed_cidrs` in `config.yaml` — CIDRs permitted to reach `/diag`.
+- `diagnostics_allowed_cidrs` in `config.yaml` — CIDRs permitted to reach `/diag` and `/metrics`.
 - `docker-compose.yml` — `read_only: true`, `init: true`, `user` directives, and the port-egress guard.
 
 **Related files:** `app/services/commands/registry.py` (metacharacter, loopback, allow/deny, and rewrite validation), `app/blueprints/run.py` (subprocess spawn and `/kill` route), `app/core/process.py` (Redis PID tracking), `docker-compose.yml` (filesystem + user isolation). See [ARCHITECTURE.md](ARCHITECTURE.md) for cross-worker signalling, the Redis-backed multi-worker kill path, and the `nmap` capability model.
@@ -1169,11 +1169,12 @@ If a session has run history, workspace files, project workspace records, user w
 
 ## Operator Diagnostics
 
-**Purpose:** a restricted operator-only status page for inspecting runtime health, storage state, config, and tool availability without opening a shell session.
+**Purpose:** restricted operator-only surfaces for inspecting current runtime health and scraping trendable Prometheus metrics without opening a shell session.
 
 **Behavior:**
 
 - `/diag` provides a live operator view of the running instance and is disabled by default.
+- `/metrics` returns Prometheus text for scrape-based monitoring and uses the same IP/CIDR allowlist as `/diag`.
 - When the visiting IP is in the allowed range, a `⊕ diag` button appears in the desktop rail and the mobile menu alongside the other toolbar buttons. It stays hidden for all other visitors.
 
 ### Enabling access
@@ -1188,7 +1189,7 @@ diagnostics_allowed_cidrs:
 
 - Access is checked against the resolved client IP, using the same trusted-proxy path as logging and rate limiting.
 - `X-Forwarded-For` is honored only when the direct peer IP is inside `trusted_proxy_cidrs`; otherwise the app falls back to the direct peer IP and logs `UNTRUSTED_PROXY` when a forwarded header was supplied.
-- The page returns 404 for all other requests.
+- `/diag` and `/metrics` return 404 for all other requests.
 - Denied access is logged as `DIAG_DENIED` with the resolved client IP and configured CIDRs; allowed access is logged as `DIAG_VIEWED`.
 
 ### What the page shows
@@ -1213,11 +1214,21 @@ Append `?format=json` to get the same data as a JSON object, suitable for script
 curl http://localhost:8888/diag?format=json
 ```
 
-**Limits:** `/diag` is gated entirely by IP/CIDR allowlists, not by an authentication layer. Empty `diagnostics_allowed_cidrs` disables it completely.
+### Prometheus metrics
 
-**Configuration:** `diagnostics_allowed_cidrs` and `trusted_proxy_cidrs` in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
+`/metrics` is meant for Prometheus, Grafana, and similar monitoring stacks. It exposes `darklab_` metrics for HTTP volume and latency, active and completed runs, PTY activity, rate-limit pressure, broker mode and subscribers, SQLite and Redis health, selected database hot-path latency, workspace usage, Atlas/finding counts, intel provider results and cache size, evidence package builds, snapshots, client errors, and unhandled server exceptions. Labels are bounded to safe values such as command roots, provider IDs, endpoint names, status classes, and coarse outcomes.
 
-**Related files:** `app/blueprints/assets.py` (`/diag` HTML + JSON responses), `app/static/css/diag.css` (page styling + mobile breakpoint behavior), `app/templates/diag.html` (diagnostics page markup), `README.md` (operator-facing config reference), `ARCHITECTURE.md` (diagnostics and logging runtime details).
+```bash
+curl http://localhost:8888/metrics
+```
+
+The repo also includes a starter Grafana dashboard at `docs/grafana/darklab-overview.json`.
+
+**Limits:** `/diag` and `/metrics` are gated entirely by IP/CIDR allowlists, not by an authentication layer. Empty `diagnostics_allowed_cidrs` disables `/diag` completely and prevents `/metrics` from being scraped. Set `metrics_enabled: false` to keep `/diag` available while hiding `/metrics`.
+
+**Configuration:** `diagnostics_allowed_cidrs`, `trusted_proxy_cidrs`, `metrics_enabled`, `prometheus_multiproc_dir`, and metrics histogram bucket settings in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
+
+**Related files:** `app/blueprints/assets.py` (`/diag` HTML/JSON responses and `/metrics`), `app/services/metrics/` (Prometheus metric definitions and scrape-time collectors), `app/static/css/diag.css` (page styling + mobile breakpoint behavior), `app/templates/diag.html` (diagnostics page markup), `docs/grafana/darklab-overview.json` (starter dashboard), `README.md` (operator-facing config reference), `ARCHITECTURE.md` (diagnostics and logging runtime details).
 
 ---
 

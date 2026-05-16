@@ -461,7 +461,21 @@ def _store():
 
 
 def publish_run_event(run_id: str, event_type: str, payload: dict[str, Any] | None = None) -> BrokerEvent:
-    return _store().publish(run_id, event_type, payload)
+    from services import metrics as app_metrics  # noqa: PLC0415
+
+    try:
+        event = _store().publish(run_id, event_type, payload)
+    except RuntimeError:
+        app_metrics.record_broker_publish_error("redis_unavailable")
+        raise
+    except (TypeError, ValueError, json.JSONDecodeError):
+        app_metrics.record_broker_publish_error("serialize")
+        raise
+    except Exception:
+        app_metrics.record_broker_publish_error("unknown")
+        raise
+    app_metrics.record_broker_event(event_type)
+    return event
 
 
 def get_run_events(run_id: str, after_id: str = "0-0", limit: int = 100) -> list[BrokerEvent]:
@@ -473,23 +487,29 @@ def replay_run_events(run_id: str) -> list[BrokerEvent]:
 
 
 def stream_run_events(run_id: str, after_id: str = "0-0") -> Iterator[str]:
+    from services import metrics as app_metrics  # noqa: PLC0415
+
+    app_metrics.record_broker_subscriber_delta(1)
     current_id = _normalize_resume_event_id(after_id)
     block_seconds = max(1.0, float(CFG.get("run_broker_subscriber_block_seconds", 15) or 15))
-    if _is_beginning_event_id(current_id):
-        for event in replay_run_events(run_id):
-            if _is_resumable_event(event):
-                current_id = event.event_id
-            yield event.as_sse()
-            if event.payload.get("type") in TERMINAL_EVENT_TYPES:
-                return
-    while True:
-        events = _store().wait_after(run_id, current_id, timeout=block_seconds)
-        if not events:
-            yield ": heartbeat\n\n"
-            continue
-        for event in events:
-            if _is_resumable_event(event):
-                current_id = event.event_id
-            yield event.as_sse()
-            if event.payload.get("type") in TERMINAL_EVENT_TYPES:
-                return
+    try:
+        if _is_beginning_event_id(current_id):
+            for event in replay_run_events(run_id):
+                if _is_resumable_event(event):
+                    current_id = event.event_id
+                yield event.as_sse()
+                if event.payload.get("type") in TERMINAL_EVENT_TYPES:
+                    return
+        while True:
+            events = _store().wait_after(run_id, current_id, timeout=block_seconds)
+            if not events:
+                yield ": heartbeat\n\n"
+                continue
+            for event in events:
+                if _is_resumable_event(event):
+                    current_id = event.event_id
+                yield event.as_sse()
+                if event.payload.get("type") in TERMINAL_EVENT_TYPES:
+                    return
+    finally:
+        app_metrics.record_broker_subscriber_delta(-1)

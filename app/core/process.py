@@ -449,6 +449,8 @@ def active_run_register(
     run_type: str = "command",
 ) -> None:
     """Register the metadata needed to restore an in-flight run after reload."""
+    from services import metrics as app_metrics  # noqa: PLC0415
+
     payload = {
         "run_id": run_id,
         "pid": pid,
@@ -471,6 +473,10 @@ def active_run_register(
         with _pid_lock:
             _active_run_meta[run_id] = payload
             _session_run_ids.setdefault(session_id, set()).add(run_id)
+    if run_type == "pty":
+        app_metrics.record_pty_started(command)
+    else:
+        app_metrics.record_run_started(command, "", active=True)
 
 
 def active_run_touch_owner(run_id: str, owner_client_id: str = "", owner_tab_id: str = "") -> bool:
@@ -577,24 +583,34 @@ def active_run_belongs_to_session(run_id: str, session_id: str) -> bool:
 
 def active_run_remove(run_id: str) -> None:
     """Remove active-run metadata after completion or explicit kill."""
+    from services import metrics as app_metrics  # noqa: PLC0415
+
+    run_type = "command"
     if redis_client:
         meta_key = f"procmeta:{run_id}"
         raw = redis_client.get(meta_key)
+        payload = None
         if raw:
             payload = _load_active_run_payload(raw)
             session_id = str(payload.get("session_id", "")) if payload else ""
+            run_type = str(payload.get("run_type", "command") or "command") if payload else "command"
             if session_id:
                 redis_client.srem(f"sessionprocs:{session_id}", run_id)
         redis_client.delete(meta_key)
+        if payload:
+            app_metrics.record_run_removed(run_type)
         return
 
     with _pid_lock:
         meta = _active_run_meta.pop(run_id, None)
         session_id = str(meta.get("session_id", "")) if isinstance(meta, dict) else ""
+        run_type = str(meta.get("run_type", "command") or "command") if isinstance(meta, dict) else "command"
         if session_id and session_id in _session_run_ids:
             _session_run_ids[session_id].discard(run_id)
             if not _session_run_ids[session_id]:
                 _session_run_ids.pop(session_id, None)
+    if meta:
+        app_metrics.record_run_removed(run_type)
 
 
 def _active_run_public_item(item: dict[str, Any], source: str, client_id: str = "") -> dict[str, object]:

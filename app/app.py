@@ -31,6 +31,13 @@ configure_logging(CFG)
 log = logging.getLogger("shell")
 
 
+def _init_metrics_environment():
+    from services.metrics import setup_prometheus_multiproc_dir  # noqa: PLC0415
+    path = setup_prometheus_multiproc_dir(CFG)
+    os.environ.setdefault("DARKLAB_APP_START_TIME_SECONDS", str(int(time.time())))
+    return path
+
+
 def _warn_workspace_root_config_drift(cfg, environ=None):
     """Warn when container env and app config point at different workspace roots."""
     active_environ = os.environ if environ is None else environ
@@ -52,6 +59,7 @@ def _warn_workspace_root_config_drift(cfg, environ=None):
 
 
 _warn_workspace_root_config_drift(CFG)
+_init_metrics_environment()
 
 # Import blueprints and shared helpers after logging is configured.
 from extensions import limiter  # noqa: E402
@@ -66,6 +74,7 @@ from blueprints.secrets import secrets_bp  # noqa: E402
 from blueprints.workspace import workspace_bp  # noqa: E402
 from blueprints.projects import projects_bp  # noqa: E402
 from services.workspace.files import cleanup_inactive_workspaces  # noqa: E402
+from services import metrics as app_metrics  # noqa: E402
 
 app = Flask(__name__, template_folder="templates")
 app.config["RATELIMIT_ENABLED"] = CFG.get("rate_limit_enabled", True)
@@ -79,6 +88,8 @@ _last_workspace_cleanup_monotonic = 0.0
 def _rate_limit_handler(e):
     ip = get_client_ip()
     log.warning("RATE_LIMIT", extra={"ip": ip, "path": request.path, "limit": str(e.description)})
+    scope = "secrets" if request.path.startswith("/session/secrets") else "global"
+    app_metrics.record_rate_limit_rejection(request.endpoint or "unknown", scope=scope)
     if request.path.startswith("/session/secrets"):
         retry_after = None
         limit = getattr(e, "limit", None)
@@ -87,6 +98,13 @@ def _rate_limit_handler(e):
             retry_after = int(limit_item.get_expiry())
         return jsonify({"error": "rate_limited", "retry_after": retry_after}), 429
     return jsonify({"error": "Rate limit exceeded. Please slow down."}), 429
+
+
+@app.errorhandler(500)
+def _server_error_handler(e):
+    app_metrics.record_unhandled_exception(request.endpoint or "unknown")
+    log.error("UNHANDLED_EXCEPTION", exc_info=True, extra={"path": request.path})
+    return jsonify({"error": "Internal server error"}), 500
 
 
 @app.before_request
@@ -112,6 +130,7 @@ def _maybe_cleanup_workspaces():
 
 @app.before_request
 def _log_request():
+    request.environ["darklab_metrics_start"] = str(time.perf_counter())
     if log.isEnabledFor(logging.DEBUG):
         ip = get_client_ip()
         extra: dict = {"ip": ip, "method": request.method, "path": request.path}
@@ -122,6 +141,17 @@ def _log_request():
 
 @app.after_request
 def _log_response(response):
+    started = request.environ.get("darklab_metrics_start")
+    try:
+        elapsed = time.perf_counter() - float(started) if started else 0.0
+    except (TypeError, ValueError):
+        elapsed = 0.0
+    app_metrics.record_http_request(
+        request.method,
+        request.endpoint or "unknown",
+        response.status_code,
+        elapsed,
+    )
     if log.isEnabledFor(logging.DEBUG):
         ip    = get_client_ip()
         extra = {

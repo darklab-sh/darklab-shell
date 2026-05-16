@@ -226,6 +226,43 @@
 # Server default if unset: [] (disabled)
 # diagnostics_allowed_cidrs:
 #   - 172.16.0.0/12
+#
+# GET /metrics exposes Prometheus-format metrics for dashboards and alerts.
+# It uses the same IP allowlist as /diag and returns 404 when the caller is not
+# allowed. Keep diagnostics_allowed_cidrs empty to hide both endpoints.
+#
+# Server default if unset: true
+# metrics_enabled: true
+#
+# Shared directory used by prometheus_client to aggregate counters/histograms
+# across Gunicorn workers. In the Docker Compose setup this lives on /tmp tmpfs
+# and is cleared on container startup by entrypoint.sh.
+# Server default if unset: /tmp/darklab_shell-prom
+# prometheus_multiproc_dir: /tmp/darklab_shell-prom
+#
+# Optional histogram bucket overrides, in seconds. The defaults cover short
+# web requests and long-running scanner commands.
+# metrics_histogram_buckets_run_duration:
+#   - 0.1
+#   - 0.5
+#   - 1
+#   - 2
+#   - 5
+#   - 10
+#   - 30
+#   - 60
+#   - 300
+#   - 900
+#   - 1800
+#   - 3600
+# metrics_histogram_buckets_http_duration:
+#   - 0.005
+#   - 0.01
+#   - 0.05
+#   - 0.1
+#   - 0.5
+#   - 1
+#   - 5
 
 # ── Restricted Command Inputs ────────────────────────────────────────────────
 

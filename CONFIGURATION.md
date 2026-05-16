@@ -76,7 +76,11 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `share_redaction_enabled` | `true` | Enables the built-in basic snapshot-share redaction baseline for bearer tokens, email addresses, IPv4 addresses, IPv6 addresses, and hostnames/dotted domains. When enabled, the `share snapshot` action asks whether to share the raw or redacted snapshot until the user sets a persistent default in the Options modal. If the prompt’s checkbox is enabled, the chosen raw/redacted mode is written back to that same persistent default. When disabled, no built-in or custom snapshot-share redaction rules run |
 | `share_redaction_rules` | `[]` | Optional operator-defined regex rules appended after the built-in snapshot-share redaction baseline. Each rule supports `label`, `pattern`, `replacement`, and `flags` (`i`, `m`). This does not change stored run history or the history drawer permalink path; it affects only snapshot sharing |
 | `trusted_proxy_cidrs` | `["127.0.0.1/32", "::1/128"]` | IPs / CIDRs allowed to supply `X-Forwarded-For`. Requests outside these ranges ignore forwarded headers and use the direct connection IP |
-| `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access the `/diag` operator diagnostics page. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so `X-Forwarded-For` is honored only when the direct peer is inside `trusted_proxy_cidrs`. Empty list disables the page entirely. When enabled, a `diag` button appears in the desktop rail and the mobile menu for matching visitors |
+| `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access `/diag` and `/metrics`. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so `X-Forwarded-For` is honored only when the direct peer is inside `trusted_proxy_cidrs`. Empty list disables the page entirely and prevents metrics scrapes. When enabled, a `diag` button appears in the desktop rail and the mobile menu for matching visitors |
+| `metrics_enabled` | `true` | Enables the Prometheus `/metrics` endpoint for callers allowed by `diagnostics_allowed_cidrs`. Set to `false` to hide `/metrics` while keeping `/diag` available |
+| `prometheus_multiproc_dir` | `/tmp/darklab_shell-prom` | Writable shared directory used by `prometheus_client` to aggregate counters and histograms across Gunicorn workers. The container entrypoint creates it on tmpfs and clears stale worker shards at startup |
+| `metrics_histogram_buckets_run_duration` | `[0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 900, 1800, 3600]` | Prometheus run and PTY duration histogram buckets, in seconds |
+| `metrics_histogram_buckets_http_duration` | `[0.005, 0.01, 0.05, 0.1, 0.5, 1, 5]` | Prometheus HTTP request duration histogram buckets, in seconds |
 | `restricted_command_input_cidrs` | `[]` | IPs / CIDRs that command validation rejects when supplied in metadata-known target slots. Applies to literal IP/CIDR values, URLs with literal IP hosts, host:port values, and inspectable workspace input files passed through declared read flags. Domain names are not DNS-resolved |
 | `history_panel_limit` | `50` | Number of history rows shown per page in the desktop history drawer and mobile recents sheet |
 | `recent_commands_limit` | `50` | Number of distinct recent commands loaded into prompt Up/Down history, desktop rail recents, and the mobile recent peek |
@@ -742,6 +746,29 @@ trusted_proxy_cidrs:
   - 127.0.0.1/32
   - ::1/128
 ```
+
+The same allowlist gates Prometheus metrics:
+
+```yaml
+# app/conf/config.local.yaml
+metrics_enabled: true
+prometheus_multiproc_dir: /tmp/darklab_shell-prom
+metrics_histogram_buckets_run_duration: [0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 900, 1800, 3600]
+metrics_histogram_buckets_http_duration: [0.005, 0.01, 0.05, 0.1, 0.5, 1, 5]
+```
+
+Example Prometheus scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: darklab_shell
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - shell.example.internal:8888
+```
+
+Metrics use the `darklab_` prefix and bounded labels such as command root, provider ID, Flask endpoint, broker mode, DB operation name, status class, and coarse outcome. A starter Grafana dashboard lives at `docs/grafana/darklab-overview.json`.
 
 ### Set The Default Theme
 

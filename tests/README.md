@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,788
+- behavior tests: 2,797
 - docs/inventory meta-tests: 32
-- `pytest`: 1419 (1387 behavior + 32 meta)
+- `pytest`: 1428 (1396 behavior + 32 meta)
 - `vitest`: 1150
 - `playwright`: 251
-- total: 2,820
+- total: 2,829
 
 This document is organized in two parts:
 
@@ -907,6 +907,22 @@ Meta-tests that verify documentation stays in sync with the test suite and opera
 | `TestRunSpawnErrorEvent.test_spawn_error_emits_error_log` | Checks that spawn error emits error log. |
 | `TestRunSpawnErrorEvent.test_spawn_error_extra_has_ip` | Checks that spawn error extra has IP. |
 | `TestRunSpawnErrorEvent.test_spawn_error_extra_has_cmd` | Checks that spawn error extra has command. |
+
+#### `test_metrics_endpoint.py`
+
+Prometheus `/metrics` route, runtime collector, label, and histogram-bucket coverage.
+
+| Test | Description |
+| --- | --- |
+| `TestMetricsEndpoint.test_ip_gate_denies_non_allowlisted_callers` | Verifies that non-allowlisted callers get a 404 from `/metrics`. |
+| `TestMetricsEndpoint.test_disabled_route_returns_404_even_when_allowlisted` | Verifies that `metrics_enabled: false` hides `/metrics` even for allowlisted callers. |
+| `TestMetricsEndpoint.test_allowlisted_callers_get_prometheus_text` | Verifies that allowlisted callers receive Prometheus text with the expected content type. |
+| `TestMetricsEndpoint.test_scrape_includes_runtime_gauge_families` | Verifies that scrape-time runtime gauge families render in `/metrics`. |
+| `TestMetricsEndpoint.test_run_finalize_metric_uses_bounded_labels` | Verifies that completed-run metrics use command-root, run-kind, and exit-code-class labels. |
+| `TestMetricsEndpoint.test_rate_limit_and_intel_helpers_render_expected_labels` | Verifies that rate-limit, intel, DB query, history fallback, and evidence package helper metrics render with bounded labels. |
+| `TestMetricsDefinitionDrift.test_metric_names_use_darklab_prefix` | Verifies that every registered metric name uses the `darklab_` prefix. |
+| `TestMetricsDefinitionDrift.test_histograms_have_explicit_buckets` | Verifies that every histogram declares explicit buckets. |
+| `TestMetricsDefinitionDrift.test_route_label_normalizer_does_not_use_raw_paths` | Verifies that route labels do not preserve raw path or query-string characters. |
 
 #### `test_output_search.py`
 

@@ -848,6 +848,8 @@ def client_log():
     data = request.get_json(silent=True) or {}
     context = str(data.get("context") or "")[:200]
     message = str(data.get("message") or "")[:500]
+    from services import metrics as app_metrics  # noqa: PLC0415
+    app_metrics.record_client_error(context or "unknown")
     log.warning("CLIENT_ERROR", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(),
@@ -1184,4 +1186,22 @@ def diag():
         generated_at=generated_at,
         current_theme=current_theme,
         current_theme_css=current_theme["vars"],
+    )
+
+
+@assets_bp.route("/metrics")
+def metrics():
+    """Prometheus scrape endpoint, hidden behind the diagnostics IP gate."""
+    if not CFG.get("metrics_enabled", True):
+        abort(404)
+    allowed_cidrs = CFG.get("diagnostics_allowed_cidrs") or []
+    client_ip = get_client_ip()
+    if not ip_is_in_cidrs(client_ip, allowed_cidrs):
+        log.warning("METRICS_DENIED", extra={"ip": client_ip, "allowed_cidrs": allowed_cidrs})
+        abort(404)
+
+    from services.metrics import PROMETHEUS_CONTENT_TYPE, render_latest_metrics  # noqa: PLC0415
+    return current_app.response_class(
+        render_latest_metrics(),
+        content_type=PROMETHEUS_CONTENT_TYPE,
     )

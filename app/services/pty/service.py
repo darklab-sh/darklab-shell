@@ -37,6 +37,7 @@ from services.pty.capture import (
     PtyTerminalCapture as _BasePtyTerminalCapture,
     _terminal_history_line_limit,
 )
+from services import metrics as app_metrics
 
 log = logging.getLogger("shell")
 pyte = pty_capture.pyte
@@ -559,6 +560,10 @@ def _queue_pty_control(run_id: str, action: str, payload: dict[str, Any]) -> Non
     body["action"] = action
     redis_client.xadd(_control_key(run_id), {"payload": json.dumps(body, separators=(",", ":"))}, maxlen=1000, approximate=True)
     redis_client.expire(_control_key(run_id), _active_ttl())
+    try:
+        app_metrics.PTY_CONTROL_QUEUE_DEPTH.set(int(cast(Any, redis_client.xlen(_control_key(run_id)))))
+    except Exception:
+        pass
 
 
 def _read_pty_control(run: PtyRun) -> list[dict[str, Any]]:
@@ -597,6 +602,11 @@ def _apply_pty_controls(run: PtyRun) -> None:
             run.terminal_capture.resize(run.rows, run.cols)
             _store_pty_meta(run)
             _store_pty_snapshot(run, force=True)
+    if redis_client:
+        try:
+            app_metrics.PTY_CONTROL_QUEUE_DEPTH.set(int(cast(Any, redis_client.xlen(_control_key(run.run_id)))))
+        except Exception:
+            pass
 
 
 def _reader_loop(run: PtyRun, client_ip: str) -> None:
@@ -865,6 +875,12 @@ def pty_run_snapshot(run_id: str, session_id: str) -> tuple[bool, str, dict[str,
                 return False, _PTY_STALE_MESSAGE, None
             snapshot = _load_pty_snapshot(run_id, session_id)
             if snapshot is not None:
+                try:
+                    created_at = float(snapshot.get("created_at", 0) or 0)
+                except (TypeError, ValueError):
+                    created_at = 0
+                if created_at:
+                    app_metrics.PTY_SNAPSHOT_AGE.observe(max(0.0, time.time() - created_at))
                 return True, "", snapshot
             if redis_client:
                 return False, "PTY snapshot is not available yet", None
@@ -887,23 +903,31 @@ def write_pty_input(
     if not meta:
         return False, message
     if owner_client_id and not active_run_owned_by(run_id, owner_client_id, owner_tab_id):
+        app_metrics.PTY_INPUT_DROPPED_BYTES.labels("not_owner").inc(
+            len(str(data or "").encode("utf-8", errors="replace"))
+        )
         return False, "PTY input is owned by another attached tab"
     text = str(data or "")
     if not text:
         return True, ""
     raw = text.encode("utf-8", errors="replace")
     if len(raw) > _PTY_INPUT_MAX_BYTES:
+        app_metrics.PTY_INPUT_DROPPED_BYTES.labels("oversize").inc(len(raw))
         return False, "Input is too large for this interactive run"
     if redis_client:
         _queue_pty_control(run_id, "input", {"data": text})
+        app_metrics.PTY_INPUT_BYTES.inc(len(raw))
         return True, ""
     run = get_pty_run(run_id, session_id)
     if not run:
+        app_metrics.PTY_INPUT_DROPPED_BYTES.labels("closed").inc(len(raw))
         return False, "Run not found"
     if not run.allow_input:
+        app_metrics.PTY_INPUT_DROPPED_BYTES.labels("closed").inc(len(raw))
         return False, "This interactive run does not accept input"
     try:
         os.write(run.master_fd, raw)
+        app_metrics.PTY_INPUT_BYTES.inc(len(raw))
         return True, ""
     except OSError as exc:
         return False, str(exc)
