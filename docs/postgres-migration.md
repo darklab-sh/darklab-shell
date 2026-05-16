@@ -16,7 +16,7 @@ The migration helper:
 - skips SQLite-only FTS5 tables such as `runs_fts` and its shadow tables
 - copies rows in batches while preserving primary keys and JSON values
 - creates Postgres indexes from the SQLite index list where possible
-- verifies referenced run-output artifact files and body-store files
+- verifies referenced run-output artifact files under `run-output/` and body-store files under `body-store/`
 - optionally copies referenced files to a new artifact root
 - requires an explicit `--confirm-secrets-key` flag when encrypted secrets exist
 - can validate row counts after the copy
@@ -38,6 +38,8 @@ Stop writes before copying. The safest path is:
 8. Keep the untouched SQLite snapshot as the rollback path.
 
 Encrypted secrets need special care. The copied ciphertext only works if the Postgres deployment uses the same `SECRETS_MASTER_KEY` value or the same app-owned key file from the SQLite deployment.
+
+The `--artifact-root` value is the app data root, not the `run-output` folder itself. For the default container layout, use `/data`: the helper reads `history.db` from that root, checks full-run output under `/data/run-output`, and checks large body-store files under `/data/body-store`.
 
 ## Run From The Compose Network
 

@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,835
+- behavior tests: 2,840
 - docs/inventory meta-tests: 32
-- `pytest`: 1454 (1422 behavior + 32 meta)
+- `pytest`: 1459 (1427 behavior + 32 meta)
 - `vitest`: 1161
 - `playwright`: 252
-- total: 2,867
+- total: 2,872
 
 This document is organized in two parts:
 
@@ -399,9 +399,13 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseBackend.test_postgres_identifier_quoting_and_advisory_lock_are_stable` | Verifies Postgres identifier quoting and advisory-lock IDs are deterministic. |
 | `TestDatabaseBackend.test_positional_placeholder_conversion_skips_literals_and_comments` | Verifies legacy SQLite-style positional placeholder conversion leaves string literals and SQL comments unchanged. |
 | `TestDatabaseBackend.test_unknown_backend_is_rejected_with_supported_values` | Verifies unsupported database backend names are rejected with the accepted backend list. |
+| `TestPostgresMigrations.test_baseline_migration_covers_current_app_schema` | Verifies the first app-owned Postgres migration covers the current app tables, JSONB columns, booleans, bytea secrets, and intentionally excludes SQLite FTS internals. |
+| `TestPostgresMigrations.test_migration_runner_serializes_with_advisory_lock_and_records_versions` | Verifies the Postgres migration runner takes a transaction-scoped advisory lock and records applied migration versions. |
+| `TestPostgresMigrations.test_database_init_runs_postgres_migrations_without_sqlite_bootstrap` | Verifies Postgres startup runs migrations without entering the SQLite bootstrap path. |
 | `TestPostgresMigrationHelper.test_discovers_app_tables_and_skips_sqlite_fts_shadow_tables` | Verifies the offline Postgres migration helper copies app tables while skipping SQLite FTS internals. |
 | `TestPostgresMigrationHelper.test_create_table_sql_maps_json_columns_and_primary_key` | Verifies migration-created Postgres tables preserve primary keys and JSON column types. |
 | `TestPostgresMigrationHelper.test_file_validation_checks_artifacts_and_body_store_pointers` | Verifies migration preflight checks run-output artifacts and body-store pointer files. |
+| `TestPostgresMigrationHelper.test_file_validation_accepts_legacy_run_output_prefixed_paths` | Verifies migration file validation accepts older run-output artifact rows that already include the `run-output/` prefix. |
 | `TestPostgresMigrationHelper.test_secret_preflight_requires_key_confirmation` | Verifies encrypted secret rows require explicit key-continuity confirmation before migration. |
 | `TestPostgresMigrationHelper.test_dry_run_does_not_require_postgres_dependency_or_database_url` | Verifies migration dry runs do not require Postgres dependencies or a destination DSN. |
 | `TestIntelServices.test_provider_registry_exposes_existing_provider_metadata` | Verifies the app-native intel provider registry exposes shipped provider labels, entity support, cache scopes, and secret consumers. |
@@ -975,6 +979,7 @@ Optional backend smoke and migration coverage. SQLite smoke coverage always runs
 | --- | --- |
 | `test_sqlite_backend_smoke_exercises_phase6_contract` | Verifies the Phase 6 backend smoke contract on SQLite: run insert/finalize, search, Atlas entity links, project links, intel JSON, and snapshot insert. |
 | `test_postgres_backend_smoke_exercises_phase6_contract` | Verifies the same backend smoke contract on Postgres when an opt-in test DSN is configured. |
+| `test_postgres_baseline_migration_runs_in_isolated_schema` | Runs the app-owned Postgres baseline migration in an isolated schema and verifies key table and column types. |
 | `test_migration_helper_copies_fixture_into_isolated_postgres_schema` | Builds a SQLite fixture with runs, artifacts, body-store pointers, secrets metadata, JSON columns, and search text, migrates it into an isolated Postgres schema, then verifies row counts, JSON values, file pointers, and search parity. |
 
 #### `test_request_kill_and_commands.py`

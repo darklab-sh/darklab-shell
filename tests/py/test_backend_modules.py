@@ -488,6 +488,109 @@ class TestDatabaseBackend:
             database_backend.parse_database_backend("oracle")
 
 
+class TestPostgresMigrations:
+    def test_baseline_migration_covers_current_app_schema(self):
+        from core.migrations import MIGRATIONS
+
+        baseline = MIGRATIONS[0]
+        sql = "\n".join(baseline.statements)
+
+        assert baseline.version == "0001"
+        for table_name in (
+            "runs",
+            "run_output_artifacts",
+            "snapshots",
+            "session_tokens",
+            "session_preferences",
+            "starred_commands",
+            "session_variables",
+            "user_workflows",
+            "recent_values",
+            "secrets",
+            "projects",
+            "project_links",
+            "entities",
+            "entity_run_links",
+            "entity_intel_snapshots",
+            "run_file_artifacts",
+            "findings",
+            "findings_occurrences",
+            "entity_labels",
+            "entity_notes",
+            "evidence_packages",
+        ):
+            assert f"CREATE TABLE IF NOT EXISTS {table_name}" in sql
+        assert "JSONB NOT NULL DEFAULT" in sql
+        assert "BOOLEAN NOT NULL DEFAULT" in sql
+        assert "BYTEA NOT NULL" in sql
+        assert "runs_fts" not in sql
+
+    def test_migration_runner_serializes_with_advisory_lock_and_records_versions(self):
+        from core.migrations.runner import Migration, run_migrations_with_advisory_lock
+
+        class FakeConnection:
+            def __init__(self):
+                self.applied_versions = set()
+                self.calls = []
+
+            def execute(self, sql, params=()):
+                self.calls.append((sql, params))
+                normalized = " ".join(str(sql).split())
+                if normalized == "SELECT version FROM schema_migrations":
+                    return self
+                if normalized.startswith("INSERT INTO schema_migrations"):
+                    self.applied_versions.add(params[0])
+                return self
+
+            def fetchall(self):
+                return [{"version": version} for version in sorted(self.applied_versions)]
+
+        conn = FakeConnection()
+        migrations = (
+            Migration("0001", "first", ("CREATE TABLE one (id TEXT)",)),
+            Migration("0002", "second", ("CREATE TABLE two (id TEXT)",)),
+        )
+
+        applied = run_migrations_with_advisory_lock(conn, migrations)
+        applied_again = run_migrations_with_advisory_lock(conn, migrations)
+
+        assert applied == ["0001", "0002"]
+        assert applied_again == []
+        lock_calls = [call for call in conn.calls if call[0] == "SELECT pg_advisory_xact_lock(%s)"]
+        assert len(lock_calls) == 2
+        assert conn.applied_versions == {"0001", "0002"}
+
+    def test_database_init_runs_postgres_migrations_without_sqlite_bootstrap(self, monkeypatch):
+        class FakePostgresConnection:
+            def __init__(self):
+                self.committed = False
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def commit(self):
+                self.committed = True
+
+        fake_conn = FakePostgresConnection()
+        migration_runner = mock.Mock(return_value=["0001"])
+        import core.migrations as migrations
+
+        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.POSTGRES)
+        monkeypatch.setattr(database, "connect_postgres", mock.Mock(return_value=fake_conn))
+        monkeypatch.setattr(database, "ensure_run_output_dir", mock.Mock())
+        monkeypatch.setattr(migrations, "MIGRATIONS", ())
+        monkeypatch.setattr("core.migrations.runner.run_migrations_with_advisory_lock", migration_runner)
+        monkeypatch.setattr(database, "_db_init_lock", mock.Mock(side_effect=AssertionError("sqlite lock used")))
+
+        database.db_init()
+
+        assert fake_conn.committed is True
+        migration_runner.assert_called_once()
+
+
 class TestPostgresMigrationHelper:
     def test_discovers_app_tables_and_skips_sqlite_fts_shadow_tables(self):
         migration = _load_postgres_migration_module()
@@ -558,7 +661,7 @@ class TestPostgresMigrationHelper:
                 conn.execute("CREATE TABLE runs (output_search_text TEXT)")
                 conn.execute(
                     "INSERT INTO run_output_artifacts (rel_path) VALUES (?)",
-                    ("run-output/run-1.txt.gz",),
+                    ("run-1.txt.gz",),
                 )
                 conn.execute("INSERT INTO runs (output_search_text) VALUES (?)", (pointer,))
                 conn.commit()
@@ -568,6 +671,33 @@ class TestPostgresMigrationHelper:
                 conn.close()
 
         assert verified == 2
+        assert copied == 0
+        assert missing == []
+
+    def test_file_validation_accepts_legacy_run_output_prefixed_paths(self):
+        migration = _load_postgres_migration_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifact = root / "run-output" / "legacy-run.txt.gz"
+            artifact.parent.mkdir(parents=True)
+            artifact.write_text("artifact", encoding="utf-8")
+
+            db_path = root / "history.db"
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                conn.execute("CREATE TABLE run_output_artifacts (rel_path TEXT NOT NULL)")
+                conn.execute(
+                    "INSERT INTO run_output_artifacts (rel_path) VALUES (?)",
+                    ("run-output/legacy-run.txt.gz",),
+                )
+                conn.commit()
+
+                verified, copied, missing = migration.verify_or_copy_files(conn, root)
+            finally:
+                conn.close()
+
+        assert verified == 1
         assert copied == 0
         assert missing == []
 

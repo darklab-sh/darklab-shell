@@ -365,7 +365,7 @@ def convert_positional_placeholders(sql: str, placeholder: str) -> str:
 
 
 def postgres_advisory_lock_id(namespace: str = "darklab_shell") -> int:
-    # Deterministic signed 63-bit lock id suitable for pg_advisory_lock().
+    # Deterministic signed 63-bit lock id suitable for Postgres advisory locks.
     import hashlib
 
     raw = int.from_bytes(hashlib.sha256(namespace.encode("utf-8")).digest()[:8], "big")

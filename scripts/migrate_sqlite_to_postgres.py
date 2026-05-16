@@ -80,6 +80,13 @@ class MigrationReport:
     missing_files: list[str]
 
 
+@dataclass(frozen=True)
+class ReferencedFile:
+    path: Path
+    copy_rel_path: Path
+    pointer: dict[str, Any] | None = None
+
+
 def _quote_ident(identifier: str) -> str:
     value = str(identifier)
     if not value or "\x00" in value:
@@ -223,6 +230,21 @@ def _safe_artifact_path(root: Path, rel_path: str) -> Path:
     return path
 
 
+def _run_output_reference(data_root: Path, rel_path: str) -> ReferencedFile:
+    normalized = str(rel_path or "").strip()
+    if not normalized:
+        raise ValueError("empty run output artifact path")
+    app_rel_path = Path(normalized) if normalized.startswith("run-output/") else Path("run-output") / normalized
+    preferred_path = _safe_artifact_path(data_root, str(app_rel_path))
+    if preferred_path.exists():
+        return ReferencedFile(path=preferred_path, copy_rel_path=app_rel_path)
+
+    legacy_path = _safe_artifact_path(data_root, normalized)
+    if legacy_path.exists():
+        return ReferencedFile(path=legacy_path, copy_rel_path=app_rel_path)
+    return ReferencedFile(path=preferred_path, copy_rel_path=app_rel_path)
+
+
 def _verify_checksum(path: Path, pointer: dict[str, Any]) -> None:
     expected = pointer.get("sha256")
     if not expected:
@@ -234,21 +256,21 @@ def _verify_checksum(path: Path, pointer: dict[str, Any]) -> None:
         raise ValueError(f"checksum mismatch for {pointer.get('rel_path')}")
 
 
-def referenced_file_paths(conn: sqlite3.Connection, artifact_root: Path) -> list[tuple[Path, dict[str, Any] | None]]:
-    paths: list[tuple[Path, dict[str, Any] | None]] = []
+def referenced_file_paths(conn: sqlite3.Connection, artifact_root: Path) -> list[ReferencedFile]:
+    paths: list[ReferencedFile] = []
     if _sqlite_has_table(conn, "run_output_artifacts"):
         for row in conn.execute("SELECT rel_path FROM run_output_artifacts WHERE rel_path != ''"):
-            paths.append((_safe_artifact_path(artifact_root, str(row["rel_path"])), None))
+            paths.append(_run_output_reference(artifact_root, str(row["rel_path"])))
 
     for table, column in BODY_POINTER_COLUMNS:
         if not _sqlite_has_table(conn, table) or not _sqlite_has_column(conn, table, column):
             continue
-        for row in conn.execute(f"SELECT {_quote_ident(column)} AS value FROM {_quote_ident(table)}"):
+        for row in conn.execute(f"SELECT {_quote_ident(column)} AS value FROM {_quote_ident(table)}"):  # nosec B608
             pointer = _decode_body_pointer(row["value"])
             if pointer is None:
                 continue
             path = _safe_artifact_path(artifact_root, str(pointer["rel_path"]))
-            paths.append((path, pointer))
+            paths.append(ReferencedFile(path=path, copy_rel_path=Path(str(pointer["rel_path"])), pointer=pointer))
     return paths
 
 
@@ -260,16 +282,16 @@ def verify_or_copy_files(
     verified = 0
     copied = 0
     missing: list[str] = []
-    for path, pointer in referenced_file_paths(conn, artifact_root):
+    for reference in referenced_file_paths(conn, artifact_root):
+        path = reference.path
         if not path.exists():
             missing.append(str(path))
             continue
-        if pointer is not None:
-            _verify_checksum(path, pointer)
+        if reference.pointer is not None:
+            _verify_checksum(path, reference.pointer)
         verified += 1
         if target_artifact_root is not None:
-            rel_path = path.relative_to(artifact_root.resolve())
-            target = (target_artifact_root / rel_path).resolve()
+            target = (target_artifact_root / reference.copy_rel_path).resolve()
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, target)
             copied += 1
@@ -350,32 +372,33 @@ def _copy_table(
     placeholders = ", ".join(["%s"] * len(columns))
     conflict = " ON CONFLICT DO NOTHING" if resume else ""
     insert_sql = (
-        f"INSERT INTO {_quote_ident(table.name)} "
+        f"INSERT INTO {_quote_ident(table.name)} "  # nosec B608
         f"({', '.join(_quote_ident(column) for column in columns)}) "
         f"VALUES ({placeholders}){conflict}"
     )
-    select_sql = f"SELECT {', '.join(_quote_ident(column) for column in columns)} FROM {_quote_ident(table.name)}"
+    select_sql = f"SELECT {', '.join(_quote_ident(column) for column in columns)} FROM {_quote_ident(table.name)}"  # nosec B608
     copied = 0
     rows: list[tuple[Any, ...]] = []
-    for row in sqlite_conn.execute(select_sql):
-        rows.append(_convert_row(table, row, jsonb_type))
-        if len(rows) >= batch_size:
-            pg_conn.executemany(insert_sql, rows)
+    with pg_conn.cursor() as cursor:
+        for row in sqlite_conn.execute(select_sql):
+            rows.append(_convert_row(table, row, jsonb_type))
+            if len(rows) >= batch_size:
+                cursor.executemany(insert_sql, rows)
+                copied += len(rows)
+                rows.clear()
+        if rows:
+            cursor.executemany(insert_sql, rows)
             copied += len(rows)
-            rows.clear()
-    if rows:
-        pg_conn.executemany(insert_sql, rows)
-        copied += len(rows)
     return copied
 
 
 def _sqlite_row_count(conn: sqlite3.Connection, table: str) -> int:
-    row = conn.execute(f"SELECT COUNT(*) AS count FROM {_quote_ident(table)}").fetchone()
+    row = conn.execute(f"SELECT COUNT(*) AS count FROM {_quote_ident(table)}").fetchone()  # nosec B608
     return int(row["count"] if row else 0)
 
 
 def _postgres_row_count(pg_conn: Any, table: str) -> int:
-    row = pg_conn.execute(f"SELECT COUNT(*) AS count FROM {_quote_ident(table)}").fetchone()
+    row = pg_conn.execute(f"SELECT COUNT(*) AS count FROM {_quote_ident(table)}").fetchone()  # nosec B608
     return int(row["count"] if row else 0)
 
 
@@ -487,7 +510,11 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--sqlite-db", default="/data/history.db", help="Source SQLite history.db path")
-    parser.add_argument("--artifact-root", default="", help="Source data/artifact root; defaults to SQLite parent")
+    parser.add_argument(
+        "--artifact-root",
+        default="",
+        help="Source app data root; defaults to the SQLite parent and expects run output under run-output/",
+    )
     parser.add_argument("--target-artifact-root", default="", help="Optional destination root for copied files")
     parser.add_argument("--database-url", default="", help="Destination Postgres DSN; falls back to DATABASE_URL")
     parser.add_argument("--schema", default="public", help="Destination Postgres schema")

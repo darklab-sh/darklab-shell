@@ -85,7 +85,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `history_panel_limit` | `50` | Number of history rows shown per page in the desktop history drawer and mobile recents sheet |
 | `recent_commands_limit` | `50` | Number of distinct recent commands loaded into prompt Up/Down history, desktop rail recents, and the mobile recent peek |
 | `data_dir` | auto | Server-side only. Directory used for SQLite history and compressed full-output artifacts. Leave unset to use `/data` when it is writable, otherwise `/tmp` for local/dev fallback. If set explicitly, the directory must be writable at startup |
-| `database_backend` | `sqlite` | Server-side only. Selects the database backend. `sqlite` remains the only active app query path. The Postgres dependency, pool helper, config surface, and optional Compose service are present for the production backend track, but the app still blocks SQLite-specific routes from running under `postgres` until the query-portability work lands |
+| `database_backend` | `sqlite` | Server-side only. Selects the database backend. `sqlite` remains the only active app query path. When set to `postgres`, startup runs the app-owned Postgres schema migrations, but SQLite-specific routes still fail fast until the query-portability work lands |
 | `database_url` | _(empty)_ | Server-side only. Postgres DSN used when `database_backend: postgres`. Ignored by SQLite. Can also be set with the `DATABASE_URL` environment variable |
 | `database_pool_min` | `1` | Server-side only. Minimum Postgres pool size. Ignored by SQLite. Can also be set with `DATABASE_POOL_MIN` |
 | `database_pool_max` | `5` | Server-side only. Maximum Postgres pool size. Ignored by SQLite. Can also be set with `DATABASE_POOL_MAX` |
@@ -625,7 +625,7 @@ The base [docker-compose.yml](docker-compose.yml) is the standalone local/test s
 docker compose --profile postgres up -d postgres
 ```
 
-The app keeps using SQLite by default. The optional Postgres service is useful for adapter testing and production planning, but the main app query path remains SQLite-gated until the query-portability and migration work is complete.
+The app keeps using SQLite by default. The optional Postgres service is useful for adapter testing and production planning. Postgres startup runs the app-owned schema migrations, but the main app query path remains SQLite-gated until the query-portability work is complete.
 
 The optional production overlay at [examples/docker-compose.prod.yml](examples/docker-compose.prod.yml) is layered on top of the base file:
 

@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sqlite3
+import sys
 from types import SimpleNamespace
 from typing import Any
 import uuid
@@ -25,6 +26,7 @@ def _load_migration_module():
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -231,6 +233,53 @@ def test_postgres_backend_smoke_exercises_phase6_contract(postgres_schema):
     postgres_schema.conn.commit()
 
 
+@pytest.mark.postgres
+def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+
+    conn = postgres_schema.conn
+    applied = run_migrations_with_advisory_lock(conn, MIGRATIONS)
+    applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
+    conn.commit()
+
+    assert applied == ["0001"]
+    assert applied_again == []
+    table_rows = conn.execute(
+        """
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = %s
+        """,
+        (postgres_schema.schema,),
+    ).fetchall()
+    column_rows = conn.execute(
+        """
+        SELECT table_name, column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = %s
+        AND (
+            (table_name = 'session_preferences' AND column_name = 'preferences')
+            OR (table_name = 'secrets' AND column_name = 'ciphertext')
+            OR (table_name = 'runs' AND column_name = 'preview_truncated')
+        )
+        """,
+        (postgres_schema.schema,),
+    ).fetchall()
+
+    assert {"runs", "entities", "entity_intel_snapshots", "schema_migrations"}.issubset({
+        row["table_name"] for row in table_rows
+    })
+    assert {
+        (row["table_name"], row["column_name"], row["data_type"])
+        for row in column_rows
+    } == {
+        ("session_preferences", "preferences", "jsonb"),
+        ("secrets", "ciphertext", "bytea"),
+        ("runs", "preview_truncated", "boolean"),
+    }
+
+
 def _write_body_pointer(root: Path, body: str, rel_path: str) -> str:
     path = root / rel_path
     path.parent.mkdir(parents=True)
@@ -327,7 +376,7 @@ def _build_migration_sqlite_fixture(root: Path) -> Path:
         )
         conn.execute(
             "INSERT INTO run_output_artifacts VALUES (?, ?, ?, ?, ?, ?)",
-            ("out-1", "run-1", "sess-1", "run-output/run-1.txt.gz", artifact.stat().st_size, "2026-05-16T00:00:01Z"),
+            ("out-1", "run-1", "sess-1", "run-1.txt.gz", artifact.stat().st_size, "2026-05-16T00:00:01Z"),
         )
         conn.execute(
             "INSERT INTO snapshots VALUES (?, ?, ?, ?, ?)",
@@ -408,5 +457,5 @@ def test_migration_helper_copies_fixture_into_isolated_postgres_schema(tmp_path,
     pointer = json.loads(snapshot_row["content"])
 
     assert search_row["id"] == "run-1"
-    assert (tmp_path / artifact_row["rel_path"]).exists()
+    assert (tmp_path / "run-output" / artifact_row["rel_path"]).exists()
     assert (tmp_path / pointer["rel_path"]).exists()

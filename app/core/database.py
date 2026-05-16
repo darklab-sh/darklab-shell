@@ -19,8 +19,10 @@ import fcntl
 from config import CFG, resolve_data_dir
 from core.database_backend import (
     SQLiteOperationalError,
+    DatabaseBackend,
     configured_database_backend,
     configured_database_dialect,
+    connect_postgres,
     connect_sqlite,
     require_sqlite_backend,
     sqlite_table_columns,
@@ -78,6 +80,17 @@ def db_connect():
     # WAL mode lets history/permalink reads proceed while active runs are still
     # being written, which keeps the UI responsive under load.
     return connect_sqlite(DB_PATH, timeout=10)
+
+
+def _postgres_db_init():
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+
+    with connect_postgres(CFG) as conn:
+        applied = run_migrations_with_advisory_lock(conn, MIGRATIONS)
+        conn.commit()
+        if applied:
+            log.info("POSTGRES_MIGRATIONS_APPLIED", extra={"versions": ",".join(applied)})
 
 
 def _json_column_sql(default: str | None = None) -> str:
@@ -1048,6 +1061,9 @@ def _prune_retention(conn):
 def db_init():
     """Create the runs and snapshots tables if they don't exist, and prune old records."""
     ensure_run_output_dir()
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        _postgres_db_init()
+        return
     with _db_init_lock():
         with db_connect() as conn:
             _create_schema(conn)
