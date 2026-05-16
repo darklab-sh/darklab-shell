@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from enum import Enum
 import json
 import sqlite3
+import time
 from typing import Any, Iterable
 
 
@@ -164,6 +165,14 @@ PostgresConnection = Any
 
 _POSTGRES_POOL: Any | None = None
 _POSTGRES_POOL_CONFIG: tuple[str, int, int] | None = None
+_POSTGRES_TRANSIENT_SQLSTATES = frozenset({
+    "08003",  # connection does not exist
+    "08006",  # connection failure
+    "40001",  # serialization failure
+    "40P01",  # deadlock detected
+    "53300",  # too many connections
+    "57P03",  # cannot connect now
+})
 
 
 def parse_database_backend(value: Any) -> DatabaseBackend:
@@ -266,6 +275,110 @@ def close_postgres_pool() -> None:
 
 def connect_postgres(cfg: dict[str, Any]) -> Any:
     return get_postgres_pool(cfg).connection()
+
+
+def _is_read_only_sql(sql: str) -> bool:
+    normalized = str(sql or "").lstrip().lower()
+    return normalized.startswith(("select ", "with ", "show "))
+
+
+def _is_transient_postgres_error(exc: BaseException) -> bool:
+    sqlstate = str(getattr(exc, "sqlstate", "") or "")
+    return sqlstate in _POSTGRES_TRANSIENT_SQLSTATES
+
+
+class PostgresSqliteCompatCursor:
+    """Cursor wrapper that accepts app-standard ``?`` placeholders."""
+
+    def __init__(self, cursor: Any, connection: Any):
+        self._cursor = cursor
+        self._connection = connection
+
+    def execute(self, sql: str, params: Iterable[Any] = ()) -> Any:
+        converted = convert_positional_placeholders(str(sql), POSTGRES_DIALECT.placeholder)
+        try:
+            return self._cursor.execute(converted, tuple(params))
+        except Exception as exc:
+            if not _is_read_only_sql(sql) or not _is_transient_postgres_error(exc):
+                raise
+            self._connection.rollback()
+            time.sleep(0.05)
+            return self._cursor.execute(converted, tuple(params))
+
+    def executemany(self, sql: str, params_seq: Iterable[Iterable[Any]]) -> Any:
+        converted = convert_positional_placeholders(str(sql), POSTGRES_DIALECT.placeholder)
+        return self._cursor.executemany(converted, params_seq)
+
+    def __iter__(self):
+        return iter(self._cursor)
+
+    def __enter__(self):
+        entered = self._cursor.__enter__() if hasattr(self._cursor, "__enter__") else self._cursor
+        self._cursor = entered
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        if hasattr(self._cursor, "__exit__"):
+            return self._cursor.__exit__(exc_type, exc, traceback)
+        close = getattr(self._cursor, "close", None)
+        if close is not None:
+            close()
+        return False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._cursor, name)
+
+
+class PostgresSqliteCompatConnection:
+    """Connection wrapper for app query paths while SQL is being ported.
+
+    The app's established persistence call sites use sqlite-style positional
+    placeholders. This wrapper converts those placeholders at the backend
+    boundary so call sites can move to Postgres incrementally instead of mixing
+    driver syntax throughout feature code.
+    """
+
+    def __init__(self, connection: Any):
+        self._connection = connection
+
+    def execute(self, sql: str, params: Iterable[Any] = ()) -> Any:
+        converted = convert_positional_placeholders(str(sql), POSTGRES_DIALECT.placeholder)
+        params_tuple = tuple(params)
+        try:
+            return self._connection.execute(converted, params_tuple)
+        except Exception as exc:
+            if not _is_read_only_sql(sql) or not _is_transient_postgres_error(exc):
+                raise
+            self._connection.rollback()
+            time.sleep(0.05)
+            return self._connection.execute(converted, params_tuple)
+
+    def executemany(self, sql: str, params_seq: Iterable[Iterable[Any]]) -> Any:
+        cursor = self.cursor()
+        return cursor.executemany(sql, params_seq)
+
+    def cursor(self, *args: Any, **kwargs: Any) -> PostgresSqliteCompatCursor:
+        return PostgresSqliteCompatCursor(self._connection.cursor(*args, **kwargs), self._connection)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._connection, name)
+
+
+class _PostgresSqliteCompatConnectionContext:
+    def __init__(self, context: Any):
+        self._context = context
+        self._connection: Any | None = None
+
+    def __enter__(self) -> PostgresSqliteCompatConnection:
+        self._connection = self._context.__enter__()
+        return PostgresSqliteCompatConnection(self._connection)
+
+    def __exit__(self, exc_type, exc, traceback):
+        return self._context.__exit__(exc_type, exc, traceback)
+
+
+def connect_postgres_sqlite_compat(cfg: dict[str, Any]) -> Any:
+    return _PostgresSqliteCompatConnectionContext(connect_postgres(cfg))
 
 
 def quote_postgres_identifier(identifier: str) -> str:

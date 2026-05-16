@@ -23,8 +23,8 @@ from core.database_backend import (
     configured_database_backend,
     configured_database_dialect,
     connect_postgres,
+    connect_postgres_sqlite_compat,
     connect_sqlite,
-    require_sqlite_backend,
     sqlite_table_columns,
     sqlite_table_exists,
 )
@@ -76,7 +76,8 @@ def validate_project_link_source(source):
 
 
 def db_connect():
-    require_sqlite_backend(CFG, "db_connect")
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        return connect_postgres_sqlite_compat(CFG)
     # WAL mode lets history/permalink reads proceed while active runs are still
     # being written, which keeps the UI responsive under load.
     return connect_sqlite(DB_PATH, timeout=10)

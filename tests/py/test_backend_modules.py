@@ -456,6 +456,90 @@ class TestDatabaseBackend:
             database_backend.close_postgres_pool()
         assert closed == [True]
 
+    def test_postgres_compat_connection_converts_app_placeholders(self, monkeypatch):
+        calls = []
+
+        class FakeCursor:
+            rowcount = 1
+
+            def execute(self, sql, params=()):
+                calls.append(("cursor_execute", sql, params))
+                return self
+
+            def executemany(self, sql, params_seq):
+                calls.append(("cursor_executemany", sql, tuple(tuple(row) for row in params_seq)))
+                return self
+
+            def fetchone(self):
+                return {"ok": True}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        class FakePostgresConnection:
+            def execute(self, sql, params=()):
+                calls.append(("execute", sql, params))
+                return FakeCursor()
+
+            def cursor(self):
+                return FakeCursor()
+
+            def rollback(self):
+                calls.append(("rollback",))
+
+        class FakeContext:
+            def __enter__(self):
+                return FakePostgresConnection()
+
+            def __exit__(self, exc_type, exc, traceback):
+                calls.append(("context_exit", exc_type))
+                return False
+
+        monkeypatch.setattr(database_backend, "connect_postgres", mock.Mock(return_value=FakeContext()))
+
+        with database_backend.connect_postgres_sqlite_compat({"database_backend": "postgres"}) as conn:
+            assert conn.execute("SELECT '?' AS literal, id FROM runs WHERE id = ?", ("run-1",)).fetchone() == {
+                "ok": True,
+            }
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id FROM runs WHERE session_id = ?", ("sess-1",))
+            conn.executemany(
+                "INSERT INTO session_variables (session_id, name) VALUES (?, ?)",
+                [("sess-1", "ONE"), ("sess-1", "TWO")],
+            )
+
+        assert calls == [
+            ("execute", "SELECT '?' AS literal, id FROM runs WHERE id = %s", ("run-1",)),
+            ("cursor_execute", "SELECT id FROM runs WHERE session_id = %s", ("sess-1",)),
+            (
+                "cursor_executemany",
+                "INSERT INTO session_variables (session_id, name) VALUES (%s, %s)",
+                (("sess-1", "ONE"), ("sess-1", "TWO")),
+            ),
+            ("context_exit", None),
+        ]
+
+    def test_db_connect_routes_to_postgres_compat_when_configured(self, monkeypatch):
+        postgres_context = object()
+        sqlite_context = object()
+        postgres_connect = mock.Mock(return_value=postgres_context)
+        sqlite_connect = mock.Mock(return_value=sqlite_context)
+
+        monkeypatch.setattr(database, "connect_postgres_sqlite_compat", postgres_connect)
+        monkeypatch.setattr(database, "connect_sqlite", sqlite_connect)
+
+        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.POSTGRES)
+        assert database.db_connect() is postgres_context
+        postgres_connect.assert_called_once_with(database.CFG)
+        sqlite_connect.assert_not_called()
+
+        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
+        assert database.db_connect() is sqlite_context
+        sqlite_connect.assert_called_once_with(database.DB_PATH, timeout=10)
+
     def test_postgres_requires_database_url(self):
         with pytest.raises(database_backend.PostgresConnectionError, match="database_url"):
             database_backend.postgres_pool_settings({"database_backend": "postgres"})
@@ -2438,6 +2522,8 @@ class TestEntrypointWorkspaceRepair:
         assert "--config /app/gunicorn_conf.py" in entrypoint
         assert "def child_exit(" in gunicorn_conf
         assert "multiprocess.mark_process_dead(worker.pid)" in gunicorn_conf
+        assert "def worker_exit(" in gunicorn_conf
+        assert "close_postgres_pool()" in gunicorn_conf
 
 
 class TestDerivedCommandRegistry:

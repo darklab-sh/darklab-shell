@@ -85,7 +85,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `history_panel_limit` | `50` | Number of history rows shown per page in the desktop history drawer and mobile recents sheet |
 | `recent_commands_limit` | `50` | Number of distinct recent commands loaded into prompt Up/Down history, desktop rail recents, and the mobile recent peek |
 | `data_dir` | auto | Server-side only. Directory used for SQLite history and compressed full-output artifacts. Leave unset to use `/data` when it is writable, otherwise `/tmp` for local/dev fallback. If set explicitly, the directory must be writable at startup |
-| `database_backend` | `sqlite` | Server-side only. Selects the database backend. `sqlite` remains the only active app query path. When set to `postgres`, startup runs the app-owned Postgres schema migrations, but SQLite-specific routes still fail fast until the query-portability work lands |
+| `database_backend` | `sqlite` | Server-side only. Selects the database backend. SQLite remains the default local/single-user path. When set to `postgres`, startup runs the app-owned Postgres schema migrations and normal `db_connect()` calls use the Postgres pool through a compatibility layer while route portability work continues |
 | `database_url` | _(empty)_ | Server-side only. Postgres DSN used when `database_backend: postgres`. Ignored by SQLite. Can also be set with the `DATABASE_URL` environment variable |
 | `database_pool_min` | `1` | Server-side only. Minimum Postgres pool size. Ignored by SQLite. Can also be set with `DATABASE_POOL_MIN` |
 | `database_pool_max` | `5` | Server-side only. Maximum Postgres pool size. Ignored by SQLite. Can also be set with `DATABASE_POOL_MAX` |
@@ -567,7 +567,7 @@ WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 | `WEB_CONCURRENCY` | Gunicorn entrypoint | Number of Gunicorn worker processes |
 | `WEB_THREADS` | Gunicorn entrypoint | Number of threads per Gunicorn worker |
 | `COMPOSE_PROFILES` | Docker Compose | Optional comma-separated Compose profiles to enable. Set to `postgres` when you want the profile-gated Postgres service included without passing `--profile postgres` |
-| `DATABASE_BACKEND` | Flask app | Optional override for `database_backend`. Keep this as `sqlite` until the Postgres query-portability work is complete |
+| `DATABASE_BACKEND` | Flask app | Optional override for `database_backend`. Keep this as `sqlite` for normal use until the Postgres query-portability work is complete |
 | `DATABASE_URL` | Flask app | Optional override for `database_url`, normally a Postgres DSN when testing the backend adapter |
 | `DATABASE_POOL_MIN` / `DATABASE_POOL_MAX` | Flask app | Optional Postgres connection-pool bounds |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Docker Compose | Credentials used by the optional `postgres` Compose profile |
@@ -625,7 +625,7 @@ The base [docker-compose.yml](docker-compose.yml) is the standalone local/test s
 docker compose --profile postgres up -d postgres
 ```
 
-The app keeps using SQLite by default. The optional Postgres service is useful for adapter testing and production planning. Postgres startup runs the app-owned schema migrations, but the main app query path remains SQLite-gated until the query-portability work is complete.
+The app keeps using SQLite by default. The optional Postgres service is useful for adapter testing and production planning. Postgres startup runs the app-owned schema migrations, and the main app connection helper can route through the Postgres pool, but full browser/API portability is still being finished.
 
 The optional production overlay at [examples/docker-compose.prod.yml](examples/docker-compose.prod.yml) is layered on top of the base file:
 

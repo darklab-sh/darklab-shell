@@ -53,11 +53,9 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - Postgres support is complete only when setting `DATABASE_BACKEND=postgres` starts the app without SQLite gating and the normal backend/route test lane passes against a Compose-network Postgres database.
   - SQLite-to-Postgres conversion stays an explicit offline operator action through `scripts/migrate_sqlite_to_postgres.py`; the app should never auto-convert a live SQLite database during startup.
 - **Phase 4 — App query-path integration**
-  - Route `db_connect()` through Postgres when `DATABASE_BACKEND=postgres`.
-  - Remove `require_sqlite_backend` gating only after the hot paths are portable: run start/finalize/history, output artifacts/body-store pointers, snapshots/permalinks, Projects, Atlas, findings, intel snapshots/cache, secrets metadata, session variables/preferences, workflows, starred commands, `/diag`, and `/metrics`.
-  - Add transaction-per-request or explicit transaction helpers for multi-step writes.
-  - Add narrow retry behavior for transient Postgres failures where retrying is safe.
-  - Ensure connection-pool lifecycle is clean under Gunicorn startup, worker exit, tests, and CLI helper execution.
+  - Finish the hot-path SQL portability pass now that `db_connect()` can route through Postgres: run start/finalize/history, output artifacts/body-store pointers, snapshots/permalinks, Projects, Atlas, findings, intel snapshots/cache, secrets metadata, session variables/preferences, workflows, starred commands, `/diag`, and `/metrics`.
+  - Add explicit transaction helpers where multi-step writes need a clearer backend-neutral boundary.
+  - Keep retry behavior limited to operations that are safe to retry; only expand beyond read-only queries when a call site has an idempotent write contract.
 - **Phase 5 — Migration helper finalization**
   - Change `scripts/migrate_sqlite_to_postgres.py` to migrate into the app-created Postgres baseline schema instead of creating copy-compatible tables itself.
   - Keep read-only SQLite access, encrypted-secret key confirmation, body-store/artifact validation, resume support, schema selection, and row-count validation.

@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,845
+- behavior tests: 2,847
 - docs/inventory meta-tests: 32
-- `pytest`: 1464 (1432 behavior + 32 meta)
+- `pytest`: 1466 (1434 behavior + 32 meta)
 - `vitest`: 1161
 - `playwright`: 252
-- total: 2,877
+- total: 2,879
 
 This document is organized in two parts:
 
@@ -395,6 +395,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseBackend.test_backend_defaults_to_sqlite_and_exposes_sqlite_dialect` | Verifies the database backend helper defaults to SQLite and exposes the current SQLite dialect shape. |
 | `TestDatabaseBackend.test_postgres_backend_exposes_dialect_and_pool_settings` | Verifies the Postgres backend exposes dialect helpers, pool settings, and the SQLite-route guard. |
 | `TestDatabaseBackend.test_postgres_pool_uses_psycopg_pool_lazily` | Verifies the Postgres pool is imported lazily, cached by pool settings, and closed cleanly. |
+| `TestDatabaseBackend.test_postgres_compat_connection_converts_app_placeholders` | Verifies the Postgres app-query compatibility wrapper converts SQLite-style placeholders for connection, cursor, and batch execution. |
+| `TestDatabaseBackend.test_db_connect_routes_to_postgres_compat_when_configured` | Verifies `db_connect()` routes to the Postgres compatibility context when the Postgres backend is configured. |
 | `TestDatabaseBackend.test_postgres_requires_database_url` | Verifies the Postgres adapter rejects missing `database_url` before opening a pool. |
 | `TestDatabaseBackend.test_postgres_identifier_quoting_and_advisory_lock_are_stable` | Verifies Postgres identifier quoting and advisory-lock IDs are deterministic. |
 | `TestDatabaseBackend.test_positional_placeholder_conversion_skips_literals_and_comments` | Verifies legacy SQLite-style positional placeholder conversion leaves string literals and SQL comments unchanged. |
