@@ -8,6 +8,7 @@
     'compare_runs',
     'workflow_steps',
     'project_summary',
+    'atlas_entities',
     'files_panel',
     'pty_terminal',
     'session_token',
@@ -23,6 +24,7 @@
     history: { label: 'Open History', opener: () => global.toggleHistoryPanelSurface?.(true) },
     workflows: { label: 'Open Workflows', opener: () => global.openWorkflows?.() },
     projects: { label: 'Open Projects', opener: () => global.openProjectWorkspace?.() },
+    atlas: { label: 'Open Atlas', opener: () => global.openAtlas?.({ source: 'tour' }) },
     session_files: { label: 'Open Files', opener: () => global.openWorkspace?.() },
     session_tokens: { label: 'Open Options', opener: () => global.openOptions?.() },
     closer: { label: 'Open FAQ', opener: () => global.openFaq?.() },
@@ -47,8 +49,8 @@
 
   function _summaryLines(summary) {
     return String(summary || '')
-      .split('\n')
-      .map(line => line.trim())
+      .split(/\n\s*\n/)
+      .map(line => line.replace(/\s*\n\s*/g, ' ').trim())
       .filter(Boolean);
   }
 
@@ -247,6 +249,55 @@
       chips.className = 'tour-mini-chip-row';
       chips.append(_createMiniPill('runs 9'), _createMiniPill('findings 137'), _createMiniPill('targets 10'));
       card.append(header, chips);
+      return card;
+    }
+
+    if (normalized === 'atlas_entities') {
+      const tabs = document.createElement('div');
+      tabs.className = 'tour-atlas-tabs';
+      [
+        ['Findings', '79'],
+        ['Hosts/IPs', '3'],
+        ['Domains', '22'],
+      ].forEach(([label, count], index) => {
+        const tab = document.createElement('span');
+        tab.className = `tour-atlas-tab${index === 1 ? ' is-active' : ''}`;
+        tab.textContent = `${label} (${count})`;
+        tabs.appendChild(tab);
+      });
+
+      const entity = document.createElement('div');
+      entity.className = 'tour-atlas-entity-card';
+      const value = document.createElement('span');
+      value.className = 'tour-atlas-value';
+      value.textContent = '104.21.4.35';
+      const meta = document.createElement('span');
+      meta.className = 'tour-atlas-meta';
+      meta.textContent = 'Hosts/IPs · 4 hits · 2 runs';
+      const tags = document.createElement('div');
+      tags.className = 'tour-mini-chip-row';
+      tags.append(_createMiniPill('linked project', 'is-green'), _createMiniPill('intel ready'));
+      entity.append(value, meta, tags);
+
+      const intel = document.createElement('div');
+      intel.className = 'tour-atlas-intel-grid';
+      [
+        ['Shodan', '2 ports'],
+        ['GreyNoise', 'not noise'],
+      ].forEach(([provider, status]) => {
+        const tile = document.createElement('div');
+        tile.className = 'tour-atlas-intel-card';
+        const providerEl = document.createElement('span');
+        providerEl.className = 'tour-compare-label';
+        providerEl.textContent = provider;
+        const statusEl = document.createElement('span');
+        statusEl.className = 'tour-compare-metric-value';
+        statusEl.textContent = status;
+        tile.append(providerEl, statusEl);
+        intel.appendChild(tile);
+      });
+
+      card.append(tabs, entity, intel);
       return card;
     }
 

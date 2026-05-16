@@ -453,6 +453,76 @@ body .welcome-status-loaded {
   border-color: color-mix(in srgb, var(--green) 42%, transparent);
 }
 
+.tour-atlas-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tour-atlas-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  color: var(--muted);
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 6px 6px 0 0;
+  background: var(--theme-inline-surface-bg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px 6px;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tour-atlas-tab.is-active {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 45%, var(--theme-panel-border));
+  border-top-width: 2px;
+  background: color-mix(in srgb, var(--green) 10%, var(--theme-inline-surface-bg));
+}
+
+.tour-atlas-entity-card,
+.tour-atlas-intel-card {
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 6px;
+  background: var(--theme-inline-surface-bg);
+  min-width: 0;
+}
+
+.tour-atlas-entity-card {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+}
+
+.tour-atlas-value {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 17px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tour-atlas-meta {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.tour-atlas-intel-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tour-atlas-intel-card {
+  padding: 10px;
+}
+
 .tour-mini-menu {
   border: 1px solid var(--theme-panel-border);
   border-radius: 8px;

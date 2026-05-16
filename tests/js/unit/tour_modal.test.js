@@ -118,6 +118,7 @@ describe('tour modal renderer', () => {
     const openHistory = vi.fn()
     const openWorkflows = vi.fn()
     const openProjects = vi.fn()
+    const openAtlas = vi.fn()
     const openFiles = vi.fn()
     const openOptions = vi.fn()
     const openFaq = vi.fn()
@@ -129,6 +130,7 @@ describe('tour modal renderer', () => {
         { id: 'history', title: 'History', sample: 'history', illustration: 'history_rows' },
         { id: 'workflows', title: 'Guided Workflows', sample: 'workflow list', illustration: 'workflow_steps' },
         { id: 'projects', title: 'Projects', sample: 'project help', illustration: 'project_summary' },
+        { id: 'atlas', title: 'Atlas', sample: 'intel domain darklab.sh', illustration: 'atlas_entities' },
         { id: 'session_files', title: 'Files', sample: 'file list', illustration: 'files_panel' },
         { id: 'session_tokens', title: 'Tokens', sample: 'session-token', illustration: 'session_token' },
         { id: 'closer', title: 'Next', sample: 'help', illustration: 'next_steps' },
@@ -142,6 +144,7 @@ describe('tour modal renderer', () => {
         toggleHistoryPanelSurface: openHistory,
         openWorkflows,
         openProjectWorkspace: openProjects,
+        openAtlas,
         openWorkspace: openFiles,
         openOptions,
         openFaq,
@@ -157,6 +160,7 @@ describe('tour modal renderer', () => {
       ['history', openHistory, [true]],
       ['workflows', openWorkflows, []],
       ['projects', openProjects, []],
+      ['atlas', openAtlas, [{ source: 'tour' }]],
       ['session_files', openFiles, []],
       ['session_tokens', openOptions, []],
       ['closer', openFaq, []],
@@ -200,6 +204,7 @@ describe('tour modal renderer', () => {
       'compare_runs',
       'workflow_steps',
       'project_summary',
+      'atlas_entities',
       'files_panel',
       'pty_terminal',
       'session_token',
@@ -217,6 +222,10 @@ describe('tour modal renderer', () => {
     expect(compareNode.querySelectorAll('.tour-compare-run-card')).toHaveLength(2)
     expect(compareNode.querySelectorAll('.tour-compare-pane')).toHaveLength(2)
     expect(compareNode.querySelector('.tour-compare-findings-title')?.textContent).toContain('Added findings')
+    const atlasNode = _renderTourIllustration('atlas_entities')
+    expect(atlasNode.querySelectorAll('.tour-atlas-tab')).toHaveLength(3)
+    expect(atlasNode.querySelector('.tour-atlas-tab.is-active')?.textContent).toContain('Hosts/IPs')
+    expect(atlasNode.querySelector('.tour-atlas-value')?.textContent).toBe('104.21.4.35')
     expect(_renderTourIllustration('unknown').classList.contains('tour-visual-terminal_stream')).toBe(true)
   })
 

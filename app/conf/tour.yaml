@@ -24,7 +24,7 @@
 # The tour kill-switch lives in config.yaml as `tour_enabled` alongside
 # other <feature>_enabled keys; this file stays content-only.
 
-version: 1
+version: 2
 
 chapters:
   - id: running_commands
@@ -93,6 +93,16 @@ chapters:
       output.
     sample: "project help"
     illustration: project_summary
+
+  - id: atlas
+    title: "Triage Entities in Atlas"
+    summary: >-
+      Atlas turns saved output into an entity-first workspace for hosts, IPs,
+      domains, URLs, hashes, CVEs, and findings. Use it to filter noisy rows,
+      review findings, keep notes on important entities, refresh provider
+      intel, and link the entities that matter back to a project.
+    sample: "intel domain darklab.sh"
+    illustration: atlas_entities
 
   # Feature-gated chapters use `requires` to reference exact
   # <feature>_enabled keys from config.yaml. When the referenced feature is

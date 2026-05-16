@@ -9,10 +9,10 @@ from pathlib import Path
 import yaml
 from core.redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
 
-APP_VERSION = "1.7"
+APP_VERSION = "2.0"
 PROJECT_NAME = "darklab_shell"
 
-PROJECT_README = "https://gitlab.com/darklab.sh/darklab_shell#darklab_shell"
+PROJECT_README = "https://gitlab.com/darklab.sh/darklab_shell/-/tree/v2.0?ref_type=heads#darklab_shell"
 APP_CONF_DIR = os.environ.get("APP_CONF_DIR", "")
 DEFAULT_PROMPT_IDENTITY = "anon@darklab.sh"
 
