@@ -11,6 +11,9 @@ import uuid
 
 import pytest
 
+from core.database_backend import DatabaseBackend
+from services.history.search import run_search_clause
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MIGRATION_SCRIPT = REPO_ROOT / "scripts" / "migrate_sqlite_to_postgres.py"
 
@@ -196,14 +199,16 @@ def _run_backend_smoke(conn: Any, *, backend: str) -> None:
         backend=backend,
     )
 
-    like_operator = "ILIKE" if backend == "postgres" else "LIKE"
-    row = conn.execute(
-        f"SELECT id FROM runs WHERE command {like_operator} ? OR output_search_text {like_operator} ?",
-        ("%darklab.sh%", "%104.21.4.35%"),
-    ).fetchone() if backend == "sqlite" else conn.execute(
-        f"SELECT id FROM runs WHERE command {like_operator} %s OR output_search_text {like_operator} %s",
-        ("%darklab.sh%", "%104.21.4.35%"),
-    ).fetchone()
+    search_backend = DatabaseBackend.POSTGRES if backend == "postgres" else DatabaseBackend.SQLITE
+    clause = run_search_clause(
+        search_backend,
+        "104.21.4.35",
+        "all",
+        alias="",
+        prefer_sqlite_fts=False,
+        postgres_placeholder="%s",
+    )
+    row = conn.execute("SELECT id FROM runs WHERE 1 = 1" + clause.sql, tuple(clause.params)).fetchone()
     assert row["id"] == "run-1"
 
     entity_count = _execute(conn, "SELECT COUNT(*) AS count FROM entity_run_links", backend=backend).fetchone()["count"]
@@ -243,7 +248,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
     conn.commit()
 
-    assert applied == ["0001"]
+    assert applied == ["0001", "0002"]
     assert applied_again == []
     table_rows = conn.execute(
         """
@@ -278,6 +283,19 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("secrets", "ciphertext", "bytea"),
         ("runs", "preview_truncated", "boolean"),
     }
+    index_rows = conn.execute(
+        """
+        SELECT indexname
+        FROM pg_indexes
+        WHERE schemaname = %s
+        AND tablename = 'runs'
+        """,
+        (postgres_schema.schema,),
+    ).fetchall()
+    assert {
+        "idx_runs_command_trgm",
+        "idx_runs_output_search_text_trgm",
+    }.issubset({row["indexname"] for row in index_rows})
 
 
 def _write_body_pointer(root: Path, body: str, rel_path: str) -> str:

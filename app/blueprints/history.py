@@ -5,7 +5,6 @@ History and share routes: run history, single-run permalinks, snapshot permalink
 import json
 import logging
 import math
-import re
 import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -26,6 +25,7 @@ from core.helpers import (
 )
 from core.output_signals import command_root as output_command_root
 from services.history.permalinks import _format_duration, _permalink_error_page, _permalink_page
+from services.history.search import run_search_clause, sqlite_fts_query
 from core.process import active_runs_for_session
 from services.atlas.cleanup import (
     atlas_run_cleanup_preview,
@@ -68,18 +68,7 @@ def _history_cutoff_for_range(date_range):
 
 
 def _build_fts_query(raw):
-    # Strip FTS5 special chars and split into quoted terms for AND-search.
-    terms = re.split(r'\s+', re.sub(r'["\'\(\)\*\^\\]', ' ', raw).strip())
-    terms = [t for t in terms if t]
-    if not terms:
-        return None
-    # The trigram tokenizer indexes 3-char windows, so any term shorter than
-    # 3 chars produces zero trigrams and would silently match nothing. Signal
-    # the caller to use the LIKE fallback instead — that path handles
-    # substring matching on the command column.
-    if any(len(t) < 3 for t in terms):
-        return None
-    return ' '.join(f'"{t}"' for t in terms)
+    return sqlite_fts_query(raw)
 
 
 def _history_add_filters(sql, params, command_root, exit_code_filter, date_range):
@@ -173,23 +162,14 @@ def _history_run_kind_sql(column):
 
 
 def _history_match_clause(query, scope, force_like=False):
-    if not query:
-        return "", [], None
-    fts_q = _build_fts_query(query) if scope != "command" and not force_like else None
-    if fts_q:
-        return (
-            " AND r.rowid IN (SELECT rowid FROM runs_fts WHERE runs_fts MATCH ?)",
-            [fts_q],
-            fts_q,
-        )
-    like_query = f"%{query.lower()}%"
-    if scope == "command":
-        return " AND LOWER(r.command) LIKE ?", [like_query], None
-    return (
-        " AND (LOWER(r.command) LIKE ? OR LOWER(COALESCE(r.output_search_text, '')) LIKE ?)",
-        [like_query, like_query],
-        None,
+    clause = run_search_clause(
+        "sqlite",
+        query,
+        scope,
+        alias="r",
+        prefer_sqlite_fts=not force_like,
     )
+    return clause.sql, clause.params, clause.fts_query
 
 
 def _history_base_clause(

@@ -496,6 +496,7 @@ class TestPostgresMigrations:
         sql = "\n".join(baseline.statements)
 
         assert baseline.version == "0001"
+        assert [migration.version for migration in MIGRATIONS] == ["0001", "0002"]
         for table_name in (
             "runs",
             "run_output_artifacts",
@@ -524,6 +525,18 @@ class TestPostgresMigrations:
         assert "BOOLEAN NOT NULL DEFAULT" in sql
         assert "BYTEA NOT NULL" in sql
         assert "runs_fts" not in sql
+
+    def test_postgres_search_migration_adds_trigram_indexes(self):
+        from core.migrations import MIGRATIONS
+
+        search_migration = MIGRATIONS[1]
+        sql = "\n".join(search_migration.statements)
+
+        assert search_migration.version == "0002"
+        assert "CREATE EXTENSION IF NOT EXISTS pg_trgm" in sql
+        assert "gin_trgm_ops" in sql
+        assert "command" in sql
+        assert "output_search_text" in sql
 
     def test_migration_runner_serializes_with_advisory_lock_and_records_versions(self):
         from core.migrations.runner import Migration, run_migrations_with_advisory_lock
@@ -589,6 +602,50 @@ class TestPostgresMigrations:
 
         assert fake_conn.committed is True
         migration_runner.assert_called_once()
+
+
+class TestRunHistorySearchClauses:
+    def test_sqlite_history_search_prefers_fts_for_output_scope(self):
+        from services.history.search import run_search_clause
+
+        clause = run_search_clause("sqlite", "darklab host", "all")
+
+        assert clause.strategy == "sqlite_fts"
+        assert "runs_fts MATCH ?" in clause.sql
+        assert clause.params == ['"darklab" "host"']
+        assert clause.fts_query == '"darklab" "host"'
+
+    def test_sqlite_history_search_falls_back_to_like_for_short_terms(self):
+        from services.history.search import run_search_clause
+
+        clause = run_search_clause("sqlite", "ip", "all")
+
+        assert clause.strategy == "sqlite_like"
+        assert "runs_fts" not in clause.sql
+        assert "LOWER(r.command) LIKE ?" in clause.sql
+        assert clause.params == ["%ip%", "%ip%"]
+        assert clause.fts_query is None
+
+    def test_sqlite_command_scope_searches_command_only(self):
+        from services.history.search import run_search_clause
+
+        clause = run_search_clause("sqlite", "host", "command")
+
+        assert clause.strategy == "sqlite_like"
+        assert clause.sql == " AND LOWER(r.command) LIKE ?"
+        assert clause.params == ["%host%"]
+
+    def test_postgres_history_search_uses_trigram_friendly_ilike(self):
+        from services.history.search import run_search_clause
+
+        clause = run_search_clause("postgres", "104.21", "all", alias="", postgres_placeholder="%s")
+
+        assert clause.strategy == "postgres_trgm"
+        assert "runs_fts" not in clause.sql
+        assert "command" in clause.sql
+        assert "output_search_text" in clause.sql
+        assert "ILIKE %s" in clause.sql
+        assert clause.params == ["%104.21%", "%104.21%"]
 
 
 class TestPostgresMigrationHelper:

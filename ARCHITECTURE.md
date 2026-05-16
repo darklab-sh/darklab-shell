@@ -950,7 +950,7 @@ That split is what allows the app to keep the interactive shell fast while still
 
 ### Database
 
-`<data_dir>/history.db` — SQLite, WAL mode. Twenty-two persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable. The server also has a `database_backend` selector and a database backend/dialect helper for connection setup, JSON column types and parameters, boolean storage and parameters, timestamps, placeholders, `IN` clauses, limit/offset clauses, upsert clauses, text search expressions, concatenation, SQLite diagnostics, Postgres identifier quoting, advisory-lock IDs, lazy psycopg pool setup, `pg_trgm` availability checks, and Postgres storage rows. Postgres startup runs app-owned migrations from `app/core/migrations/` behind a transaction-scoped advisory lock; the first migration is a baseline schema for the current app tables, indexes, JSONB columns, booleans, bytea secret payloads, and triggers. `sqlite` is the active app query path today. The Postgres dependency, pool helper, config surface, migration runner, and optional Compose service are available for the production-backend track, while SQLite-specific routes still fail fast under `postgres` until the portability work lands.
+`<data_dir>/history.db` — SQLite, WAL mode. Twenty-two persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable. The server also has a `database_backend` selector and a database backend/dialect helper for connection setup, JSON column types and parameters, boolean storage and parameters, timestamps, placeholders, `IN` clauses, limit/offset clauses, upsert clauses, text search expressions, concatenation, SQLite diagnostics, Postgres identifier quoting, advisory-lock IDs, lazy psycopg pool setup, `pg_trgm` availability checks, and Postgres storage rows. History search has a backend-aware SQL helper: SQLite keeps its FTS5-first path with `LIKE` fallback for short terms, while Postgres uses substring `ILIKE` clauses backed by trigram indexes. Postgres startup runs app-owned migrations from `app/core/migrations/` behind a transaction-scoped advisory lock; the first migration is a baseline schema for the current app tables, indexes, JSONB columns, booleans, bytea secret payloads, and triggers, and the second adds `pg_trgm` run-history search indexes. `sqlite` is the active app query path today. The Postgres dependency, pool helper, config surface, migration runner, and optional Compose service are available for the production-backend track, while SQLite-specific routes still fail fast under `postgres` until the portability work lands.
 
 Logical relationships are owned by the app rather than SQLite foreign-key constraints. Anonymous browser sessions can appear as `session_id` values without a matching `session_tokens` row.
 
@@ -1436,12 +1436,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,840
+- behavior tests: 2,845
 - docs/inventory meta-tests: 32
-- `pytest`: 1459 (1427 behavior + 32 meta)
+- `pytest`: 1464 (1432 behavior + 32 meta)
 - `vitest`: 1161
 - `playwright`: 252
-- total: 2,872
+- total: 2,877
 
 ### Testing Architecture
 

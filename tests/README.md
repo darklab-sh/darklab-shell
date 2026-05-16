@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,840
+- behavior tests: 2,845
 - docs/inventory meta-tests: 32
-- `pytest`: 1459 (1427 behavior + 32 meta)
+- `pytest`: 1464 (1432 behavior + 32 meta)
 - `vitest`: 1161
 - `playwright`: 252
-- total: 2,872
+- total: 2,877
 
 This document is organized in two parts:
 
@@ -400,8 +400,13 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseBackend.test_positional_placeholder_conversion_skips_literals_and_comments` | Verifies legacy SQLite-style positional placeholder conversion leaves string literals and SQL comments unchanged. |
 | `TestDatabaseBackend.test_unknown_backend_is_rejected_with_supported_values` | Verifies unsupported database backend names are rejected with the accepted backend list. |
 | `TestPostgresMigrations.test_baseline_migration_covers_current_app_schema` | Verifies the first app-owned Postgres migration covers the current app tables, JSONB columns, booleans, bytea secrets, and intentionally excludes SQLite FTS internals. |
+| `TestPostgresMigrations.test_postgres_search_migration_adds_trigram_indexes` | Verifies the Postgres run-search migration creates `pg_trgm` and trigram indexes for command and output search. |
 | `TestPostgresMigrations.test_migration_runner_serializes_with_advisory_lock_and_records_versions` | Verifies the Postgres migration runner takes a transaction-scoped advisory lock and records applied migration versions. |
 | `TestPostgresMigrations.test_database_init_runs_postgres_migrations_without_sqlite_bootstrap` | Verifies Postgres startup runs migrations without entering the SQLite bootstrap path. |
+| `TestRunHistorySearchClauses.test_sqlite_history_search_prefers_fts_for_output_scope` | Verifies SQLite history search still prefers FTS for output-capable searches with indexable terms. |
+| `TestRunHistorySearchClauses.test_sqlite_history_search_falls_back_to_like_for_short_terms` | Verifies SQLite history search falls back to substring `LIKE` for short terms that FTS trigram tokenization cannot match. |
+| `TestRunHistorySearchClauses.test_sqlite_command_scope_searches_command_only` | Verifies command-scoped history search only matches the command text. |
+| `TestRunHistorySearchClauses.test_postgres_history_search_uses_trigram_friendly_ilike` | Verifies Postgres history search uses substring `ILIKE` clauses that can use trigram indexes without referencing SQLite FTS tables. |
 | `TestPostgresMigrationHelper.test_discovers_app_tables_and_skips_sqlite_fts_shadow_tables` | Verifies the offline Postgres migration helper copies app tables while skipping SQLite FTS internals. |
 | `TestPostgresMigrationHelper.test_create_table_sql_maps_json_columns_and_primary_key` | Verifies migration-created Postgres tables preserve primary keys and JSON column types. |
 | `TestPostgresMigrationHelper.test_file_validation_checks_artifacts_and_body_store_pointers` | Verifies migration preflight checks run-output artifacts and body-store pointer files. |

@@ -470,7 +470,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── migrations/         # Postgres schema migration registry and runner
 │   │   │   ├── __init__.py     # Ordered Postgres migration list
 │   │   │   ├── runner.py       # Advisory-lock migration runner for Postgres startup
-│   │   │   └── v0001_postgres_baseline.py # Current app schema baseline for Postgres
+│   │   │   ├── v0001_postgres_baseline.py # Current app schema baseline for Postgres
+│   │   │   └── v0002_postgres_run_search.py # Trigram-backed Postgres run-history search indexes
 │   │   ├── output_signals.py   # Server-side output signal and entity classifier
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and in-process fallback
 │   │   └── redaction.py        # Snapshot-share redaction helpers and built-in rule application
@@ -510,7 +511,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── wordlists.py    # SecLists catalog loader and filtering helpers for wordlist command/autocomplete
 │   │   ├── history/
 │   │   │   ├── __init__.py     # History service package marker
-│   │   │   └── permalinks.py   # Flask context/render helpers for /history/<id> and /share/<id>
+│   │   │   ├── permalinks.py   # Flask context/render helpers for /history/<id> and /share/<id>
+│   │   │   └── search.py       # Backend-aware run-history search SQL helpers
 │   │   ├── intel/
 │   │   │   ├── __init__.py     # External intel service package marker
 │   │   │   ├── abuseipdb.py    # AbuseIPDB provider normalization

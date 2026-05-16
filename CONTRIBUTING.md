@@ -176,8 +176,8 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **1459 pytest + 1161 Vitest + 252 Playwright = 2,872 tests**.
-That total includes 2,840 behavior tests plus 32 docs/inventory meta-tests.
+Current totals: **1464 pytest + 1161 Vitest + 252 Playwright = 2,877 tests**.
+That total includes 2,845 behavior tests plus 32 docs/inventory meta-tests.
 
 Postgres backend checks are opt-in. Set `DARKLAB_TEST_POSTGRES_DSN` or pass
 `--postgres-dsn` to pytest when you want the Postgres smoke and migration
