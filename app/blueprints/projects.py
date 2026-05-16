@@ -542,7 +542,10 @@ def projects_packages_download(project_id, package_id):
         time.perf_counter() - build_started,
         archive_bytes=int(metrics.get("archive_bytes") or archive.get("byte_size") or 0),
         skipped_artifacts=int(metrics.get("skipped_artifacts") or 0),
-        skipped_items=int(metrics.get("skipped_items") or 0),
+        skipped_other_items=max(
+            0,
+            int(metrics.get("skipped_items") or 0) - int(metrics.get("skipped_artifacts") or 0),
+        ),
     )
     log_extra = {
         "ip": get_client_ip(),

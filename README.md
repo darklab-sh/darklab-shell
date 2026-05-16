@@ -378,7 +378,7 @@ To prevent commands from writing to either path directly, the app blocks any com
 - [FEATURES.md](FEATURES.md) - Full per-feature reference: autocomplete, pipe support, keyboard shortcuts, allowlist, welcome animation, history, permalinks, themes, and more
 - [THEME.md](THEME.md) - Theme registry, selector metadata, and override behavior
 - [TODO.md](TODO.md) - Open follow-ups, research notes, known issues, and future ideas
-- [docs/atlas-export.md](docs/atlas-export.md) - Session Entity Atlas CSV/JSONL export schema and filters
+- [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - External command registry, rewrite, environment, Files, and smoke-test contracts
 - [tests/README.md](tests/README.md) - Detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory
@@ -465,6 +465,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and in-process fallback
 │   │   └── redaction.py        # Snapshot-share redaction helpers and built-in rule application
 │   ├── extensions.py           # Flask-Limiter singleton (init_app deferred to app.py)
+│   ├── gunicorn_conf.py        # Gunicorn hooks for Prometheus worker cleanup
 │   ├── requirements.txt        # Python runtime dependencies
 │   ├── services/
 │   │   ├── __init__.py         # Service package marker
@@ -723,7 +724,6 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   └── history.db              #   stores run history and tab snapshots
 ├── docker-compose.yml
 ├── docs/
-│   ├── atlas-export.md # Session Entity Atlas CSV/JSONL export schema and filters
 │   ├── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
 │   └── release-drafts/
 │       ├── v2.0-merge-request.md # Draft merge-request notes for the next major release

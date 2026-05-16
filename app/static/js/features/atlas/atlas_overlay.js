@@ -266,7 +266,7 @@
     (tabsApi.tabs || []).forEach(tab => {
       const button = document.createElement('button');
       button.type = 'button';
-      button.className = 'toggle-btn history-run-tab atlas-tab';
+      button.className = 'tab-strip-item atlas-tab';
       button.dataset.atlasTab = tab.id;
       button.setAttribute('role', 'tab');
       button.setAttribute('aria-selected', tab.id === state.activeTab ? 'true' : 'false');
@@ -393,9 +393,34 @@
     return found ? found[1] : text(value, 'New');
   }
 
+  function activateRowOnKeyboard(row, handler) {
+    row.setAttribute('role', 'button');
+    row.tabIndex = 0;
+    row.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      handler();
+    });
+  }
+
+  function appendSelectionCheckbox(row, item, selectedIds, label, className = 'atlas-row-select') {
+    const selectLabel = document.createElement('label');
+    selectLabel.className = 'atlas-row-select-label';
+    selectLabel.addEventListener('click', event => event.stopPropagation());
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = className;
+    checkbox.checked = selectedIds.has(String(item.id || ''));
+    checkbox.setAttribute('aria-label', label);
+    checkbox.addEventListener('change', () => {
+      toggleItemSelection(item, checkbox.checked);
+    });
+    selectLabel.appendChild(checkbox);
+    row.appendChild(selectLabel);
+  }
+
   function findingRow(finding) {
-    const row = document.createElement('button');
-    row.type = 'button';
+    const row = document.createElement('div');
     row.className = 'chrome-row chrome-row-clickable atlas-finding-queue-row';
     row.classList.toggle('is-selecting', state.selectMode);
     row.classList.toggle(
@@ -426,25 +451,24 @@
     badges.appendChild(badge(findingStatusLabel(finding.review_state || finding.status), 'green'));
     if (finding.occurrence_count) badges.appendChild(badge(countLabel(finding.occurrence_count, 'hit', 'hits'), 'muted'));
     if (state.selectMode) {
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.className = 'atlas-finding-select atlas-row-select';
-      checkbox.checked = state.selectedFindingIds.has(String(finding.id || ''));
-      checkbox.setAttribute('aria-label', `Select finding: ${finding.title || finding.id}`);
-      checkbox.addEventListener('click', (event) => {
-        event.stopPropagation();
-        toggleItemSelection(finding, checkbox.checked);
-      });
-      row.appendChild(checkbox);
+      appendSelectionCheckbox(
+        row,
+        finding,
+        state.selectedFindingIds,
+        `Select finding: ${finding.title || finding.id}`,
+        'atlas-finding-select atlas-row-select',
+      );
     }
     row.append(main, badges);
-    row.addEventListener('click', () => {
+    const handleActivation = () => {
       if (state.selectMode) {
         toggleItemSelection(finding);
         return;
       }
       selectFinding(finding.id);
-    });
+    };
+    row.addEventListener('click', handleActivation);
+    if (!state.selectMode) activateRowOnKeyboard(row, handleActivation);
     return row;
   }
 
@@ -469,8 +493,7 @@
       return;
     }
     state.entities.forEach(entity => {
-      const row = document.createElement('button');
-      row.type = 'button';
+      const row = document.createElement('div');
       row.className = 'chrome-row chrome-row-clickable atlas-entity-row';
       row.classList.toggle('is-selecting', state.selectMode);
       row.classList.toggle(
@@ -500,25 +523,23 @@
       labels.slice(0, 2).forEach(label => badges.appendChild(badge(text(label.label || label), 'muted')));
 
       if (state.selectMode) {
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.className = 'atlas-row-select';
-        checkbox.checked = state.selectedEntityIds.has(String(entity.id || ''));
-        checkbox.setAttribute('aria-label', `Select entity: ${entity.canonical_value || entity.id}`);
-        checkbox.addEventListener('click', (event) => {
-          event.stopPropagation();
-          toggleItemSelection(entity, checkbox.checked);
-        });
-        row.appendChild(checkbox);
+        appendSelectionCheckbox(
+          row,
+          entity,
+          state.selectedEntityIds,
+          `Select entity: ${entity.canonical_value || entity.id}`,
+        );
       }
       row.append(main, badges);
-      row.addEventListener('click', () => {
+      const handleActivation = () => {
         if (state.selectMode) {
           toggleItemSelection(entity);
           return;
         }
         selectEntity(entity.id);
-      });
+      };
+      row.addEventListener('click', handleActivation);
+      if (!state.selectMode) activateRowOnKeyboard(row, handleActivation);
       listHost.appendChild(row);
     });
   }
@@ -798,30 +819,31 @@
   }
 
   async function bulkDeleteSelectedItems() {
+    if (state.bulkInFlight) return;
     const tab = currentTab();
     const isFindings = tab.id === 'findings';
     const selected = activeSelectionSet(tab);
     const ids = [...selected];
     if (!ids.length || typeof global.showConfirm !== 'function') return;
+    setBulkBusy(true);
     const noun = bulkDeleteNoun(tab, ids.length);
     const note = isFindings
       ? 'This removes the selected findings and cannot be undone.'
       : 'This removes the selected entities and any findings attached to them. This cannot be undone.';
-    const choice = await global.showConfirm({
-      body: {
-        text: `Delete ${ids.length.toLocaleString()} Atlas ${noun}?`,
-        note,
-      },
-      tone: 'warning',
-      actions: [
-        { id: 'cancel', label: 'Cancel', role: 'cancel' },
-        { id: 'delete', label: 'Delete', role: 'destructive', tone: 'warning' },
-      ],
-      refocusOnResolve: false,
-    });
-    if (choice !== 'delete') return;
-    setBulkBusy(true);
     try {
+      const choice = await global.showConfirm({
+        body: {
+          text: `Delete ${ids.length.toLocaleString()} Atlas ${noun}?`,
+          note,
+        },
+        tone: 'warning',
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'delete', label: 'Delete', role: 'destructive', tone: 'warning' },
+        ],
+        refocusOnResolve: false,
+      });
+      if (choice !== 'delete') return;
       const url = isFindings ? '/atlas/findings/bulk-delete' : '/atlas/entities/bulk-delete';
       const body = isFindings ? { finding_ids: ids } : { entity_ids: ids };
       const resp = await api()(url, {

@@ -7,9 +7,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
 
 // Surface-scoped button class names that are no longer valid. Buttons compose
-// the .btn role/tone/size/state primitives (see components.css) plus the
-// .nav-item / .close-btn / .toggle-btn / .kb-key siblings; minting any of
-// these names back is a regression.
+// the .btn role/tone/size/state primitives (see components.css) plus sibling
+// primitives such as .nav-item, .tab-strip-item, .close-btn, and .toggle-btn;
+// minting any of these names back is a regression.
 const RETIRED_CLASSES = [
   'term-action-btn',
   'hud-kill-btn',

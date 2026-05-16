@@ -10,7 +10,9 @@
 
   "allowed_primitive_classes": [
     "btn",
+    "chip",
     "nav-item",
+    "tab-strip-item",
     "close-btn",
     "toggle-btn",
     "kb-key",

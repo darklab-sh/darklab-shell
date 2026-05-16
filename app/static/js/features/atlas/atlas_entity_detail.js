@@ -183,7 +183,7 @@
       const card = node('div', 'atlas-intel-card');
       const toggle = document.createElement('button');
       toggle.type = 'button';
-      toggle.className = 'atlas-intel-card-toggle';
+      toggle.className = 'btn btn-ghost btn-compact atlas-intel-card-toggle';
       toggle.setAttribute('aria-expanded', 'false');
       toggle.append(
         node('span', 'atlas-intel-card-caret', '›'),

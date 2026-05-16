@@ -135,9 +135,10 @@ Creating resume file: /tools/katana/resume-abcd.cfg
 The `intel` built-in uses the same provider keys when a provider needs them, without launching the vendor CLI:
 
 - `intel ip <ip>` queries Shodan, Censys, GreyNoise, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, URLhaus, ThreatFox, and RouteViews.
-- `intel domain <domain>` queries VirusTotal, AlienVault OTX, and crt.sh.
-- `intel hash <md5|sha1|sha256>` queries VirusTotal and AlienVault OTX after autodetecting the hash type by hex length, and checks SHA1 hashes against HIBP Pwned Passwords by sending only the first five SHA1 characters.
-- `intel cve <CVE-ID>` queries NVD.
+- `intel domain <domain>` queries VirusTotal, AlienVault OTX, crt.sh, URLhaus, ThreatFox, urlscan.io, and SecurityTrails.
+- `intel url <url>` queries URLhaus, ThreatFox, and urlscan.io.
+- `intel hash <md5|sha1|sha256>` queries VirusTotal, AlienVault OTX, URLhaus, and ThreatFox after autodetecting the hash type by hex length, and checks SHA1 hashes against HIBP Pwned Passwords by sending only the first five SHA1 characters.
+- `intel cve <CVE-ID>` queries NVD and Vulners.
 
 Provider metadata lives in `app/services/intel/registry.py`, including display labels, supported entity types, secret names and aliases, cache scopes, rate-limit config keys, and user-facing usage labels. Provider responses are normalized through `app/services/intel/schema.py` before they are rendered, cached, or logged. Each provider pane reports whether the result came from cache, was blocked by rate limiting or quota backoff, or is missing the needed encrypted secret. If all keyed providers for a lookup are missing, the built-in exits with setup guidance only when no no-key or optional-key provider can run. If only some providers are missing, available providers still render normally and the missing providers show placeholders. The same provider metadata feeds the Options Provider Status modal, `secret show-consumers`, the `providers` alias, and the Options Secrets picker for providers that need stored keys, so app-native HTTP providers and CLI-backed provider wrappers are discoverable from one place.
 

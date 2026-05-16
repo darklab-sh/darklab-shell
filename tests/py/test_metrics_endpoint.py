@@ -4,6 +4,8 @@ import re
 import uuid
 from unittest import mock
 
+import pytest
+
 import app as shell_app
 import config
 from services import metrics as app_metrics
@@ -86,6 +88,7 @@ class TestMetricsEndpoint:
     def test_rate_limit_and_intel_helpers_render_expected_labels(self):
         app_metrics.record_rate_limit_rejection("run.start_brokered_run", scope="global")
         app_metrics.record_intel_lookup("shodan", "cache_hit", 0.05)
+        app_metrics.record_intel_lookup("user supplied provider", "surprise")
         app_metrics.record_db_query("history_list", 0.01)
         app_metrics.record_history_search_fallback("missing_fts")
         app_metrics.record_evidence_package_build(
@@ -93,18 +96,25 @@ class TestMetricsEndpoint:
             0.2,
             archive_bytes=2048,
             skipped_artifacts=1,
-            skipped_items=2,
+            skipped_other_items=1,
         )
+        app_metrics.record_completed_pty("mtr darklab.sh", 130, 0.5)
+        app_metrics.record_workspace_evictions(2, "manual")
 
         body = _allowed_metrics(get_client(use_forwarded_for=False)).get_data(as_text=True)
 
         assert 'darklab_rate_limit_rejections_total{route="run.start_brokered_run",scope="global"}' in body
         assert 'darklab_intel_requests_total{outcome="cache_hit",provider="shodan"}' in body
+        assert 'darklab_intel_requests_total{outcome="error",provider="unknown"}' in body
+        assert 'provider="user_supplied_provider"' not in body
         assert 'darklab_db_query_duration_seconds_bucket{le="0.05",operation="history_list"}' in body
         assert 'darklab_history_search_fallbacks_total{reason="missing_fts"}' in body
         assert 'darklab_evidence_package_build_duration_seconds_bucket{le="0.5",outcome="success"}' in body
         assert "darklab_evidence_package_archive_bytes_bucket" in body
         assert 'darklab_evidence_package_skipped_items_total{kind="artifact"}' in body
+        assert 'darklab_evidence_package_skipped_items_total{kind="item"}' in body
+        assert 'darklab_pty_finished_total{exit_code_class="signal",tool="mtr"}' in body
+        assert 'darklab_workspace_evictions_total{reason="manual"}' in body
 
 
 class TestMetricsDefinitionDrift:
@@ -119,6 +129,16 @@ class TestMetricsDefinitionDrift:
                 if item != float("inf")
             ]
             assert buckets, f"{getattr(histogram, '_name', '<unknown>')} should declare buckets"
+
+    def test_labeled_metrics_have_cardinality_policies(self):
+        app_metrics.validate_metric_definitions()
+
+        class FakeMetric:
+            _name = "darklab_unreviewed_labels"
+            _labelnames = ("raw_user_input",)
+
+        with pytest.raises(RuntimeError, match="missing cardinality policy"):
+            app_metrics.validate_metric_definitions([FakeMetric()])
 
     def test_route_label_normalizer_does_not_use_raw_paths(self):
         normalized = app_metrics.normalize_endpoint_label("/history/abc-123/details?q=raw")

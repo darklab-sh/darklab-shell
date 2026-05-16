@@ -719,7 +719,7 @@
     {
       "id": 15,
       "type": "timeseries",
-      "title": "PTY started rate by tool",
+      "title": "PTY lifecycle rate",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
@@ -738,7 +738,16 @@
           },
           "expr": "sum by (tool)(rate(darklab_pty_started_total[5m]))",
           "refId": "A",
-          "legendFormat": "{{tool}}"
+          "legendFormat": "started {{tool}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (exit_code_class)(rate(darklab_pty_finished_total[5m]))",
+          "refId": "B",
+          "legendFormat": "finished {{exit_code_class}}"
         }
       ],
       "fieldConfig": {

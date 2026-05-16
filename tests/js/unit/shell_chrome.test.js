@@ -18,6 +18,7 @@ function tick() {
 const PRESSABLE_PRIMITIVE_CLASSES = new Set([
   'btn',
   'nav-item',
+  'tab-strip-item',
   'close-btn',
   'toggle-btn',
   'kb-key',

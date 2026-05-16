@@ -3362,6 +3362,24 @@ class TestDiagRoute:
         assert artifact_entry["logical_payload"] == len("out.gz") + len("gzip") + 128
         assert storage["largest_runs"][0]["id"] == "run-a"
 
+        without_output_path = tmp_path / "diag_storage_payload_without_output.db"
+        with sqlite3.connect(without_output_path) as conn:
+            conn.execute(
+                "CREATE TABLE runs ("
+                "id TEXT PRIMARY KEY, command TEXT NOT NULL, output_preview TEXT, output_search_text TEXT)"
+            )
+            conn.execute(
+                "INSERT INTO runs (id, command, output_preview, output_search_text) "
+                "VALUES (?, ?, ?, ?)",
+                ("run-b", "host darklab.sh", "preview", "search"),
+            )
+            conn.commit()
+            storage_without_output = shell_assets._diag_table_storage_breakdown(conn, {"runs": 1})
+
+        assert storage_without_output["largest_runs"][0]["id"] == "run-b"
+        assert storage_without_output["largest_runs"][0]["payload"] == len("preview") + len("search")
+        assert not any("largest runs probe failed" in error for error in storage_without_output["errors"])
+
     def test_db_storage_breakdown_rolls_up_fts_shadow_tables(self, tmp_path):
         db_path = tmp_path / "diag_storage_fts.db"
         with sqlite3.connect(db_path) as conn:
@@ -4581,15 +4599,152 @@ class TestAtlasRoutes:
         assert cve_id
         assert finding_count == 0
 
-    def test_entity_detail_is_session_scoped(self):
+    def test_atlas_read_and_write_routes_are_session_scoped(self):
         client = get_client()
         session_id = self._session_id()
         _, recorded = self._seed_entity_run(session_id)
         domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
+        wrong_session_id = self._session_id()
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Scoped Atlas Case"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        owner_link_resp = client.post(
+            f"/atlas/entities/{domain_id}/project_links",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        with db_connect() as conn:
+            finding_id = conn.execute(
+                "SELECT id FROM findings WHERE session_id = ? AND entity_id = ?",
+                (session_id, domain_id),
+            ).fetchone()["id"]
+            conn.execute(
+                "INSERT INTO entity_intel_snapshots "
+                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at) "
+                "VALUES (?, ?, ?, 'crtsh', 'ok', 'data available', ?, datetime('now'))",
+                (
+                    "intel_" + uuid.uuid4().hex,
+                    session_id,
+                    domain_id,
+                    json.dumps({"summary": {"has_intel": True, "providers_with_data": ["crtsh"]}}),
+                ),
+            )
+            conn.execute(
+                "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created) "
+                "VALUES (?, ?, 'atlas_entity', ?, 'curated', 'manual', datetime('now'))",
+                ("lbl-" + uuid.uuid4().hex, session_id, domain_id),
+            )
+            conn.execute(
+                "INSERT INTO entity_notes (id, session_id, entity_type, entity_id, body, created, updated) "
+                "VALUES (?, ?, 'atlas_entity', ?, 'keep this context', datetime('now'), datetime('now'))",
+                ("note-" + uuid.uuid4().hex, session_id, domain_id),
+            )
+            conn.commit()
 
-        resp = client.get(f"/atlas/entities/{domain_id}", headers={"X-Session-ID": self._session_id()})
+        def owner_state():
+            with db_connect() as conn:
+                return {
+                    "entities": [
+                        tuple(row) for row in conn.execute(
+                            "SELECT id, type, canonical_value, occurrence_count FROM entities "
+                            "WHERE session_id = ? ORDER BY id",
+                            (session_id,),
+                        ).fetchall()
+                    ],
+                    "findings": [
+                        tuple(row) for row in conn.execute(
+                            "SELECT id, status, raw_line FROM findings WHERE session_id = ? ORDER BY id",
+                            (session_id,),
+                        ).fetchall()
+                    ],
+                    "snapshots": [
+                        tuple(row) for row in conn.execute(
+                            "SELECT entity_id, provider, status, summary, data_json FROM entity_intel_snapshots "
+                            "WHERE session_id = ? ORDER BY entity_id, provider",
+                            (session_id,),
+                        ).fetchall()
+                    ],
+                    "labels": [
+                        tuple(row) for row in conn.execute(
+                            "SELECT entity_id, label FROM entity_labels WHERE session_id = ? ORDER BY entity_id, label",
+                            (session_id,),
+                        ).fetchall()
+                    ],
+                    "notes": [
+                        tuple(row) for row in conn.execute(
+                            "SELECT entity_id, body FROM entity_notes WHERE session_id = ? ORDER BY entity_id",
+                            (session_id,),
+                        ).fetchall()
+                    ],
+                    "links": [
+                        tuple(row) for row in conn.execute(
+                            "SELECT project_id, entity_type, entity_id FROM project_links "
+                            "WHERE project_id = ? ORDER BY entity_type, entity_id",
+                            (project["id"],),
+                        ).fetchall()
+                    ],
+                }
 
-        assert resp.status_code == 404
+        before = owner_state()
+
+        with mock.patch("services.atlas.intel_bridge.lookup_entity", side_effect=AssertionError("cross-session lookup")):
+            detail_resp = client.get(f"/atlas/entities/{domain_id}", headers={"X-Session-ID": wrong_session_id})
+            review_resp = client.post(
+                "/atlas/findings/review",
+                json={"finding_ids": [finding_id], "review_state": "important"},
+                headers={"X-Session-ID": wrong_session_id},
+            )
+            bulk_entity_resp = client.post(
+                "/atlas/entities/bulk-delete",
+                json={"entity_ids": [domain_id]},
+                headers={"X-Session-ID": wrong_session_id},
+            )
+            entity_delete_resp = client.delete(
+                f"/atlas/entities/{domain_id}",
+                json={"prune_source_run": True},
+                headers={"X-Session-ID": wrong_session_id},
+            )
+            bulk_finding_resp = client.post(
+                "/atlas/findings/bulk-delete",
+                json={"finding_ids": [finding_id]},
+                headers={"X-Session-ID": wrong_session_id},
+            )
+            finding_delete_resp = client.delete(
+                f"/atlas/findings/{finding_id}",
+                json={"prune_source_run": True},
+                headers={"X-Session-ID": wrong_session_id},
+            )
+            refresh_resp = client.post(
+                f"/atlas/entities/{domain_id}/refresh_intel",
+                headers={"X-Session-ID": wrong_session_id},
+            )
+            link_resp = client.post(
+                f"/atlas/entities/{domain_id}/project_links",
+                json={"project_id": project["id"]},
+                headers={"X-Session-ID": wrong_session_id},
+            )
+            unlink_resp = client.delete(
+                f"/atlas/entities/{domain_id}/project_links/{project['id']}",
+                headers={"X-Session-ID": wrong_session_id},
+            )
+
+        assert owner_link_resp.status_code == 201
+        assert detail_resp.status_code == 404
+        assert review_resp.status_code == 200
+        assert json.loads(review_resp.data)["counts"] == {"updated": 0, "not_found": 1}
+        assert bulk_entity_resp.status_code == 200
+        assert json.loads(bulk_entity_resp.data)["counts"] == {"deleted": 0, "findings_deleted": 0, "not_found": 1}
+        assert entity_delete_resp.status_code == 404
+        assert bulk_finding_resp.status_code == 200
+        assert json.loads(bulk_finding_resp.data)["counts"] == {"deleted": 0, "not_found": 1}
+        assert finding_delete_resp.status_code == 404
+        assert refresh_resp.status_code == 404
+        assert link_resp.status_code == 404
+        assert unlink_resp.status_code == 404
+        assert owner_state() == before
 
     def test_refresh_intel_persists_provider_snapshot(self):
         client = get_client()

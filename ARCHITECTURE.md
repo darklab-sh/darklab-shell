@@ -551,9 +551,15 @@ Every clickable surface in the shell uses one of a small, allowlisted set of pri
 - **Role modifiers** (mutually exclusive): `.btn-primary`, `.btn-secondary`, `.btn-ghost`, `.btn-destructive`. Role controls the visual weight of the button — primary is the main action in a group, secondary is the alternate, ghost is a low-weight inline action, and destructive is a labeled irreversible action.
 - **Tone modifiers** (mutually exclusive, optional): `.btn-danger`, `.btn-warning`. Tone overlays a semantic color from the theme contract. A tone without a role is not valid.
 
-Eight non-`btn` pressable primitives exist for surfaces that are structurally not buttons but still need consistent pressable behavior: `.nav-item` (rail/tab navigation), `.close-btn` (modal and sheet close controls), `.toggle-btn` (on/off switches with no destructive semantics), `.kb-key` (keyboard-key glyphs in help copy), `.dropdown-item` (menu/listbox choices inside app-owned dropdowns), `.control-row` (row-shaped filter/select controls), `.hud-action-cell` (clickable HUD summary cells), and `.gesture-handle` (mobile sheet drag/tap handles). New pressable surfaces must pick one of these primitives rather than introducing one-off classes.
+Nine non-`btn` pressable primitives exist for surfaces that are structurally not buttons but still need consistent pressable behavior: `.nav-item` (rail and menu navigation), `.tab-strip-item` (modal and panel tabs inside `.tab-strip`), `.close-btn` (modal and sheet close controls), `.toggle-btn` (on/off switches with no destructive semantics), `.kb-key` (keyboard-key glyphs in help copy), `.dropdown-item` (menu/listbox choices inside app-owned dropdowns), `.control-row` (row-shaped filter/select controls), `.hud-action-cell` (clickable HUD summary cells), and `.gesture-handle` (mobile sheet drag/tap handles). New pressable surfaces must pick one of these primitives rather than introducing one-off classes.
 
 All pressable primitives route through `bindPressable` in `app/static/js/ui/ui_pressable.js` so click + Enter/Space activation, press-style timing, and composer-refocus behavior stay consistent. A jsdom contract test (`tests/js/unit/button_primitives_allowlist.test.js`) enumerates every `<button>` / `[role="button"]` in the rendered shell and fails CI on any element that does not carry one of the allowed class families; exceptions are listed in `tests/js/fixtures/button_primitive_allowlist.json` with a short reason per entry.
+
+#### Tab Strip Primitive
+
+Modal and panel tabs use the shared `.tab-strip` / `.tab-strip-item` primitive pair. The primitive owns the horizontal overflow behavior, hidden scrollbar, top-border active tab treatment, non-active hover color, pressed-state cleanup, and focus styling. Surface classes such as `.atlas-tab`, `.history-run-tab`, `.project-explorer-tab`, and `.project-mobile-tab` remain as JS hooks or for small local count-chip/layout tweaks, but they don't redefine the tab chrome.
+
+Current consumers are Run Details, Atlas, Project desktop tabs, Project mobile tabs, Project entity-type tabs, and the Options modal tabs. Terminal document tabs keep their separate `.tab` contract because they are draggable workspace tabs rather than simple modal tabs.
 
 #### Dropdown/Menu Primitive Family
 
@@ -871,6 +877,44 @@ Atlas is the entity-first triage surface that turns saved external-run output in
 **Run-delete cleanup and orphan model.** Deleting a run removes its `entity_run_links` and `findings_occurrences` rows but leaves the parent entity and finding rows in place so labels, notes, project links, and triage state survive transcript pruning. Run-delete confirmations can opt in to also remove non-curated entities and findings whose only source run was the deleted one; curated items (labels, notes, project links, non-`new` triage status) are always kept. Atlas surfaces expose an orphan-source filter so operators can audit entities and findings whose source runs have all been deleted, and the entity/finding delete confirmations can sweep non-curated siblings whose only source run is the same as the selected item.
 
 **Project linkage.** Project membership for Atlas entities flows through the generic `project_links` table with `entity_type='atlas_entity'`. There is no separate per-entity project table; promotion from Atlas to a project is a tag on the entity row, not a copy.
+
+### Export Schema
+
+Atlas can export the current session's entity rows as CSV or JSONL for handoff, offline review, and quick spreadsheet work. Exports include entity summary fields and lightweight metadata but do not include raw provider response bodies.
+
+**Endpoint.** `GET /atlas/entities/export` is session-scoped — it only returns entities owned by the current browser session or named session token.
+
+**Query parameters.**
+
+| Parameter | Values | Default | Notes |
+| --- | --- | --- | --- |
+| `format` | `csv`, `jsonl` | `csv` | Controls the file format. |
+| `type` | `ip`, `domain`, `url`, `hash`, `cve` | all types | Matches the Atlas entity tabs. |
+| `q` | text | empty | Filters by canonical entity value. |
+| `project_id` | project id | empty | Limits results to entities linked to that project. |
+| `orphan_filter` | `hide`, `all`, `only` | `hide` | Controls whether rows without a live source run are hidden, included, or exported by themselves. |
+| `limit` | `1` to `10000` | `10000` | Caps the number of exported rows. |
+
+The Atlas UI sends the same `type`, search text, project filter, and orphan-source filter that are active in the entity tab when the user clicks **CSV** or **JSONL**.
+
+**Schema.**
+
+| Field | CSV | JSONL | Description |
+| --- | --- | --- | --- |
+| `id` | string | string | Atlas entity id. |
+| `type` | string | string | Entity type: `ip`, `domain`, `url`, `hash`, or `cve`. |
+| `canonical_value` | string | string | Normalized entity value. |
+| `first_seen_at` | string | string | First time Atlas saw the entity in this session. |
+| `last_seen_at` | string | string | Most recent time Atlas saw the entity in this session. |
+| `occurrence_count` | number | number | Total materialized occurrences across saved source runs. |
+| `labels` | `; ` separated string | array | Labels attached to the Atlas entity. |
+| `notes` | string | string | The entity note body, if one exists. |
+| `project_names` | `; ` separated string | array | Projects linked to the entity. |
+| `intel_providers_with_data` | `; ` separated string | array | Provider names whose cached Atlas intel snapshot contains usable data. |
+
+CSV uses a header row and semicolon-separated strings for list fields so the file opens cleanly in spreadsheet tools. JSONL emits one JSON object per line and keeps list fields as arrays.
+
+**Redaction.** Atlas exports are session-owned working files, so they include the visible Atlas entity values and metadata from the current filtered view. They include provider names that have usable cached intel, but they do not include raw intel response bodies. Treat CSV and JSONL exports as raw triage data: entity values, labels, notes, and project names are exported as shown in Atlas.
 
 ---
 
@@ -1323,8 +1367,8 @@ Operationally, `/diag` sits on top of the same underlying sources described earl
 - table/index storage, logical payload estimates, FTS shadow-table rollups, and largest saved-run hints come from the same SQLite connection as the Database card; allocated byte counts appear when SQLite was built with `SQLITE_ENABLE_DBSTAT_VTAB`, while row counts and logical payload estimates still render without it
 - config values reflect the browser/backend config split described in **Configuration Surfaces**
 - access control and denied-access logging reuse the same client-IP trust model described in **Security Model** and **Logging**
-- Prometheus counters, histograms, label normalizers, and multiprocess registry setup live in `app/services/metrics/__init__.py`; scrape-time collectors for database, Redis, broker mode, workspace, intel cache size, Atlas, findings, snapshots, and provider-secret health live in `app/services/metrics/collectors.py`
-- the container entrypoint prepares `PROMETHEUS_MULTIPROC_DIR` under `/tmp/darklab_shell-prom`, clears stale worker shards on startup, and keeps the directory ephemeral with the existing tmpfs runtime
+- Prometheus counters, histograms, label normalizers, cardinality policies, and multiprocess registry setup live in `app/services/metrics/__init__.py`; scrape-time collectors for database, Redis, broker mode, workspace, intel cache size, Atlas, findings, snapshots, and provider-secret health live in `app/services/metrics/collectors.py`
+- the container entrypoint prepares `PROMETHEUS_MULTIPROC_DIR` under `/tmp/darklab_shell-prom`, clears stale worker shards on startup, keeps the directory ephemeral with the existing tmpfs runtime, and starts Gunicorn with `app/gunicorn_conf.py` so dead worker metric shards are removed when workers exit
 
 ---
 
@@ -1392,12 +1436,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,797
+- behavior tests: 2,799
 - docs/inventory meta-tests: 32
-- `pytest`: 1428 (1396 behavior + 32 meta)
+- `pytest`: 1432 (1400 behavior + 32 meta)
 - `vitest`: 1150
 - `playwright`: 251
-- total: 2,829
+- total: 2,833
 
 ### Testing Architecture
 
@@ -1436,7 +1480,7 @@ Keep the detailed suite appendix, focused run commands, and maintenance notes in
 - [README.md](README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
-- [docs/atlas-export.md](docs/atlas-export.md) - Session Entity Atlas CSV/JSONL export schema and filters
+- [Atlas and Entity Model → Export Schema](#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

@@ -165,6 +165,45 @@ _DIAG_PAYLOAD_BYTE_COLUMNS = {
 }
 _DIAG_LARGEST_RUNS_LIMIT = 10
 _DIAG_LARGEST_RUNS_ROWCOUNT_LIMIT = 100_000
+_DIAG_LARGEST_RUNS_SQL_BY_COLUMNS = {
+    (): (
+        "SELECT id, command, 0 AS payload_bytes "
+        "FROM runs ORDER BY payload_bytes DESC LIMIT ?"
+    ),
+    ("output",): (
+        "SELECT id, command, LENGTH(COALESCE(output, '')) AS payload_bytes "
+        "FROM runs ORDER BY payload_bytes DESC LIMIT ?"
+    ),
+    ("output_preview",): (
+        "SELECT id, command, LENGTH(COALESCE(output_preview, '')) AS payload_bytes "
+        "FROM runs ORDER BY payload_bytes DESC LIMIT ?"
+    ),
+    ("output_search_text",): (
+        "SELECT id, command, LENGTH(COALESCE(output_search_text, '')) AS payload_bytes "
+        "FROM runs ORDER BY payload_bytes DESC LIMIT ?"
+    ),
+    ("output", "output_preview"): (
+        "SELECT id, command, "
+        "(LENGTH(COALESCE(output, '')) + LENGTH(COALESCE(output_preview, ''))) AS payload_bytes "
+        "FROM runs ORDER BY payload_bytes DESC LIMIT ?"
+    ),
+    ("output", "output_search_text"): (
+        "SELECT id, command, "
+        "(LENGTH(COALESCE(output, '')) + LENGTH(COALESCE(output_search_text, ''))) AS payload_bytes "
+        "FROM runs ORDER BY payload_bytes DESC LIMIT ?"
+    ),
+    ("output_preview", "output_search_text"): (
+        "SELECT id, command, "
+        "(LENGTH(COALESCE(output_preview, '')) + LENGTH(COALESCE(output_search_text, ''))) AS payload_bytes "
+        "FROM runs ORDER BY payload_bytes DESC LIMIT ?"
+    ),
+    ("output", "output_preview", "output_search_text"): (
+        "SELECT id, command, "
+        "(LENGTH(COALESCE(output, '')) + LENGTH(COALESCE(output_preview, '')) + "
+        "LENGTH(COALESCE(output_search_text, ''))) AS payload_bytes "
+        "FROM runs ORDER BY payload_bytes DESC LIMIT ?"
+    ),
+}
 
 # Themed groupings for the Config card. Every key emitted into
 # `result["config"]` must appear in exactly one group, otherwise it is
@@ -477,14 +516,17 @@ def _diag_table_storage_breakdown(conn, table_counts: dict[str, int] | None = No
                 str(row[1])
                 for row in conn.execute("PRAGMA table_info(" + _diag_sqlite_identifier("runs") + ")").fetchall()
             }
-            required_columns = {"id", "command", "output", "output_preview", "output_search_text"}
+            required_columns = {"id", "command"}
             if not required_columns.issubset(live_run_columns):
-                raise ValueError("runs table is missing saved-output columns")
+                raise ValueError("runs table is missing required identity columns")
+            payload_columns = tuple(
+                column
+                for column in ("output", "output_preview", "output_search_text")
+                if column in live_run_columns
+            )
+            largest_runs_sql = _DIAG_LARGEST_RUNS_SQL_BY_COLUMNS[payload_columns]
             rows = conn.execute(
-                "SELECT id, command, "
-                "(LENGTH(COALESCE(output, '')) + LENGTH(COALESCE(output_preview, '')) + "
-                "LENGTH(COALESCE(output_search_text, ''))) AS payload_bytes "
-                "FROM runs ORDER BY payload_bytes DESC LIMIT ?",
+                largest_runs_sql,
                 (_DIAG_LARGEST_RUNS_LIMIT,),
             ).fetchall()
             result["largest_runs"] = [

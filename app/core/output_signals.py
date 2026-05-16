@@ -179,8 +179,39 @@ _ENTITY_URL_RE = re.compile(r"https?://[^\s<>'\"]+", re.I)
 _ENTITY_HASH_RE = re.compile(r"(?<![0-9a-f])(?:[0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{64})(?![0-9a-f])", re.I)
 _ENTITY_CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,}\b", re.I)
 _ENTITY_FILELIKE_SUFFIXES = {
-    "bak", "cfg", "conf", "csv", "db", "gz", "html", "ini", "js", "json", "log", "md",
-    "out", "sqlite", "txt", "xml", "yaml", "yml", "zip",
+    "bak",
+    "cfg",
+    "conf",
+    "css",
+    "csv",
+    "db",
+    "eot",
+    "gif",
+    "gz",
+    "html",
+    "ico",
+    "ini",
+    "jpeg",
+    "jpg",
+    "js",
+    "json",
+    "log",
+    "map",
+    "md",
+    "out",
+    "png",
+    "sqlite",
+    "svg",
+    "ttf",
+    "txt",
+    "wasm",
+    "webp",
+    "woff",
+    "woff2",
+    "xml",
+    "yaml",
+    "yml",
+    "zip",
 }
 
 
@@ -230,6 +261,10 @@ def _looks_like_file_hostname(value: str) -> bool:
     return suffix in _ENTITY_FILELIKE_SUFFIXES
 
 
+def _span_overlaps(spans: list[tuple[int, int]], start: int, end: int) -> bool:
+    return any(start < span_end and end > span_start for span_start, span_end in spans)
+
+
 def strip_ansi_codes(value: str) -> str:
     return _ANSI_ESCAPE_RE.sub("", str(value or ""))
 
@@ -251,6 +286,7 @@ def extract_entities(text: str, *, include_private_ips: bool = False, source_lin
 
     entities: list[dict[str, object]] = []
     seen: set[tuple[str, str]] = set()
+    url_tail_spans: list[tuple[int, int]] = []
 
     for match in _ENTITY_IPV4_RE.finditer(stripped):
         raw = match.group(0)
@@ -304,6 +340,8 @@ def extract_entities(text: str, *, include_private_ips: bool = False, source_lin
         host_offset = raw_url.lower().find(host.lower())
         start = match.start() + host_offset if host_offset >= 0 else match.start()
         end = start + len(host) if host_offset >= 0 else match.end()
+        if host_offset >= 0 and end < match.end():
+            url_tail_spans.append((end, match.end()))
         _add_entity(
             entities,
             seen,
@@ -316,6 +354,8 @@ def extract_entities(text: str, *, include_private_ips: bool = False, source_lin
         )
 
     for match in _ENTITY_HOSTNAME_RE.finditer(stripped):
+        if _span_overlaps(url_tail_spans, match.start(), match.end()):
+            continue
         raw = match.group(0).rstrip(".")
         if _looks_like_file_hostname(raw):
             continue

@@ -629,6 +629,56 @@ class TestIntelServices:
         assert connections[0].context == "ctx"
         assert connections[0].path == "/v1?x=1"
 
+    def test_json_api_client_rejects_cross_origin_redirects_before_forwarding_secrets(self, monkeypatch):
+        from services.intel import clients
+        from services.intel.base import ProviderApiError
+
+        connections = []
+
+        class FakeResponse:
+            def __init__(self, status, body=b"{}", location=None):
+                self.status = status
+                self._body = body
+                self._location = location
+
+            def read(self):
+                return self._body
+
+            def getheader(self, name):
+                return self._location if name.lower() == "location" else None
+
+        class FakeHttpsConnection:
+            def __init__(self, host, *, timeout, context):
+                self.host = host
+                self.timeout = timeout
+                self.context = context
+                connections.append(self)
+
+            def request(self, method, path, body=None, headers=None):
+                self.method = method
+                self.path = path
+                self.body = body
+                self.headers = headers or {}
+
+            def getresponse(self):
+                assert self.host == "provider.example.test"
+                return FakeResponse(302, location="https://evil.example.test/collect")
+
+            def close(self):
+                self.closed = True
+
+        monkeypatch.setattr(clients.ssl, "create_default_context", lambda **kwargs: "ctx")
+        monkeypatch.setattr(clients.http.client, "HTTPSConnection", FakeHttpsConnection)
+
+        with pytest.raises(ProviderApiError, match="untrusted host"):
+            clients.JsonApiClient()._json_request(
+                "https://provider.example.test/v1",
+                headers={"x-apikey": "secret-token"},
+            )
+
+        assert len(connections) == 1
+        assert connections[0].headers == {"x-apikey": "secret-token"}
+
     def test_json_api_client_honors_explicit_ca_env(self, monkeypatch):
         from services.intel import clients
 
@@ -965,12 +1015,144 @@ class TestIntelServices:
         }
 
     def test_new_intel_provider_modules_normalize_payloads(self):
+        from services.intel.clients import (
+            CensysApiClient,
+            RouteViewsApiClient,
+            SecurityTrailsApiClient,
+            ThreatFoxApiClient,
+            UrlhausApiClient,
+            UrlscanApiClient,
+            VulnersApiClient,
+        )
         from services.intel.routeviews import RouteViewsProvider
         from services.intel.securitytrails import SecurityTrailsProvider
         from services.intel.threatfox import ThreatFoxProvider
         from services.intel.urlhaus import UrlhausProvider
         from services.intel.urlscan import UrlscanProvider
         from services.intel.vulners import VulnersProvider
+
+        censys_client = CensysApiClient()
+        with mock.patch.object(censys_client, "_json_request", return_value={}) as censys_request:
+            censys_client.lookup_host("2001:db8::1", api_key="censys-key", organization_id="org-1")
+        censys_request.assert_called_once_with(
+            "https://api.platform.censys.io/v3/global/asset/host/2001%3Adb8%3A%3A1?organization_id=org-1",
+            headers={
+                "Authorization": "Bearer censys-key",
+                "Accept": "application/vnd.censys.api.v3.host.v1+json",
+            },
+        )
+
+        vulners_client = VulnersApiClient()
+        with mock.patch.object(vulners_client, "_json_post", return_value={}) as vulners_post:
+            vulners_client.lookup_cve("CVE-2026-12345", api_key="vulners-key")
+            vulners_client.lookup_exploits("CVE-2026-12345", api_key="vulners-key", size=3)
+        assert vulners_post.call_args_list == [
+            mock.call(
+                "https://vulners.com/api/v3/search/id/",
+                {"id": "CVE-2026-12345", "fields": ["*"]},
+                headers={"X-Api-Key": "vulners-key", "Accept": "application/json"},
+            ),
+            mock.call(
+                "https://vulners.com/api/v3/search/lucene/",
+                {
+                    "query": "bulletinFamily:exploit AND CVE-2026-12345",
+                    "skip": 0,
+                    "size": 3,
+                    "fields": ["id", "title", "href", "published", "modified", "cvelist"],
+                },
+                headers={"X-Api-Key": "vulners-key", "Accept": "application/json"},
+            ),
+        ]
+
+        urlscan_client = UrlscanApiClient()
+        with mock.patch.object(urlscan_client, "_json_request", return_value={}) as urlscan_request:
+            urlscan_client.search("domain:example.test", api_key="urlscan-key", size=7)
+            urlscan_client.lookup_result("scan/id", api_key="urlscan-key")
+        assert urlscan_request.call_args_list == [
+            mock.call(
+                "https://urlscan.io/api/v1/search/?q=domain%3Aexample.test&size=7",
+                headers={"API-Key": "urlscan-key", "Accept": "application/json"},
+            ),
+            mock.call(
+                "https://urlscan.io/api/v1/result/scan%2Fid/",
+                headers={"API-Key": "urlscan-key", "Accept": "application/json"},
+            ),
+        ]
+
+        urlhaus_client_contract = UrlhausApiClient()
+        with mock.patch.object(urlhaus_client_contract, "_form_post", return_value={}) as urlhaus_post:
+            urlhaus_client_contract.lookup_url("https://example.test/a", api_key="urlhaus-key")
+            urlhaus_client_contract.lookup_host("example.test", api_key="urlhaus-key")
+            urlhaus_client_contract.lookup_payload("a" * 32, api_key="urlhaus-key")
+            urlhaus_client_contract.lookup_payload("b" * 64, api_key="urlhaus-key")
+        assert urlhaus_post.call_args_list == [
+            mock.call(
+                "https://urlhaus-api.abuse.ch/v1/url/",
+                {"url": "https://example.test/a"},
+                headers={"Auth-Key": "urlhaus-key", "Accept": "application/json"},
+            ),
+            mock.call(
+                "https://urlhaus-api.abuse.ch/v1/host/",
+                {"host": "example.test"},
+                headers={"Auth-Key": "urlhaus-key", "Accept": "application/json"},
+            ),
+            mock.call(
+                "https://urlhaus-api.abuse.ch/v1/payload/",
+                {"md5_hash": "a" * 32},
+                headers={"Auth-Key": "urlhaus-key", "Accept": "application/json"},
+            ),
+            mock.call(
+                "https://urlhaus-api.abuse.ch/v1/payload/",
+                {"sha256_hash": "b" * 64},
+                headers={"Auth-Key": "urlhaus-key", "Accept": "application/json"},
+            ),
+        ]
+
+        threatfox_client = ThreatFoxApiClient()
+        with mock.patch.object(threatfox_client, "_json_post", return_value={}) as threatfox_post:
+            threatfox_client.search_ioc("example.test", api_key="threatfox-key")
+            threatfox_client.search_hash("c" * 64, api_key="threatfox-key")
+        assert threatfox_post.call_args_list == [
+            mock.call(
+                "https://threatfox-api.abuse.ch/api/v1/",
+                {"query": "search_ioc", "search_term": "example.test", "exact_match": True},
+                headers={"Auth-Key": "threatfox-key", "Accept": "application/json"},
+            ),
+            mock.call(
+                "https://threatfox-api.abuse.ch/api/v1/",
+                {"query": "search_hash", "hash": "c" * 64},
+                headers={"Auth-Key": "threatfox-key", "Accept": "application/json"},
+            ),
+        ]
+
+        securitytrails_client = SecurityTrailsApiClient()
+        with mock.patch.object(securitytrails_client, "_json_request", return_value={}) as securitytrails_request:
+            securitytrails_client.lookup_domain("example.test", api_key="securitytrails-key")
+        assert securitytrails_request.call_args_list == [
+            mock.call(
+                "https://api.securitytrails.com/v1/domain/example.test",
+                headers={"APIKEY": "securitytrails-key", "Accept": "application/json"},
+            ),
+            mock.call(
+                "https://api.securitytrails.com/v1/domain/example.test/whois",
+                headers={"APIKEY": "securitytrails-key", "Accept": "application/json"},
+            ),
+            mock.call(
+                "https://api.securitytrails.com/v1/domain/example.test/subdomains",
+                headers={"APIKEY": "securitytrails-key", "Accept": "application/json"},
+            ),
+        ]
+
+        routeviews_client = RouteViewsApiClient()
+        with mock.patch.object(
+            routeviews_client,
+            "_json_request_any",
+            return_value=[{"prefix": "8.8.8.0/24"}],
+        ) as routeviews_request:
+            assert routeviews_client.lookup_ip("8.8.8.8") == {
+                "prefixes": [{"prefix": "8.8.8.0/24"}],
+            }
+        routeviews_request.assert_called_once_with("https://api.routeviews.org/prefix/8.8.8.8/32")
 
         secrets = {
             ("session-1", "URLHAUS_AUTH_KEY"): "urlhaus-key",
@@ -1562,13 +1744,15 @@ class TestSessionWorkspace:
                 "file_count": 2,
             }
 
-            result = delete_workspace_path("session-1", "reports", cfg)
+            with mock.patch("services.workspace.files.app_metrics.record_workspace_evictions") as evictions:
+                result = delete_workspace_path("session-1", "reports", cfg)
 
             assert result.kind == "directory"
             assert result.file_count == 2
             assert result.path == "reports"
             assert list_workspace_files("session-1", cfg) == []
             assert list_workspace_directories("session-1", cfg) == []
+            evictions.assert_called_once_with(2, "manual")
 
     def test_create_and_list_empty_directories_without_file_usage(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1763,6 +1947,14 @@ class TestEntrypointWorkspaceRepair:
         assert "find \"$session_dir\" -mindepth 1 -exec chown scanner:appuser" in entrypoint
         assert "find \"$session_dir\" -mindepth 1 -type d -exec chmod 3770" in entrypoint
         assert "find \"$session_dir\" -mindepth 1 -type f -exec chmod 640" in entrypoint
+
+    def test_gunicorn_uses_prometheus_multiprocess_cleanup_hook(self):
+        entrypoint = (REPO_ROOT / "entrypoint.sh").read_text()
+        gunicorn_conf = (REPO_ROOT / "app" / "gunicorn_conf.py").read_text()
+
+        assert "--config /app/gunicorn_conf.py" in entrypoint
+        assert "def child_exit(" in gunicorn_conf
+        assert "multiprocess.mark_process_dead(worker.pid)" in gunicorn_conf
 
 
 class TestDerivedCommandRegistry:
@@ -5481,6 +5673,18 @@ class TestOutputSignals:
         assert all(item["source_line"] == 7 for item in entities)
         assert all(isinstance(item["start"], int) and isinstance(item["end"], int) for item in entities)
         assert by_type[("domain", "xn--bcher-kva.example")]["value"] == "bücher.example"
+
+    def test_extract_entities_ignores_file_names_inside_url_paths(self):
+        entities = extract_entities(
+            "loaded https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css "
+            "and https://example.test/assets/icons/awesome.svg",
+        )
+        values = {(item["type"], item["canonical_value"]) for item in entities}
+
+        assert ("domain", "cdnjs.cloudflare.com") in values
+        assert ("domain", "example.test") in values
+        assert ("domain", "all.min.css") not in values
+        assert ("domain", "awesome.svg") not in values
 
     def test_extract_entities_can_include_private_ips_when_requested(self):
         entities = extract_entities("localhost-ish: 127.0.0.1 and fd00::1", include_private_ips=True)

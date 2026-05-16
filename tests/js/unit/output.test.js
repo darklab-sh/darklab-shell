@@ -293,6 +293,8 @@ describe('appendLine', () => {
     expect(line?.dataset.signalTarget).toBe('ip.darklab.sh')
     expect(token?.dataset.atlasEntityType).toBe('domain')
     expect(token?.dataset.atlasEntityValue).toBe('ip.darklab.sh')
+    expect(token?.classList.contains('chip')).toBe(true)
+    expect(token?.classList.contains('chip-action')).toBe(true)
 
     expect(_getTabs()[0].rawLines[0]).toMatchObject({
       text: 'scan ip.darklab.sh 443/tcp open https',

@@ -39,11 +39,11 @@ function _ensureHistoryRunOverlay() {
         </div>
         <button type="button" class="close-btn history-run-close" aria-label="Close run details">✕</button>
       </div>
-      <div class="history-run-tabs" role="tablist" aria-label="Run details sections">
-        <button type="button" class="toggle-btn history-run-tab" data-history-run-tab="summary" role="tab">Summary</button>
-        <button type="button" class="toggle-btn history-run-tab" data-history-run-tab="output" role="tab">Output</button>
-        <button type="button" class="toggle-btn history-run-tab" data-history-run-tab="findings" role="tab">Findings</button>
-        <button type="button" class="toggle-btn history-run-tab" data-history-run-tab="artifacts" role="tab">Artifacts</button>
+      <div class="history-run-tabs tab-strip" role="tablist" aria-label="Run details sections">
+        <button type="button" class="tab-strip-item history-run-tab" data-history-run-tab="summary" role="tab">Summary</button>
+        <button type="button" class="tab-strip-item history-run-tab" data-history-run-tab="output" role="tab">Output</button>
+        <button type="button" class="tab-strip-item history-run-tab" data-history-run-tab="findings" role="tab">Findings</button>
+        <button type="button" class="tab-strip-item history-run-tab" data-history-run-tab="artifacts" role="tab">Artifacts</button>
       </div>
       <div id="history-run-body" class="history-run-body surface-body nice-scroll"></div>
     </section>

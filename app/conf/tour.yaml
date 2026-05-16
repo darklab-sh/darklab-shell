@@ -96,7 +96,7 @@ chapters:
 
   - id: atlas
     title: "Triage Entities in Atlas"
-    summary: >-
+    summary: |
       Atlas turns saved output into an entity-first workspace for hosts, IPs,
       domains, URLs, hashes, CVEs, and findings. Use it to filter noisy rows,
       review findings, keep notes on important entities, refresh provider

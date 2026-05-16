@@ -80,6 +80,9 @@ describe('tour modal renderer', () => {
     expect(overlay?.classList.contains('open')).toBe(true)
     expect(document.getElementById('tour-modal')?.dataset.focusTrapBound).toBe('1')
     expect(document.getElementById('tour-chapter-title')?.textContent).toBe('Running commands')
+    expect([...document.querySelectorAll('#tour-chapter-summary p')].map(p => p.textContent)).toEqual([
+      'Run a command. Watch output stream.',
+    ])
     expect(recordTourOpened).toHaveBeenCalledTimes(1)
   })
 
@@ -130,7 +133,13 @@ describe('tour modal renderer', () => {
         { id: 'history', title: 'History', sample: 'history', illustration: 'history_rows' },
         { id: 'workflows', title: 'Guided Workflows', sample: 'workflow list', illustration: 'workflow_steps' },
         { id: 'projects', title: 'Projects', sample: 'project help', illustration: 'project_summary' },
-        { id: 'atlas', title: 'Atlas', sample: 'intel domain darklab.sh', illustration: 'atlas_entities' },
+        {
+          id: 'atlas',
+          title: 'Atlas',
+          summary: 'Atlas keeps entities together.\nIntel and project links stay nearby.',
+          sample: 'intel domain darklab.sh',
+          illustration: 'atlas_entities',
+        },
         { id: 'session_files', title: 'Files', sample: 'file list', illustration: 'files_panel' },
         { id: 'session_tokens', title: 'Tokens', sample: 'session-token', illustration: 'session_token' },
         { id: 'closer', title: 'Next', sample: 'help', illustration: 'next_steps' },
@@ -166,6 +175,11 @@ describe('tour modal renderer', () => {
       ['closer', openFaq, []],
     ].forEach(([chapterId, spy, args]) => {
       openSecondTour({ chapterId })
+      if (chapterId === 'atlas') {
+        expect([...document.querySelectorAll('#tour-chapter-summary p')].map(p => p.textContent)).toEqual([
+          'Atlas keeps entities together. Intel and project links stay nearby.',
+        ])
+      }
       document.querySelector('.tour-sample-chip')?.dispatchEvent(new window.Event('click', { bubbles: true }))
       expect(spy).toHaveBeenLastCalledWith(...args)
       expect(document.getElementById('tour-overlay')?.classList.contains('open')).toBe(false)

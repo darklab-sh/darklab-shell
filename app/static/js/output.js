@@ -474,7 +474,7 @@ function _outputEntityRanges(text, entities) {
 function _entityTokenFromText(text, entity, tabId) {
   const token = document.createElement('button');
   token.type = 'button';
-  token.className = 'atlas-entity-token';
+  token.className = 'chip chip-action atlas-entity-token';
   token.dataset.atlasEntityType = String(entity && entity.type || '');
   token.dataset.atlasEntityValue = _outputEntityValue(entity);
   token.dataset.atlasEntityTab = _atlasTabForOutputEntity(entity && entity.type);

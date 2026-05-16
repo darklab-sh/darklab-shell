@@ -33,9 +33,113 @@ SNAPSHOT_TRIGGERS = frozenset({"manual", "permalink", "auto"})
 BOOL_LABELS = frozenset({"true", "false"})
 HISTORY_SEARCH_FALLBACK_REASONS = frozenset({"missing_fts", "fts_error"})
 EVIDENCE_PACKAGE_OUTCOMES = frozenset({"success", "too_large", "not_found", "error"})
+HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"})
+STATUS_CLASSES = frozenset({"1xx", "2xx", "3xx", "4xx", "5xx", "unknown"})
+RUN_FINALIZE_STAGES = frozenset({"capture", "db_write", "artifact_write", "entity_materialize"})
+BROKER_EVENT_TYPES = frozenset({"started", "output", "notice", "clear", "exit", "error", "heartbeat", "killed"})
+BROKER_PUBLISH_ERROR_CAUSES = frozenset({"redis_unavailable", "serialize", "unknown"})
+EVIDENCE_PACKAGE_SKIPPED_KINDS = frozenset({"artifact", "item"})
 
 _LABEL_VALUE_RE = re.compile(r"[^a-zA-Z0-9_.:-]+")
 _DEFAULT_PROMETHEUS_MULTIPROC_DIR = Path(tempfile.gettempdir()) / "darklab_shell-prom"
+
+LABEL_CARDINALITY_POLICIES: dict[str, dict[str, dict[str, Any]]] = {
+    "darklab_http_requests": {
+        "method": {"kind": "enum", "values": HTTP_METHODS, "fallback": "GET"},
+        "endpoint": {"kind": "bounded", "max_values": 160, "max_len": 120, "fallback": "unknown"},
+        "status_class": {"kind": "enum", "values": STATUS_CLASSES, "fallback": "unknown"},
+    },
+    "darklab_http_request_duration_seconds": {
+        "endpoint": {"kind": "bounded", "max_values": 160, "max_len": 120, "fallback": "unknown"},
+    },
+    "darklab_runs_started": {
+        "tool": {"kind": "bounded", "max_values": 96, "max_len": 80, "fallback": "other"},
+        "run_kind": {"kind": "enum", "values": RUN_KINDS, "fallback": RUN_KIND_EXTERNAL},
+    },
+    "darklab_runs_finished": {
+        "tool": {"kind": "bounded", "max_values": 96, "max_len": 80, "fallback": "other"},
+        "run_kind": {"kind": "enum", "values": RUN_KINDS, "fallback": RUN_KIND_EXTERNAL},
+        "exit_code_class": {"kind": "enum", "values": EXIT_CODE_CLASSES, "fallback": "error"},
+    },
+    "darklab_run_duration_seconds": {
+        "tool": {"kind": "bounded", "max_values": 96, "max_len": 80, "fallback": "other"},
+        "run_kind": {"kind": "enum", "values": RUN_KINDS, "fallback": RUN_KIND_EXTERNAL},
+    },
+    "darklab_run_output_bytes": {
+        "tool": {"kind": "bounded", "max_values": 96, "max_len": 80, "fallback": "other"},
+    },
+    "darklab_run_output_truncated": {
+        "tool": {"kind": "bounded", "max_values": 96, "max_len": 80, "fallback": "other"},
+    },
+    "darklab_run_finalize_errors": {
+        "stage": {"kind": "enum", "values": RUN_FINALIZE_STAGES, "fallback": "db_write"},
+    },
+    "darklab_pty_started": {
+        "tool": {"kind": "bounded", "max_values": 96, "max_len": 80, "fallback": "other"},
+    },
+    "darklab_pty_finished": {
+        "tool": {"kind": "bounded", "max_values": 96, "max_len": 80, "fallback": "other"},
+        "exit_code_class": {"kind": "enum", "values": EXIT_CODE_CLASSES, "fallback": "error"},
+    },
+    "darklab_pty_duration_seconds": {
+        "tool": {"kind": "bounded", "max_values": 96, "max_len": 80, "fallback": "other"},
+    },
+    "darklab_pty_input_dropped_bytes": {
+        "reason": {"kind": "enum", "values": PTY_DROP_REASONS, "fallback": "closed"},
+    },
+    "darklab_rate_limit_rejections": {
+        "route": {"kind": "bounded", "max_values": 160, "max_len": 120, "fallback": "unknown"},
+        "scope": {"kind": "enum", "values": RATE_LIMIT_SCOPES, "fallback": "global"},
+    },
+    "darklab_intel_provider_rate_limit_waits_seconds": {
+        "provider": {"kind": "known_provider", "fallback": "unknown"},
+    },
+    "darklab_broker_events_published": {
+        "event_type": {"kind": "enum", "values": BROKER_EVENT_TYPES, "fallback": "error"},
+    },
+    "darklab_broker_publish_errors": {
+        "cause": {"kind": "enum", "values": BROKER_PUBLISH_ERROR_CAUSES, "fallback": "unknown"},
+    },
+    "darklab_db_query_duration_seconds": {
+        "operation": {"kind": "bounded", "max_values": 48, "max_len": 80, "fallback": "other"},
+    },
+    "darklab_history_search_fallbacks": {
+        "reason": {"kind": "enum", "values": HISTORY_SEARCH_FALLBACK_REASONS, "fallback": "fts_error"},
+    },
+    "darklab_workspace_evictions": {
+        "reason": {"kind": "enum", "values": WORKSPACE_EVICTION_REASONS, "fallback": "manual"},
+    },
+    "darklab_intel_requests": {
+        "provider": {"kind": "known_provider", "fallback": "unknown"},
+        "outcome": {"kind": "enum", "values": INTEL_OUTCOMES, "fallback": "error"},
+    },
+    "darklab_intel_request_duration_seconds": {
+        "provider": {"kind": "known_provider", "fallback": "unknown"},
+    },
+    "darklab_findings_materialized": {
+        "run_kind": {"kind": "enum", "values": RUN_KINDS, "fallback": RUN_KIND_EXTERNAL},
+    },
+    "darklab_snapshot_creates": {
+        "trigger": {"kind": "enum", "values": SNAPSHOT_TRIGGERS, "fallback": "manual"},
+    },
+    "darklab_snapshot_views": {
+        "redacted": {"kind": "enum", "values": BOOL_LABELS, "fallback": "false"},
+    },
+    "darklab_evidence_package_build_duration_seconds": {
+        "outcome": {"kind": "enum", "values": EVIDENCE_PACKAGE_OUTCOMES, "fallback": "error"},
+    },
+    "darklab_evidence_package_skipped_items": {
+        "kind": {"kind": "enum", "values": EVIDENCE_PACKAGE_SKIPPED_KINDS, "fallback": "item"},
+    },
+    "darklab_client_errors": {
+        "context": {"kind": "bounded", "max_values": 96, "max_len": 60, "fallback": "other"},
+    },
+    "darklab_unhandled_exceptions": {
+        "endpoint": {"kind": "bounded", "max_values": 160, "max_len": 120, "fallback": "unknown"},
+    },
+}
+
+_LABEL_CARDINALITY_SEEN: dict[tuple[str, str], set[str]] = {}
 
 
 def _configured_buckets(key: str, defaults: tuple[float, ...]) -> tuple[float, ...]:
@@ -129,6 +233,11 @@ PTY_STARTED = Counter(
     "darklab_pty_started",
     "PTY runs started by normalized tool root.",
     ("tool",),
+)
+PTY_FINISHED = Counter(
+    "darklab_pty_finished",
+    "PTY runs finished by normalized tool root and exit-code class.",
+    ("tool", "exit_code_class"),
 )
 PTY_DURATION = Histogram(
     "darklab_pty_duration_seconds",
@@ -267,6 +376,7 @@ METRIC_DEFINITIONS = (
     RUN_FINALIZE_ERRORS,
     PTY_ACTIVE,
     PTY_STARTED,
+    PTY_FINISHED,
     PTY_DURATION,
     PTY_INPUT_BYTES,
     PTY_INPUT_DROPPED_BYTES,
@@ -314,6 +424,49 @@ def _bounded_label(value: object, fallback: str = "unknown", max_len: int = 80) 
     return (label or fallback)[:max_len]
 
 
+def _metric_name(metric: Any) -> str:
+    return str(getattr(metric, "_name", "") or "")
+
+
+def _known_intel_provider_labels() -> frozenset[str]:
+    try:
+        from services.intel.registry import INTEL_PROVIDERS  # noqa: PLC0415
+    except Exception:
+        return frozenset()
+    return frozenset(_bounded_label(provider_id) for provider_id in INTEL_PROVIDERS)
+
+
+def _enum_metric_label(value: object, allowed: frozenset[str], fallback: str) -> str:
+    label = str(value or "").strip()
+    return label if label in allowed else fallback
+
+
+def _cardinality_guarded_label(metric_name: str, label_name: str, value: object) -> str:
+    policy = LABEL_CARDINALITY_POLICIES.get(metric_name, {}).get(label_name, {})
+    fallback = str(policy.get("fallback") or "other")
+    kind = str(policy.get("kind") or "")
+    if kind == "enum":
+        values = frozenset(str(item) for item in policy.get("values", frozenset()))
+        return _enum_metric_label(value, values, fallback)
+    if kind == "known_provider":
+        label = _bounded_label(value, fallback=fallback, max_len=int(policy.get("max_len") or 80))
+        return label if label in _known_intel_provider_labels() else fallback
+
+    max_len = int(policy.get("max_len") or 80)
+    label = _bounded_label(value, fallback=fallback, max_len=max_len)
+    max_values = int(policy.get("max_values") or 0)
+    if max_values <= 0:
+        return label
+    key = (metric_name, label_name)
+    seen = _LABEL_CARDINALITY_SEEN.setdefault(key, set())
+    if label in seen:
+        return label
+    if len(seen) < max_values:
+        seen.add(label)
+        return label
+    return fallback
+
+
 def normalize_tool_label(command: object) -> str:
     root = command_root(str(command or "")) or "unknown"
     return _bounded_label(root)
@@ -324,7 +477,7 @@ def normalize_endpoint_label(value: object) -> str:
 
 
 def normalize_provider_label(value: object) -> str:
-    return _bounded_label(value)
+    return _cardinality_guarded_label(_metric_name(INTEL_REQUESTS), "provider", value)
 
 
 def normalize_run_kind_label(value: object, *, command: str = "") -> str:
@@ -356,18 +509,29 @@ def status_class(status_code: Any) -> str:
 
 
 def record_http_request(method: object, endpoint: object, status_code: object, duration_seconds: float) -> None:
-    endpoint_label = normalize_endpoint_label(endpoint)
-    HTTP_REQUESTS.labels(str(method or "GET").upper(), endpoint_label, status_class(status_code)).inc()
+    endpoint_label = _cardinality_guarded_label(
+        _metric_name(HTTP_REQUESTS), "endpoint", normalize_endpoint_label(endpoint)
+    )
+    method_label = _cardinality_guarded_label(_metric_name(HTTP_REQUESTS), "method", str(method or "GET").upper())
+    status_label = _cardinality_guarded_label(_metric_name(HTTP_REQUESTS), "status_class", status_class(status_code))
+    HTTP_REQUESTS.labels(method_label, endpoint_label, status_label).inc()
     HTTP_REQUEST_DURATION.labels(endpoint_label).observe(max(0.0, float(duration_seconds or 0.0)))
 
 
 def record_rate_limit_rejection(route: object, scope: str = "global") -> None:
-    normalized_scope = scope if scope in RATE_LIMIT_SCOPES else "global"
-    RATE_LIMIT_REJECTIONS.labels(normalize_endpoint_label(route), normalized_scope).inc()
+    normalized_scope = _cardinality_guarded_label(_metric_name(RATE_LIMIT_REJECTIONS), "scope", scope)
+    route_label = _cardinality_guarded_label(
+        _metric_name(RATE_LIMIT_REJECTIONS), "route", normalize_endpoint_label(route)
+    )
+    RATE_LIMIT_REJECTIONS.labels(route_label, normalized_scope).inc()
 
 
 def record_run_started(command: object, run_kind: object, *, active: bool = True) -> None:
-    RUNS_STARTED.labels(normalize_tool_label(command), normalize_run_kind_label(run_kind, command=str(command or ""))).inc()
+    tool = _cardinality_guarded_label(_metric_name(RUNS_STARTED), "tool", normalize_tool_label(command))
+    kind = _cardinality_guarded_label(
+        _metric_name(RUNS_STARTED), "run_kind", normalize_run_kind_label(run_kind, command=str(command or ""))
+    )
+    RUNS_STARTED.labels(tool, kind).inc()
     if active:
         ACTIVE_RUNS.inc()
 
@@ -380,7 +544,7 @@ def record_run_removed(run_type: str = "command") -> None:
 
 
 def record_pty_started(command: object) -> None:
-    PTY_STARTED.labels(normalize_tool_label(command)).inc()
+    PTY_STARTED.labels(_cardinality_guarded_label(_metric_name(PTY_STARTED), "tool", normalize_tool_label(command))).inc()
     PTY_ACTIVE.inc()
 
 
@@ -394,8 +558,14 @@ def record_completed_run_values(
 ) -> None:
     tool = normalize_tool_label(command)
     kind = normalize_run_kind_label(run_kind, command=str(command or ""))
+    tool = _cardinality_guarded_label(_metric_name(RUNS_FINISHED), "tool", tool)
+    kind = _cardinality_guarded_label(_metric_name(RUNS_FINISHED), "run_kind", kind)
     elapsed = max(0.0, float(elapsed_seconds or 0.0))
-    RUNS_FINISHED.labels(tool, kind, exit_code_class(exit_code)).inc()
+    RUNS_FINISHED.labels(
+        tool,
+        kind,
+        _cardinality_guarded_label(_metric_name(RUNS_FINISHED), "exit_code_class", exit_code_class(exit_code)),
+    ).inc()
     RUN_DURATION.labels(tool, kind).observe(elapsed)
     RUN_OUTPUT_BYTES.labels(tool).observe(max(0, output_bytes))
     if truncated:
@@ -418,8 +588,12 @@ def record_completed_run(command: object, run_kind: object, exit_code: object, e
 
 
 def record_completed_pty(command: object, exit_code: object, elapsed_seconds: float) -> None:
-    del exit_code
-    PTY_DURATION.labels(normalize_tool_label(command)).observe(max(0.0, float(elapsed_seconds or 0.0)))
+    tool = _cardinality_guarded_label(_metric_name(PTY_FINISHED), "tool", normalize_tool_label(command))
+    PTY_FINISHED.labels(
+        tool,
+        _cardinality_guarded_label(_metric_name(PTY_FINISHED), "exit_code_class", exit_code_class(exit_code)),
+    ).inc()
+    PTY_DURATION.labels(tool).observe(max(0.0, float(elapsed_seconds or 0.0)))
 
 
 def record_run_finalize_error(stage: str) -> None:
@@ -428,7 +602,9 @@ def record_run_finalize_error(stage: str) -> None:
 
 
 def record_broker_event(event_type: object) -> None:
-    BROKER_EVENTS_PUBLISHED.labels(_bounded_label(event_type, max_len=40)).inc()
+    BROKER_EVENTS_PUBLISHED.labels(
+        _cardinality_guarded_label(_metric_name(BROKER_EVENTS_PUBLISHED), "event_type", _bounded_label(event_type, max_len=40))
+    ).inc()
 
 
 def record_broker_publish_error(cause: str) -> None:
@@ -444,7 +620,11 @@ def record_broker_subscriber_delta(delta: int) -> None:
 
 
 def record_db_query(operation: object, duration_seconds: float) -> None:
-    DB_QUERY_DURATION.labels(_bounded_label(operation, fallback="unknown", max_len=80)).observe(
+    DB_QUERY_DURATION.labels(
+        _cardinality_guarded_label(
+            _metric_name(DB_QUERY_DURATION), "operation", _bounded_label(operation, fallback="unknown", max_len=80)
+        )
+    ).observe(
         max(0.0, float(duration_seconds or 0.0))
     )
 
@@ -455,7 +635,7 @@ def record_history_search_fallback(reason: str) -> None:
 
 
 def record_intel_lookup(provider: object, outcome: str, duration_seconds: float = 0.0, retry_after_seconds: int = 0) -> None:
-    outcome_label = outcome if outcome in INTEL_OUTCOMES else "error"
+    outcome_label = _cardinality_guarded_label(_metric_name(INTEL_REQUESTS), "outcome", outcome)
     provider_label = normalize_provider_label(provider)
     INTEL_REQUESTS.labels(provider_label, outcome_label).inc()
     if duration_seconds:
@@ -494,7 +674,7 @@ def record_evidence_package_build(
     *,
     archive_bytes: int = 0,
     skipped_artifacts: int = 0,
-    skipped_items: int = 0,
+    skipped_other_items: int = 0,
 ) -> None:
     outcome_label = outcome if outcome in EVIDENCE_PACKAGE_OUTCOMES else "error"
     EVIDENCE_PACKAGE_BUILD_DURATION.labels(outcome_label).observe(max(0.0, float(duration_seconds or 0.0)))
@@ -502,24 +682,51 @@ def record_evidence_package_build(
         EVIDENCE_PACKAGE_ARCHIVE_BYTES.observe(max(0, int(archive_bytes or 0)))
         if skipped_artifacts > 0:
             EVIDENCE_PACKAGE_SKIPPED_ITEMS.labels("artifact").inc(skipped_artifacts)
-        other_skipped = max(0, int(skipped_items or 0) - int(skipped_artifacts or 0))
-        if other_skipped > 0:
-            EVIDENCE_PACKAGE_SKIPPED_ITEMS.labels("item").inc(other_skipped)
+        if skipped_other_items > 0:
+            EVIDENCE_PACKAGE_SKIPPED_ITEMS.labels("item").inc(skipped_other_items)
 
 
 def record_client_error(context: object) -> None:
-    CLIENT_ERRORS.labels(_bounded_label(context, fallback="unknown", max_len=60)).inc()
+    CLIENT_ERRORS.labels(
+        _cardinality_guarded_label(
+            _metric_name(CLIENT_ERRORS), "context", _bounded_label(context, fallback="unknown", max_len=60)
+        )
+    ).inc()
 
 
 def record_unhandled_exception(endpoint: object) -> None:
-    UNHANDLED_EXCEPTIONS.labels(normalize_endpoint_label(endpoint)).inc()
+    UNHANDLED_EXCEPTIONS.labels(
+        _cardinality_guarded_label(_metric_name(UNHANDLED_EXCEPTIONS), "endpoint", normalize_endpoint_label(endpoint))
+    ).inc()
 
 
 def validate_metric_definitions(metrics: Iterable[Any] = METRIC_DEFINITIONS) -> None:
     for metric in metrics:
-        name = str(getattr(metric, "_name", "") or "")
+        name = _metric_name(metric)
         if not name.startswith("darklab_"):
             raise RuntimeError(f"metric name must start with darklab_: {name}")
+        label_names = tuple(str(item) for item in getattr(metric, "_labelnames", ()) or ())
+        policy = LABEL_CARDINALITY_POLICIES.get(name, {})
+        missing = sorted(label for label in label_names if label not in policy)
+        extra = sorted(label for label in policy if label not in label_names)
+        if missing:
+            raise RuntimeError(f"metric label missing cardinality policy: {name} {', '.join(missing)}")
+        if extra:
+            raise RuntimeError(f"metric cardinality policy references unknown label: {name} {', '.join(extra)}")
+        for label_name in label_names:
+            label_policy = policy[label_name]
+            kind = str(label_policy.get("kind") or "")
+            if kind not in {"enum", "bounded", "known_provider"}:
+                raise RuntimeError(f"metric label has invalid cardinality policy: {name}.{label_name}")
+            if kind == "enum" and not label_policy.get("values"):
+                raise RuntimeError(f"metric enum label has no allowed values: {name}.{label_name}")
+            if kind == "bounded":
+                max_values = int(label_policy.get("max_values") or 0)
+                max_len = int(label_policy.get("max_len") or 0)
+                if max_values <= 0 or max_values > 200 or max_len <= 0 or max_len > 120:
+                    raise RuntimeError(f"metric bounded label needs tight limits: {name}.{label_name}")
+            if kind == "known_provider" and not _known_intel_provider_labels():
+                raise RuntimeError(f"metric provider label has no known provider set: {name}.{label_name}")
     for histogram in HISTOGRAM_DEFINITIONS:
         buckets = getattr(histogram, "_upper_bounds", ())
         finite = [item for item in buckets if item != float("inf")]

@@ -53,4 +53,11 @@ WEB_CONCURRENCY="${WEB_CONCURRENCY:-4}"
 WEB_THREADS="${WEB_THREADS:-4}"
 export WEB_CONCURRENCY WEB_THREADS
 
-exec gosu appuser gunicorn --bind "0.0.0.0:${APP_PORT:-8888}" --workers "$WEB_CONCURRENCY" --threads "$WEB_THREADS" --timeout 3600 --control-socket /tmp/.gunicorn app:app
+exec gosu appuser gunicorn \
+    --config /app/gunicorn_conf.py \
+    --bind "0.0.0.0:${APP_PORT:-8888}" \
+    --workers "$WEB_CONCURRENCY" \
+    --threads "$WEB_THREADS" \
+    --timeout 3600 \
+    --control-socket /tmp/.gunicorn \
+    app:app

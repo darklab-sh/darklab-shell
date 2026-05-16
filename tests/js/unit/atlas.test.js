@@ -57,7 +57,7 @@ function setupAtlasDom() {
       <section id="atlas-surface" class="atlas-surface mobile-sheet-surface">
         <button type="button" class="atlas-close">close</button>
         <div id="atlas-subtitle"></div>
-        <div id="atlas-tabs" class="atlas-tabs history-run-tabs"></div>
+        <div id="atlas-tabs" class="atlas-tabs tab-strip"></div>
         <input id="atlas-search" />
         <select id="atlas-finding-status-filter" class="u-hidden"></select>
         <select id="atlas-orphan-filter"></select>
@@ -288,8 +288,8 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-overlay')?.classList.contains('u-hidden')).toBe(false)
     expect(document.getElementById('atlas-subtitle')?.textContent).toBe('1 entity · 1 finding')
     expect(document.getElementById('atlas-tabs')?.textContent).toContain('Hosts/IPs1')
-    expect(document.getElementById('atlas-tabs')?.classList.contains('history-run-tabs')).toBe(true)
-    expect(document.querySelector('[data-atlas-tab="ip"]')?.classList.contains('history-run-tab')).toBe(true)
+    expect(document.getElementById('atlas-tabs')?.classList.contains('tab-strip')).toBe(true)
+    expect(document.querySelector('[data-atlas-tab="ip"]')?.classList.contains('tab-strip-item')).toBe(true)
     expect(document.querySelector('[data-atlas-tab="ip"]')?.classList.contains('is-active')).toBe(true)
     expect(document.querySelector('[data-atlas-tab="ip"]')?.getAttribute('aria-pressed')).toBe('true')
     expect(document.getElementById('atlas-list')?.textContent).toContain('107.178.109.44')
@@ -301,6 +301,8 @@ describe('Atlas overlay', () => {
     expect(document.querySelectorAll('.atlas-intel-highlight-provider')).toHaveLength(2)
     expect(document.querySelector('.atlas-intel-highlight-provider')?.textContent).toContain('CVE-2026-0001')
     const intelToggle = document.querySelector('.atlas-intel-card-toggle')
+    expect(intelToggle?.classList.contains('btn')).toBe(true)
+    expect(intelToggle?.classList.contains('btn-ghost')).toBe(true)
     expect(intelToggle?.getAttribute('aria-expanded')).toBe('false')
     expect(document.querySelector('.atlas-intel-card-body')?.classList.contains('u-hidden')).toBe(true)
     intelToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -722,6 +724,7 @@ describe('Atlas overlay', () => {
     const entityDetailCallsBeforeSelect = apiFetch.mock.calls
       .filter(([url]) => String(url) === '/atlas/entities/ent_ip').length
     const entityRow = document.querySelector('.atlas-entity-row')
+    expect(entityRow?.tagName).toBe('DIV')
     entityRow?.click()
     expect(document.querySelector('.atlas-row-select')?.checked).toBe(true)
     expect(document.querySelector('.atlas-entity-row')?.classList.contains('is-selected')).toBe(true)
@@ -729,9 +732,11 @@ describe('Atlas overlay', () => {
       entityDetailCallsBeforeSelect,
     )
     document.getElementById('atlas-bulk-delete')?.click()
+    document.getElementById('atlas-bulk-delete')?.click()
     await Promise.resolve()
     await Promise.resolve()
 
+    expect(showConfirm).toHaveBeenCalledTimes(1)
     expect(showConfirm.mock.calls[0][0].body).toEqual(expect.objectContaining({
       text: 'Delete 1 Atlas entity?',
       note: 'This removes the selected entities and any findings attached to them. This cannot be undone.',
@@ -740,6 +745,7 @@ describe('Atlas overlay', () => {
       method: 'POST',
       body: JSON.stringify({ entity_ids: ['ent_ip'] }),
     }))
+    expect(apiFetch.mock.calls.filter(([url]) => String(url) === '/atlas/entities/bulk-delete')).toHaveLength(1)
     await vi.waitFor(() => {
       expect(showToast).toHaveBeenCalledWith('Deleted 1 entity - 1 attached finding removed', 'success')
     })
@@ -781,6 +787,7 @@ describe('Atlas overlay', () => {
     document.getElementById('atlas-select-toggle').dispatchEvent(new Event('change', { bubbles: true }))
     const selectedFindingBeforeClick = document.getElementById('atlas-detail')?.textContent
     const findingRow = document.querySelector('.atlas-finding-queue-row')
+    expect(findingRow?.tagName).toBe('DIV')
     findingRow?.click()
     expect(document.querySelector('.atlas-finding-select')?.checked).toBe(true)
     expect(document.querySelector('.atlas-finding-queue-row')?.classList.contains('is-selected')).toBe(true)

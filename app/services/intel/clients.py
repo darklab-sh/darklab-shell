@@ -57,10 +57,16 @@ class JsonApiClient:
             location = response.getheader("location")
             if response.status in {301, 302, 303, 307, 308} and location and _redirects_remaining > 0:
                 response.read()
+                redirect_url = urljoin(url, location)
+                if _url_origin(redirect_url) != _url_origin(url):
+                    raise ProviderApiError(
+                        "provider redirected to an untrusted host",
+                        status=int(response.status),
+                    )
                 redirected_method = "GET" if response.status == 303 else method
                 redirected_body = None if response.status == 303 else body
                 return self._raw_request(
-                    urljoin(url, location),
+                    redirect_url,
                     headers=headers,
                     method=redirected_method,
                     body=redirected_body,
@@ -152,6 +158,15 @@ def _default_ssl_context() -> ssl.SSLContext:
         if os.path.exists(candidate):
             return ssl.create_default_context(cafile=candidate)
     return ssl.create_default_context()
+
+
+def _url_origin(url: str) -> tuple[str, str, int | None]:
+    parsed = urlsplit(url)
+    host = (parsed.hostname or "").lower()
+    port = parsed.port
+    if port is None and parsed.scheme == "https":
+        port = 443
+    return parsed.scheme, host, port
 
 
 class ShodanApiClient(JsonApiClient):

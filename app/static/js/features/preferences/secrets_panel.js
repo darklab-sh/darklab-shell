@@ -176,7 +176,7 @@ function _optionsProviderStatus(provider, secretNames) {
 
 function _optionsChip(text, className = '', opts = {}) {
   const chip = document.createElement('span');
-  chip.className = `options-secret-chip${className ? ` ${className}` : ''}`;
+  chip.className = `badge badge-tone-muted options-secret-chip${className ? ` ${className}` : ''}`;
   chip.textContent = text;
   if (opts.title) chip.title = opts.title;
   return chip;
@@ -204,7 +204,7 @@ function _optionsStoredSecretForProviderName(displayName, provider, secrets = []
 function _optionsSecretLink(name, secret = null) {
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.className = 'options-secret-chip options-secret-link';
+  btn.className = 'chip chip-action options-secret-chip options-secret-link';
   btn.textContent = name;
   btn.title = secret ? `Replace ${_normalizeOptionsSecretName(secret.name) || name}` : `Add ${name}`;
   btn.addEventListener('click', () => {
@@ -240,7 +240,9 @@ function _optionsProviderRow(provider, secretNames, secrets = []) {
   header.appendChild(title);
 
   const badge = document.createElement('span');
-  badge.className = `options-provider-status ${status.configured ? 'is-usable' : 'is-needed'}`;
+  badge.className = `badge options-provider-status ${
+    status.configured ? 'badge-tone-green is-usable' : 'badge-tone-muted is-needed'
+  }`;
   badge.textContent = status.label;
   header.appendChild(badge);
   row.appendChild(header);
@@ -380,14 +382,14 @@ function _optionsSecretChips(secret) {
   const envs = Array.isArray(secret?.consumer_envs) ? secret.consumer_envs : [];
   if (!envs.length) {
     const chip = document.createElement('span');
-    chip.className = 'options-secret-chip is-muted';
+    chip.className = 'badge badge-tone-muted options-secret-chip is-muted';
     chip.textContent = 'no consumers';
     wrap.appendChild(chip);
     return wrap;
   }
   envs.forEach((env) => {
     const chip = document.createElement('span');
-    chip.className = 'options-secret-chip';
+    chip.className = 'badge badge-tone-muted options-secret-chip';
     chip.textContent = String(env || '').trim();
     wrap.appendChild(chip);
   });

@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,797
+- behavior tests: 2,799
 - docs/inventory meta-tests: 32
-- `pytest`: 1428 (1396 behavior + 32 meta)
+- `pytest`: 1432 (1400 behavior + 32 meta)
 - `vitest`: 1150
 - `playwright`: 251
-- total: 2,829
+- total: 2,833
 
 This document is organized in two parts:
 
@@ -398,10 +398,11 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestIntelServices.test_rate_limiter_consumes_bucket_and_reports_retry` | Verifies per-session provider token buckets consume quota and report retry timing. |
 | `TestIntelServices.test_audit_event_omits_sensitive_provider_fields` | Verifies intel audit events include lookup metadata without API keys or raw provider bodies. |
 | `TestIntelServices.test_json_api_client_uses_system_ca_bundle_for_https` | Verifies app-native intel HTTPS clients prefer the system CA bundle when no explicit CA env is set. |
+| `TestIntelServices.test_json_api_client_rejects_cross_origin_redirects_before_forwarding_secrets` | Verifies app-native intel HTTPS clients stop cross-origin redirects before provider API-key headers can be forwarded. |
 | `TestIntelServices.test_json_api_client_honors_explicit_ca_env` | Verifies app-native intel HTTPS clients honor explicit `SSL_CERT_FILE` and `SSL_CERT_DIR` settings. |
 | `TestIntelServices.test_provider_modules_read_secret_at_call_time_and_normalize_payloads` | Verifies provider modules read vault-backed secrets, including VirusTotal's native `VTCLI_APIKEY` alias, at lookup time and return normalized payloads. |
 | `TestIntelServices.test_teamcymru_dns_origin_records_and_asn_description_records_are_normalized` | Verifies Team Cymru DNS origin and ASN-description records normalize into rendered ownership fields. |
-| `TestIntelServices.test_new_intel_provider_modules_normalize_payloads` | Verifies URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, and RouteViews provider modules normalize representative payloads. |
+| `TestIntelServices.test_new_intel_provider_modules_normalize_payloads` | Verifies URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, and RouteViews provider modules normalize representative payloads and request contracts. |
 | `TestIntelServices.test_teamcymru_dns_client_fetches_origin_and_asn_description_records` | Verifies the Team Cymru DNS client fetches origin records and matching ASN-description records. |
 | `TestIntelServices.test_provider_missing_secret_blocks_lookup_before_client_call` | Verifies provider calls stop before client access when the required secret is missing. |
 | `TestIntelServices.test_lookup_entity_requires_secret_before_cache_hit` | Verifies cached provider data is not returned when the current session lacks the required provider secret. |
@@ -423,7 +424,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionWorkspace.test_list_repairs_command_created_workspace_modes` | Verifies that workspace listing repairs command-created folder/file modes so app-mediated reads can see tool config output. |
 | `TestSessionWorkspace.test_read_workspace_permission_denied_is_not_raw_os_error` | Verifies that unreadable workspace files raise an app-level permission error instead of a raw OS error. |
 | `TestSessionWorkspace.test_delete_workspace_file_falls_back_to_scanner_owner_for_nested_command_files` | Verifies that deleting scanner-owned nested workspace files falls back through the validated scanner sudo path when sticky directory permissions block direct unlink. |
-| `TestSessionWorkspace.test_workspace_path_info_and_delete_remove_folders_recursively` | Verifies that workspace path info counts files under folders and recursive folder delete removes nested files and directories. |
+| `TestSessionWorkspace.test_workspace_path_info_and_delete_remove_folders_recursively` | Verifies that workspace path info counts files under folders, recursive folder delete removes nested files and directories, and manual delete metrics are recorded. |
 | `TestSessionWorkspace.test_create_and_list_empty_directories_without_file_usage` | Verifies that explicit empty session folders can be created and listed without counting against file usage. |
 | `TestSessionWorkspace.test_workspace_glob_pattern_matches_one_path_segment` | Verifies that workspace glob expansion matches `*` within one path segment without crossing into nested folders. |
 | `TestSessionWorkspace.test_rejects_absolute_traversal_and_backslash_paths` | Verifies that unsafe workspace paths are rejected before touching the filesystem. |
@@ -436,6 +437,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionWorkspace.test_touch_session_workspace_extends_cleanup_activity` | Verifies that app-mediated workspace access refreshes the session directory activity timestamp so active workspaces are retained. |
 | `TestSessionWorkspace.test_cleanup_can_skip_current_session_directory` | Verifies that workspace cleanup can preserve the request session while sweeping other expired session directories. |
 | `TestEntrypointWorkspaceRepair.test_workspace_repair_targets_children_inside_session_directories` | Verifies that entrypoint workspace permission repair explicitly targets files and folders inside hashed session directories. |
+| `TestEntrypointWorkspaceRepair.test_gunicorn_uses_prometheus_multiprocess_cleanup_hook` | Verifies that Gunicorn starts with the Prometheus multiprocess dead-worker cleanup hook configured. |
 | `TestDerivedCommandRegistry.test_commands_registry_loader_normalizes_policy_and_autocomplete` | Verifies that the `commands.yaml` loader normalizes policy entries and autocomplete metadata, including pipe-helper entries. |
 | `TestDerivedCommandRegistry.test_command_catalog_derives_reference_data_from_registry` | Verifies that the command catalog helper derives descriptions, examples, flags, workspace file handling, runtime notes, and subcommand-scoped details from the command registry. |
 | `TestDerivedCommandRegistry.test_commands_registry_local_overlay_appends_policy_and_context` | Verifies that `commands.local.yaml` appends policy entries, adds new roots, overrides categories, and merges autocomplete hints without replacing the base registry. |
@@ -610,6 +612,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestOutputSignals.test_classifies_warning_error_and_summary_lines` | Verifies that backend output-signal classification separates warning, error, and summary-style lines. |
 | `TestOutputSignals.test_workspace_notices_are_not_output_signals` | Verifies that app-owned workspace read/write notices do not count as findings, warnings, errors, or summaries. |
 | `TestOutputSignals.test_extracts_structured_entities_from_output` | Verifies that backend output metadata extracts public IPs, domains, hashes, and CVEs while skipping loopback addresses and filename-like hostnames. |
+| `TestOutputSignals.test_extract_entities_ignores_file_names_inside_url_paths` | Verifies that entity extraction keeps URL hostnames while ignoring file-like names inside URL paths. |
 | `TestOutputSignals.test_extract_entities_can_include_private_ips_when_requested` | Verifies that entity extraction can opt into private and loopback IP metadata for explicit caller-controlled contexts. |
 | `TestOutputSignals.test_classifier_adds_entity_metadata_to_real_output` | Verifies that real command output lines carry structured entity metadata with source-line indexes. |
 | `TestOutputSignals.test_nmap_input_file_sections_update_signal_target` | Verifies that nmap input-file scans update output metadata targets as each `Nmap scan report for ...` section starts. |
@@ -919,9 +922,10 @@ Prometheus `/metrics` route, runtime collector, label, and histogram-bucket cove
 | `TestMetricsEndpoint.test_allowlisted_callers_get_prometheus_text` | Verifies that allowlisted callers receive Prometheus text with the expected content type. |
 | `TestMetricsEndpoint.test_scrape_includes_runtime_gauge_families` | Verifies that scrape-time runtime gauge families render in `/metrics`. |
 | `TestMetricsEndpoint.test_run_finalize_metric_uses_bounded_labels` | Verifies that completed-run metrics use command-root, run-kind, and exit-code-class labels. |
-| `TestMetricsEndpoint.test_rate_limit_and_intel_helpers_render_expected_labels` | Verifies that rate-limit, intel, DB query, history fallback, and evidence package helper metrics render with bounded labels. |
+| `TestMetricsEndpoint.test_rate_limit_and_intel_helpers_render_expected_labels` | Verifies that rate-limit, intel, DB query, history fallback, evidence package, PTY completion, and workspace eviction helper metrics render with bounded labels. |
 | `TestMetricsDefinitionDrift.test_metric_names_use_darklab_prefix` | Verifies that every registered metric name uses the `darklab_` prefix. |
 | `TestMetricsDefinitionDrift.test_histograms_have_explicit_buckets` | Verifies that every histogram declares explicit buckets. |
+| `TestMetricsDefinitionDrift.test_labeled_metrics_have_cardinality_policies` | Verifies that every labeled metric has an explicit cardinality policy and fails on unreviewed labels. |
 | `TestMetricsDefinitionDrift.test_route_label_normalizer_does_not_use_raw_paths` | Verifies that route labels do not preserve raw path or query-string characters. |
 
 #### `test_output_search.py`
@@ -1175,7 +1179,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestAtlasRoutes.test_run_delete_can_prune_non_curated_atlas_orphans_and_keep_curated_entities` | Verifies run deletion can prune non-curated Atlas rows from the deleted run while preserving curated entities. |
 | `TestAtlasRoutes.test_delete_atlas_finding_can_cleanup_same_run_siblings` | Verifies deleting an Atlas finding can also remove non-curated sibling entities from the same source run. |
 | `TestAtlasRoutes.test_bulk_delete_atlas_entities_and_findings` | Verifies Atlas bulk delete routes remove selected entities and findings while reporting missing ids. |
-| `TestAtlasRoutes.test_entity_detail_is_session_scoped` | Verifies Atlas entity detail routes do not reveal entities from other sessions. |
+| `TestAtlasRoutes.test_atlas_read_and_write_routes_are_session_scoped` | Verifies Atlas read, write, refresh, delete, and project-link routes do not reveal or mutate another session's Atlas data. |
 | `TestAtlasRoutes.test_refresh_intel_persists_provider_snapshot` | Verifies Atlas intel refresh stores provider snapshots for the selected session-owned entity. |
 | `TestAtlasRoutes.test_findings_tab_lists_and_bulk_updates_review_state` | Verifies the Atlas Findings queue lists deduped findings and bulk-updates review state for selected findings. |
 | `TestAtlasRoutes.test_unscoped_findings_flow_through_atlas_projects_and_run_routes` | Verifies unscoped findings share one review state across Atlas, Projects, and source-run finding routes. |
@@ -1946,7 +1950,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 
 #### `button_primitives_allowlist.test.js`
 
-Positive counterpart to the negative blocklist in `button_primitives.test.js`. Each row below is one dynamically-generated test — the suite walks `app/templates/**.html` and emits one test per file, plus a fixture-validity test. Every `<button>`, `[role="button"]`, and `<a role="button">` in the scanned file must either carry an allowed primitive class (`btn`, `nav-item`, `close-btn`, `toggle-btn`, `kb-key`) or match a selector in `tests/js/fixtures/button_primitive_allowlist.json`. The allowlist fixture documents surfaces that deliberately opt out of the primitives (legacy or surface-specific class families).
+Positive counterpart to the negative blocklist in `button_primitives.test.js`. Each row below is one dynamically-generated test — the suite walks `app/templates/**.html` and emits one test per file, plus a fixture-validity test. Every `<button>`, `[role="button"]`, and `<a role="button">` in the scanned file must either carry an allowed primitive class (`btn`, `nav-item`, `tab-strip-item`, `close-btn`, `toggle-btn`, `kb-key`, and the other shared primitive families) or match a selector in `tests/js/fixtures/button_primitive_allowlist.json`. The allowlist fixture documents surfaces that deliberately opt out of the primitives (legacy or surface-specific class families).
 
 | Test | Description |
 | --- | --- |
@@ -3356,6 +3360,6 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 - [README.md](../README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](../TODO.md) - open follow-ups, research notes, known issues, and future ideas
-- [docs/atlas-export.md](../docs/atlas-export.md) - Session Entity Atlas CSV/JSONL export schema and filters
+- [ARCHITECTURE.md → Atlas Export Schema](../ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/external-command-integrations.md](../docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [tests/ui-capture-scenes.md](ui-capture-scenes.md) - UI screenshot capture scene inventory

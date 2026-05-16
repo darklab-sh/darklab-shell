@@ -815,6 +815,7 @@ def delete_workspace_path(
         _remove_workspace_directory(path)
     else:
         raise WorkspacePathNotFound("session file or folder was not found")
+    app_metrics.record_workspace_evictions(max(1, int(info["file_count"] or 0)), "manual")
     return WorkspaceDeleteResult(
         path=str(info["path"]),
         kind=str(info["kind"]),

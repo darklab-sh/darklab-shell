@@ -1222,13 +1222,13 @@ curl http://localhost:8888/diag?format=json
 curl http://localhost:8888/metrics
 ```
 
-The repo also includes a starter Grafana dashboard at `docs/grafana/darklab-overview.json`.
+The repo also includes a starter Grafana dashboard at `examples/grafana/darklab-overview.json`.
 
 **Limits:** `/diag` and `/metrics` are gated entirely by IP/CIDR allowlists, not by an authentication layer. Empty `diagnostics_allowed_cidrs` disables `/diag` completely and prevents `/metrics` from being scraped. Set `metrics_enabled: false` to keep `/diag` available while hiding `/metrics`.
 
 **Configuration:** `diagnostics_allowed_cidrs`, `trusted_proxy_cidrs`, `metrics_enabled`, `prometheus_multiproc_dir`, and metrics histogram bucket settings in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
-**Related files:** `app/blueprints/assets.py` (`/diag` HTML/JSON responses and `/metrics`), `app/services/metrics/` (Prometheus metric definitions and scrape-time collectors), `app/static/css/diag.css` (page styling + mobile breakpoint behavior), `app/templates/diag.html` (diagnostics page markup), `docs/grafana/darklab-overview.json` (starter dashboard), `README.md` (operator-facing config reference), `ARCHITECTURE.md` (diagnostics and logging runtime details).
+**Related files:** `app/blueprints/assets.py` (`/diag` HTML/JSON responses and `/metrics`), `app/services/metrics/` (Prometheus metric definitions and scrape-time collectors), `app/static/css/diag.css` (page styling + mobile breakpoint behavior), `app/templates/diag.html` (diagnostics page markup), `examples/grafana/darklab-overview.json` (starter dashboard), `README.md` (operator-facing config reference), `ARCHITECTURE.md` (diagnostics and logging runtime details).
 
 ---
 
@@ -1245,7 +1245,7 @@ The repo also includes a starter Grafana dashboard at `docs/grafana/darklab-over
 - [README.md](README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
-- [docs/atlas-export.md](docs/atlas-export.md) - Session Entity Atlas CSV/JSONL export schema and filters
+- [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

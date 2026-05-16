@@ -5106,6 +5106,7 @@ describe('app helpers', () => {
 
     const shodanLink = Array.from(document.querySelectorAll('.options-secret-link'))
       .find((button) => button.textContent === 'SHODAN_API_KEY')
+    expect(shodanLink.classList.contains('chip')).toBe(true)
     shodanLink.click()
     await vi.waitFor(() => expect(providerOverlay.classList.contains('u-hidden')).toBe(true))
     await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/session/secrets', expect.objectContaining({
@@ -5123,6 +5124,7 @@ describe('app helpers', () => {
     await vi.waitFor(() => expect(providerOverlay.classList.contains('u-hidden')).toBe(false))
     const configuredShodanLink = Array.from(document.querySelectorAll('.options-secret-link'))
       .find((button) => button.textContent === 'SHODAN_API_KEY')
+    expect(configuredShodanLink.classList.contains('chip')).toBe(true)
     expect(configuredShodanLink.title).toBe('Replace SHODAN_API_KEY')
     configuredShodanLink.click()
     await vi.waitFor(() => expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({

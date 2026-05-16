@@ -4354,10 +4354,11 @@
     items.forEach((item) => {
       const tab = document.createElement('button');
       tab.type = 'button';
-      tab.className = 'nav-item project-mobile-tab' + (projectWorkspaceTab === item.id ? ' is-active' : '');
+      tab.className = 'tab-strip-item project-mobile-tab' + (projectWorkspaceTab === item.id ? ' is-active' : '');
       tab.dataset.projectMobileDetailTab = item.id;
       tab.setAttribute('role', 'tab');
       tab.setAttribute('aria-selected', projectWorkspaceTab === item.id ? 'true' : 'false');
+      tab.setAttribute('aria-pressed', projectWorkspaceTab === item.id ? 'true' : 'false');
       const label = document.createElement('span');
       label.className = 'project-mobile-tab-label';
       label.textContent = item.label;
@@ -5509,7 +5510,9 @@
     header.append(titleWrap, actions);
 
     const tabs = document.createElement('div');
-    tabs.className = 'project-explorer-tabs';
+    tabs.className = 'project-explorer-tabs tab-strip';
+    tabs.setAttribute('role', 'tablist');
+    tabs.setAttribute('aria-label', 'Project sections');
     const tabCounts = _projectCounts(summary);
     const projectId = String(project.id || '');
     const tabItems = [
@@ -5525,8 +5528,11 @@
     tabItems.forEach(({ id, label, count }) => {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'nav-item project-explorer-tab' + (projectWorkspaceTab === id ? ' is-active' : '');
+      btn.className = 'tab-strip-item project-explorer-tab' + (projectWorkspaceTab === id ? ' is-active' : '');
       btn.dataset.projectTab = id;
+      btn.setAttribute('role', 'tab');
+      btn.setAttribute('aria-selected', projectWorkspaceTab === id ? 'true' : 'false');
+      btn.setAttribute('aria-pressed', projectWorkspaceTab === id ? 'true' : 'false');
       btn.textContent = count === undefined ? label : `${label} (${count})`;
       _bindProjectRuntimePressable(btn);
       tabs.appendChild(btn);
@@ -5711,7 +5717,7 @@
 
   function _renderProjectEntityTypeTabs(projectId, summary) {
     const tabs = document.createElement('div');
-    tabs.className = 'project-entity-type-tabs';
+    tabs.className = 'project-entity-type-tabs tab-strip';
     tabs.setAttribute('role', 'tablist');
     tabs.setAttribute('aria-label', 'Project entity types');
     const counts = _projectEntityCounts(summary);
@@ -5719,7 +5725,7 @@
       const btn = document.createElement('button');
       btn.type = 'button';
       const active = projectWorkspaceEntityTab === tab.id;
-      btn.className = 'toggle-btn project-entity-type-tab' + (active ? ' is-active' : '');
+      btn.className = 'tab-strip-item project-entity-type-tab' + (active ? ' is-active' : '');
       btn.dataset.projectEntityTab = tab.id;
       btn.dataset.projectId = projectId;
       btn.setAttribute('role', 'tab');

@@ -1354,22 +1354,9 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 
 .options-tabs {
-  padding-top: 8px;
-}
-
-#options-tabs.options-tabs .project-mobile-tab.nav-item:hover:not(.is-active):not([aria-disabled="true"]):not(:disabled),
-#options-tabs.options-tabs .project-mobile-tab.nav-item:focus-visible:not(.is-active) {
-  color: var(--green);
-}
-
-#options-tabs.options-tabs .project-mobile-tab.nav-item.is-active:hover:not([aria-disabled="true"]):not(:disabled),
-#options-tabs.options-tabs .project-mobile-tab.nav-item.is-active:active:not([aria-disabled="true"]):not(:disabled) {
-  border-color: var(--border-bright);
-  border-top-color: color-mix(in srgb, var(--green) 55%, transparent);
-  border-bottom-color: var(--theme-tab-active-bg);
-  background: var(--theme-tab-active-bg);
-  color: var(--green);
-  opacity: 1;
+  --tab-strip-padding: 8px 0 0;
+  --tab-strip-bg: var(--theme-panel-bg);
+  --tab-strip-active-bg: var(--theme-tab-active-bg);
 }
 
 .options-body {
@@ -1459,18 +1446,12 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 
 .options-secret-chip {
-  display: inline-flex;
-  align-items: center;
   max-width: 100%;
   min-height: 20px;
   padding: 2px 6px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  background: var(--theme-button-secondary-bg);
-  font-family: var(--font-mono);
   font-size: 11px;
   overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .options-secret-chip.is-muted,
@@ -1547,7 +1528,6 @@ body.mobile-terminal-mode .output-follow-btn {
 
 .options-provider-status {
   flex: 0 0 auto;
-  border-radius: 4px;
   padding: 2px 6px;
   font-size: 11px;
   font-weight: 650;
@@ -1555,12 +1535,10 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 
 .options-provider-status.is-usable {
-  color: var(--green);
   background: var(--theme-button-ghost-hover-bg);
 }
 
 .options-provider-status.is-needed {
-  color: var(--amber);
   background: var(--theme-button-secondary-bg);
 }
 
@@ -1571,7 +1549,6 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 
 .options-secret-link {
-  cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
 }

@@ -73,6 +73,7 @@
 
 .atlas-tabs {
   flex: 0 0 auto;
+  --tab-strip-padding: 6px 20px 0;
 }
 
 .atlas-tab {
@@ -241,6 +242,14 @@
 .atlas-finding-select {
   width: 18px;
   height: 18px;
+}
+
+.atlas-row-select-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  min-height: 18px;
 }
 
 .atlas-entity-main {
@@ -597,8 +606,8 @@
   cursor: pointer;
 }
 
-.atlas-entity-token:hover,
-.atlas-entity-token:focus-visible {
+.chip.atlas-entity-token:hover,
+.chip.atlas-entity-token:focus-visible {
   background: var(--theme-button-ghost-hover-bg);
   outline: 1px solid var(--green-dim);
   outline-offset: 1px;
