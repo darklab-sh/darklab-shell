@@ -13,6 +13,25 @@ services:
       retries: 3
       start_period: 5s
 
+  postgres:
+    image: postgres:17-alpine
+    container_name: darklab-postgres
+    restart: unless-stopped
+    profiles:
+      - postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-darklab_shell}
+      POSTGRES_USER: ${POSTGRES_USER:-darklab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-darklab_dev_password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-darklab} -d ${POSTGRES_DB:-darklab_shell}"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   shell:
     build:
       context: .
@@ -36,6 +55,10 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - APP_PORT=${APP_PORT:-8888}
       - PROMETHEUS_MULTIPROC_DIR=/tmp/darklab_shell-prom
+      - DATABASE_BACKEND=${DATABASE_BACKEND:-sqlite}
+      - DATABASE_URL=${DATABASE_URL:-}
+      - DATABASE_POOL_MIN=${DATABASE_POOL_MIN:-1}
+      - DATABASE_POOL_MAX=${DATABASE_POOL_MAX:-5}
       # Must match app/conf/config.yaml workspace_root when customized.
       # The entrypoint uses this path to normalize workspace permissions before
       # dropping privileges; the app uses workspace_root for runtime access.
@@ -50,3 +73,9 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+        required: false
+
+volumes:
+  postgres-data:

@@ -34,6 +34,7 @@ import services.runs.comparison as run_comparison
 import services.secrets.vault as secrets_vault
 from services.commands.builtins import execute_builtin_command
 from core.database import DB_PATH, db_connect, db_init
+from core.database_backend import quote_sqlite_identifier
 from services.projects.workspace import record_run_findings
 from services.atlas.materializer import materialize_run_entities
 from services.workspace.files import resolve_workspace_path
@@ -3484,11 +3485,11 @@ class TestDiagRoute:
         assert {"name": 'odd"table', "rows": 2} in info["tables"]
 
     def test_diag_sqlite_identifier_rejects_empty_or_nul_names(self):
-        assert shell_assets._diag_sqlite_identifier('odd"table') == '"odd""table"'
+        assert quote_sqlite_identifier('odd"table') == '"odd""table"'
         with pytest.raises(ValueError):
-            shell_assets._diag_sqlite_identifier("")
+            quote_sqlite_identifier("")
         with pytest.raises(ValueError):
-            shell_assets._diag_sqlite_identifier("bad\x00name")
+            quote_sqlite_identifier("bad\x00name")
 
     def test_db_section_runs_and_snapshots_remain_at_top_level(self):
         """Backward-compat for the original /diag schema — `runs` and
@@ -4808,6 +4809,61 @@ class TestAtlasRoutes:
             ("Names", "darklab.sh, www.darklab.sh", "crtsh"),
         }
 
+    def test_refresh_intel_can_offload_provider_payload_and_restore_detail(self):
+        from services.storage import body_store
+
+        client = get_client()
+        session_id = self._session_id()
+        _, recorded = self._seed_entity_run(session_id)
+        domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
+        provider_result = mock.Mock(
+            provider="crtsh",
+            status="ok",
+            message="",
+            result=mock.Mock(
+                provider="crtsh",
+                payload={
+                    "providers": {"crtsh": {"certificate_count": 7}},
+                    "summary": {"has_intel": True, "providers_with_data": ["crtsh"]},
+                },
+            ),
+        )
+        lookup_result = mock.Mock(
+            entity_type="domain",
+            canonical_value="darklab.sh",
+            providers=[provider_result],
+            success_count=1,
+            configured_count=1,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(body_store, "DATA_DIR", tmp), \
+             mock.patch.dict("config.CFG", {"intel_payload_inline_max_bytes": 1}), \
+             mock.patch("services.atlas.intel_bridge.lookup_entity", return_value=lookup_result):
+            refresh_resp = client.post(
+                f"/atlas/entities/{domain_id}/refresh_intel",
+                headers={"X-Session-ID": session_id},
+            )
+            with db_connect() as conn:
+                stored = conn.execute(
+                    "SELECT data_json FROM entity_intel_snapshots WHERE session_id = ? AND entity_id = ?",
+                    (session_id, domain_id),
+                ).fetchone()["data_json"]
+            pointer = body_store.stored_body_pointer(stored)
+            assert pointer is not None
+            body_path = os.path.join(tmp, pointer["rel_path"])
+            assert os.path.exists(body_path)
+
+            detail_resp = client.get(f"/atlas/entities/{domain_id}", headers={"X-Session-ID": session_id})
+            delete_resp = client.delete(f"/atlas/entities/{domain_id}", headers={"X-Session-ID": session_id})
+
+            assert refresh_resp.status_code == 200
+            assert detail_resp.status_code == 200
+            detail = json.loads(detail_resp.data)
+            assert detail["intel_snapshots"][0]["data"]["providers"]["crtsh"]["certificate_count"] == 7
+            assert delete_resp.status_code == 200
+            assert not os.path.exists(body_path)
+
     def test_findings_tab_lists_and_bulk_updates_review_state(self):
         client = get_client()
         session_id = self._session_id()
@@ -5973,6 +6029,47 @@ class TestRunRoute:
             conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
             conn.commit()
             conn.close()
+
+    def test_client_side_run_can_offload_search_text_and_delete_it_with_run(self):
+        from services.storage import body_store
+
+        client = get_client()
+        session = "client-run-offload-" + uuid.uuid4().hex[:8]
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(body_store, "DATA_DIR", tmp), \
+             mock.patch.dict("config.CFG", {"runs_search_text_inline_max_bytes": 1}):
+            resp = client.post(
+                "/run/client",
+                headers={"X-Session-ID": session},
+                json={
+                    "command": "theme list",
+                    "exit_code": 0,
+                    "lines": [{"text": "Available themes: " + ("x" * 64), "cls": "builtin-section"}],
+                },
+            )
+            run_id = json.loads(resp.data)["run_id"]
+            with db_connect() as conn:
+                stored = conn.execute(
+                    "SELECT output_search_text FROM runs WHERE id = ?",
+                    (run_id,),
+                ).fetchone()["output_search_text"]
+            pointer = body_store.stored_body_pointer(stored)
+            assert pointer is not None
+            body_path = os.path.join(tmp, pointer["rel_path"])
+            assert os.path.exists(body_path)
+
+            detail = json.loads(
+                client.get(
+                    f"/history/{run_id}?json&preview=1",
+                    headers={"X-Session-ID": session},
+                ).data
+            )
+            delete_resp = client.delete(f"/history/{run_id}", headers={"X-Session-ID": session})
+
+            assert resp.status_code == 200
+            assert detail["output"] == ["Available themes: " + ("x" * 64)]
+            assert delete_resp.status_code == 200
+            assert not os.path.exists(body_path)
 
     def test_client_side_run_persists_tour_builtin(self):
         client = get_client()
@@ -8010,6 +8107,39 @@ class TestShareRoute:
         data = json.loads(resp.data)
         assert "id" in data
         assert "url" in data
+
+    def test_post_can_offload_large_snapshot_content_and_restore_it(self):
+        from services.storage import body_store
+
+        client = get_client()
+        session_id = "share-offload-" + uuid.uuid4().hex[:8]
+        content = [{"text": "line " + ("x" * 64), "cls": "notice"}]
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(body_store, "DATA_DIR", tmp), \
+             mock.patch.dict("config.CFG", {"snapshots_inline_max_bytes": 1}):
+            create_resp = client.post(
+                "/share",
+                json={"label": "large snapshot", "content": content},
+                headers={"X-Session-ID": session_id},
+            )
+            share_id = json.loads(create_resp.data)["id"]
+            with db_connect() as conn:
+                stored = conn.execute(
+                    "SELECT content FROM snapshots WHERE id = ?",
+                    (share_id,),
+                ).fetchone()["content"]
+            pointer = body_store.stored_body_pointer(stored)
+            assert pointer is not None
+            body_path = os.path.join(tmp, pointer["rel_path"])
+            assert os.path.exists(body_path)
+
+            fetch_resp = client.get(f"/share/{share_id}?json", headers={"X-Session-ID": session_id})
+            delete_resp = client.delete(f"/share/{share_id}", headers={"X-Session-ID": session_id})
+
+            assert fetch_resp.status_code == 200
+            assert json.loads(fetch_resp.data)["content"] == content
+            assert delete_resp.status_code == 200
+            assert not os.path.exists(body_path)
 
     def test_post_does_not_link_snapshot_to_source_run_project(self):
         client = get_client()

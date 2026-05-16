@@ -6,7 +6,6 @@ import json
 import logging
 import math
 import re
-import sqlite3
 import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -17,6 +16,7 @@ from flask import Blueprint, jsonify, request
 import config as _config
 import services.runs.comparison as run_comparison
 from core.database import db_connect, delete_run_artifacts, delete_snapshot_metadata
+from core.database_backend import SQLiteOperationalError, sqlite_table_columns, sqlite_table_exists
 from core.helpers import (
     GRACEFUL_TERMINATION_EXIT_CODE,
     get_client_ip,
@@ -37,6 +37,7 @@ from services.projects.workspace import ProjectWorkspaceError, compare_project_r
 from core.redaction import omit_raw_only_line_entries, redact_line_entries
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, builtin_command_roots_for_storage
 from services.runs.output_store import load_full_output_entries
+from services.storage.body_store import inline_threshold_bytes, load_text_body, maybe_store_text_body
 from services import metrics as app_metrics
 
 APP_VERSION = _config.APP_VERSION
@@ -148,19 +149,15 @@ def _parse_history_int(value, default, *, minimum=1, maximum=None):
 
 
 def _history_table_exists(conn, table_name):
-    row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
-        (table_name,),
-    ).fetchone()
-    return bool(row)
+    return sqlite_table_exists(conn, table_name)
 
 
 def _history_column_exists(conn, table_name, column_name):
     try:
-        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-    except sqlite3.OperationalError:
+        columns = sqlite_table_columns(conn, table_name)
+    except SQLiteOperationalError:
         return False
-    return any(str(row["name"] if isinstance(row, sqlite3.Row) else row[1]) == column_name for row in rows)
+    return column_name in columns
 
 
 def _history_run_kind_sql(column):
@@ -1003,7 +1000,7 @@ def get_history():
                 "history_list_fts" if fts_q else "history_list",
                 time.perf_counter() - query_started,
             )
-        except sqlite3.OperationalError as exc:
+        except SQLiteOperationalError as exc:
             if query and _build_fts_query(query):
                 app_metrics.record_history_search_fallback(
                     "missing_fts" if "runs_fts" in str(exc).lower() else "fts_error"
@@ -1724,10 +1721,17 @@ def save_share():
         content = redact_line_entries(content, _config.get_share_redaction_rules(CFG))
     share_id = str(uuid.uuid4())
     created  = datetime.now(timezone.utc).isoformat()
+    content_json = json.dumps(content)
+    stored_content = maybe_store_text_body(
+        "snapshot",
+        share_id,
+        content_json,
+        inline_threshold_bytes(CFG.get("snapshots_inline_max_bytes")),
+    )
     with db_connect() as conn:
         conn.execute(
             "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
-            (share_id, session_id, label, created, json.dumps(content))
+            (share_id, session_id, label, created, stored_content)
         )
         conn.commit()
     log.info("SHARE_CREATED", extra={
@@ -1789,7 +1793,10 @@ def get_share(share_id):
         log.warning("SHARE_NOT_FOUND", extra={"ip": get_client_ip(), "share_id": share_id})
         return _permalink_error_page("snapshot")
     snap = dict(row)
-    content_lines = json.loads(snap["content"]) if snap["content"] else []
+    try:
+        content_lines = json.loads(load_text_body(snap["content"]) or "[]")
+    except (TypeError, json.JSONDecodeError, ValueError):
+        content_lines = []
     log.info("SHARE_VIEWED", extra={
         "ip": get_client_ip(), "session": get_log_session_id(), "share_id": share_id,
         "label": snap["label"],

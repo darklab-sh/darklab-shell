@@ -15,6 +15,19 @@ from flask import Blueprint, abort, current_app, jsonify, render_template, reque
 from services.commands.registry import command_root, load_command_policy
 from config import APP_VERSION, CFG, get_theme_entry
 from core.database import DB_PATH, db_connect
+from core.database_backend import (
+    quote_sqlite_identifier,
+    sqlite_compileoption_used,
+    sqlite_dbstat_rows,
+    sqlite_fts_orphan_count,
+    sqlite_fts_virtual_table_names,
+    sqlite_journal_mode,
+    sqlite_page_stats,
+    sqlite_schema_objects,
+    sqlite_table_columns,
+    sqlite_table_names,
+    sqlite_table_row_count,
+)
 from core.helpers import (
     FONT_FILES,
     GRACEFUL_TERMINATION_EXIT_CODE,
@@ -47,14 +60,6 @@ def _fmt_elapsed(seconds):
         m, r = s // 60, s % 60
         return f"{m}m {r}s" if r else f"{m}m"
     return f"{s}s"
-
-
-def _diag_sqlite_identifier(name: str) -> str:
-    """Return a safely quoted SQLite identifier for metadata-derived names."""
-    value = str(name)
-    if not value or "\x00" in value:
-        raise ValueError("invalid SQLite identifier")
-    return '"' + value.replace('"', '""') + '"'
 
 
 _ANSI_UP_JS = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "ansi_up.js"
@@ -266,11 +271,11 @@ def _diag_storage_bucket_for_table(name: str, kind: str = "table") -> str:
 
 def _diag_sum_payload_expr(text_columns: tuple[str, ...], byte_columns: tuple[str, ...] = ()) -> str:
     parts = [
-        "COALESCE(SUM(LENGTH(COALESCE(" + _diag_sqlite_identifier(column) + ", ''))), 0)"
+        "COALESCE(SUM(LENGTH(COALESCE(" + quote_sqlite_identifier(column) + ", ''))), 0)"
         for column in text_columns
     ]
     parts.extend(
-        "COALESCE(SUM(" + _diag_sqlite_identifier(column) + "), 0)"
+        "COALESCE(SUM(" + quote_sqlite_identifier(column) + "), 0)"
         for column in byte_columns
     )
     return " + ".join(parts) or "0"
@@ -302,11 +307,7 @@ def _diag_table_storage_breakdown(conn, table_counts: dict[str, int] | None = No
     virtual_names: set[str] = set()
 
     try:
-        rows = conn.execute(
-            "SELECT name, type, tbl_name, sql FROM sqlite_master "
-            "WHERE name NOT LIKE 'sqlite_%' "
-            "ORDER BY name"
-        ).fetchall()
+        rows = sqlite_schema_objects(conn)
         for row in rows:
             name = str(row["name"] if hasattr(row, "keys") else row[0])
             obj_type = str(row["type"] if hasattr(row, "keys") else row[1])
@@ -319,8 +320,7 @@ def _diag_table_storage_breakdown(conn, table_counts: dict[str, int] | None = No
         result["errors"].append(f"schema listing failed: {exc}")
 
     try:
-        row = conn.execute("SELECT sqlite_compileoption_used('ENABLE_DBSTAT_VTAB')").fetchone()
-        result["dbstat_available"] = bool(row and int(row[0] or 0))
+        result["dbstat_available"] = sqlite_compileoption_used(conn, "ENABLE_DBSTAT_VTAB")
     except Exception as exc:
         result["errors"].append(f"dbstat probe failed: {exc}")
 
@@ -348,11 +348,7 @@ def _diag_table_storage_breakdown(conn, table_counts: dict[str, int] | None = No
 
     if result["dbstat_available"]:
         try:
-            rows = conn.execute(
-                "SELECT name, SUM(pgsize) AS allocated, SUM(payload) AS payload, "
-                "SUM(pgsize - payload - unused) AS overhead, SUM(unused) AS unused, "
-                "COUNT(*) AS pages FROM dbstat GROUP BY name"
-            ).fetchall()
+            rows = sqlite_dbstat_rows(conn)
             for row in rows:
                 name = str(row["name"] if hasattr(row, "keys") else row[0])
                 allocated = int((row["allocated"] if hasattr(row, "keys") else row[1]) or 0)
@@ -417,10 +413,7 @@ def _diag_table_storage_breakdown(conn, table_counts: dict[str, int] | None = No
         if table_name not in entries:
             continue
         try:
-            live_columns = {
-                str(row[1])
-                for row in conn.execute("PRAGMA table_info(" + _diag_sqlite_identifier(table_name) + ")").fetchall()
-            }
+            live_columns = sqlite_table_columns(conn, table_name)
             selected_text = tuple(column for column in columns if column in live_columns)
             selected_bytes = tuple(
                 column for column in _DIAG_PAYLOAD_BYTE_COLUMNS.get(table_name, ())
@@ -431,7 +424,7 @@ def _diag_table_storage_breakdown(conn, table_counts: dict[str, int] | None = No
                 continue
             expr = _diag_sum_payload_expr(selected_text, selected_bytes)
             value = conn.execute(
-                "SELECT " + expr + " FROM " + _diag_sqlite_identifier(table_name),  # nosec
+                "SELECT " + expr + " FROM " + quote_sqlite_identifier(table_name),  # nosec
             ).fetchone()[0]
             entries[table_name]["logical_payload"] = int(value or 0)
         except Exception as exc:
@@ -512,10 +505,7 @@ def _diag_table_storage_breakdown(conn, table_counts: dict[str, int] | None = No
     try:
         runs_count = int(table_counts.get("runs") or 0)
         if "runs" in entries and (result["dbstat_available"] or runs_count < _DIAG_LARGEST_RUNS_ROWCOUNT_LIMIT):
-            live_run_columns = {
-                str(row[1])
-                for row in conn.execute("PRAGMA table_info(" + _diag_sqlite_identifier("runs") + ")").fetchall()
-            }
+            live_run_columns = sqlite_table_columns(conn, "runs")
             required_columns = {"id", "command"}
             if not required_columns.issubset(live_run_columns):
                 raise ValueError("runs table is missing required identity columns")
@@ -792,14 +782,14 @@ def _diag_db_stats() -> dict:
     # Pragma + table queries — single connection.
     with db_connect() as conn:
         try:
-            row = conn.execute("PRAGMA journal_mode").fetchone()
-            info["journal_mode"] = str(row[0]) if row else None
+            info["journal_mode"] = sqlite_journal_mode(conn)
         except Exception:
             pass
         try:
-            page_count = int(conn.execute("PRAGMA page_count").fetchone()[0])
-            page_size = int(conn.execute("PRAGMA page_size").fetchone()[0])
-            freelist = int(conn.execute("PRAGMA freelist_count").fetchone()[0])
+            page_stats = sqlite_page_stats(conn)
+            page_count = page_stats["page_count"]
+            page_size = page_stats["page_size"]
+            freelist = page_stats["freelist_count"]
             info["page_count"] = page_count
             info["page_size"] = page_size
             info["freelist_count"] = freelist
@@ -814,37 +804,20 @@ def _diag_db_stats() -> dict:
         # first find the FTS5 virtual tables and synthesize their shadow
         # names, then filter the table listing against that set.
         try:
-            virtual_names = {
-                str(row[0])
-                for row in conn.execute(
-                    "SELECT name FROM sqlite_master "
-                    "WHERE sql LIKE 'CREATE VIRTUAL TABLE%'"
-                ).fetchall()
-            }
+            virtual_names = sqlite_fts_virtual_table_names(conn)
             shadow_suffixes = ("_data", "_idx", "_content", "_docsize", "_config")
             shadow_names: set[str] = {
                 f"{vname}{suffix}"
                 for vname in virtual_names
                 for suffix in shadow_suffixes
             }
-            rows = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' "
-                "AND name NOT LIKE 'sqlite_%' "
-                "ORDER BY name"
-            ).fetchall()
             tables: list[dict] = []
-            for (name,) in rows:
+            for name in sqlite_table_names(conn):
                 name = str(name)
                 if name in shadow_names:
                     continue
                 try:
-                    table_identifier = _diag_sqlite_identifier(name)
-                    # SQLite does not bind table identifiers; names come from
-                    # sqlite_master and are quoted/escaped before interpolation.
-                    n = conn.execute(
-                        "SELECT COUNT(*) FROM " + table_identifier  # nosec
-                    ).fetchone()[0]
-                    tables.append({"name": name, "rows": int(n)})
+                    tables.append({"name": name, "rows": sqlite_table_row_count(conn, name)})
                 except Exception:
                     continue
             info["tables"] = tables
@@ -873,11 +846,7 @@ def _diag_db_stats() -> dict:
         # Same operator value as the Redis procmeta orphan probe: surfaces
         # cleanup that has fallen behind.
         try:
-            n = conn.execute(
-                "SELECT COUNT(*) FROM runs_fts "
-                "WHERE rowid NOT IN (SELECT rowid FROM runs)"
-            ).fetchone()[0]
-            info["fts_orphans"] = int(n)
+            info["fts_orphans"] = sqlite_fts_orphan_count(conn)
         except Exception:
             pass
 

@@ -12,14 +12,23 @@ FTS: runs_fts (FTS5 virtual table over runs.command + runs.output_search_text).
 import json
 import logging
 import os
-import sqlite3
 from contextlib import contextmanager
 
 import fcntl
 
 from config import CFG, resolve_data_dir
+from core.database_backend import (
+    SQLiteOperationalError,
+    configured_database_backend,
+    configured_database_dialect,
+    connect_sqlite,
+    require_sqlite_backend,
+    sqlite_table_columns,
+    sqlite_table_exists,
+)
 from services.runs.output_store import delete_artifact_file, ensure_run_output_dir, load_full_output_entries
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, builtin_command_roots_for_storage
+from services.storage.body_store import delete_text_body
 
 log = logging.getLogger("shell")
 
@@ -27,6 +36,8 @@ log = logging.getLogger("shell")
 DATA_DIR = resolve_data_dir()
 DB_PATH  = os.path.join(DATA_DIR, "history.db")
 DB_INIT_LOCK_PATH = os.path.join(DATA_DIR, "history.db.init.lock")
+DB_BACKEND = configured_database_backend(CFG)
+DB_DIALECT = configured_database_dialect(CFG)
 
 PROJECT_ENTITY_TYPES = frozenset({
     "atlas_entity",
@@ -63,13 +74,14 @@ def validate_project_link_source(source):
 
 
 def db_connect():
+    require_sqlite_backend(CFG, "db_connect")
     # WAL mode lets history/permalink reads proceed while active runs are still
     # being written, which keeps the UI responsive under load.
-    conn = sqlite3.connect(DB_PATH, timeout=10)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    return conn
+    return connect_sqlite(DB_PATH, timeout=10)
+
+
+def _json_column_sql(default: str | None = None) -> str:
+    return configured_database_dialect(CFG).json_column_definition(default)
 
 
 @contextmanager
@@ -130,10 +142,10 @@ def _create_schema(conn):
             created TEXT NOT NULL
         )
     """)
-    conn.execute("""
+    conn.execute(f"""
         CREATE TABLE IF NOT EXISTS session_preferences (
             session_id  TEXT PRIMARY KEY,
-            preferences TEXT NOT NULL,
+            preferences {_json_column_sql()},
             updated     TEXT NOT NULL
         )
     """)
@@ -153,14 +165,14 @@ def _create_schema(conn):
             PRIMARY KEY (session_id, name)
         )
     """)
-    conn.execute("""
+    conn.execute(f"""
         CREATE TABLE IF NOT EXISTS user_workflows (
             id          TEXT PRIMARY KEY,
             session_id  TEXT NOT NULL,
             title       TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '',
-            inputs      TEXT NOT NULL DEFAULT '[]',
-            steps       TEXT NOT NULL DEFAULT '[]',
+            inputs      {_json_column_sql("[]")},
+            steps       {_json_column_sql("[]")},
             created     TEXT NOT NULL,
             updated     TEXT NOT NULL
         )
@@ -211,7 +223,7 @@ def _create_project_workspace_schema(conn):
             UNIQUE (session_id, slug)
         )
     """)
-    conn.execute("""
+    conn.execute(f"""
         CREATE TABLE IF NOT EXISTS project_links (
             id            TEXT PRIMARY KEY,
             project_id    TEXT NOT NULL,
@@ -220,7 +232,7 @@ def _create_project_workspace_schema(conn):
             source        TEXT NOT NULL DEFAULT 'manual',
             confidence    REAL NOT NULL DEFAULT 1.0,
             review_state  TEXT NOT NULL DEFAULT 'confirmed',
-            source_detail TEXT NOT NULL DEFAULT '{}',
+            source_detail {_json_column_sql("{}")},
             updated       TEXT NOT NULL DEFAULT '',
             created       TEXT NOT NULL,
             UNIQUE (project_id, entity_type, entity_id)
@@ -250,7 +262,7 @@ def _create_project_workspace_schema(conn):
             PRIMARY KEY (entity_id, run_id)
         )
     """)
-    conn.execute("""
+    conn.execute(f"""
         CREATE TABLE IF NOT EXISTS entity_intel_snapshots (
             id          TEXT PRIMARY KEY,
             session_id  TEXT NOT NULL,
@@ -258,7 +270,7 @@ def _create_project_workspace_schema(conn):
             provider    TEXT NOT NULL,
             status      TEXT NOT NULL DEFAULT '',
             summary     TEXT NOT NULL DEFAULT '',
-            data_json   TEXT NOT NULL DEFAULT '{}',
+            data_json   {_json_column_sql("{}")},
             fetched_at  TEXT NOT NULL,
             expires_at  TEXT NOT NULL DEFAULT '',
             UNIQUE (entity_id, provider)
@@ -342,7 +354,7 @@ def _create_project_workspace_schema(conn):
             UNIQUE (session_id, entity_type, entity_id)
         )
     """)
-    conn.execute("""
+    conn.execute(f"""
         CREATE TABLE IF NOT EXISTS evidence_packages (
             id                TEXT PRIMARY KEY,
             session_id        TEXT NOT NULL,
@@ -351,7 +363,7 @@ def _create_project_workspace_schema(conn):
             description       TEXT NOT NULL DEFAULT '',
             redaction_mode    TEXT NOT NULL DEFAULT 'redacted',
             include_artifacts INTEGER NOT NULL DEFAULT 0,
-            manifest          TEXT NOT NULL DEFAULT '{}',
+            manifest          {_json_column_sql("{}")},
             status            TEXT NOT NULL DEFAULT 'draft',
             created           TEXT NOT NULL,
             updated           TEXT NOT NULL
@@ -579,7 +591,7 @@ def _create_fts_schema(conn):
                 tokenize='trigram'
             )
         """)
-    except sqlite3.OperationalError:
+    except SQLiteOperationalError:
         conn.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS runs_fts USING fts5(
                 command, output_search_text,
@@ -610,11 +622,8 @@ def _drop_legacy_project_entity_tables(conn):
     now the source of truth for project targets and finding triage.
     """
     try:
-        columns = {
-            row["name"] if isinstance(row, sqlite3.Row) else row[1]
-            for row in conn.execute("PRAGMA table_info('findings')").fetchall()
-        }
-    except sqlite3.OperationalError:
+        columns = sqlite_table_columns(conn, "findings")
+    except SQLiteOperationalError:
         columns = set()
     if columns and {"signature_hash", "last_seen_at", "run_id"}.issubset(columns):
         return
@@ -628,12 +637,12 @@ def _drop_legacy_project_entity_tables(conn):
     ):
         try:
             conn.execute(f"DROP INDEX IF EXISTS {index_name}")
-        except sqlite3.OperationalError:
+        except SQLiteOperationalError:
             pass
     for table_name in ("finding_targets", "project_targets", "findings"):
         try:
             conn.execute(f"DROP TABLE IF EXISTS {table_name}")
-        except sqlite3.OperationalError:
+        except SQLiteOperationalError:
             pass
 
 
@@ -641,7 +650,7 @@ def _migrate_schema(conn):
     """Apply one-time schema migrations for databases from older versions."""
     try:
         conn.execute("ALTER TABLE runs ADD COLUMN session_id TEXT NOT NULL DEFAULT ''")
-    except sqlite3.OperationalError:
+    except SQLiteOperationalError:
         pass  # Column already exists
     for stmt in (
         "ALTER TABLE runs ADD COLUMN run_kind TEXT NOT NULL DEFAULT 'external'",
@@ -654,7 +663,7 @@ def _migrate_schema(conn):
     ):
         try:
             conn.execute(stmt)
-        except sqlite3.OperationalError:
+        except SQLiteOperationalError:
             pass
 
     try:
@@ -674,7 +683,7 @@ def _migrate_schema(conn):
                 f"IN ({placeholders})",
                 [RUN_KIND_BUILTIN, *builtin_roots],
             )
-    except sqlite3.OperationalError:
+    except SQLiteOperationalError:
         pass
 
     try:
@@ -683,7 +692,7 @@ def _migrate_schema(conn):
                SET output_preview = output
              WHERE output_preview IS NULL AND output IS NOT NULL
         """)
-    except sqlite3.OperationalError:
+    except SQLiteOperationalError:
         pass
 
     # session_tokens table — added in v1.5
@@ -694,18 +703,18 @@ def _migrate_schema(conn):
                 created TEXT NOT NULL
             )
         """)
-    except sqlite3.OperationalError:
+    except SQLiteOperationalError:
         pass
 
     try:
-        conn.execute("""
+        conn.execute(f"""
             CREATE TABLE IF NOT EXISTS session_preferences (
                 session_id  TEXT PRIMARY KEY,
-                preferences TEXT NOT NULL,
+                preferences {_json_column_sql()},
                 updated     TEXT NOT NULL
             )
         """)
-    except sqlite3.OperationalError:
+    except SQLiteOperationalError:
         pass
 
     # starred_commands table — per-session command stars, keyed by session_id
@@ -717,7 +726,7 @@ def _migrate_schema(conn):
                 PRIMARY KEY (session_id, command)
             )
         """)
-    except sqlite3.OperationalError:
+    except SQLiteOperationalError:
         pass
 
     try:
@@ -730,23 +739,23 @@ def _migrate_schema(conn):
                 PRIMARY KEY (session_id, name)
             )
         """)
-    except sqlite3.OperationalError:
+    except SQLiteOperationalError:
         pass
 
     try:
-        conn.execute("""
+        conn.execute(f"""
             CREATE TABLE IF NOT EXISTS user_workflows (
                 id          TEXT PRIMARY KEY,
                 session_id  TEXT NOT NULL,
                 title       TEXT NOT NULL,
                 description TEXT NOT NULL DEFAULT '',
-                inputs      TEXT NOT NULL DEFAULT '[]',
-                steps       TEXT NOT NULL DEFAULT '[]',
+                inputs      {_json_column_sql("[]")},
+                steps       {_json_column_sql("[]")},
                 created     TEXT NOT NULL,
                 updated     TEXT NOT NULL
             )
         """)
-    except sqlite3.OperationalError:
+    except SQLiteOperationalError:
         pass
 
     try:
@@ -760,13 +769,10 @@ def _migrate_schema(conn):
                 PRIMARY KEY (session_id, kind, value)
             )
         """)
-    except sqlite3.OperationalError:
+    except SQLiteOperationalError:
         pass
     try:
-        old_recent_domains = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'recent_domains'"
-        ).fetchone()
-        if old_recent_domains:
+        if sqlite_table_exists(conn, "recent_domains"):
             conn.execute(
                 "INSERT INTO recent_values (session_id, kind, value, last_used, use_count) "
                 "SELECT session_id, 'domain', domain, last_used, use_count FROM recent_domains "
@@ -779,32 +785,32 @@ def _migrate_schema(conn):
                 "use_count = recent_values.use_count + excluded.use_count"
             )
             conn.execute("DROP TABLE recent_domains")
-    except sqlite3.OperationalError:
+    except SQLiteOperationalError:
         pass
 
     try:
         _create_secrets_schema(conn)
-    except sqlite3.OperationalError:
+    except SQLiteOperationalError:
         pass
 
     _drop_legacy_project_entity_tables(conn)
     try:
         _create_project_workspace_schema(conn)
-    except sqlite3.OperationalError:
+    except SQLiteOperationalError:
         pass
     for stmt in (
         "ALTER TABLE project_links ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0",
         "ALTER TABLE project_links ADD COLUMN review_state TEXT NOT NULL DEFAULT 'confirmed'",
-        "ALTER TABLE project_links ADD COLUMN source_detail TEXT NOT NULL DEFAULT '{}'",
+        f"ALTER TABLE project_links ADD COLUMN source_detail {_json_column_sql('{}')}",
         "ALTER TABLE project_links ADD COLUMN updated TEXT NOT NULL DEFAULT ''",
     ):
         try:
             conn.execute(stmt)
-        except sqlite3.OperationalError:
+        except SQLiteOperationalError:
             pass
     try:
         conn.execute("ALTER TABLE run_file_artifacts ADD COLUMN content_sha256 TEXT NOT NULL DEFAULT ''")
-    except sqlite3.OperationalError:
+    except SQLiteOperationalError:
         pass
 
     # output_search_text column + FTS rebuild — added in v1.6
@@ -812,7 +818,7 @@ def _migrate_schema(conn):
     try:
         conn.execute("ALTER TABLE runs ADD COLUMN output_search_text TEXT")
         fts_needs_rebuild = True
-    except sqlite3.OperationalError:
+    except SQLiteOperationalError:
         pass  # Column already exists
     if fts_needs_rebuild:
         _populate_output_search_text(conn)
@@ -890,6 +896,10 @@ def delete_run_artifacts(conn, run_ids):
         f"SELECT rel_path FROM run_output_artifacts WHERE run_id IN ({placeholders})",  # nosec
         ids,
     ).fetchall()
+    search_text_rows = conn.execute(
+        f"SELECT output_search_text FROM runs WHERE id IN ({placeholders})",  # nosec
+        ids,
+    ).fetchall()
     file_artifact_rows = conn.execute(
         f"SELECT id FROM run_file_artifacts WHERE run_id IN ({placeholders})",  # nosec
         ids,
@@ -952,6 +962,8 @@ def delete_run_artifacts(conn, run_ids):
     )
     for row in rows:
         delete_artifact_file(row["rel_path"])
+    for row in search_text_rows:
+        delete_text_body(row["output_search_text"])
 
 
 def delete_snapshot_metadata(conn, snapshot_ids):
@@ -960,6 +972,10 @@ def delete_snapshot_metadata(conn, snapshot_ids):
         return
 
     placeholders = ",".join("?" for _ in ids)
+    snapshot_rows = conn.execute(
+        f"SELECT content FROM snapshots WHERE id IN ({placeholders})",  # nosec
+        ids,
+    ).fetchall()
     conn.execute(
         "DELETE FROM project_links WHERE entity_type = 'snapshot' "  # nosec
         f"AND entity_id IN ({placeholders})",
@@ -970,6 +986,8 @@ def delete_snapshot_metadata(conn, snapshot_ids):
         f"AND entity_id IN ({placeholders})",
         ids,
     )
+    for row in snapshot_rows:
+        delete_text_body(row["content"])
     conn.execute(
         "DELETE FROM entity_notes WHERE entity_type = 'snapshot' "  # nosec
         f"AND entity_id IN ({placeholders})",

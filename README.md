@@ -53,7 +53,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Security and operations** — registry-backed command policy with deny-prefix lists for loopback and path blocking, shell metacharacter blocking, Redis-backed rate limiting and PID tracking, structured logging with `text` and `gelf` format support, an IP-gated `/diag` page for live operator checks, and an IP-gated `/metrics` endpoint for Prometheus/Grafana monitoring
 - **Pre-installed security tooling** — nmap, rustscan, naabu, masscan, nuclei, ffuf, gobuster, katana, amass, wafw00f, sslscan, sslyze, openssl, and more, all sandboxed under a dedicated `scanner` user with enforced allowlists and the full [SecLists](https://github.com/danielmiessler/SecLists) collection pre-installed at `/usr/share/wordlists/seclists/`; the built-in `wordlist` command and typed autocomplete catalog show high-signal SecLists entries without dumping the whole corpus into suggestions
 - **Operator customization** — external-tool command metadata and runtime tweaks in `conf/commands.yaml`, custom FAQ entries in `conf/faq.yaml`, and welcome animation settings in `conf/welcome.yaml`, all reloaded without a server restart where the app supports live reload
-- **Configurable deployment** — Docker-first runtime, non-Docker local mode, YAML-driven config and theme overlays, SQLite persistence for history, previews, snapshots, and artifacts, and configurable retention pruning via `permalink_retention_days`
+- **Configurable deployment** — Docker-first runtime, non-Docker local mode, YAML-driven config and theme overlays, SQLite persistence for history, previews, snapshots, and artifacts, optional large-body offload under `data_dir/body-store`, and configurable retention pruning via `permalink_retention_days`
 
 See [FEATURES.md](FEATURES.md) for the full grouped capability reference.
 
@@ -164,10 +164,13 @@ Use [CONFIGURATION.md](CONFIGURATION.md) for the full operator reference, includ
 - every `config.yaml` key and default value
 - `*.local.*` overlay behavior
 - config reload behavior
-- `.env` variables such as `APP_PORT`, `WORKSPACE_ROOT`, `WEB_CONCURRENCY`, `WEB_THREADS`, and `DOCKER_GELF_ADDRESS`
+- `.env` variables such as `APP_PORT`, `WORKSPACE_ROOT`, `WEB_CONCURRENCY`, `WEB_THREADS`, `DATABASE_BACKEND`, `DATABASE_URL`, and `DOCKER_GELF_ADDRESS`
+- switching between SQLite and Postgres, including Compose profiles, `DATABASE_URL`, and `.env` versus `config.local.yaml` precedence
 - `docker-compose.yml` and `examples/docker-compose.prod.yml`
 - Files/workspace storage recipes
 - production host tuning notes
+
+SQLite is the default backend. If you're moving an existing install to Postgres, read [CONFIGURATION.md](CONFIGURATION.md#database-backend-selection) first, then use [docs/postgres-migration.md](docs/postgres-migration.md) for the offline migration workflow.
 
 Theme authoring details stay in [THEME.md](THEME.md), and command registry integration details stay in [docs/external-command-integrations.md](docs/external-command-integrations.md).
 
@@ -380,6 +383,8 @@ To prevent commands from writing to either path directly, the app blocks any com
 - [TODO.md](TODO.md) - Open follow-ups, research notes, known issues, and future ideas
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - External command registry, rewrite, environment, Files, and smoke-test contracts
+- [docs/postgres-migration.md](docs/postgres-migration.md) - Offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [tests/README.md](tests/README.md) - Detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory
 
@@ -459,6 +464,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── core/
 │   │   ├── __init__.py         # Core helper package marker
 │   │   ├── database.py         # SQLite connection, schema init, retention pruning
+│   │   ├── database_backend.py # Database backend enum, dialect helpers, and SQLite diagnostics boundary
 │   │   ├── helpers.py          # Trusted-proxy IP resolver, session-ID extraction, and shared request helpers
 │   │   ├── logging_setup.py    # Structured logging formatters and logger configuration
 │   │   ├── output_signals.py   # Server-side output signal and entity classifier
@@ -559,6 +565,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── session/
 │   │   │   ├── __init__.py     # Session service package marker
 │   │   │   └── variables.py    # Per-session command-variable storage and expansion helpers
+│   │   ├── storage/
+│   │   │   ├── __init__.py     # Shared file-backed storage package marker
+│   │   │   └── body_store.py   # Compressed large-body offload helpers for DB text columns
 │   │   ├── workflows/
 │   │   │   ├── __init__.py     # Workflow service package marker
 │   │   │   ├── catalog.py      # Built-in/configured workflow catalog loading and normalization helpers
@@ -729,9 +738,11 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── docker-compose.yml
 ├── docs/
 │   ├── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
-│   └── release-drafts/
-│       ├── v2.0-merge-request.md # Draft merge-request notes for the next major release
-│       └── v2.0-release-notes.md # Draft user-facing release notes for the next major release
+│   ├── postgres-migration.md # Offline SQLite-to-Postgres cutover helper and validation workflow
+│   ├── release-drafts/
+│   │   ├── v2.0-merge-request.md # Draft merge-request notes for the next major release
+│   │   └── v2.0-release-notes.md # Draft user-facing release notes for the next major release
+│   └── storage-scaling.md      # SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 ├── entrypoint.sh               # Container startup script — fixes /data ownership, drops to appuser
 ├── examples/
 │   ├── docker-compose.prod.yml  # Optional production Docker Compose override (GELF, proxy env, external network)
@@ -755,6 +766,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── hooks/
 │   │   └── pre-commit          # Git pre-commit hook — runs all lint, security, and unit checks (activate with: git config core.hooksPath scripts/hooks)
 │   ├── lint_json.mjs           # Validates that all tracked JSON files parse cleanly — used by the lint pipeline
+│   ├── migrate_sqlite_to_postgres.py # Offline SQLite-to-Postgres cutover helper with row-count and file-reference validation
 │   ├── obs_recording.mjs       # Minimal OBS WebSocket helper used by the demo recording wrappers
 │   ├── playwright/
 │   │   ├── run_e2e_server.sh   # Starts one isolated Flask e2e server with per-worker APP_DATA_DIR state
@@ -853,6 +865,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   ├── test_logging.py     # Structured logging: formatters, configure_logging, and event coverage
     │   ├── test_metrics_endpoint.py # Prometheus /metrics gate, label, bucket, and runtime-gauge coverage
     │   ├── test_output_search.py # SQLite FTS history-search coverage and fallback behavior
+    │   ├── test_postgres_backend.py # Optional Postgres backend smoke and migration-helper integration coverage
     │   ├── test_request_kill_and_commands.py # /kill, request parsing, loader edges, and built-in command resolution
     │   ├── test_routes.py      # Flask integration tests via test client (all HTTP routes)
     │   ├── test_run_history_share.py # Higher-value /runs, history, share, built-in command, and persistence flows

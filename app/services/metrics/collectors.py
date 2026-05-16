@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
-import sqlite3
 import time
 from typing import Any
 
@@ -12,6 +10,15 @@ from prometheus_client.core import GaugeMetricFamily
 
 from config import APP_VERSION, CFG
 from core import database, process
+from core.database_backend import (
+    SQLiteConnection,
+    SQLiteOperationalError,
+    sqlite_dbstat_rows,
+    sqlite_fts_orphan_count,
+    sqlite_page_stats,
+    sqlite_table_names,
+    sqlite_table_row_count,
+)
 from services.intel.registry import INTEL_PROVIDERS
 from services.metrics import build_info_labels
 from services.workspace.files import workspace_root, workspace_settings
@@ -19,7 +26,6 @@ from services.workspace.files import workspace_root, workspace_settings
 
 _REDIS_SCAN_KEY_CAP = 2000
 _REDIS_PREFIXES = ("runstream", "proc", "procmeta", "sessionprocs", "intel")
-_SQLITE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -36,48 +42,32 @@ def _db_file_size(path: str) -> int:
         return 0
 
 
-def _table_names(conn: sqlite3.Connection) -> list[str]:
-    rows = conn.execute(
-        "SELECT name FROM sqlite_schema "
-        "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' "
-        "ORDER BY name"
-    ).fetchall()
-    return [str(row["name"]) for row in rows]
+def _table_names(conn: SQLiteConnection) -> list[str]:
+    return sqlite_table_names(conn)
 
 
-def _count_rows(conn: sqlite3.Connection, table: str) -> int:
-    if not _SQLITE_IDENTIFIER_RE.fullmatch(table):
-        return 0
-    quoted = '"' + table.replace('"', '""') + '"'
-    row = conn.execute(f"SELECT COUNT(*) AS count FROM {quoted}").fetchone()  # nosec B608
-    return _safe_int(row["count"] if row else 0)
+def _count_rows(conn: SQLiteConnection, table: str) -> int:
+    return sqlite_table_row_count(conn, table)
 
 
-def _allocated_bytes(conn: sqlite3.Connection) -> dict[str, int]:
+def _allocated_bytes(conn: SQLiteConnection) -> dict[str, int]:
     try:
-        rows = conn.execute(
-            "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY name"
-        ).fetchall()
-    except sqlite3.OperationalError:
+        rows = sqlite_dbstat_rows(conn)
+    except SQLiteOperationalError:
         return {}
-    return {str(row["name"]): _safe_int(row["bytes"]) for row in rows}
+    return {str(row["name"]): _safe_int(row["allocated"]) for row in rows}
 
 
-def _db_freelist_bytes(conn: sqlite3.Connection) -> int:
-    page_size = _safe_int(conn.execute("PRAGMA page_size").fetchone()[0])
-    freelist = _safe_int(conn.execute("PRAGMA freelist_count").fetchone()[0])
-    return page_size * freelist
+def _db_freelist_bytes(conn: SQLiteConnection) -> int:
+    stats = sqlite_page_stats(conn)
+    return _safe_int(stats["page_size"]) * _safe_int(stats["freelist_count"])
 
 
-def _fts_orphans(conn: sqlite3.Connection) -> int:
+def _fts_orphans(conn: SQLiteConnection) -> int:
     try:
-        row = conn.execute(
-            "SELECT COUNT(*) AS count FROM runs_fts "
-            "WHERE rowid NOT IN (SELECT rowid FROM runs)"
-        ).fetchone()
-    except sqlite3.OperationalError:
+        return sqlite_fts_orphan_count(conn)
+    except SQLiteOperationalError:
         return 0
-    return _safe_int(row["count"] if row else 0)
 
 
 def _workspace_usage() -> tuple[int, int]:
@@ -135,10 +125,10 @@ def _redis_stream_length_sample(client: Any, prefix: str) -> int:
             return total
 
 
-def _secret_envs_with_rows(conn: sqlite3.Connection) -> set[str]:
+def _secret_envs_with_rows(conn: SQLiteConnection) -> set[str]:
     try:
         rows = conn.execute("SELECT name, consumer_envs FROM secrets").fetchall()
-    except sqlite3.OperationalError:
+    except SQLiteOperationalError:
         return set()
     envs = set()
     for row in rows:
@@ -262,34 +252,34 @@ class RuntimeStateCollector:
         yield snapshots
         yield intel_missing
 
-    def _add_atlas(self, conn: sqlite3.Connection, metric: GaugeMetricFamily) -> None:
+    def _add_atlas(self, conn: SQLiteConnection, metric: GaugeMetricFamily) -> None:
         try:
             rows = conn.execute("SELECT type, COUNT(*) AS count FROM entities GROUP BY type").fetchall()
-        except sqlite3.OperationalError:
+        except SQLiteOperationalError:
             rows = []
         for row in rows:
             metric.add_metric([str(row["type"] or "unknown")], _safe_int(row["count"]))
 
-    def _add_findings(self, conn: sqlite3.Connection, metric: GaugeMetricFamily) -> None:
+    def _add_findings(self, conn: SQLiteConnection, metric: GaugeMetricFamily) -> None:
         try:
             rows = conn.execute(
                 "SELECT COALESCE(NULLIF(severity, ''), 'unknown') AS severity, "
                 "COALESCE(NULLIF(status, ''), 'new') AS status, COUNT(*) AS count "
                 "FROM findings GROUP BY severity, status"
             ).fetchall()
-        except sqlite3.OperationalError:
+        except SQLiteOperationalError:
             rows = []
         for row in rows:
             metric.add_metric([str(row["severity"]), str(row["status"])], _safe_int(row["count"]))
 
-    def _add_snapshots(self, conn: sqlite3.Connection, metric: GaugeMetricFamily) -> None:
+    def _add_snapshots(self, conn: SQLiteConnection, metric: GaugeMetricFamily) -> None:
         try:
             row = conn.execute("SELECT COUNT(*) AS count FROM snapshots").fetchone()
             metric.add_metric([], _safe_int(row["count"] if row else 0))
-        except sqlite3.OperationalError:
+        except SQLiteOperationalError:
             metric.add_metric([], 0)
 
-    def _add_intel_missing(self, conn: sqlite3.Connection, metric: GaugeMetricFamily) -> None:
+    def _add_intel_missing(self, conn: SQLiteConnection, metric: GaugeMetricFamily) -> None:
         configured_envs = _secret_envs_with_rows(conn)
         for provider in INTEL_PROVIDERS.values():
             secret_env = str(provider.secret_env or "")

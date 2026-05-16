@@ -65,6 +65,7 @@ from services.runs.broker import (
 )
 from services.runs.output_store import RunOutputCapture, load_full_output_entries
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, run_kind_for_cmd_type
+from services.storage.body_store import inline_threshold_bytes, maybe_store_text_body
 from services.atlas.materializer import materialize_run_entities
 from services.secrets.audit import emit_secret_event
 from services.secrets.storage import InvalidSecretName, get_secret_value_for_env
@@ -297,6 +298,12 @@ def _save_completed_run(
                 search_text = _extract_output_search_text(preview_lines)
         else:
             search_text = _extract_output_search_text(preview_lines)
+        stored_search_text = maybe_store_text_body(
+            "run_search",
+            run_id,
+            search_text,
+            inline_threshold_bytes(CFG.get("runs_search_text_inline_max_bytes")),
+        )
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO runs "
@@ -320,7 +327,7 @@ def _save_completed_run(
                     capture.output_line_count,
                     int(capture.full_output_available),
                     int(capture.full_output_truncated),
-                    search_text,
+                    stored_search_text,
                 )
             )
             if capture.full_output_available and capture.artifact_rel_path:
@@ -585,6 +592,12 @@ def save_client_side_run():
     started = datetime.now(timezone.utc)
     finished = datetime.now(timezone.utc)
     output_search_text = _extract_output_search_text(lines)
+    stored_output_search_text = maybe_store_text_body(
+        "run_search",
+        run_id,
+        output_search_text,
+        inline_threshold_bytes(CFG.get("runs_search_text_inline_max_bytes")),
+    )
 
     log.info("RUN_START", extra={
         "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
@@ -623,7 +636,7 @@ def save_client_side_run():
                 raw_line_count,
                 0,
                 0,
-                output_search_text,
+                stored_output_search_text,
             ),
         )
         conn.commit()

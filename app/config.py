@@ -71,6 +71,19 @@ def _coerce_mb_value(value):
     return None
 
 
+def _coerce_int_value(value, default=0, *, minimum=0):
+    if value is None or isinstance(value, bool):
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        try:
+            parsed = int(float(str(value).strip()))
+        except (TypeError, ValueError):
+            return default
+    return max(minimum, parsed)
+
+
 def load_config(conf_dir=None):
     """Load config.yaml plus optional config.local.yaml overlays.
 
@@ -86,6 +99,10 @@ def load_config(conf_dir=None):
         "history_panel_limit":        50,
         "recent_commands_limit":      50,
         "data_dir":                   "",
+        "database_backend":           "sqlite",
+        "database_url":               "",
+        "database_pool_min":          1,
+        "database_pool_max":          5,
         "permalink_retention_days":   365,
         "log_level":                  "INFO",
         "log_format":                 "text",
@@ -174,6 +191,9 @@ def load_config(conf_dir=None):
         "output_preview_max_mb":      1,
         "persist_full_run_output":    True,
         "full_output_max_mb":         5,
+        "runs_search_text_inline_max_bytes": 0,
+        "snapshots_inline_max_bytes": 0,
+        "intel_payload_inline_max_bytes": 0,
         "workspace_enabled":          False,
         "workspace_backend":          "tmpfs",
         # Intentional server-side workspace root default. Workspaces are
@@ -231,6 +251,22 @@ def load_config(conf_dir=None):
         conf_path = Path(__file__).resolve().parent / "conf"
     defaults.update(_load_yaml_config(conf_path / "config.yaml"))
     defaults.update(_load_yaml_config_optional(conf_path / "config.local.yaml"))
+    env_database_backend = str(os.environ.get("DATABASE_BACKEND") or "").strip()
+    if env_database_backend:
+        defaults["database_backend"] = env_database_backend
+    env_database_url = str(os.environ.get("DATABASE_URL") or "").strip()
+    if env_database_url:
+        defaults["database_url"] = env_database_url
+    env_database_pool_min = str(os.environ.get("DATABASE_POOL_MIN") or "").strip()
+    if env_database_pool_min:
+        defaults["database_pool_min"] = env_database_pool_min
+    env_database_pool_max = str(os.environ.get("DATABASE_POOL_MAX") or "").strip()
+    if env_database_pool_max:
+        defaults["database_pool_max"] = env_database_pool_max
+    defaults["database_pool_min"] = _coerce_int_value(defaults.get("database_pool_min"), 1, minimum=0)
+    defaults["database_pool_max"] = _coerce_int_value(defaults.get("database_pool_max"), 5, minimum=1)
+    if defaults["database_pool_max"] < defaults["database_pool_min"]:
+        defaults["database_pool_max"] = defaults["database_pool_min"] or 1
     legacy_full_output_max_bytes = defaults.pop("full_output_max_bytes", None)
     full_output_max_mb = _coerce_mb_value(defaults.get("full_output_max_mb"))
     if full_output_max_mb is None and legacy_full_output_max_bytes is not None:

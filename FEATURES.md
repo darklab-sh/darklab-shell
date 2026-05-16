@@ -1057,12 +1057,13 @@ wget -q -O /dev/null --server-response https://example.com
 
 - Run history, preview metadata, full-output artifact metadata, and tab snapshots all live under `./data`.
 - SQLite uses `./data/history.db`; persisted full-output artifacts are written as compressed files under `./data/run-output/`.
+- Optional body-store thresholds can move large run search text, tab snapshot bodies, and Atlas intel payloads into compressed files under `./data/body-store/` while the app keeps reading them normally.
 - The `./data` directory is created automatically on first run and persists across container restarts and recreations.
 - On startup, runs, run-output artifact metadata, artifact files, and snapshots older than `permalink_retention_days` are pruned together.
 
 **Limits:** `./data` is the only writable path in an otherwise read-only container. Setting `permalink_retention_days: 0` disables pruning entirely (unlimited retention). Never write to `./data/history.db` from the host — host/container SQLite version mismatches can corrupt the FTS5 btree.
 
-**Configuration:** `permalink_retention_days` in `config.yaml` (default 365; `0` disables pruning).
+**Configuration:** `permalink_retention_days` in `config.yaml` (default 365; `0` disables pruning). `runs_search_text_inline_max_bytes`, `snapshots_inline_max_bytes`, and `intel_payload_inline_max_bytes` default to `0`, which keeps those bodies inline.
 
 **Related files:** `app/core/database.py` (schema, migrations, FTS5 wiring, and startup pruning), `app/services/runs/output_store.py` (compressed artifact writer + reader), `app/blueprints/history.py` (reads + writes through the persistence layer). See [ARCHITECTURE.md](ARCHITECTURE.md) for full schema.
 
@@ -1248,5 +1249,7 @@ The repo also includes a starter Grafana dashboard at `examples/grafana/darklab-
 - [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
+- [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

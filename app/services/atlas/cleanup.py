@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.storage.body_store import delete_text_body
+
 
 def _unique_ids(values: list[str] | tuple[str, ...] | set[str] | None) -> list[str]:
     result: list[str] = []
@@ -275,10 +277,16 @@ def delete_atlas_entities(conn, session_id: str, entity_ids: list[str] | tuple[s
         f"AND entity_id IN ({owned_placeholders})",
         owned,
     )
+    intel_rows = conn.execute(
+        f"SELECT data_json FROM entity_intel_snapshots WHERE session_id = ? AND entity_id IN ({owned_placeholders})",  # nosec
+        [session_id, *owned],
+    ).fetchall()
     conn.execute(
         f"DELETE FROM entity_intel_snapshots WHERE session_id = ? AND entity_id IN ({owned_placeholders})",  # nosec
         [session_id, *owned],
     )
+    for row in intel_rows:
+        delete_text_body(row["data_json"])
     conn.execute(
         f"DELETE FROM entity_run_links WHERE entity_id IN ({owned_placeholders})",  # nosec
         owned,

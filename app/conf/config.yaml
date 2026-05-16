@@ -53,6 +53,21 @@
 # directory to be writable.
 # Server default if unset: auto (/data if writable, otherwise /tmp)
 # data_dir: /data
+#
+# Database backend. SQLite is the default for local and single-user installs.
+# The Postgres pool/dependency/config surface is available for the production
+# backend track, but the main app query path stays SQLite until the migration
+# and query-portability phases are complete.
+# Server default if unset: sqlite
+# database_backend: sqlite
+#
+# Postgres DSN and pool bounds. These are ignored while database_backend is
+# sqlite. DATABASE_URL, DATABASE_POOL_MIN, and DATABASE_POOL_MAX environment
+# variables can also set these values for Compose-based deployments.
+# Server defaults if unset: "", 1, 5
+# database_url: postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell
+# database_pool_min: 1
+# database_pool_max: 5
 
 # Enable the built-in basic redaction model for snapshot sharing. When enabled,
 # the app applies a
@@ -89,6 +104,14 @@
 # deleted from the database on startup. Set to 0 for unlimited retention.
 # Server default if unset: 365
 # permalink_retention_days: 365
+
+# Optional filesystem offload thresholds for large text bodies stored under
+# data_dir/body-store. Set to 0 to keep the current all-inline database shape.
+# Values accept bytes or strings like 512kb / 2mb.
+# Server defaults if unset: 0
+# runs_search_text_inline_max_bytes: 0
+# snapshots_inline_max_bytes: 0
+# intel_payload_inline_max_bytes: 0
 
 # ── Per-session Workspace Storage ────────────────────────────────────────────
 #

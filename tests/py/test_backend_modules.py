@@ -15,6 +15,7 @@ Run with: pytest tests/ (from the repo root)
 import errno
 import base64
 import gzip
+import hashlib
 import importlib.util
 import json
 import os
@@ -23,6 +24,7 @@ import re
 import shlex
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest.mock as mock
@@ -37,6 +39,7 @@ import core.process as process
 import services.pty.service as pty_service
 import services.runs.broker as run_broker
 import core.database as database
+import core.database_backend as database_backend
 import services.projects.workspace as project_workspace
 import app as shell_app
 import config as app_config
@@ -81,6 +84,7 @@ from services.workspace.files import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SEED_HISTORY_PATH = REPO_ROOT / "scripts" / "seed_history.py"
+MIGRATE_SQLITE_TO_POSTGRES_PATH = REPO_ROOT / "scripts" / "migrate_sqlite_to_postgres.py"
 
 
 def _load_seed_history_module():
@@ -88,6 +92,20 @@ def _load_seed_history_module():
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_postgres_migration_module():
+    spec = importlib.util.spec_from_file_location(
+        "migrate_sqlite_to_postgres",
+        MIGRATE_SQLITE_TO_POSTGRES_PATH,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -145,6 +163,20 @@ class TestSplitChainedCommands:
 
 
 class TestLoadConfig:
+    def test_database_env_overrides_yaml_backend_settings(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {
+            "DATABASE_BACKEND": "postgres",
+            "DATABASE_URL": "postgresql://darklab:secret@postgres:5432/darklab_shell",
+            "DATABASE_POOL_MIN": "2",
+            "DATABASE_POOL_MAX": "4",
+        }):
+            cfg = app_config.load_config(tmp)
+
+        assert cfg["database_backend"] == "postgres"
+        assert cfg["database_url"] == "postgresql://darklab:secret@postgres:5432/darklab_shell"
+        assert cfg["database_pool_min"] == 2
+        assert cfg["database_pool_max"] == 4
+
     def test_local_config_overrides_base_config_without_replacing_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:
             base_path = os.path.join(tmp, "config.yaml")
@@ -182,6 +214,10 @@ class TestLoadConfig:
         assert cfg["rate_limit_per_minute"] == 99
         assert cfg["trusted_proxy_cidrs"] == ["127.0.0.1/32", "::1/128"]
         assert cfg["data_dir"] == ""
+        assert cfg["database_backend"] == "sqlite"
+        assert cfg["database_url"] == ""
+        assert cfg["database_pool_min"] == 1
+        assert cfg["database_pool_max"] == 5
         assert cfg["workspace_enabled"] is False
         assert cfg["workspace_backend"] == "tmpfs"
         assert cfg["workspace_quota_mb"] == 50
@@ -322,6 +358,230 @@ class TestLoadConfig:
         assert args == ("WORKSPACE_ROOT_MISMATCH",)
         assert kwargs["extra"]["workspace_root_env"].endswith("/tmp/env-workspaces")
         assert kwargs["extra"]["workspace_root_config"].endswith("/tmp/app-workspaces")
+
+
+class TestDatabaseBackend:
+    def test_backend_defaults_to_sqlite_and_exposes_sqlite_dialect(self):
+        assert database_backend.configured_database_backend({}) == database_backend.DatabaseBackend.SQLITE
+        dialect = database_backend.configured_database_dialect({"database_backend": "sqlite"})
+
+        assert dialect.backend == database_backend.DatabaseBackend.SQLITE
+        assert dialect.placeholder == "?"
+        assert dialect.json_column == "TEXT"
+        assert dialect.json_column_definition("{}") == "TEXT NOT NULL DEFAULT '{}'"
+        assert dialect.boolean_column_definition() == "INTEGER NOT NULL DEFAULT 0"
+        assert dialect.placeholders(3) == "?, ?, ?"
+
+    def test_postgres_backend_exposes_dialect_and_pool_settings(self):
+        cfg = {
+            "database_backend": "postgres",
+            "database_url": "postgresql://darklab:secret@postgres:5432/darklab_shell",
+            "database_pool_min": 2,
+            "database_pool_max": 7,
+        }
+        dialect = database_backend.configured_database_dialect(cfg)
+
+        assert database_backend.configured_database_backend(cfg) == database_backend.DatabaseBackend.POSTGRES
+        assert dialect.json_column_definition("[]") == "JSONB NOT NULL DEFAULT '[]'::jsonb"
+        assert dialect.boolean_column_definition(True) == "BOOLEAN NOT NULL DEFAULT TRUE"
+        assert dialect.placeholders(3) == "%s, %s, %s"
+        assert dialect.text_search_expr("runs.output_search_text") == "COALESCE(runs.output_search_text, '') ILIKE %s"
+        assert dialect.concat_expr("runs.command", "' '", "runs.output_search_text") == (
+            "CONCAT(runs.command, ' ', runs.output_search_text)"
+        )
+        assert database_backend.postgres_pool_settings(cfg) == (
+            "postgresql://darklab:secret@postgres:5432/darklab_shell",
+            2,
+            7,
+        )
+        with pytest.raises(database_backend.DatabaseBackendError, match="SQLite-specific SQL"):
+            database_backend.require_sqlite_backend(cfg, "db_connect")
+
+    def test_postgres_pool_uses_psycopg_pool_lazily(self, monkeypatch):
+        created = []
+        closed = []
+
+        class FakePool:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+                created.append(kwargs)
+
+            def connection(self):
+                return "connection-context"
+
+            def close(self):
+                closed.append(True)
+
+        monkeypatch.setattr(database_backend, "_load_postgres_pool_types", lambda: (FakePool, "dict_row"))
+        database_backend.close_postgres_pool()
+        try:
+            cfg = {
+                "database_url": "postgresql://darklab:secret@postgres:5432/darklab_shell",
+                "database_pool_min": 1,
+                "database_pool_max": 3,
+            }
+
+            pool = database_backend.get_postgres_pool(cfg)
+            same_pool = database_backend.get_postgres_pool(cfg)
+
+            assert pool is same_pool
+            assert database_backend.connect_postgres(cfg) == "connection-context"
+            assert created == [{
+                "conninfo": "postgresql://darklab:secret@postgres:5432/darklab_shell",
+                "min_size": 1,
+                "max_size": 3,
+                "kwargs": {"row_factory": "dict_row"},
+                "open": True,
+            }]
+        finally:
+            database_backend.close_postgres_pool()
+        assert closed == [True]
+
+    def test_postgres_requires_database_url(self):
+        with pytest.raises(database_backend.PostgresConnectionError, match="database_url"):
+            database_backend.postgres_pool_settings({"database_backend": "postgres"})
+
+    def test_postgres_identifier_quoting_and_advisory_lock_are_stable(self):
+        assert database_backend.quote_postgres_identifier('odd"name') == '"odd""name"'
+        assert database_backend.postgres_advisory_lock_id() == database_backend.postgres_advisory_lock_id()
+        with pytest.raises(ValueError):
+            database_backend.quote_postgres_identifier("")
+
+    def test_unknown_backend_is_rejected_with_supported_values(self):
+        with pytest.raises(database_backend.DatabaseBackendError, match="sqlite, postgres"):
+            database_backend.parse_database_backend("oracle")
+
+
+class TestPostgresMigrationHelper:
+    def test_discovers_app_tables_and_skips_sqlite_fts_shadow_tables(self):
+        migration = _load_postgres_migration_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "history.db"
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                conn.execute("CREATE TABLE runs (id TEXT PRIMARY KEY, command TEXT NOT NULL)")
+                conn.execute("CREATE VIRTUAL TABLE runs_fts USING fts5(command)")
+                conn.execute("INSERT INTO runs (id, command) VALUES ('run-1', 'host darklab.sh')")
+
+                tables, skipped = migration.discover_migration_tables(conn)
+            finally:
+                conn.close()
+
+        assert [table.name for table in tables] == ["runs"]
+        assert set(skipped) >= {
+            "runs_fts",
+            "runs_fts_data",
+            "runs_fts_idx",
+            "runs_fts_docsize",
+            "runs_fts_config",
+        }
+
+    def test_create_table_sql_maps_json_columns_and_primary_key(self):
+        migration = _load_postgres_migration_module()
+        table = migration.TableInfo(
+            name="entity_intel_snapshots",
+            columns=(
+                migration.ColumnInfo("id", "TEXT", True, None, 1),
+                migration.ColumnInfo("data_json", "TEXT", True, "'{}'", 0),
+                migration.ColumnInfo("fetched_at", "TEXT", True, None, 0),
+            ),
+        )
+
+        sql = migration.create_table_sql(table)
+
+        assert '"id" TEXT NOT NULL' in sql
+        assert '"data_json" JSONB NOT NULL DEFAULT \'{}\'' in sql
+        assert 'PRIMARY KEY ("id")' in sql
+
+    def test_file_validation_checks_artifacts_and_body_store_pointers(self):
+        migration = _load_postgres_migration_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifact = root / "run-output" / "run-1.txt.gz"
+            artifact.parent.mkdir(parents=True)
+            artifact.write_text("artifact", encoding="utf-8")
+
+            body = "large body"
+            digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+            body_path = root / "body-store" / "runs" / "run-1.txt.gz"
+            body_path.parent.mkdir(parents=True)
+            with gzip.open(body_path, "wt", encoding="utf-8") as handle:
+                handle.write(body)
+            pointer = json.dumps({
+                "__darklab_body_store__": 1,
+                "rel_path": "body-store/runs/run-1.txt.gz",
+                "sha256": digest,
+            })
+
+            db_path = root / "history.db"
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                conn.execute("CREATE TABLE run_output_artifacts (rel_path TEXT NOT NULL)")
+                conn.execute("CREATE TABLE runs (output_search_text TEXT)")
+                conn.execute(
+                    "INSERT INTO run_output_artifacts (rel_path) VALUES (?)",
+                    ("run-output/run-1.txt.gz",),
+                )
+                conn.execute("INSERT INTO runs (output_search_text) VALUES (?)", (pointer,))
+                conn.commit()
+
+                verified, copied, missing = migration.verify_or_copy_files(conn, root)
+            finally:
+                conn.close()
+
+        assert verified == 2
+        assert copied == 0
+        assert missing == []
+
+    def test_secret_preflight_requires_key_confirmation(self):
+        migration = _load_postgres_migration_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "history.db"
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                conn.execute(
+                    "CREATE TABLE secrets ("
+                    "session_token TEXT, name TEXT, ciphertext BLOB, nonce BLOB, "
+                    "created_at TEXT, updated_at TEXT)"
+                )
+                conn.execute(
+                    "INSERT INTO secrets VALUES ('tok', 'SHODAN_API_KEY', X'00', X'01', 'now', 'now')"
+                )
+                conn.commit()
+
+                with pytest.raises(RuntimeError, match="--confirm-secrets-key"):
+                    migration._preflight_secrets(conn, False)
+                migration._preflight_secrets(conn, True)
+            finally:
+                conn.close()
+
+    def test_dry_run_does_not_require_postgres_dependency_or_database_url(self, monkeypatch):
+        migration = _load_postgres_migration_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "history.db"
+            conn = sqlite3.connect(db_path)
+            conn.execute("CREATE TABLE runs (id TEXT PRIMARY KEY, command TEXT NOT NULL)")
+            conn.execute("INSERT INTO runs (id, command) VALUES ('run-1', 'host darklab.sh')")
+            conn.commit()
+            conn.close()
+
+            monkeypatch.setattr(migration, "_load_psycopg", mock.Mock(side_effect=AssertionError))
+            args = migration.build_parser().parse_args([
+                "--sqlite-db",
+                str(db_path),
+                "--artifact-root",
+                str(root),
+                "--dry-run",
+            ])
+
+            report = migration.migrate(args)
+
+        assert report.copied_rows == {}
+        assert report.verified_files == 0
 
 
 class TestIntelServices:
@@ -6666,6 +6926,33 @@ class TestDatabaseInit:
         }.issubset(finding_columns)
         assert {"finding_id", "run_id", "line_number", "snippet", "seen_at"}.issubset(occurrence_columns)
 
+    def test_json_bearing_schema_columns_use_sqlite_json_type(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            column_types = {
+                table_name: {
+                    row[1]: row[2]
+                    for row in conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+                }
+                for table_name in (
+                    "session_preferences",
+                    "user_workflows",
+                    "project_links",
+                    "entity_intel_snapshots",
+                    "evidence_packages",
+                )
+            }
+            conn.close()
+
+        assert column_types["session_preferences"]["preferences"] == "TEXT"
+        assert column_types["user_workflows"]["inputs"] == "TEXT"
+        assert column_types["user_workflows"]["steps"] == "TEXT"
+        assert column_types["project_links"]["source_detail"] == "TEXT"
+        assert column_types["entity_intel_snapshots"]["data_json"] == "TEXT"
+        assert column_types["evidence_packages"]["manifest"] == "TEXT"
+
     def test_materializes_run_entities_from_output_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
@@ -7137,6 +7424,38 @@ class TestDatabaseInit:
 
         assert conn.execute.call_count >= 1
         assert conn.execute.call_args_list[0].args[0] == "ALTER TABLE runs ADD COLUMN session_id TEXT NOT NULL DEFAULT ''"
+
+
+class TestBodyStore:
+    def test_large_text_round_trips_through_pointer_and_deletes_file(self):
+        from services.storage import body_store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(body_store, "DATA_DIR", tmp):
+                stored = body_store.maybe_store_text_body(
+                    "snapshot",
+                    "share-1",
+                    "line one\nline two\nline three",
+                    threshold_bytes=8,
+                    preview_chars=9,
+                )
+                pointer = body_store.stored_body_pointer(stored)
+
+                assert pointer is not None
+                assert pointer["byte_size"] == len("line one\nline two\nline three".encode("utf-8"))
+                assert pointer["preview"] == "line one\n"
+                assert os.path.exists(os.path.join(tmp, pointer["rel_path"]))
+                assert body_store.load_text_body(stored) == "line one\nline two\nline three"
+
+                body_store.delete_text_body(stored)
+                assert not os.path.exists(os.path.join(tmp, pointer["rel_path"]))
+
+    def test_inline_threshold_accepts_human_readable_byte_values(self):
+        from services.storage.body_store import inline_threshold_bytes
+
+        assert inline_threshold_bytes("2kb") == 2048
+        assert inline_threshold_bytes("1.5mb") == 1572864
+        assert inline_threshold_bytes("invalid") == 0
 
 
 class TestSessionVariables:

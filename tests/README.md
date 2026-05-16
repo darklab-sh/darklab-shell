@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,813
+- behavior tests: 2,834
 - docs/inventory meta-tests: 32
-- `pytest`: 1432 (1400 behavior + 32 meta)
+- `pytest`: 1453 (1421 behavior + 32 meta)
 - `vitest`: 1161
 - `playwright`: 252
-- total: 2,845
+- total: 2,866
 
 This document is organized in two parts:
 
@@ -94,6 +94,7 @@ Notes:
 - keep the Python virtualenv active for lint and backend debugging work
 - `Vitest` and `Playwright` use the repo-local npm dependencies; do not rely on global installs
 - most day-to-day test work does not require Docker
+- Postgres backend tests are opt-in. Set `DARKLAB_TEST_POSTGRES_DSN` or pass `--postgres-dsn` to run the Postgres smoke and migration integration tests against an isolated schema.
 - the container smoke test is slower and is meant for Dockerfile, dependency, and toolchain validation rather than the normal fast iteration loop
 
 ---
@@ -381,6 +382,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSplitChainedCommands.test_redirect_in` | Checks redirect in handling. |
 | `TestSplitChainedCommands.test_empty_parts_stripped` | Checks empty parts stripped handling. |
 | `TestSplitChainedCommands.test_empty_string_returns_empty_list` | Checks that empty string returns empty list. |
+| `TestLoadConfig.test_database_env_overrides_yaml_backend_settings` | Verifies database environment variables override YAML backend settings and pool sizes. |
 | `TestLoadConfig.test_local_config_overrides_base_config_without_replacing_defaults` | Checks that local config overrides base config without replacing defaults. |
 | `TestLoadConfig.test_share_redaction_enabled_defaults_true` | Checks that share redaction defaults enabled when omitted from config. |
 | `TestLoadConfig.test_get_share_redaction_rules_includes_builtins_and_custom_rules_when_enabled` | Checks that effective share redaction rules include the built-in baseline plus operator rules when enabled. |
@@ -390,6 +392,17 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestLoadConfig.test_resolve_data_dir_falls_back_to_tmp_when_data_is_not_writable` | Verifies that auto-detection falls back to `/tmp` when image-created `/data` is not writable. |
 | `TestLoadConfig.test_resolve_data_dir_rejects_unwritable_configured_data_dir` | Verifies that an explicit but unwritable `data_dir` fails loudly instead of silently falling back. |
 | `TestLoadConfig.test_workspace_root_env_warning_only_logs_on_mismatch` | Verifies that startup warns when `WORKSPACE_ROOT` and configured `workspace_root` diverge, without warning for matching paths. |
+| `TestDatabaseBackend.test_backend_defaults_to_sqlite_and_exposes_sqlite_dialect` | Verifies the database backend helper defaults to SQLite and exposes the current SQLite dialect shape. |
+| `TestDatabaseBackend.test_postgres_backend_exposes_dialect_and_pool_settings` | Verifies the Postgres backend exposes dialect helpers, pool settings, and the SQLite-route guard. |
+| `TestDatabaseBackend.test_postgres_pool_uses_psycopg_pool_lazily` | Verifies the Postgres pool is imported lazily, cached by pool settings, and closed cleanly. |
+| `TestDatabaseBackend.test_postgres_requires_database_url` | Verifies the Postgres adapter rejects missing `database_url` before opening a pool. |
+| `TestDatabaseBackend.test_postgres_identifier_quoting_and_advisory_lock_are_stable` | Verifies Postgres identifier quoting and advisory-lock IDs are deterministic. |
+| `TestDatabaseBackend.test_unknown_backend_is_rejected_with_supported_values` | Verifies unsupported database backend names are rejected with the accepted backend list. |
+| `TestPostgresMigrationHelper.test_discovers_app_tables_and_skips_sqlite_fts_shadow_tables` | Verifies the offline Postgres migration helper copies app tables while skipping SQLite FTS internals. |
+| `TestPostgresMigrationHelper.test_create_table_sql_maps_json_columns_and_primary_key` | Verifies migration-created Postgres tables preserve primary keys and JSON column types. |
+| `TestPostgresMigrationHelper.test_file_validation_checks_artifacts_and_body_store_pointers` | Verifies migration preflight checks run-output artifacts and body-store pointer files. |
+| `TestPostgresMigrationHelper.test_secret_preflight_requires_key_confirmation` | Verifies encrypted secret rows require explicit key-continuity confirmation before migration. |
+| `TestPostgresMigrationHelper.test_dry_run_does_not_require_postgres_dependency_or_database_url` | Verifies migration dry runs do not require Postgres dependencies or a destination DSN. |
 | `TestIntelServices.test_provider_registry_exposes_existing_provider_metadata` | Verifies the app-native intel provider registry exposes shipped provider labels, entity support, cache scopes, and secret consumers. |
 | `TestIntelServices.test_canonical_entity_normalizes_supported_values` | Verifies canonical IP, domain, URL, hash, and CVE values for external intel lookups. |
 | `TestIntelServices.test_canonical_entity_rejects_invalid_values` | Verifies unsupported or malformed intel entities fail before provider lookup. |
@@ -669,6 +682,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPermalinkErrorPage.test_no_retention_mention_when_unlimited` | Checks that no retention mention when unlimited. |
 | `TestDatabaseInit.test_creates_runs_and_snapshots_tables` | Checks that creates runs and snapshots tables. |
 | `TestDatabaseInit.test_creates_project_workspace_tables` | Verifies that project workspace relationship tables are created during database bootstrap. |
+| `TestDatabaseInit.test_json_bearing_schema_columns_use_sqlite_json_type` | Verifies JSON-bearing schema columns keep SQLite's `TEXT` storage type through the backend dialect helper. |
 | `TestDatabaseInit.test_materializes_run_entities_from_output_entries` | Verifies Atlas materialization deduplicates classified run-output entities and creates source-run links. |
 | `TestDatabaseInit.test_materializer_ignores_unclassified_raw_output_text` | Verifies Atlas materialization only reads classifier-provided entity metadata and does not rescan raw output text. |
 | `TestDatabaseInit.test_materializer_replaces_run_links_on_refinalize_and_preserves_entities` | Verifies Atlas materialization replaces stale run links on re-finalization while preserving deduped entity rows. |
@@ -684,6 +698,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_recent_runs_not_pruned` | Checks that recent runs not pruned. |
 | `TestDatabaseInit.test_legacy_runs_table_gets_session_id_column_migrated` | Checks that legacy runs table gets session id column migrated. |
 | `TestDatabaseInit.test_migrate_schema_ignores_existing_column_error` | Checks that migrate schema ignores existing column error. |
+| `TestBodyStore.test_large_text_round_trips_through_pointer_and_deletes_file` | Verifies the filesystem body store writes oversized text as a compressed pointer, reads it back, and deletes the file. |
+| `TestBodyStore.test_inline_threshold_accepts_human_readable_byte_values` | Verifies large-body offload thresholds accept byte counts plus `kb` and `mb` strings. |
 | `TestSessionVariables.test_set_list_unset_and_expand_variables` | Verifies that session command variables can be stored, listed, expanded in `$NAME` and `${NAME}` forms, and removed. |
 | `TestSessionVariables.test_rejects_invalid_names_and_undefined_references` | Verifies that invalid variable names, undefined variables, and unsupported shell-style `$...` syntax are rejected. |
 | `TestBuiltinStatus.test_includes_session_summary_counts` | Checks that the `status` built-in reports session type, run and snapshot counts, starred-command count, saved-options presence, and active-job count for the current session. |
@@ -950,6 +966,16 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestOutputSearch.test_full_output_text_beyond_preview_window_is_searchable` | Verifies that `output_search_text` can index content from beyond the capped preview window — simulates a truncated run whose full artifact text contains terms absent from `output_preview`, and asserts they are found. |
 | `TestOutputSearch.test_fts_failure_falls_back_to_command_and_output_like` | Verifies graceful degradation when the `runs_fts` table does not exist: command-text and output-only queries succeed via `LIKE` fallback and return HTTP 200. |
 
+#### `test_postgres_backend.py`
+
+Optional backend smoke and migration coverage. SQLite smoke coverage always runs; Postgres smoke and migration integration tests run only when `DARKLAB_TEST_POSTGRES_DSN` or `--postgres-dsn` points at a test Postgres database. Postgres tests create and drop isolated schemas so they do not share tables with the app schema.
+
+| Test | Description |
+| --- | --- |
+| `test_sqlite_backend_smoke_exercises_phase6_contract` | Verifies the Phase 6 backend smoke contract on SQLite: run insert/finalize, search, Atlas entity links, project links, intel JSON, and snapshot insert. |
+| `test_postgres_backend_smoke_exercises_phase6_contract` | Verifies the same backend smoke contract on Postgres when an opt-in test DSN is configured. |
+| `test_migration_helper_copies_fixture_into_isolated_postgres_schema` | Builds a SQLite fixture with runs, artifacts, body-store pointers, secrets metadata, JSON columns, and search text, migrates it into an isolated Postgres schema, then verifies row counts, JSON values, file pointers, and search parity. |
+
 #### `test_request_kill_and_commands.py`
 
 | Test | Description |
@@ -1181,6 +1207,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestAtlasRoutes.test_bulk_delete_atlas_entities_and_findings` | Verifies Atlas bulk delete routes remove selected entities and findings while reporting missing ids. |
 | `TestAtlasRoutes.test_atlas_read_and_write_routes_are_session_scoped` | Verifies Atlas read, write, refresh, delete, and project-link routes do not reveal or mutate another session's Atlas data. |
 | `TestAtlasRoutes.test_refresh_intel_persists_provider_snapshot` | Verifies Atlas intel refresh stores provider snapshots for the selected session-owned entity. |
+| `TestAtlasRoutes.test_refresh_intel_can_offload_provider_payload_and_restore_detail` | Verifies oversized Atlas intel payloads can be offloaded, restored in entity detail, and cleaned up with the entity. |
 | `TestAtlasRoutes.test_findings_tab_lists_and_bulk_updates_review_state` | Verifies the Atlas Findings queue lists deduped findings and bulk-updates review state for selected findings. |
 | `TestAtlasRoutes.test_unscoped_findings_flow_through_atlas_projects_and_run_routes` | Verifies unscoped findings share one review state across Atlas, Projects, and source-run finding routes. |
 | `TestAtlasRoutes.test_project_links_curate_atlas_entities_into_project_targets` | Verifies Atlas project links surface as Project Targets and can be unlinked without copying entity records. |
@@ -1222,6 +1249,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunRoute.test_shell_operator_returns_403` | Checks that shell operator returns 403. |
 | `TestRunRoute.test_non_json_body_handled` | Checks that non JSON body handled. |
 | `TestRunRoute.test_client_side_run_persists_terminal_native_builtin` | Verifies that browser-owned built-in output is persisted as a server-backed history run. |
+| `TestRunRoute.test_client_side_run_can_offload_search_text_and_delete_it_with_run` | Verifies oversized run search text can be offloaded and cleaned up when the run is deleted. |
 | `TestRunRoute.test_client_side_run_persists_tour_builtin` | Verifies that the terminal tour can persist its client-side transcript as a normal history run. |
 | `TestRunRoute.test_client_side_run_does_not_link_to_active_project` | Verifies browser-owned built-in persistence saves history without linking administrative runs to the active project. |
 | `TestRunRoute.test_client_side_run_rejects_non_client_builtin_root` | Verifies that `/run/client` only accepts allowlisted browser-owned built-in roots. |
@@ -1266,6 +1294,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestHistoryRoute.test_compare_history_runs_matches_findings_by_normalized_text_not_order_or_fingerprint` | Verifies that run comparison treats matching finding text as unchanged even when findings are recorded in different order with different run-scoped fingerprints. |
 | `TestHistoryRoute.test_compare_history_runs_leaves_very_long_lines_unpaired` | Verifies that run comparison avoids expensive similar-line pairing for very long changed lines. |
 | `TestShareRoute.test_post_creates_snapshot` | Checks post creates snapshot handling. |
+| `TestShareRoute.test_post_can_offload_large_snapshot_content_and_restore_it` | Verifies oversized snapshot bodies can be offloaded, restored through the share API, and deleted with the snapshot. |
 | `TestShareRoute.test_post_does_not_link_snapshot_to_source_run_project` | Verifies snapshots created from project-associated runs are not linked back to that project. |
 | `TestShareRoute.test_post_rejects_non_string_label` | Checks that post rejects non string label. |
 | `TestShareRoute.test_post_rejects_non_list_content` | Checks that post rejects non list content. |
@@ -3379,4 +3408,6 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 - [TODO.md](../TODO.md) - open follow-ups, research notes, known issues, and future ideas
 - [ARCHITECTURE.md → Atlas Export Schema](../ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/external-command-integrations.md](../docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
+- [docs/postgres-migration.md](../docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/storage-scaling.md](../docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [tests/ui-capture-scenes.md](ui-capture-scenes.md) - UI screenshot capture scene inventory

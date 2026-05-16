@@ -10,6 +10,7 @@ from typing import Any
 from services.atlas.materializer import ATLAS_ENTITY_TYPES
 from services.intel.registry import provider_label
 from services.projects.contracts import FINDING_REVIEW_STATES
+from services.storage.body_store import load_text_body
 
 
 FINDING_STATUS_ORDER = {
@@ -109,10 +110,10 @@ def _row_to_run_link(row) -> dict[str, Any]:
 def _row_to_intel_snapshot(row) -> dict[str, Any]:
     data: dict[str, Any] = {}
     try:
-        parsed = json.loads(row["data_json"] or "{}")
+        parsed = json.loads(load_text_body(row["data_json"]) or "{}")
         if isinstance(parsed, dict):
             data = parsed
-    except (TypeError, json.JSONDecodeError):
+    except (TypeError, json.JSONDecodeError, ValueError):
         data = {}
     return {
         "id": row["id"],
@@ -804,8 +805,8 @@ def list_entities(
 
 def _has_intel_data(data_json: str) -> bool:
     try:
-        payload = json.loads(data_json or "{}")
-    except (TypeError, json.JSONDecodeError):
+        payload = json.loads(load_text_body(data_json) or "{}")
+    except (TypeError, json.JSONDecodeError, ValueError):
         return False
     if not isinstance(payload, dict):
         return False

@@ -176,8 +176,12 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **1432 pytest + 1161 Vitest + 252 Playwright = 2,845 tests**.
-That total includes 2,813 behavior tests plus 32 docs/inventory meta-tests.
+Current totals: **1453 pytest + 1161 Vitest + 252 Playwright = 2,866 tests**.
+That total includes 2,834 behavior tests plus 32 docs/inventory meta-tests.
+
+Postgres backend checks are opt-in. Set `DARKLAB_TEST_POSTGRES_DSN` or pass
+`--postgres-dsn` to pytest when you want the Postgres smoke and migration
+integration tests to run against an isolated test schema.
 
 Playwright notes:
 
@@ -385,5 +389,7 @@ Keep the summary factual. Do not bury risk or incomplete validation.
 - [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
+- [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

@@ -51,6 +51,12 @@ services:
       driver: gelf
       options:
         gelf-address: "${DOCKER_GELF_ADDRESS:-udp://loghost.darklab.sh:12201/}"
+  postgres:
+    container_name: shell.darklab.sh-postgres
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "${DOCKER_GELF_ADDRESS:-udp://loghost.darklab.sh:12201/}"
 networks:
   default:
     external: true

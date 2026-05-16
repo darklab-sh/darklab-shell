@@ -85,7 +85,14 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `history_panel_limit` | `50` | Number of history rows shown per page in the desktop history drawer and mobile recents sheet |
 | `recent_commands_limit` | `50` | Number of distinct recent commands loaded into prompt Up/Down history, desktop rail recents, and the mobile recent peek |
 | `data_dir` | auto | Server-side only. Directory used for SQLite history and compressed full-output artifacts. Leave unset to use `/data` when it is writable, otherwise `/tmp` for local/dev fallback. If set explicitly, the directory must be writable at startup |
+| `database_backend` | `sqlite` | Server-side only. Selects the database backend. `sqlite` remains the only active app query path. The Postgres dependency, pool helper, config surface, and optional Compose service are present for the production backend track, but the app still blocks SQLite-specific routes from running under `postgres` until the query-portability work lands |
+| `database_url` | _(empty)_ | Server-side only. Postgres DSN used when `database_backend: postgres`. Ignored by SQLite. Can also be set with the `DATABASE_URL` environment variable |
+| `database_pool_min` | `1` | Server-side only. Minimum Postgres pool size. Ignored by SQLite. Can also be set with `DATABASE_POOL_MIN` |
+| `database_pool_max` | `5` | Server-side only. Maximum Postgres pool size. Ignored by SQLite. Can also be set with `DATABASE_POOL_MAX` |
 | `permalink_retention_days` | `365` | Delete runs and snapshots older than this many days on startup. `0` means unlimited retention |
+| `runs_search_text_inline_max_bytes` | `0` | Server-side only. Offloads oversized `runs.output_search_text` values to compressed files under `data_dir/body-store` when the UTF-8 body is larger than this byte threshold. `0` keeps values inline |
+| `snapshots_inline_max_bytes` | `0` | Server-side only. Offloads oversized tab snapshot bodies under `data_dir/body-store` while share links still read back normally. `0` keeps snapshot content inline |
+| `intel_payload_inline_max_bytes` | `0` | Server-side only. Offloads oversized Atlas intel provider payloads under `data_dir/body-store` while entity detail responses still return the provider data. `0` keeps intel payloads inline |
 | `rate_limit_enabled` | `true` | Enables the `/runs` rate limiter. Set to `false` only for test-only or maintenance overlays where throttling should be bypassed |
 | `rate_limit_per_minute` | `30` | Max `/runs` requests per minute per IP |
 | `rate_limit_per_second` | `5` | Max `/runs` requests per second per IP |
@@ -541,6 +548,14 @@ APP_PORT=8888
 WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 # WEB_CONCURRENCY=4
 # WEB_THREADS=4
+# COMPOSE_PROFILES=postgres
+# DATABASE_BACKEND=sqlite
+# DATABASE_URL=postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell
+# DATABASE_POOL_MIN=1
+# DATABASE_POOL_MAX=5
+# POSTGRES_DB=darklab_shell
+# POSTGRES_USER=darklab
+# POSTGRES_PASSWORD=darklab_dev_password
 # SECRETS_MASTER_KEY=
 # DOCKER_GELF_ADDRESS=udp://loghost.darklab.sh:12201/
 ```
@@ -551,6 +566,11 @@ WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 | `WORKSPACE_ROOT` | Docker entrypoint and Compose environment | Path prepared by the container before dropping privileges; keep aligned with `workspace_root` in app config |
 | `WEB_CONCURRENCY` | Gunicorn entrypoint | Number of Gunicorn worker processes |
 | `WEB_THREADS` | Gunicorn entrypoint | Number of threads per Gunicorn worker |
+| `COMPOSE_PROFILES` | Docker Compose | Optional comma-separated Compose profiles to enable. Set to `postgres` when you want the profile-gated Postgres service included without passing `--profile postgres` |
+| `DATABASE_BACKEND` | Flask app | Optional override for `database_backend`. Keep this as `sqlite` until the Postgres query-portability work is complete |
+| `DATABASE_URL` | Flask app | Optional override for `database_url`, normally a Postgres DSN when testing the backend adapter |
+| `DATABASE_POOL_MIN` / `DATABASE_POOL_MAX` | Flask app | Optional Postgres connection-pool bounds |
+| `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Docker Compose | Credentials used by the optional `postgres` Compose profile |
 | `SECRETS_MASTER_KEY` | Flask app | Optional base64-encoded 32-byte master key for the encrypted per-session secrets vault. When unset, the app creates `<data_dir>/.secrets_master_key` with mode `0600` on first use and repairs broader existing key-file permissions to `0600` before use. If both env and file exist, the env value wins and the app logs `MASTER_KEY_FILE_IGNORED` |
 | `DOCKER_GELF_ADDRESS` | Production Compose overlay | GELF log destination for Docker's logging driver |
 
@@ -558,9 +578,54 @@ If `WEB_CONCURRENCY` and `WEB_THREADS` are unset, the entrypoint defaults remain
 
 ---
 
+## Database Backend Selection
+
+SQLite is the default database backend and remains the recommended local/single-user path. Postgres is the production-scaling path for heavier deployments.
+
+The app reads database settings from `app/conf/config.yaml`, then `app/conf/config.local.yaml`, then environment variables. Environment variables win. In Docker Compose deployments, prefer `.env` for backend selection because Compose uses the same file to decide which services to start.
+
+For a Compose-managed Postgres deployment, set these values in `.env`:
+
+```env
+COMPOSE_PROFILES=postgres
+DATABASE_BACKEND=postgres
+POSTGRES_PASSWORD=<redacted>
+DATABASE_URL=postgresql://darklab:<redacted>@postgres:5432/darklab_shell
+```
+
+`COMPOSE_PROFILES=postgres` enables the profile-gated `postgres` service without passing `--profile postgres` on every command. `DATABASE_BACKEND` and `DATABASE_URL` are read by the Flask app. `POSTGRES_PASSWORD` is read by the Postgres container at database initialization time.
+
+If you run the app outside Compose, or you prefer file-based app config, the equivalent app-side settings are:
+
+```yaml
+database_backend: postgres
+database_url: postgresql://darklab:<redacted>@postgres:5432/darklab_shell
+```
+
+Do not set conflicting values in `.env` and `config.local.yaml`: the environment wins, so `.env` will override `config.local.yaml`.
+
+Postgres connection notes:
+
+- Keep `DATABASE_URL` aligned with any `POSTGRES_USER`, `POSTGRES_PASSWORD`, or `POSTGRES_DB` overrides.
+- URL-encode special characters in the password before putting it in `DATABASE_URL`.
+- If `POSTGRES_PASSWORD` changes after the `postgres-data` volume already exists, Postgres does not automatically change the existing role password. Change the role password manually or recreate the volume intentionally.
+- Keep the same `SECRETS_MASTER_KEY` or copied app-owned key file when migrating encrypted secrets.
+
+For an existing SQLite install, run the offline migration before switching the app over. See [docs/postgres-migration.md](docs/postgres-migration.md).
+
+For backend development, Postgres tests are opt-in. Set `DARKLAB_TEST_POSTGRES_DSN` or pass `--postgres-dsn` to pytest to run the Postgres smoke and migration integration tests against isolated schemas.
+
+---
+
 ## Docker Compose Files
 
-The base [docker-compose.yml](docker-compose.yml) is the standalone local/test stack. It starts the shell service, Redis, the writable `/data` volume, tmpfs scratch space, default port binding, and the runtime capabilities needed by supported scanners.
+The base [docker-compose.yml](docker-compose.yml) is the standalone local/test stack. It starts the shell service, Redis, the writable `/data` volume, tmpfs scratch space, default port binding, and the runtime capabilities needed by supported scanners. It also includes an optional profile-gated `postgres` service with a named volume and healthcheck for the production backend track:
+
+```bash
+docker compose --profile postgres up -d postgres
+```
+
+The app keeps using SQLite by default. The optional Postgres service is useful for adapter testing and production planning, but the main app query path remains SQLite-gated until the query-portability and migration work is complete.
 
 The optional production overlay at [examples/docker-compose.prod.yml](examples/docker-compose.prod.yml) is layered on top of the base file:
 
@@ -570,7 +635,7 @@ docker compose -f docker-compose.yml -f examples/docker-compose.prod.yml up --bu
 
 The production overlay adds:
 
-1. Docker GELF log transport for `shell` and `redis`
+1. Docker GELF log transport for `shell`, `redis`, and the optional `postgres` service
 2. Reverse-proxy environment values such as `VIRTUAL_HOST` and `LETSENCRYPT_HOST`
 3. External Docker network usage instead of a direct host `ports:` binding
 4. Deployment-specific container names
@@ -813,5 +878,7 @@ Use the production Compose overlay and `DOCKER_GELF_ADDRESS` if Docker should al
 - [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
+- [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

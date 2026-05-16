@@ -7,8 +7,10 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from config import CFG
 from core.database import db_connect
 from services.intel.lookup import lookup_entity
+from services.storage.body_store import delete_text_body, inline_threshold_bytes, maybe_store_text_body
 
 
 def _now() -> str:
@@ -50,7 +52,8 @@ def refresh_entity_intel(session_id: str, entity_id: str) -> dict[str, Any] | No
         session_id=session_id,
     )
     fetched_at = _now()
-    snapshots = []
+    snapshots: list[dict[str, Any]] = []
+    replaced_payloads: list[str] = []
     with db_connect() as conn:
         for provider_lookup in lookup.providers:
             provider = provider_lookup.provider
@@ -63,7 +66,16 @@ def refresh_entity_intel(session_id: str, entity_id: str) -> dict[str, Any] | No
                 payload = provider_lookup.result.payload
                 summary = _snapshot_summary(payload)
             snapshot_id = "intel_" + uuid.uuid4().hex
-            data_json = json.dumps(payload, sort_keys=True)
+            existing = conn.execute(
+                "SELECT data_json FROM entity_intel_snapshots WHERE entity_id = ? AND provider = ?",
+                (entity_id, provider),
+            ).fetchone()
+            data_json = maybe_store_text_body(
+                "intel_payload",
+                f"{entity_id}-{provider}",
+                json.dumps(payload, sort_keys=True),
+                inline_threshold_bytes(CFG.get("intel_payload_inline_max_bytes")),
+            )
             conn.execute(
                 "INSERT INTO entity_intel_snapshots "
                 "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
@@ -73,6 +85,8 @@ def refresh_entity_intel(session_id: str, entity_id: str) -> dict[str, Any] | No
                 "fetched_at = excluded.fetched_at, expires_at = excluded.expires_at",
                 (snapshot_id, session_id, entity_id, provider, status, summary, data_json, fetched_at),
             )
+            if existing and existing["data_json"] != data_json:
+                replaced_payloads.append(str(existing["data_json"] or ""))
             snapshots.append({
                 "provider": provider,
                 "status": status,
@@ -80,6 +94,8 @@ def refresh_entity_intel(session_id: str, entity_id: str) -> dict[str, Any] | No
                 "fetched_at": fetched_at,
             })
         conn.commit()
+    for replaced_payload in replaced_payloads:
+        delete_text_body(replaced_payload)
     return {
         "entity_id": entity_id,
         "entity_type": lookup.entity_type,
