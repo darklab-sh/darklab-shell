@@ -1944,11 +1944,14 @@ describe('shell chrome project workspace', () => {
 
   it('opens a finding source run at the recorded line', async () => {
     const restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-restored'))
-    const showConfirm = vi.fn((options = {}) => (
-      String(options.body || '').startsWith('Delete package:')
+    const showConfirm = vi.fn((options = {}) => {
+      const bodyText = typeof options.body === 'object' ? String(options.body.text || '') : String(options.body || '')
+      return bodyText.startsWith('Delete package:')
         ? Promise.resolve('delete')
-        : Promise.resolve('remove')
-    ))
+        : bodyText.startsWith('Unlink')
+          ? Promise.resolve('unlink')
+          : Promise.resolve('remove')
+    })
     const dismissibles = []
     const bindDismissible = vi.fn((el, options) => {
       dismissibles.push({ el, options })
@@ -1975,6 +1978,30 @@ describe('shell chrome project workspace', () => {
         id: 'target-3',
         type: 'port_set',
         value: '80,443',
+      },
+    ]
+    let projectEntities = [
+      {
+        id: 'entity-ip',
+        type: 'ip',
+        canonical_value: '107.178.109.44',
+        value: '107.178.109.44',
+        occurrence_count: 1,
+        run_count: 1,
+        intel_provider_count: 2,
+        intel_providers: ['Shodan', 'Censys'],
+        intel_last_refreshed: '2026-05-07T00:03:00Z',
+      },
+      {
+        id: 'entity-cve',
+        type: 'cve',
+        canonical_value: 'CVE-2025-49113',
+        value: 'CVE-2025-49113',
+        occurrence_count: 1,
+        run_count: 1,
+        intel_provider_count: 1,
+        intel_providers: ['NVD'],
+        intel_last_refreshed: '2026-05-07T00:04:00Z',
       },
     ]
     let projectRuns = [
@@ -2101,6 +2128,7 @@ describe('shell chrome project workspace', () => {
           json: () => Promise.resolve({
             counts: {
               runs: projectRuns.length,
+              entities: projectEntities.length,
               findings: 3,
               artifacts: projectArtifacts.length,
               packages: projectPackages.length,
@@ -2116,6 +2144,11 @@ describe('shell chrome project workspace', () => {
               ...target,
               labels: labelObjects('target', target.id),
               note: noteObject('target', target.id),
+            })),
+            entities: projectEntities.map(entity => ({
+              ...entity,
+              labels: labelObjects('atlas_entity', entity.id),
+              note: noteObject('atlas_entity', entity.id),
             })),
             artifacts: projectArtifacts.map(artifact => ({
               ...artifact,
@@ -2148,7 +2181,12 @@ describe('shell chrome project workspace', () => {
       }
       if (url === '/projects/project-1/links' && options.method === 'DELETE') {
         const payload = JSON.parse(options.body)
-        projectRuns = projectRuns.filter(run => run.id !== payload.entity_id)
+        if (payload.entity_type === 'atlas_entity') {
+          const entityIds = new Set(payload.entity_ids || [payload.entity_id])
+          projectEntities = projectEntities.filter(entity => !entityIds.has(entity.id))
+        } else {
+          projectRuns = projectRuns.filter(run => run.id !== payload.entity_id)
+        }
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ ok: true }),
@@ -2423,6 +2461,35 @@ describe('shell chrome project workspace', () => {
     ])
     shell.showToast.mockClear()
 
+    document.querySelector('[data-project-tab="entities"]').click()
+    await tick()
+    expect(document.querySelector('.project-entity-type-tab.is-active .project-entity-type-tab-label')?.textContent).toBe('Hosts/IPs')
+    expect(document.querySelector('.project-entity-type-tab.is-active .project-entity-type-tab-count')?.textContent).toBe('1')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('107.178.109.44')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('Shodan')
+    expect(document.querySelector('[data-project-action="refresh-project-entity-intel"]')).toBeNull()
+    document.querySelector('[data-project-entity-tab="cve"]').click()
+    await tick()
+    expect(document.querySelector('.project-entity-type-tab.is-active .project-entity-type-tab-label')?.textContent).toBe('CVEs')
+    expect(document.querySelector('.project-entity-type-tab.is-active .project-entity-type-tab-count')?.textContent).toBe('1')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('CVE-2025-49113')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('intel: NVD')
+    document.querySelector('[data-project-action="toggle-project-entity-select"]').click()
+    await tick()
+    document.querySelector('[data-project-action="select-all-project-entities"]').click()
+    await tick()
+    expect(document.querySelector('.project-entity-selection-count')?.textContent).toBe('1 selected')
+    document.querySelector('[data-project-action="bulk-unlink-project-entities"]').click()
+    await tick()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/links', expect.objectContaining({
+      method: 'DELETE',
+      body: JSON.stringify({ entity_type: 'atlas_entity', entity_ids: ['entity-cve'] }),
+    }))
+    expect(document.getElementById('project-explorer-body').textContent).not.toContain('CVE-2025-49113')
+
+    document.querySelector('[data-project-tab="details"]').click()
+    await tick()
     document.querySelector('[data-project-action="edit-target"]').click()
     await tick()
     expect(document.getElementById('project-target-editor-overlay').classList.contains('open')).toBe(true)

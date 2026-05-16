@@ -721,6 +721,8 @@ test.beforeEach(async ({ page }) => {
 
     await page.locator('[data-project-mobile-detail-tab="runs"]').click()
     await page.locator('#project-mobile-detail-body [data-project-action="link-last-run"]').first().click()
+    await expect(page.locator('#confirm-host')).toContainText('Add the last run to this project?')
+    await page.locator('#confirm-host [data-confirm-action-id="add"]').click()
     await expect(page.locator('#permalink-toast')).toContainText('Last run linked to this project.')
     await expect(page.locator('#project-mobile-detail-body .project-mobile-run-row')).toContainText(seededRun.command)
 

@@ -318,8 +318,10 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | `PUT` | `/projects/<project_id>` | Updates project display metadata, status, entity-note-backed notes, and slug. |
 | `DELETE` | `/projects/<project_id>` | Deletes project metadata and project links without deleting linked source records. |
 | `GET` | `/projects/<project_id>/links` | Lists run source records linked into a project. |
-| `POST` | `/projects/<project_id>/links` | Links a supported current-session run into a project. |
-| `DELETE` | `/projects/<project_id>/links` | Removes one supported run link from a project. |
+| `POST` | `/projects/<project_id>/links` | Links supported current-session runs or Atlas entities into a project. Run-link payloads can also include the run's Atlas entities. |
+| `DELETE` | `/projects/<project_id>/links` | Removes supported run or Atlas entity links from a project. Run-unlink payloads can also remove same-run, non-curated Atlas entity links from that project. |
+| `POST` | `/projects/<project_id>/links/run-entities/preview` | Counts Atlas entities that can be added with selected run links. |
+| `POST` | `/projects/<project_id>/links/run-entities/remove-preview` | Counts same-run, non-curated Atlas entity links that can be removed when selected run links are removed. |
 | `GET` | `/projects/<project_id>/targets` | Lists project-scoped targets. |
 | `POST` | `/projects/<project_id>/targets` | Adds an idempotent project target. |
 | `PUT` | `/projects/<project_id>/targets/<target_id>` | Updates one project target. |
@@ -331,7 +333,7 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | `DELETE` | `/projects/<project_id>/packages/<package_id>` | Deletes one draft evidence package manifest. |
 | `GET` | `/projects/<project_id>/artifacts/<artifact_id>/preview` | Returns text preview content for one project-linked run artifact. |
 | `GET` | `/projects/<project_id>/artifacts/<artifact_id>/download` | Downloads one available project-linked run artifact from the workspace. |
-| `GET` | `/projects/<project_id>/findings` | Lists findings reached through project-linked runs, with project filters. |
+| `GET` | `/projects/<project_id>/findings` | Lists findings reached through project-linked runs or linked Atlas entities, with project filters. |
 | `GET` | `/entities/run/<run_id>/findings` | Lists persisted findings captured for a current-session run. |
 | `PUT` | `/findings/<finding_id>/review` | Updates the review state for one current-session finding. |
 | `GET` | `/entities/<entity_type>/<path:entity_id>/labels` | Lists current-session labels for a supported entity. |
@@ -845,9 +847,9 @@ Workspace-aware validation in **Run Lifecycle** rewrites declared file and direc
 
 ## Projects Workspace
 
-Project workspace tables are the relationship foundation for case-style grouping. Projects link to completed runs and Atlas entities instead of copying them, so source records can remain usable outside any project and can belong to more than one project when that is useful. Snapshots and manually selected workspace files remain in their share/history/files surfaces and are not project-linked. Run-owned records such as artifacts and findings stay attached to their source run and surface in project views through linked runs.
+Project workspace tables are the relationship foundation for case-style grouping. Projects link to completed runs and Atlas entities instead of copying them, so source records can remain usable outside any project and can belong to more than one project when that is useful. Snapshots and manually selected workspace files remain in their share/history/files surfaces and are not project-linked. Run-owned artifacts stay attached to their source run and surface in project views through linked runs; findings surface through linked runs or linked Atlas entities so entity-first triage and project triage stay aligned.
 
-`project_links` is a generic membership table `(project_id, entity_type, entity_id)` shared across `run`, `finding`, and `atlas_entity` entity types — there is no parallel per-feature membership table. Atlas-entity links also carry target-list metadata such as source, confidence, review state, and source detail so the Projects modal can keep its target workflow without a separate target table. Evidence packages (`evidence_packages`) record draft package manifests scoped to a project and session, capture redaction mode and artifact-inclusion preference, and export the manifest plus any still-available selected workspace artifacts as a downloadable archive. Project-level labels and notes use the generic `entity_labels` / `entity_notes` tables with `entity_type='project'`.
+`project_links` is a generic membership table `(project_id, entity_type, entity_id)` shared across `run` and `atlas_entity` entity types — there is no parallel per-feature membership table. Atlas-entity links also carry target-list metadata such as source, confidence, review state, and source detail so the Projects modal can keep its target workflow without a separate target table. Evidence packages (`evidence_packages`) record draft package manifests scoped to a project and session, capture redaction mode and artifact-inclusion preference, and export the manifest plus any still-available selected workspace artifacts as a downloadable archive. Project-level labels and notes use the generic `entity_labels` / `entity_notes` tables with `entity_type='project'`.
 
 The full route surface is enumerated in **HTTP Route Inventory → Project Routes**. Schema shapes for `projects`, `project_links`, and `evidence_packages` live in **State And Persistence → Database**. Atlas entity linkage from the project side is covered in **Atlas and Entity Model**.
 
@@ -863,7 +865,7 @@ Atlas is the entity-first triage surface that turns saved external-run output in
 
 **Intel snapshots.** Per-entity cached intel data lives in `entity_intel_snapshots`, keyed `(entity_id, provider)` so refresh, expiry, and per-provider quota stories stay tractable. The refresh route writes through the same provider orchestration used by the terminal `intel` command — see **Intel and Provider Integrations**.
 
-**Findings model.** `findings` is a single entity-owned table deduped across runs by a stable signature; `findings_occurrences` records per-run sightings. The Projects modal, Run Details, and the Atlas Findings tab all read this same table so review state never drifts between surfaces. Project linkage for findings flows through `project_links` with `entity_type='finding'`.
+**Findings model.** `findings` is a single entity-owned table deduped across runs by a stable signature; `findings_occurrences` records per-run sightings. The Projects modal, Run Details, and the Atlas Findings tab all read this same table so review state never drifts between surfaces. Project linkage for findings flows through linked source runs or linked Atlas entities, not separate finding membership rows.
 
 **Run-delete cleanup and orphan model.** Deleting a run removes its `entity_run_links` and `findings_occurrences` rows but leaves the parent entity and finding rows in place so labels, notes, project links, and triage state survive transcript pruning. Run-delete confirmations can opt in to also remove non-curated entities and findings whose only source run was the deleted one; curated items (labels, notes, project links, non-`new` triage status) are always kept. Atlas surfaces expose an orphan-source filter so operators can audit entities and findings whose source runs have all been deleted, and the entity/finding delete confirmations can sweep non-curated siblings whose only source run is the same as the selected item.
 
@@ -907,7 +909,7 @@ That split is what allows the app to keep the interactive shell fast while still
 
 Logical relationships are owned by the app rather than SQLite foreign-key constraints. Anonymous browser sessions can appear as `session_id` values without a matching `session_tokens` row.
 
-Project workspace tables are the relationship foundation for case-style grouping. Projects link to completed runs and Atlas entities instead of copying them, so source records can remain usable outside any project and can belong to more than one project when that is useful. Snapshots and manually selected workspace files remain in their share/history/files surfaces and are not project-linked. Run-owned records such as artifacts and findings stay attached to their source run and surface in project views through linked runs.
+Project workspace tables are the relationship foundation for case-style grouping. Projects link to completed runs and Atlas entities instead of copying them, so source records can remain usable outside any project and can belong to more than one project when that is useful. Snapshots and manually selected workspace files remain in their share/history/files surfaces and are not project-linked. Run-owned artifacts stay attached to their source run and surface in project views through linked runs; findings surface through linked runs or linked Atlas entities.
 
 The schema is shown as one compact topology diagram for the full relationship model, then three field-level diagrams for the clusters where column shapes carry real meaning. Per-table field reference continues in the prose list below.
 
@@ -1146,7 +1148,7 @@ erDiagram
 - `recent_values` — one row per recently used autocomplete value per session `(session_id, kind, value, last_used, use_count)`. `kind` is one of `domain`, `ip`, `url`, or `port_set`; each kind is capped independently at 10 entries. URL recents keep the scheme, host, and path but drop query strings and fragments before storage.
 - `secrets` — one row per encrypted secret name per session `(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at)`, with a unique `(session_token, name)` binding so replacing a secret updates the existing row. Storage also rejects attempts to bind the same consumer env name to two different secrets in one session, keeping command-time lookup unambiguous. Values are AES-GCM ciphertext and are never returned by list routes or stored in transcripts. The wrapping key comes from `SECRETS_MASTER_KEY` or `<data_dir>/.secrets_master_key`, with a fixed HKDF-SHA256 app context deriving the key used for row encryption. When the key file is used, the app creates or repairs it with `0600` permissions.
 - `projects` — one row per project/case folder. Stores session ownership, display metadata, status, timestamps, and a session-scoped slug. Project notes are stored through `entity_notes` with `entity_type='project'`.
-- `project_links` — generic project membership rows `(project_id, entity_type, entity_id)`. The app owns the valid entity vocabulary and link sources so projects can link completed runs and Atlas entities without copying source data. Atlas-entity links also carry target-list metadata such as source, confidence, review state, and source detail so the Projects modal can keep its target workflow without a separate target table. Run-owned records such as file artifacts and findings are intentionally reached through linked runs instead of direct project links.
+- `project_links` — generic project membership rows `(project_id, entity_type, entity_id)`. The app owns the valid entity vocabulary and link sources so projects can link completed runs and Atlas entities without copying source data. Atlas-entity links also carry target-list metadata such as source, confidence, review state, and source detail so the Projects modal can keep its target workflow without a separate target table. Run-owned file artifacts are intentionally reached through linked runs, while findings are reached through linked runs or linked Atlas entities instead of direct project links.
 - `entities` — session-scoped Atlas rows for normalized public IPs, domains, URLs, hashes, and CVEs extracted from saved external-run output metadata. The app stores a canonical value, a stable signature hash, first/last seen timestamps, and an aggregate occurrence count so entity lists are deduplicated across runs.
 - `entity_run_links` — many-to-many Atlas source links from entities to runs, with first/last seen timestamps and per-run occurrence counts. Run pruning removes these link rows while leaving the deduplicated entity row available for labels, notes, project links, and future intel snapshots. Run-delete confirmations can also remove non-curated entities and findings that only came from the deleted run; curated items are kept.
 - `entity_intel_snapshots` — cached, normalized provider snapshots attached to an Atlas entity. The row shape stores provider name, status, short summary, JSON payload, fetch time, and expiry time so Atlas detail views can render intel cards without re-querying providers on every open. Atlas derives compact `intel_summary` highlights from these rows at read time instead of storing duplicate summary columns. The refresh route writes through the same app-native intel provider orchestration used by the `intel` terminal command.
@@ -1385,12 +1387,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,772
+- behavior tests: 2,778
 - docs/inventory meta-tests: 32
-- `pytest`: 1408 (1376 behavior + 32 meta)
-- `vitest`: 1147
+- `pytest`: 1413 (1381 behavior + 32 meta)
+- `vitest`: 1148
 - `playwright`: 249
-- total: 2,804
+- total: 2,810
 
 ### Testing Architecture
 

@@ -1339,10 +1339,10 @@ body.mobile-terminal-mode .output-follow-btn {
   color: var(--green);
 }
 
-/* Confirmation primitive must sit above the options overlay (z-index 320)
-   so Set / Migrate prompts remain reachable while the options surface is open. */
+/* Confirmation primitive must sit above modal-level surfaces, including Run
+   Details and project pickers, so nested confirmations stay reachable. */
 #confirm-host {
-  z-index: 340;
+  z-index: 2400;
 }
 
 .modal-token-input {

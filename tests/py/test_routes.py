@@ -358,6 +358,24 @@ class TestProjectRoutes:
         assert resp.status_code == 201
         return json.loads(resp.data)["link"]
 
+    def _seed_run_entities(self, session_id, run_id):
+        with db_connect() as conn:
+            recorded = materialize_run_entities(
+                conn,
+                session_id,
+                run_id,
+                [{
+                    "text": "darklab.sh 104.21.4.35",
+                    "entities": [
+                        {"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"},
+                        {"type": "ip", "value": "104.21.4.35", "canonical_value": "104.21.4.35"},
+                    ],
+                }],
+                seen_at="2026-05-14T00:00:01+00:00",
+            )
+            conn.commit()
+        return recorded
+
     def _project_compare_url(self, project_id, *, left=None, right=None, baseline_label=None):
         params = {"project_id": project_id}
         if left is not None:
@@ -1421,6 +1439,7 @@ class TestProjectRoutes:
         assert summary["project"]["id"] == project["id"]
         assert summary["counts"] == {
             "runs": 2,
+            "entities": 0,
             "targets": 0,
             "pending_targets": 0,
             "artifacts": 2,
@@ -1843,6 +1862,7 @@ class TestProjectRoutes:
         assert legacy_data["ok"] is True
         assert "link" in legacy_data
         assert "results" not in legacy_data
+        assert "linked_entities" not in legacy_data
 
         bulk_resp = client.post(
             f"/projects/{project['id']}/links",
@@ -1885,6 +1905,134 @@ class TestProjectRoutes:
             "not_found": 2,
             "rejected": 0,
         }
+
+    def test_project_run_link_can_include_source_atlas_entities(self):
+        client = get_client()
+        session_id = self._session_id("project-link-run-entities")
+        project = self._create_project(client, session_id)
+        run_id = self._seed_run(session_id, "nmap darklab.sh")
+        recorded = self._seed_run_entities(session_id, run_id)
+        entity_ids = {item["id"] for item in recorded}
+
+        preview_resp = client.post(
+            f"/projects/{project['id']}/links/run-entities/preview",
+            json={"run_ids": [run_id]},
+            headers={"X-Session-ID": session_id},
+        )
+        link_resp = client.post(
+            f"/projects/{project['id']}/links",
+            json={
+                "entity_type": "run",
+                "entity_id": run_id,
+                "source": "manual",
+                "include_entities": True,
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        second_preview_resp = client.post(
+            f"/projects/{project['id']}/links/run-entities/preview",
+            json={"run_ids": [run_id]},
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert preview_resp.status_code == 200
+        assert json.loads(preview_resp.data)["preview"] == {
+            "available": 2,
+            "added": 0,
+            "already_linked": 0,
+            "rejected": 0,
+            "linkable": 2,
+            "run_count": 1,
+        }
+        assert link_resp.status_code == 201
+        link_data = json.loads(link_resp.data)
+        assert link_data["link"]["entity_id"] == run_id
+        assert link_data["linked_entities"]["added"] == 2
+        assert link_data["linked_entities"]["available"] == 2
+        assert json.loads(second_preview_resp.data)["preview"]["linkable"] == 0
+        with db_connect() as conn:
+            linked_entities = {
+                row["entity_id"]
+                for row in conn.execute(
+                    "SELECT entity_id FROM project_links "
+                    "WHERE project_id = ? AND entity_type = 'atlas_entity'",
+                    (project["id"],),
+                ).fetchall()
+            }
+        assert linked_entities == entity_ids
+
+    def test_project_run_unlink_can_remove_non_curated_source_entities(self):
+        client = get_client()
+        session_id = self._session_id("project-unlink-run-entities")
+        project = self._create_project(client, session_id)
+        run_id = self._seed_run(session_id, "nmap darklab.sh")
+        recorded = self._seed_run_entities(session_id, run_id)
+        removable_id = recorded[0]["id"]
+        curated_id = recorded[1]["id"]
+
+        link_resp = client.post(
+            f"/projects/{project['id']}/links",
+            json={
+                "entity_type": "run",
+                "entity_id": run_id,
+                "source": "manual",
+                "include_entities": True,
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created) "
+                "VALUES (?, ?, 'atlas_entity', ?, 'keep', 'manual', datetime('now'))",
+                ("lbl-" + uuid.uuid4().hex, session_id, curated_id),
+            )
+            conn.commit()
+
+        preview_resp = client.post(
+            f"/projects/{project['id']}/links/run-entities/remove-preview",
+            json={"run_ids": [run_id]},
+            headers={"X-Session-ID": session_id},
+        )
+        unlink_resp = client.delete(
+            f"/projects/{project['id']}/links",
+            json={
+                "entity_type": "run",
+                "entity_id": run_id,
+                "include_entities": True,
+            },
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert link_resp.status_code == 201
+        assert preview_resp.status_code == 200
+        assert json.loads(preview_resp.data)["preview"] == {
+            "available": 2,
+            "removable": 1,
+            "kept_curated": 1,
+            "removed": 0,
+            "run_count": 1,
+        }
+        assert unlink_resp.status_code == 200
+        unlink_data = json.loads(unlink_resp.data)
+        assert unlink_data["unlinked_entities"]["removed"] == 1
+        assert unlink_data["unlinked_entities"]["kept_curated"] == 1
+        with db_connect() as conn:
+            run_link_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM project_links "
+                "WHERE project_id = ? AND entity_type = 'run' AND entity_id = ?",
+                (project["id"], run_id),
+            ).fetchone()["count"]
+            remaining_entity_links = {
+                row["entity_id"]
+                for row in conn.execute(
+                    "SELECT entity_id FROM project_links "
+                    "WHERE project_id = ? AND entity_type = 'atlas_entity'",
+                    (project["id"],),
+                ).fetchall()
+            }
+        assert run_link_count == 0
+        assert removable_id not in remaining_entity_links
+        assert curated_id in remaining_entity_links
 
     def test_bulk_project_links_reject_too_many_entity_ids(self):
         client = get_client()
@@ -4497,6 +4645,120 @@ class TestAtlasRoutes:
         assert json.loads(summary_resp.data)["counts"]["targets"] == 1
         assert unlink_resp.status_code == 200
         assert json.loads(targets_after_unlink.data)["targets"] == []
+
+    def test_project_summary_surfaces_all_linked_atlas_entities(self):
+        client = get_client()
+        session_id = self._session_id()
+        _, recorded = self._seed_entity_run(session_id)
+        domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
+        cve_id = next(item["id"] for item in recorded if item["type"] == "cve")
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Entity Case"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO entity_intel_snapshots "
+                "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at) "
+                "VALUES (?, ?, ?, 'nvd', 'ok', 'data available', ?, datetime('now'))",
+                (
+                    "intel_" + uuid.uuid4().hex,
+                    session_id,
+                    cve_id,
+                    json.dumps({"summary": {"has_intel": True, "providers_with_data": ["nvd"]}}),
+                ),
+            )
+            conn.commit()
+
+        bulk_resp = client.post(
+            f"/projects/{project['id']}/links",
+            json={"entity_type": "atlas_entity", "entity_ids": [domain_id, cve_id]},
+            headers={"X-Session-ID": session_id},
+        )
+        summary_resp = client.get(
+            f"/projects/{project['id']}/summary",
+            headers={"X-Session-ID": session_id},
+        )
+        data = json.loads(summary_resp.data)
+
+        assert bulk_resp.status_code == 200
+        assert json.loads(bulk_resp.data)["counts"]["added"] == 2
+        assert summary_resp.status_code == 200
+        assert data["counts"]["targets"] == 1
+        assert data["counts"]["entities"] == 2
+        assert {item["id"] for item in data["targets"]} == {domain_id}
+        entities = {item["id"]: item for item in data["entities"]}
+        assert set(entities) == {domain_id, cve_id}
+        assert entities[cve_id]["type"] == "cve"
+        assert entities[cve_id]["intel_provider_count"] == 1
+        assert entities[cve_id]["intel_providers"] == ["nvd"]
+        assert entities[cve_id]["intel_last_refreshed"]
+
+    def test_project_findings_include_linked_entity_findings_without_linked_run(self):
+        client = get_client()
+        session_id = self._session_id()
+        _, recorded = self._seed_entity_run(session_id)
+        domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Entity Finding Case"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        link_resp = client.post(
+            f"/projects/{project['id']}/links",
+            json={"entity_type": "atlas_entity", "entity_id": domain_id},
+            headers={"X-Session-ID": session_id},
+        )
+        project_findings_resp = client.get(
+            f"/projects/{project['id']}/findings",
+            headers={"X-Session-ID": session_id},
+        )
+        data = json.loads(project_findings_resp.data)
+
+        assert link_resp.status_code == 201
+        assert project_findings_resp.status_code == 200
+        assert [(item["entity_id"], item["raw_line"]) for item in data["findings"]] == [
+            (domain_id, "443/tcp open https on darklab.sh")
+        ]
+        assert data["findings"][0]["orphan_source"] is False
+
+    def test_bulk_project_unlink_supports_atlas_entities(self):
+        client = get_client()
+        session_id = self._session_id()
+        _, recorded = self._seed_entity_run(session_id)
+        domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
+        cve_id = next(item["id"] for item in recorded if item["type"] == "cve")
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Bulk Entity Case"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        client.post(
+            f"/projects/{project['id']}/links",
+            json={"entity_type": "atlas_entity", "entity_ids": [domain_id, cve_id]},
+            headers={"X-Session-ID": session_id},
+        )
+
+        unlink_resp = client.delete(
+            f"/projects/{project['id']}/links",
+            json={"entity_type": "atlas_entity", "entity_ids": [domain_id, "missing-entity"]},
+            headers={"X-Session-ID": session_id},
+        )
+        summary_resp = client.get(
+            f"/projects/{project['id']}/summary",
+            headers={"X-Session-ID": session_id},
+        )
+        data = json.loads(unlink_resp.data)
+
+        assert unlink_resp.status_code == 200
+        assert data["counts"]["removed"] == 1
+        assert data["counts"]["not_found"] == 1
+        assert {item["status"] for item in data["results"]} == {"removed", "not_found"}
+        assert {item["id"] for item in json.loads(summary_resp.data)["entities"]} == {cve_id}
 
     def test_exports_entities_as_csv_and_jsonl_with_metadata(self):
         client = get_client()

@@ -639,7 +639,7 @@ function _historyMergeBulkProjectResponses(responses) {
   });
 }
 
-async function _historyBulkPostProject(project, action) {
+async function _historyBulkPostProject(project, action, options = {}) {
   const runIds = _historySelectedRunIds();
   if (!project || !project.id || !runIds.length) return;
   _historySetBulkBusy(true);
@@ -647,7 +647,12 @@ async function _historyBulkPostProject(project, action) {
     const resp = await apiFetch(`/projects/${encodeURIComponent(project.id)}/links`, {
       method: action === 'remove' ? 'DELETE' : 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ entity_type: 'run', entity_ids: runIds, source: 'manual' }),
+      body: JSON.stringify({
+        entity_type: 'run',
+        entity_ids: runIds,
+        source: 'manual',
+        ...(options.includeEntities ? { include_entities: true } : {}),
+      }),
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
@@ -655,7 +660,11 @@ async function _historyBulkPostProject(project, action) {
     const projectName = _historyProjectDisplayName(project) || 'project';
     _historySelection.selected.clear();
     const reasonSummary = _historyBulkReasonSummary(data.results);
-    const message = [_historyBulkResultText(action, projectName, counts), reasonSummary].filter(Boolean).join(' - ');
+    const entityAdded = Number(data && data.linked_entities && data.linked_entities.added || 0);
+    const entitySummary = action === 'add' && entityAdded
+      ? `${entityAdded.toLocaleString()} ${entityAdded === 1 ? 'entity' : 'entities'} added`
+      : '';
+    const message = [_historyBulkResultText(action, projectName, counts), entitySummary, reasonSummary].filter(Boolean).join(' - ');
     _historyBulkToast(message, counts);
     if (typeof refreshProjectWorkspace === 'function') {
       try { await refreshProjectWorkspace(); } catch (_) {}
@@ -729,7 +738,23 @@ async function _historyBulkAddToActiveProject() {
     showToast('No active project selected', 'error');
     return;
   }
-  await _historyBulkPostProject(project, 'add');
+  const runIds = _historySelectedRunIds();
+  const entityOption = _historyProjectRunEntityOptionContent();
+  await _historyRefreshProjectRunEntityOption(entityOption, project, runIds);
+  const choice = await showConfirm({
+    body: `Add ${runIds.length} selected ${runIds.length === 1 ? 'run' : 'runs'} to ${_historyProjectDisplayName(project) || 'the active project'}?`,
+    content: entityOption.wrap.classList.contains('u-hidden') ? null : entityOption.wrap,
+    tone: null,
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'add', label: 'Add to project', role: 'primary' },
+    ],
+    refocusOnResolve: false,
+  });
+  if (choice !== 'add') return;
+  await _historyBulkPostProject(project, 'add', {
+    includeEntities: !!entityOption.checkbox.checked && !entityOption.checkbox.disabled,
+  });
 }
 
 async function _historyBulkChooseProject(action) {
@@ -750,6 +775,15 @@ async function _historyBulkChooseProject(action) {
     return;
   }
   const { wrap, select } = _historyProjectPickerContent(projects);
+  const entityOption = _historyProjectRunEntityOptionContent();
+  wrap.appendChild(entityOption.wrap);
+  const runIds = _historySelectedRunIds();
+  const updateEntityOption = () => {
+    const selectedProject = projects.find(item => String(item.id || '') === select.value);
+    _historyRefreshProjectRunEntityOption(entityOption, selectedProject, runIds);
+  };
+  select.addEventListener('change', updateEntityOption);
+  updateEntityOption();
   const help = wrap.querySelector('.history-project-picker-help');
   if (help) {
     help.textContent = 'Choose a project to link selected runs.';
@@ -774,7 +808,9 @@ async function _historyBulkChooseProject(action) {
   const choice = await choicePromise;
   if (choice !== action) return;
   const project = projects.find(item => String(item.id || '') === select.value);
-  await _historyBulkPostProject(project, action);
+  await _historyBulkPostProject(project, action, {
+    includeEntities: !!entityOption.checkbox.checked && !entityOption.checkbox.disabled,
+  });
 }
 
 function _historyBulkDeleteLabel(runCount, snapshotCount) {

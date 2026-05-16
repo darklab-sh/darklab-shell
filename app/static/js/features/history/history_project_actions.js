@@ -107,13 +107,19 @@ function _historyOrderProjectsForPicker(projects, activeProject = null) {
   });
 }
 
-async function _historyLinkRunToProject(run, project) {
+async function _historyLinkRunToProject(run, project, options = {}) {
+  const includeEntities = !!options.includeEntities;
   if (!run || !run.id) throw new Error('Run is missing its identifier.');
   if (!project || !project.id) throw new Error('Project is missing its identifier.');
   const resp = await apiFetch(`/projects/${encodeURIComponent(project.id)}/links`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ entity_type: 'run', entity_id: run.id, source: 'manual' }),
+    body: JSON.stringify({
+      entity_type: 'run',
+      entity_id: run.id,
+      source: 'manual',
+      ...(includeEntities ? { include_entities: true } : {}),
+    }),
   });
   if (!resp.ok) {
     let detail = '';
@@ -124,9 +130,11 @@ async function _historyLinkRunToProject(run, project) {
     throw new Error(detail || `HTTP ${resp.status}`);
   }
   let link = null;
+  let entityStats = null;
   try {
     const data = await resp.json();
     link = data && data.link ? data.link : null;
+    entityStats = data && data.linked_entities ? data.linked_entities : null;
   } catch (_) {}
   if (link) {
     run.project_links = (Array.isArray(run.project_links) ? run.project_links : [])
@@ -138,10 +146,138 @@ async function _historyLinkRunToProject(run, project) {
     try { await refreshProjectWorkspace(); } catch (_) {}
   }
   const name = _historyProjectDisplayName(project) || 'project';
-  showToast(`Run added to ${name}`);
+  const addedEntities = includeEntities ? Number(entityStats && entityStats.added || 0) : 0;
+  showToast(addedEntities
+    ? `Run and ${addedEntities.toLocaleString()} ${addedEntities === 1 ? 'entity' : 'entities'} added to ${name}`
+    : `Run added to ${name}`);
   if (typeof refreshHistoryPanel === 'function') {
     try { await refreshHistoryPanel(); } catch (_) {}
   }
+}
+
+async function _historyLoadProjectRunEntityPreview(project, runIds) {
+  const projectId = String(project && project.id || '').trim();
+  const ids = (Array.isArray(runIds) ? runIds : [runIds])
+    .map(runId => String(runId || '').trim())
+    .filter(Boolean);
+  if (!projectId || !ids.length) return null;
+  const resp = await apiFetch(`/projects/${encodeURIComponent(projectId)}/links/run-entities/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ run_ids: ids }),
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  return data && data.preview ? data.preview : null;
+}
+
+async function _historyLoadProjectRunEntityRemovePreview(project, runIds) {
+  const projectId = String(project && project.id || '').trim();
+  const ids = (Array.isArray(runIds) ? runIds : [runIds])
+    .map(runId => String(runId || '').trim())
+    .filter(Boolean);
+  if (!projectId || !ids.length) return null;
+  const resp = await apiFetch(`/projects/${encodeURIComponent(projectId)}/links/run-entities/remove-preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ run_ids: ids }),
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  return data && data.preview ? data.preview : null;
+}
+
+function _historyProjectRunEntityOptionLabel(count, runCount) {
+  const entityLabel = count === 1 ? 'entity' : 'entities';
+  if (runCount > 1) return `Also add ${count.toLocaleString()} Atlas ${entityLabel} found in these runs`;
+  return `Also add ${count.toLocaleString()} Atlas ${entityLabel} found in this run`;
+}
+
+function _historyProjectRunEntityOptionContent({
+  kind = 'add',
+  labelForCount = _historyProjectRunEntityOptionLabel,
+} = {}) {
+  const wrap = document.createElement('div');
+  wrap.className = 'history-project-run-entities-option u-hidden';
+  wrap.dataset.historyProjectRunEntitiesOption = kind;
+  const label = document.createElement('label');
+  label.className = 'form-check';
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.checked = false;
+  const text = document.createElement('span');
+  label.append(checkbox, text);
+  wrap.append(label);
+  const note = document.createElement('div');
+  note.className = 'history-project-run-entities-note u-hidden';
+  wrap.appendChild(note);
+  return {
+    wrap,
+    checkbox,
+    text,
+    note,
+    setPreview(preview) {
+      const count = Number(preview && (preview.linkable ?? preview.removable) || 0);
+      const runCount = Number(preview && preview.run_count || 0);
+      const keptCurated = Number(preview && preview.kept_curated || 0);
+      checkbox.checked = false;
+      checkbox.disabled = count <= 0;
+      wrap.classList.toggle('u-hidden', count <= 0);
+      text.textContent = count > 0 ? labelForCount(count, runCount) : '';
+      note.classList.toggle('u-hidden', count <= 0 || keptCurated <= 0);
+      note.textContent = keptCurated > 0
+        ? `${keptCurated.toLocaleString()} curated ${keptCurated === 1 ? 'entity will' : 'entities will'} stay linked.`
+        : '';
+    },
+  };
+}
+
+async function _historyRefreshProjectRunEntityOption(control, project, runIds) {
+  if (!control) return null;
+  try {
+    const preview = await _historyLoadProjectRunEntityPreview(project, runIds);
+    control.setPreview(preview);
+    return preview;
+  } catch (_) {
+    control.setPreview(null);
+    return null;
+  }
+}
+
+async function _historyRefreshProjectRunEntityRemoveOption(control, project, runIds) {
+  if (!control) return null;
+  try {
+    const preview = await _historyLoadProjectRunEntityRemovePreview(project, runIds);
+    control.setPreview(preview);
+    return preview;
+  } catch (_) {
+    control.setPreview(null);
+    return null;
+  }
+}
+
+async function _historyConfirmAddRunToProject(run, project) {
+  const option = _historyProjectRunEntityOptionContent();
+  await _historyRefreshProjectRunEntityOption(option, project, [run && run.id]);
+  const content = option.wrap.classList.contains('u-hidden') ? null : option.wrap;
+  const choice = await showConfirm({
+    body: `Add this run to ${_historyProjectDisplayName(project) || 'this project'}?`,
+    content,
+    tone: null,
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'add', label: 'Add to project', role: 'primary' },
+    ],
+    refocusOnResolve: false,
+  });
+  if (choice !== 'add') return false;
+  return { includeEntities: !!option.checkbox.checked && !option.checkbox.disabled };
+}
+
+function _historyProjectRunEntityRemoveOptionLabel(count, runCount) {
+  const entityLabel = count === 1 ? 'entity' : 'entities';
+  if (runCount > 1) return `Also remove ${count.toLocaleString()} Atlas ${entityLabel} found only in these runs from this project`;
+  return `Also remove ${count.toLocaleString()} Atlas ${entityLabel} found only in this run from this project`;
 }
 
 function _historyProjectFromLink(link) {
@@ -168,13 +304,18 @@ function _historyRunProjectLinks(run) {
     ));
 }
 
-async function _historyUnlinkRunFromProject(run, project) {
+async function _historyUnlinkRunFromProject(run, project, options = {}) {
+  const includeEntities = !!options.includeEntities;
   if (!run || !run.id) throw new Error('Run is missing its identifier.');
   if (!project || !project.id) throw new Error('Project is missing its identifier.');
   const resp = await apiFetch(`/projects/${encodeURIComponent(project.id)}/links`, {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ entity_type: 'run', entity_id: run.id }),
+    body: JSON.stringify({
+      entity_type: 'run',
+      entity_id: run.id,
+      ...(includeEntities ? { include_entities: true } : {}),
+    }),
   });
   if (!resp.ok) {
     let detail = '';
@@ -184,6 +325,11 @@ async function _historyUnlinkRunFromProject(run, project) {
     } catch (_) {}
     throw new Error(detail || `HTTP ${resp.status}`);
   }
+  let entityStats = null;
+  try {
+    const data = await resp.json();
+    entityStats = data && data.unlinked_entities ? data.unlinked_entities : null;
+  } catch (_) {}
   if (typeof refreshProjectWorkspace === 'function') {
     try { await refreshProjectWorkspace(); } catch (_) {}
   }
@@ -192,7 +338,10 @@ async function _historyUnlinkRunFromProject(run, project) {
     run.project_link_count = run.project_links.length;
   }
   const name = _historyProjectDisplayName(project) || 'project';
-  showToast(`Run removed from ${name}`);
+  const removedEntities = includeEntities ? Number(entityStats && entityStats.removed || 0) : 0;
+  showToast(removedEntities
+    ? `Run and ${removedEntities.toLocaleString()} ${removedEntities === 1 ? 'entity' : 'entities'} removed from ${name}`
+    : `Run removed from ${name}`);
   if (typeof refreshHistoryPanel === 'function') {
     try { await refreshHistoryPanel(); } catch (_) {}
   }
@@ -204,7 +353,9 @@ async function _historyAddRunToActiveProject(run) {
     showToast('No active project selected', 'error');
     return;
   }
-  await _historyLinkRunToProject(run, project);
+  const confirmed = await _historyConfirmAddRunToProject(run, project);
+  if (!confirmed) return;
+  await _historyLinkRunToProject(run, project, confirmed);
 }
 
 function _historyProjectPickerContentForLinks(links) {
@@ -224,10 +375,20 @@ async function _historyRemoveRunFromProject(run) {
   let project = links[0].project;
   let content = null;
   let defaultFocus = null;
+  const removeOption = _historyProjectRunEntityOptionContent({
+    kind: 'remove',
+    labelForCount: _historyProjectRunEntityRemoveOptionLabel,
+  });
   if (links.length > 1) {
     const { wrap, select, projects } = _historyProjectPickerContentForLinks(links);
     content = wrap;
     defaultFocus = select;
+    wrap.appendChild(removeOption.wrap);
+    await _historyRefreshProjectRunEntityRemoveOption(removeOption, project, [run && run.id]);
+    select.addEventListener('change', () => {
+      const selectedProject = projects.find(item => String(item.id || '') === select.value);
+      _historyRefreshProjectRunEntityRemoveOption(removeOption, selectedProject, [run && run.id]);
+    });
     if (typeof enhanceAppSelects === 'function') {
       enhanceAppSelects(wrap);
       if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) {
@@ -235,6 +396,11 @@ async function _historyRemoveRunFromProject(run) {
       }
     }
     project = () => projects.find(item => String(item.id || '') === select.value);
+  } else {
+    await _historyRefreshProjectRunEntityRemoveOption(removeOption, project, [run && run.id]);
+    if (!removeOption.wrap.classList.contains('u-hidden')) {
+      content = removeOption.wrap;
+    }
   }
   const choice = await showConfirm({
     body: links.length > 1
@@ -252,7 +418,9 @@ async function _historyRemoveRunFromProject(run) {
   if (choice !== 'remove') return;
   if (typeof project === 'function') project = project();
   try {
-    await _historyUnlinkRunFromProject(run, project);
+    await _historyUnlinkRunFromProject(run, project, {
+      includeEntities: !!removeOption.checkbox.checked && !removeOption.checkbox.disabled,
+    });
   } catch (_) {
     showToast('Failed to remove run from project', 'error');
   }
@@ -295,6 +463,15 @@ async function _historyAddRunToProject(run) {
     return;
   }
   const { wrap, select } = _historyProjectPickerContent(projects);
+  const entityOption = _historyProjectRunEntityOptionContent();
+  wrap.appendChild(entityOption.wrap);
+  const selectedRunIds = [run && run.id];
+  const updateEntityOption = () => {
+    const selectedProject = projects.find(item => String(item.id || '') === select.value);
+    _historyRefreshProjectRunEntityOption(entityOption, selectedProject, selectedRunIds);
+  };
+  select.addEventListener('change', updateEntityOption);
+  updateEntityOption();
   const choicePromise = showConfirm({
     body: 'Add this run to a project',
     content: wrap,
@@ -316,7 +493,9 @@ async function _historyAddRunToProject(run) {
   if (choice !== 'add') return;
   const project = projects.find(item => String(item.id || '') === select.value);
   try {
-    await _historyLinkRunToProject(run, project);
+    await _historyLinkRunToProject(run, project, {
+      includeEntities: !!entityOption.checkbox.checked && !entityOption.checkbox.disabled,
+    });
   } catch (_) {
     showToast('Failed to add run to project', 'error');
   }

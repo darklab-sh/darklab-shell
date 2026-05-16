@@ -262,6 +262,15 @@ def _row_to_target(row):
             "source_detail": source_detail,
             "seen_count": max(1, int(row["occurrence_count"] or 0)),
             "occurrence_count": int(row["occurrence_count"] or 0),
+            "run_count": int(row["run_count"] or 0) if "run_count" in row.keys() else 0,
+            "intel_provider_count": int(row["intel_provider_count"] or 0)
+            if "intel_provider_count" in row.keys() else 0,
+            "intel_providers": [
+                provider.strip()
+                for provider in str(row["intel_providers"] or "").split(",")
+                if provider.strip()
+            ] if "intel_providers" in row.keys() else [],
+            "intel_last_refreshed": row["intel_last_refreshed"] if "intel_last_refreshed" in row.keys() else "",
             "last_seen": row["last_seen_at"] or "",
             "dismissed_at": "",
             "created": row["created"],
@@ -499,6 +508,9 @@ def _row_to_project_finding(row, target_ids=None, allowed_target_ids=None):
     finding["target_ids"] = _finding_target_ids_from_row(row, target_ids, allowed_target_ids)
     finding["run_command"] = row["run_command"] or ""
     finding["command_root"] = _command_root(row["run_command"])
+    if "source_run_exists" in row.keys():
+        finding["source_run_exists"] = bool(row["source_run_exists"])
+        finding["orphan_source"] = not bool(row["source_run_exists"])
     return finding
 
 
@@ -2164,6 +2176,45 @@ def _count_rows_for_ids(conn, table, column, ids):
     return int(row["count"] or 0) if row else 0
 
 
+def _project_atlas_entity_select_sql(*, target_only=False):
+    type_filter = "AND e.type IN ('domain', 'ip', 'url') " if target_only else ""
+    return (
+        "SELECT e.id, l.project_id, e.type, e.canonical_value, "  # nosec
+        "COALESCE(("
+        "SELECT erl.run_id FROM entity_run_links erl "
+        "JOIN project_links run_link ON run_link.entity_type = 'run' AND run_link.entity_id = erl.run_id "
+        "WHERE erl.entity_id = e.id AND run_link.project_id = l.project_id "
+        "ORDER BY erl.last_seen_at DESC, erl.run_id DESC LIMIT 1"
+        "), '') AS source_run_id, "
+        "l.confidence, l.review_state, l.source, l.source_detail, "
+        "e.occurrence_count, e.last_seen_at, e.created, COALESCE(NULLIF(l.updated, ''), l.created) AS updated, "
+        "COALESCE(("
+        "SELECT COUNT(DISTINCT erl.run_id) FROM entity_run_links erl "
+        "JOIN runs er ON er.id = erl.run_id AND er.session_id = e.session_id "
+        "WHERE erl.entity_id = e.id"
+        "), 0) AS run_count, "
+        "COALESCE(("
+        "SELECT COUNT(DISTINCT eis.provider) FROM entity_intel_snapshots eis "
+        "WHERE eis.session_id = e.session_id AND eis.entity_id = e.id "
+        "AND (eis.status = 'ok' OR eis.status = 'partial')"
+        "), 0) AS intel_provider_count "
+        ", COALESCE(("
+        "SELECT GROUP_CONCAT(DISTINCT eis.provider) FROM entity_intel_snapshots eis "
+        "WHERE eis.session_id = e.session_id AND eis.entity_id = e.id "
+        "AND (eis.status = 'ok' OR eis.status = 'partial')"
+        "), '') AS intel_providers "
+        ", COALESCE(("
+        "SELECT MAX(eis.fetched_at) FROM entity_intel_snapshots eis "
+        "WHERE eis.session_id = e.session_id AND eis.entity_id = e.id "
+        "AND (eis.status = 'ok' OR eis.status = 'partial')"
+        "), '') AS intel_last_refreshed "
+        "FROM project_links l JOIN entities e ON e.id = l.entity_id "
+        "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' AND e.session_id = ? "
+        + type_filter
+        + "ORDER BY e.type ASC, e.canonical_value COLLATE NOCASE ASC"
+    )
+
+
 def get_project_summary(session_id, project_id):
     with db_connect() as conn:
         project_row = conn.execute(
@@ -2184,23 +2235,13 @@ def get_project_summary(session_id, project_id):
             "ORDER BY l.created DESC",
             (project_id, session_id, RUN_KIND_EXTERNAL),
         ).fetchall()
-        target_rows = conn.execute(
-            "SELECT e.id, l.project_id, e.type, e.canonical_value, "
-            "COALESCE(("
-            "SELECT erl.run_id FROM entity_run_links erl "
-            "JOIN project_links run_link ON run_link.entity_type = 'run' AND run_link.entity_id = erl.run_id "
-            "WHERE erl.entity_id = e.id AND run_link.project_id = l.project_id "
-            "ORDER BY erl.last_seen_at DESC, erl.run_id DESC LIMIT 1"
-            "), '') AS source_run_id, "
-            "l.confidence, l.review_state, l.source, l.source_detail, "
-            "e.occurrence_count, e.last_seen_at, e.created, COALESCE(NULLIF(l.updated, ''), l.created) AS updated "
-            "FROM project_links l JOIN entities e ON e.id = l.entity_id "
-            "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' AND e.session_id = ? "
-            "AND e.type IN ('domain', 'ip', 'url') "
-            "ORDER BY e.type ASC, e.canonical_value COLLATE NOCASE ASC",
+        entity_rows = conn.execute(
+            _project_atlas_entity_select_sql(),
             (project_id, session_id),
         ).fetchall()
+        target_rows = [row for row in entity_rows if row["type"] in {"domain", "ip", "url"}]
         run_ids = [row["entity_id"] for row in link_rows if row["entity_type"] == "run"]
+        entity_ids = [row["id"] for row in entity_rows]
         artifact_rows = []
         finding_rows = []
         run_rows = []
@@ -2222,15 +2263,33 @@ def get_project_summary(session_id, project_id):
                 "ORDER BY created DESC, id DESC",
                 run_ids,
             ).fetchall()
+        if run_ids or entity_ids:
+            finding_clauses = []
+            finding_params = [session_id]
+            if run_ids:
+                run_placeholders = ",".join("?" for _ in run_ids)
+                finding_clauses.append(
+                    "EXISTS ("
+                    "SELECT 1 FROM findings_occurrences fo "
+                    "WHERE fo.finding_id = f.id "
+                    f"AND fo.run_id IN ({run_placeholders})"  # nosec
+                    ")"
+                )
+                finding_params.extend(run_ids)
+            if entity_ids:
+                entity_placeholders = ",".join("?" for _ in entity_ids)
+                finding_clauses.append(f"f.entity_id IN ({entity_placeholders})")  # nosec
+                finding_params.extend(entity_ids)
             finding_rows = conn.execute(
-                "SELECT DISTINCT f.id FROM findings_occurrences fo "
-                "JOIN findings f ON f.id = fo.finding_id "
-                f"WHERE f.session_id = ? AND fo.run_id IN ({placeholders})",  # nosec
-                [session_id, *run_ids],
+                "SELECT DISTINCT f.id FROM findings f WHERE f.session_id = ? AND ("  # nosec
+                + " OR ".join(finding_clauses)
+                + ")",
+                finding_params,
             ).fetchall()
         artifact_ids = [row["id"] for row in artifact_rows]
         finding_ids = [row["id"] for row in finding_rows]
         target_ids = [row["id"] for row in target_rows]
+        entity_ids = [row["id"] for row in entity_rows]
         package_rows = conn.execute(
             "SELECT id FROM evidence_packages WHERE session_id = ? AND project_id = ?",
             (session_id, project_id),
@@ -2242,12 +2301,14 @@ def get_project_summary(session_id, project_id):
         artifact_notes = _entity_notes_by_id(conn, session_id, "run_file_artifact", artifact_ids)
         target_labels = _entity_labels_by_id(conn, session_id, "atlas_entity", target_ids)
         target_notes = _entity_notes_by_id(conn, session_id, "atlas_entity", target_ids)
+        entity_labels = _entity_labels_by_id(conn, session_id, "atlas_entity", entity_ids)
+        entity_notes = _entity_notes_by_id(conn, session_id, "atlas_entity", entity_ids)
         label_count = (
             _count_entity_metadata_for_ids(conn, "entity_labels", "project", [project_id])
             + _count_entity_metadata_for_ids(conn, "entity_labels", "run", run_ids)
             + _count_entity_metadata_for_ids(conn, "entity_labels", "run_file_artifact", artifact_ids)
             + _count_entity_metadata_for_ids(conn, "entity_labels", "finding", finding_ids)
-            + _count_entity_metadata_for_ids(conn, "entity_labels", "atlas_entity", target_ids)
+            + _count_entity_metadata_for_ids(conn, "entity_labels", "atlas_entity", entity_ids)
             + _count_entity_metadata_for_ids(conn, "entity_labels", "target", target_ids)
             + _count_entity_metadata_for_ids(conn, "entity_labels", "package", package_ids)
         )
@@ -2256,7 +2317,7 @@ def get_project_summary(session_id, project_id):
             + _count_entity_metadata_for_ids(conn, "entity_notes", "run", run_ids)
             + _count_entity_metadata_for_ids(conn, "entity_notes", "run_file_artifact", artifact_ids)
             + _count_entity_metadata_for_ids(conn, "entity_notes", "finding", finding_ids)
-            + _count_entity_metadata_for_ids(conn, "entity_notes", "atlas_entity", target_ids)
+            + _count_entity_metadata_for_ids(conn, "entity_notes", "atlas_entity", entity_ids)
             + _count_entity_metadata_for_ids(conn, "entity_notes", "target", target_ids)
             + _count_entity_metadata_for_ids(conn, "entity_notes", "package", package_ids)
         )
@@ -2273,6 +2334,16 @@ def get_project_summary(session_id, project_id):
         })
     confirmed_target_count = sum(1 for target in targets if target and target.get("review_state") == "confirmed")
     pending_target_count = sum(1 for target in targets if target and target.get("review_state") == "pending")
+    entities = []
+    for item in (_row_to_target(row) for row in entity_rows):
+        if not item:
+            continue
+        item_id = str(item["id"])
+        entities.append({
+            **item,
+            "labels": entity_labels.get(item_id, []),
+            "note": entity_notes.get(item_id),
+        })
     runs = []
     for item in (_row_to_project_run(row) for row in run_rows):
         if not item:
@@ -2297,11 +2368,13 @@ def get_project_summary(session_id, project_id):
         "project": project,
         "links": links,
         "targets": targets,
+        "entities": entities,
         "runs": runs,
         "artifacts": artifacts,
         "packages": packages,
         "counts": {
             "runs": len(run_ids),
+            "entities": len(entities),
             "targets": confirmed_target_count,
             "pending_targets": pending_target_count,
             "artifacts": len(artifacts),
@@ -3139,19 +3212,40 @@ def list_project_findings(session_id, project_id, filters=None):
         if note_state:
             if note_state not in {"noted", "unnoted"}:
                 raise ProjectWorkspaceError("note_state must be noted or unnoted")
+        orphan_filter = _trim_text(filters.get("orphan_filter") or "hide", 32).lower()
+        if orphan_filter not in {"hide", "only", "all"}:
+            orphan_filter = "hide"
         rows = conn.execute(
+            "WITH project_runs AS ("
+            "  SELECT l.entity_id AS run_id FROM project_links l "
+            "  JOIN runs r ON r.id = l.entity_id "
+            "  WHERE l.project_id = ? AND l.entity_type = 'run' AND r.session_id = ?"
+            "), project_entities AS ("
+            "  SELECT l.entity_id FROM project_links l "
+            "  JOIN entities e ON e.id = l.entity_id "
+            "  WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' AND e.session_id = ?"
+            ") "
             "SELECT f.id, f.session_id, COALESCE(f.entity_id, f.target_id) AS entity_id, "
             "f.subject_key, f.signature_hash, f.severity, f.kind, f.tool_root, "
             "f.first_run_id, f.last_run_id, f.first_seen_at, f.last_seen_at, "
             "f.occurrence_count, f.status, f.fingerprint, f.title, f.raw_line, f.created, "
-            "fo.run_id, fo.line_number, fo.snippet, r.command AS run_command "
-            "FROM project_links run_link "
-            "JOIN runs r ON r.id = run_link.entity_id "
-            "JOIN findings_occurrences fo ON fo.run_id = r.id "
-            "JOIN findings f ON f.id = fo.finding_id AND f.session_id = r.session_id "
-            "WHERE run_link.project_id = ? AND run_link.entity_type = 'run' AND r.session_id = ? "
-            "ORDER BY fo.seen_at DESC, f.id DESC",
-            (project_id, session_id),
+            "COALESCE(fo.run_id, f.last_run_id) AS run_id, fo.line_number, fo.snippet, r.command AS run_command, "
+            "CASE WHEN EXISTS ("
+            "  SELECT 1 FROM findings_occurrences orphan_fo "
+            "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id "
+            "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id"
+            ") THEN 1 ELSE 0 END AS source_run_exists "
+            "FROM findings f "
+            "LEFT JOIN findings_occurrences fo ON fo.finding_id = f.id "
+            "LEFT JOIN runs r ON r.id = fo.run_id AND r.session_id = f.session_id "
+            "WHERE f.session_id = ? AND ("
+            "EXISTS (SELECT 1 FROM project_runs pr WHERE pr.run_id = fo.run_id) "
+            "OR EXISTS ("
+            "  SELECT 1 FROM project_entities pe "
+            "  WHERE pe.entity_id = COALESCE(f.entity_id, f.target_id)"
+            ")) "
+            "ORDER BY COALESCE(fo.seen_at, f.last_seen_at, f.created) DESC, f.id DESC",
+            (project_id, session_id, project_id, session_id, session_id),
         ).fetchall()
         project_target_rows = conn.execute(
             "SELECT entity_id FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity'",
@@ -3202,6 +3296,10 @@ def list_project_findings(session_id, project_id, filters=None):
         ]
     if note_state:
         findings = [item for item in findings if bool(item.get("note")) == (note_state == "noted")]
+    if orphan_filter == "hide":
+        findings = [item for item in findings if not item.get("orphan_source")]
+    elif orphan_filter == "only":
+        findings = [item for item in findings if item.get("orphan_source")]
     command_root = _trim_text(filters.get("command_root"), 128)
     if command_root:
         findings = [item for item in findings if item["command_root"] == command_root]
@@ -3481,6 +3579,288 @@ def _insert_project_link(
         if row:
             return _row_to_link(row)
     raise ProjectWorkspaceError("could not allocate a project link id")
+
+
+def _run_entity_ids_for_project_link(conn, session_id, run_ids):
+    normalized_run_ids = [str(run_id or "").strip() for run_id in run_ids]
+    normalized_run_ids = [run_id for run_id in normalized_run_ids if run_id]
+    if not normalized_run_ids:
+        return []
+    placeholders = ",".join("?" for _ in normalized_run_ids)
+    rows = conn.execute(
+        "SELECT DISTINCT e.id "
+        "FROM entity_run_links erl "
+        "JOIN entities e ON e.id = erl.entity_id "
+        "JOIN runs r ON r.id = erl.run_id "
+        f"WHERE r.session_id = ? AND e.session_id = ? AND erl.run_id IN ({placeholders}) "  # nosec
+        "ORDER BY e.last_seen_at DESC, e.canonical_value ASC",
+        [session_id, session_id, *normalized_run_ids],
+    ).fetchall()
+    return [str(row["id"]) for row in rows if row["id"]]
+
+
+def _normalize_project_run_ids_payload(data):
+    raw_run_ids = data.get("run_ids") if isinstance(data, dict) else None
+    if raw_run_ids is None and isinstance(data, dict):
+        raw_run_ids = [data.get("run_id")]
+    if not isinstance(raw_run_ids, list):
+        raise ProjectWorkspaceError("run_ids must be a list")
+    if len(raw_run_ids) > MAX_BULK_RUN_ACTION_ITEMS:
+        raise ProjectWorkspaceError("too_many")
+    run_ids = []
+    seen = set()
+    for raw_run_id in raw_run_ids:
+        run_id = _trim_text(raw_run_id, MAX_ENTITY_ID_LEN)
+        if not run_id or run_id in seen:
+            continue
+        seen.add(run_id)
+        run_ids.append(run_id)
+    if not run_ids:
+        raise ProjectWorkspaceError("run_ids is required")
+    return run_ids
+
+
+def _project_run_entity_link_stats(conn, project_id, entity_ids):
+    stats = {
+        "available": len(entity_ids),
+        "added": 0,
+        "already_linked": 0,
+        "rejected": 0,
+        "linkable": 0,
+    }
+    if not entity_ids:
+        return stats
+    placeholders = ",".join("?" for _ in entity_ids)
+    linked_rows = conn.execute(
+        "SELECT entity_id FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity' "  # nosec
+        f"AND entity_id IN ({placeholders})",
+        [project_id, *entity_ids],
+    ).fetchall()
+    linked_ids = {str(row["entity_id"]) for row in linked_rows}
+    stats["already_linked"] = len(linked_ids)
+    stats["linkable"] = max(0, len(entity_ids) - len(linked_ids))
+    return stats
+
+
+def preview_project_run_entity_links(session_id, project_id, data):
+    run_ids = _normalize_project_run_ids_payload(data)
+    with db_connect() as conn:
+        project = conn.execute(
+            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
+            [session_id, project_id],
+        ).fetchone()
+        if not project:
+            return None
+        run_maps = _bulk_project_run_maps(conn, session_id, run_ids)
+        if any(run_id not in run_maps["owned"] for run_id in run_ids):
+            raise ProjectWorkspaceNotFound("run not found for this session")
+        if any(run_id not in run_maps["linkable"] for run_id in run_ids):
+            raise ProjectWorkspaceError("project links only support external runs")
+        entity_ids = _run_entity_ids_for_project_link(conn, session_id, run_ids)
+        stats = _project_run_entity_link_stats(conn, project_id, entity_ids)
+    stats["run_count"] = len(run_ids)
+    return stats
+
+
+def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids):
+    stats = {
+        "available": 0,
+        "removable": 0,
+        "kept_curated": 0,
+        "removed": 0,
+        "run_count": len(run_ids),
+    }
+    if not run_ids:
+        return stats, []
+    placeholders = ",".join("?" for _ in run_ids)
+    rows = conn.execute(
+        "SELECT DISTINCT e.id, l.confidence, l.review_state, l.source_detail, "
+        "EXISTS ("
+        "  SELECT 1 FROM entity_run_links other_erl "
+        "  WHERE other_erl.entity_id = e.id "
+        f"  AND other_erl.run_id NOT IN ({placeholders})"
+        ") AS has_other_runs, "
+        "EXISTS ("
+        "  SELECT 1 FROM project_links other_l "
+        "  WHERE other_l.entity_type = 'atlas_entity' "
+        "  AND other_l.entity_id = e.id "
+        "  AND other_l.project_id != ?"
+        ") AS has_other_projects, "
+        "EXISTS ("
+        "  SELECT 1 FROM entity_labels lbl "
+        "  WHERE lbl.session_id = ? "
+        "  AND lbl.entity_type = 'atlas_entity' "
+        "  AND lbl.entity_id = e.id"
+        ") AS has_labels, "
+        "EXISTS ("
+        "  SELECT 1 FROM entity_notes note "
+        "  WHERE note.session_id = ? "
+        "  AND note.entity_type = 'atlas_entity' "
+        "  AND note.entity_id = e.id "
+        "  AND trim(note.body) != ''"
+        ") AS has_note, "
+        "EXISTS ("
+        "  SELECT 1 FROM findings child_f "
+        "  WHERE child_f.session_id = e.session_id "
+        "  AND child_f.entity_id = e.id "
+        "  AND ("
+        "    COALESCE(NULLIF(child_f.status, ''), 'new') != 'new' "
+        "    OR COALESCE(NULLIF(child_f.review_state, ''), 'new') != 'new' "
+        "    OR EXISTS ("
+        "      SELECT 1 FROM project_links child_link "
+        "      WHERE child_link.entity_type = 'finding' "
+        "      AND child_link.entity_id = child_f.id"
+        "    ) "
+        "    OR EXISTS ("
+        "      SELECT 1 FROM entity_labels child_label "
+        "      WHERE child_label.entity_type = 'finding' "
+        "      AND child_label.entity_id = child_f.id"
+        "    ) "
+        "    OR EXISTS ("
+        "      SELECT 1 FROM entity_notes child_note "
+        "      WHERE child_note.entity_type = 'finding' "
+        "      AND child_note.entity_id = child_f.id"
+        "    )"
+        "  )"
+        ") AS has_curated_findings "
+        "FROM entity_run_links erl "
+        "JOIN entities e ON e.id = erl.entity_id "
+        "JOIN runs r ON r.id = erl.run_id "
+        "JOIN project_links l ON l.project_id = ? "
+        "AND l.entity_type = 'atlas_entity' "
+        "AND l.entity_id = e.id "
+        "WHERE r.session_id = ? AND e.session_id = ? "  # nosec
+        f"AND erl.run_id IN ({placeholders})",
+        [
+            *run_ids,
+            project_id,
+            session_id,
+            session_id,
+            project_id,
+            session_id,
+            session_id,
+            *run_ids,
+        ],
+    ).fetchall()
+    removable_ids = []
+    for row in rows:
+        stats["available"] += 1
+        source_detail = str(row["source_detail"] or "").strip()
+        has_default_project_link = (
+            abs(float(row["confidence"] or 1.0) - 1.0) < 0.0001
+            and str(row["review_state"] or "confirmed") == "confirmed"
+            and source_detail in {"", "{}", "null"}
+        )
+        is_curated = any((
+            int(row["has_other_runs"] or 0) > 0,
+            int(row["has_other_projects"] or 0) > 0,
+            int(row["has_labels"] or 0) > 0,
+            int(row["has_note"] or 0) > 0,
+            int(row["has_curated_findings"] or 0) > 0,
+            not has_default_project_link,
+        ))
+        if is_curated:
+            stats["kept_curated"] += 1
+            continue
+        removable_ids.append(str(row["id"]))
+    stats["removable"] = len(removable_ids)
+    return stats, removable_ids
+
+
+def preview_project_run_entity_unlinks(session_id, project_id, data):
+    run_ids = _normalize_project_run_ids_payload(data)
+    with db_connect() as conn:
+        project = conn.execute(
+            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
+            [session_id, project_id],
+        ).fetchone()
+        if not project:
+            return None
+        run_maps = _bulk_project_run_maps(conn, session_id, run_ids)
+        if any(run_id not in run_maps["owned"] for run_id in run_ids):
+            raise ProjectWorkspaceNotFound("run not found for this session")
+        stats, _ = _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids)
+    return stats
+
+
+def unlink_project_run_entities(session_id, project_id, run_ids):
+    normalized_run_ids = []
+    seen = set()
+    for raw_run_id in run_ids:
+        run_id = _trim_text(raw_run_id, MAX_ENTITY_ID_LEN)
+        if not run_id or run_id in seen:
+            continue
+        seen.add(run_id)
+        normalized_run_ids.append(run_id)
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        project = conn.execute(
+            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
+            [session_id, project_id],
+        ).fetchone()
+        if not project:
+            return None
+        run_maps = _bulk_project_run_maps(conn, session_id, normalized_run_ids)
+        owned_run_ids = [run_id for run_id in normalized_run_ids if run_id in run_maps["owned"]]
+        stats, removable_ids = _project_run_entity_unlink_candidates(conn, session_id, project_id, owned_run_ids)
+        if removable_ids:
+            placeholders = ",".join("?" for _ in removable_ids)
+            result = conn.execute(
+                "DELETE FROM project_links WHERE project_id = ? "
+                "AND entity_type = 'atlas_entity' "  # nosec
+                f"AND entity_id IN ({placeholders})",
+                [project_id, *removable_ids],
+            )
+            stats["removed"] = max(0, int(result.rowcount or 0))
+        conn.commit()
+    return stats
+
+
+def link_project_run_entities(session_id, project_id, run_ids, source="manual"):
+    source = validate_project_link_source(source)
+    with db_connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        project = conn.execute(
+            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
+            [session_id, project_id],
+        ).fetchone()
+        if not project:
+            return None
+        run_maps = _bulk_project_run_maps(conn, session_id, run_ids)
+        linkable_run_ids = [run_id for run_id in run_ids if run_id in run_maps["linkable"]]
+        entity_ids = _run_entity_ids_for_project_link(conn, session_id, linkable_run_ids)
+        stats = _project_run_entity_link_stats(conn, project_id, entity_ids)
+        count_row = conn.execute(
+            "SELECT COUNT(*) AS count FROM project_links WHERE project_id = ?",
+            [project_id],
+        ).fetchone()
+        current_count = int(count_row["count"] or 0) if count_row else 0
+        limit = int(_config.CFG.get("max_project_links_per_project", 1000) or 1000)
+        new_link_budget = max(0, limit - current_count)
+        linked_rows = set()
+        if entity_ids:
+            placeholders = ",".join("?" for _ in entity_ids)
+            linked_rows = {
+                str(row["entity_id"])
+                for row in conn.execute(
+                    "SELECT entity_id FROM project_links WHERE project_id = ? AND entity_type = 'atlas_entity' "  # nosec
+                    f"AND entity_id IN ({placeholders})",
+                    [project_id, *entity_ids],
+                ).fetchall()
+            }
+        for entity_id in entity_ids:
+            if entity_id in linked_rows:
+                continue
+            if new_link_budget <= 0:
+                stats["rejected"] += 1
+                continue
+            _insert_project_link(conn, project_id, "atlas_entity", entity_id, source)
+            stats["added"] += 1
+            new_link_budget -= 1
+        conn.commit()
+    stats["linkable"] = max(0, stats["available"] - stats["already_linked"])
+    stats["run_count"] = len([run_id for run_id in run_ids if str(run_id or "").strip()])
+    return stats
 
 
 def record_run_file_artifacts(conn, session_id, run_id, artifacts):
@@ -3849,8 +4229,6 @@ def _normalize_bulk_link_payload(data):
         raise ProjectWorkspaceError(str(exc)) from None
     if entity_type not in PROJECT_LINK_ENTITY_TYPES:
         raise ProjectWorkspaceError(f"project links do not support {entity_type}")
-    if entity_type != "run":
-        raise ProjectWorkspaceError(f"bulk project links do not support {entity_type}")
     raw_ids = data.get("entity_ids")
     if not isinstance(raw_ids, list):
         raise ProjectWorkspaceError("entity_ids must be a list")
@@ -4271,9 +4649,13 @@ def link_project_entity(session_id, project_id, data):
         raise ProjectWorkspaceError("could not allocate a project link id")
 
 
-def _project_bulk_result(statuses, run_id, status, *, reason=None):
+def _project_bulk_result(statuses, entity_type, entity_id, status, *, reason=None):
     statuses[status] = statuses.get(status, 0) + 1
-    item = {"run_id": run_id, "status": status}
+    item = (
+        {"entity_id": entity_id, "status": status}
+        if entity_type == "atlas_entity"
+        else {"run_id": entity_id, "status": status}
+    )
     if reason:
         item["reason"] = reason
     return item
@@ -4297,6 +4679,23 @@ def _bulk_project_run_maps(conn, session_id, run_ids):
     }
 
 
+def _bulk_project_entity_maps(conn, session_id, entity_type, entity_ids):
+    if entity_type == "run":
+        return _bulk_project_run_maps(conn, session_id, entity_ids)
+    if entity_type != "atlas_entity":
+        return {"owned": set(), "linkable": set()}
+    placeholders = ",".join("?" for _ in entity_ids)
+    rows = conn.execute(
+        f"SELECT id FROM entities WHERE session_id = ? AND id IN ({placeholders})",  # nosec
+        [session_id, *entity_ids],
+    ).fetchall()
+    owned = {str(row["id"]) for row in rows}
+    return {
+        "owned": owned,
+        "linkable": set(owned),
+    }
+
+
 def link_project_entities(session_id, project_id, data):
     entity_type, entity_ids, source = _normalize_bulk_link_payload(data)
     counts = {
@@ -4316,7 +4715,7 @@ def link_project_entities(session_id, project_id, data):
         ).fetchone()
         if not project:
             return None
-        run_maps = _bulk_project_run_maps(conn, session_id, entity_ids)
+        entity_maps = _bulk_project_entity_maps(conn, session_id, entity_type, entity_ids)
         placeholders = ",".join("?" for _ in entity_ids)
         link_rows = conn.execute(
             "SELECT id, project_id, entity_type, entity_id, source, created "  # nosec
@@ -4327,7 +4726,7 @@ def link_project_entities(session_id, project_id, data):
         linked_by_id = {str(row["entity_id"]): _row_to_link(row) for row in link_rows}
         count_row = conn.execute(
             "SELECT COUNT(*) AS count FROM project_links "
-            "WHERE project_id = ? AND entity_type = 'run'",
+            "WHERE project_id = ?",
             [project_id],
         ).fetchone()
         current_count = int(count_row["count"] or 0) if count_row else 0
@@ -4335,22 +4734,22 @@ def link_project_entities(session_id, project_id, data):
         new_link_budget = max(0, limit - current_count)
         links = []
         for entity_id in entity_ids:
-            if entity_id not in run_maps["owned"]:
-                results.append(_project_bulk_result(counts, entity_id, "not_found"))
+            if entity_id not in entity_maps["owned"]:
+                results.append(_project_bulk_result(counts, entity_type, entity_id, "not_found"))
                 continue
-            if entity_id not in run_maps["linkable"]:
-                results.append(_project_bulk_result(counts, entity_id, "rejected", reason="builtin"))
+            if entity_id not in entity_maps["linkable"]:
+                results.append(_project_bulk_result(counts, entity_type, entity_id, "rejected", reason="builtin"))
                 continue
             if entity_id in linked_by_id:
-                results.append(_project_bulk_result(counts, entity_id, "already_linked"))
+                results.append(_project_bulk_result(counts, entity_type, entity_id, "already_linked"))
                 continue
             if new_link_budget <= 0:
-                results.append(_project_bulk_result(counts, entity_id, "rejected", reason="policy_blocked"))
+                results.append(_project_bulk_result(counts, entity_type, entity_id, "rejected", reason="policy_blocked"))
                 continue
             link = _insert_project_link(conn, project_id, entity_type, entity_id, source)
             links.append(link)
             new_link_budget -= 1
-            results.append(_project_bulk_result(counts, entity_id, "added"))
+            results.append(_project_bulk_result(counts, entity_type, entity_id, "added"))
         conn.commit()
     return {"ok": True, "counts": counts, "results": results, "links": links}
 
@@ -4391,7 +4790,7 @@ def unlink_project_entities(session_id, project_id, data):
         ).fetchone()
         if not project:
             return None
-        run_maps = _bulk_project_run_maps(conn, session_id, entity_ids)
+        entity_maps = _bulk_project_entity_maps(conn, session_id, entity_type, entity_ids)
         placeholders = ",".join("?" for _ in entity_ids)
         link_rows = conn.execute(
             "SELECT entity_id FROM project_links WHERE project_id = ? AND entity_type = ? "  # nosec
@@ -4401,14 +4800,14 @@ def unlink_project_entities(session_id, project_id, data):
         linked_ids = {str(row["entity_id"]) for row in link_rows}
         removable_ids = []
         for entity_id in entity_ids:
-            if entity_id not in run_maps["owned"]:
-                results.append(_project_bulk_result(counts, entity_id, "not_found"))
+            if entity_id not in entity_maps["owned"]:
+                results.append(_project_bulk_result(counts, entity_type, entity_id, "not_found"))
                 continue
             if entity_id not in linked_ids:
-                results.append(_project_bulk_result(counts, entity_id, "not_linked"))
+                results.append(_project_bulk_result(counts, entity_type, entity_id, "not_linked"))
                 continue
             removable_ids.append(entity_id)
-            results.append(_project_bulk_result(counts, entity_id, "removed"))
+            results.append(_project_bulk_result(counts, entity_type, entity_id, "removed"))
         if removable_ids:
             remove_placeholders = ",".join("?" for _ in removable_ids)
             conn.execute(
@@ -4429,19 +4828,7 @@ def list_project_targets(session_id, project_id):
         if not project:
             return None
         rows = conn.execute(
-            "SELECT e.id, l.project_id, e.type, e.canonical_value, "
-            "COALESCE(("
-            "SELECT erl.run_id FROM entity_run_links erl "
-            "JOIN project_links run_link ON run_link.entity_type = 'run' AND run_link.entity_id = erl.run_id "
-            "WHERE erl.entity_id = e.id AND run_link.project_id = l.project_id "
-            "ORDER BY erl.last_seen_at DESC, erl.run_id DESC LIMIT 1"
-            "), '') AS source_run_id, "
-            "l.confidence, l.review_state, l.source, l.source_detail, "
-            "e.occurrence_count, e.last_seen_at, e.created, COALESCE(NULLIF(l.updated, ''), l.created) AS updated "
-            "FROM project_links l JOIN entities e ON e.id = l.entity_id "
-            "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' AND e.session_id = ? "
-            "AND e.type IN ('domain', 'ip', 'url') "
-            "ORDER BY e.type ASC, e.canonical_value COLLATE NOCASE ASC",
+            _project_atlas_entity_select_sql(target_only=True),
             (project_id, session_id),
         ).fetchall()
         targets = [_row_to_target(row) for row in rows]

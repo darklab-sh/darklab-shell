@@ -210,11 +210,18 @@ function _historyRunActionMenu() {
     ['edit-metadata', 'Edit metadata'],
   ];
   if (_historyRunCanOpenAtlas()) items.push(['open-atlas', 'Open in Atlas']);
-  items.push(
-    ['add-active-project', 'Add to active project'],
-    ['add-project', 'Add to project'],
-    ['copy-run-id', 'Copy run ID'],
-  );
+  const projectLinks = typeof _historyRunProjectLinks === 'function'
+    ? _historyRunProjectLinks(_historyRunPrimary())
+    : [];
+  if (projectLinks.length) {
+    items.push(['remove-project', 'Remove from project']);
+  } else {
+    items.push(
+      ['add-active-project', 'Add to active project'],
+      ['add-project', 'Add to project'],
+    );
+  }
+  items.push(['copy-run-id', 'Copy run ID']);
   items.forEach(([action, label]) => {
     const item = document.createElement('button');
     item.type = 'button';
@@ -645,7 +652,9 @@ async function _handleHistoryRunModalAction(action) {
     const project = projectState && projectState.project;
     if (!project || projectState.attached) return;
     try {
-      await _historyLinkRunToProject(run, project);
+      const confirmed = await _historyConfirmAddRunToProject(run, project);
+      if (!confirmed) return;
+      await _historyLinkRunToProject(run, project, confirmed);
       _historyRunModalState.projectState = { project, attached: true };
       _renderHistoryRunModal();
       refreshHistoryPanel();
@@ -655,9 +664,32 @@ async function _handleHistoryRunModalAction(action) {
   } else if (action === 'add-project') {
     try {
       await _historyAddRunToProject(run);
+      const projectState = _historyRunModalState.projectState;
+      if (projectState && projectState.project) {
+        const activeProjectId = String(projectState.project.id || '');
+        const attached = typeof _historyRunProjectLinks === 'function'
+          && _historyRunProjectLinks(run).some(item => String(item.project?.id || '') === activeProjectId);
+        _historyRunModalState.projectState = { ...projectState, attached };
+      }
+      _renderHistoryRunModal();
       refreshHistoryPanel();
     } catch (_) {
       showToast('Failed to add run to project', 'error');
+    }
+  } else if (action === 'remove-project') {
+    try {
+      await _historyRemoveRunFromProject(run);
+      const projectState = _historyRunModalState.projectState;
+      if (projectState && projectState.project) {
+        const activeProjectId = String(projectState.project.id || '');
+        const attached = typeof _historyRunProjectLinks === 'function'
+          && _historyRunProjectLinks(run).some(item => String(item.project?.id || '') === activeProjectId);
+        _historyRunModalState.projectState = { ...projectState, attached };
+      }
+      _renderHistoryRunModal();
+      refreshHistoryPanel();
+    } catch (_) {
+      showToast('Failed to remove run from project', 'error');
     }
   } else if (action === 'copy-run-id') {
     copyTextToClipboard(run.id)

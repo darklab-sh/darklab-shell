@@ -530,6 +530,8 @@ test.describe('project workspace modal', () => {
     })
     await page.locator('[data-project-tab="runs"]').click()
     await page.locator('[data-project-action="link-last-run"]').click()
+    await expect(page.locator('#confirm-host')).toContainText('Add the last run to this project?')
+    await page.locator('#confirm-host [data-confirm-action-id="add"]').click()
     await expect(page.locator('#permalink-toast')).toContainText('Last run linked to this project.')
     const runRow = page.locator('.project-explorer-item').filter({ hasText: seededRun.command }).first()
     await expect(runRow).toBeVisible()

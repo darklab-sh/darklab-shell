@@ -34,6 +34,7 @@ from services.projects.workspace import (
     get_project,
     get_project_run_file_artifact,
     get_project_summary,
+    link_project_run_entities,
     link_project_entities,
     link_project_entity,
     list_entity_labels,
@@ -43,7 +44,10 @@ from services.projects.workspace import (
     list_project_targets,
     list_run_findings,
     list_projects,
+    preview_project_run_entity_links,
+    preview_project_run_entity_unlinks,
     unlink_project_entities,
+    unlink_project_run_entities,
     set_active_project,
     unlink_project_entity,
     update_finding_review_state,
@@ -281,6 +285,15 @@ def projects_links_create(project_id):
             "counts": counts,
             "failures": _project_bulk_failures(result.get("results")),
         })
+        if data.get("include_entities") and data.get("entity_type") == "run":
+            linked_entities = link_project_run_entities(
+                session_id,
+                project_id,
+                [str(run_id or "") for run_id in data.get("entity_ids") or []],
+                data.get("source") or "manual",
+            )
+            if linked_entities is not None:
+                result["linked_entities"] = linked_entities
         return jsonify(result)
     try:
         link = link_project_entity(session_id, project_id, data)
@@ -295,7 +308,47 @@ def projects_links_create(project_id):
         "entity_type": link["entity_type"],
         "source": link["source"],
     })
-    return jsonify({"ok": True, "link": link}), 201
+    body = {"ok": True, "link": link}
+    if data.get("include_entities") and data.get("entity_type") == "run":
+        linked_entities = link_project_run_entities(
+            session_id,
+            project_id,
+            [str(data.get("entity_id") or "")],
+            data.get("source") or "manual",
+        )
+        if linked_entities is not None:
+            body["linked_entities"] = linked_entities
+    return jsonify(body), 201
+
+
+@projects_bp.route("/projects/<project_id>/links/run-entities/preview", methods=["POST"])
+def projects_run_entity_link_preview(project_id):
+    session_id = get_session_id()
+    data = request.get_json(silent=True) or {}
+    try:
+        preview = preview_project_run_entity_links(session_id, project_id, data)
+    except ProjectWorkspaceError as exc:
+        if str(exc) == "too_many":
+            return _project_bulk_too_many_response()
+        return _project_error_response(exc)
+    if preview is None:
+        return jsonify({"error": "project not found"}), 404
+    return jsonify({"ok": True, "preview": preview})
+
+
+@projects_bp.route("/projects/<project_id>/links/run-entities/remove-preview", methods=["POST"])
+def projects_run_entity_unlink_preview(project_id):
+    session_id = get_session_id()
+    data = request.get_json(silent=True) or {}
+    try:
+        preview = preview_project_run_entity_unlinks(session_id, project_id, data)
+    except ProjectWorkspaceError as exc:
+        if str(exc) == "too_many":
+            return _project_bulk_too_many_response()
+        return _project_error_response(exc)
+    if preview is None:
+        return jsonify({"error": "project not found"}), 404
+    return jsonify({"ok": True, "preview": preview})
 
 
 @projects_bp.route("/projects/<project_id>/links", methods=["DELETE"])
@@ -330,14 +383,26 @@ def projects_links_delete(project_id):
         return jsonify({"error": "project not found"}), 404
     if not deleted:
         return jsonify({"error": "project link not found"}), 404
+    body: dict[str, object] = {"ok": True}
+    unlinked_entity_count = 0
+    if data.get("include_entities") and data.get("entity_type") == "run":
+        unlinked_entities = unlink_project_run_entities(
+            session_id,
+            project_id,
+            [str(data.get("entity_id") or "")],
+        )
+        if unlinked_entities is not None:
+            body["unlinked_entities"] = unlinked_entities
+            unlinked_entity_count = int(unlinked_entities.get("removed", 0) or 0)
     log.info("PROJECT_LINK_REMOVED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
         "project_id": project_id,
         "entity_type": data.get("entity_type") or "",
         "entity_id": data.get("entity_id") or "",
+        "unlinked_entities": unlinked_entity_count,
     })
-    return jsonify({"ok": True})
+    return jsonify(body)
 
 
 @projects_bp.route("/projects/<project_id>/targets")
@@ -570,6 +635,7 @@ def projects_findings_list(project_id):
         "command_root": request.args.get("command_root"),
         "label": request.args.getlist("label"),
         "note_state": request.args.get("note_state"),
+        "orphan_filter": request.args.get("orphan_filter"),
     }
     try:
         findings = list_project_findings(session_id, project_id, filters)

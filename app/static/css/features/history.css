@@ -441,6 +441,36 @@ body #history-panel { background: var(--theme-chrome-bg); }
   color: var(--muted);
   font-size: 12px;
 }
+.history-project-run-entities-option {
+  padding-top: 2px;
+}
+
+.history-project-run-entities-option .form-check {
+  align-items: flex-start;
+  gap: 12px;
+  line-height: 1.35;
+}
+
+.history-project-run-entities-option .form-check input {
+  flex: 0 0 auto;
+  margin-top: 4px;
+}
+
+.history-project-run-entities-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  margin: 8px 0 0 28px;
+}
+
+.modal-confirm-content:has(.history-project-run-entities-option) {
+  margin-top: 18px;
+  margin-bottom: 22px;
+}
+
+#confirm-host .modal-card-compact:has(.history-project-run-entities-option) {
+  width: min(640px, 94vw);
+}
 
 .history-run-overlay {
   --history-run-modal-top: clamp(24px, 7vh, 72px);

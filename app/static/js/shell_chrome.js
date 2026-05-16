@@ -167,8 +167,15 @@
   let projectWorkspaceFindingStatusFilters = new Map();
   let projectWorkspaceFindingLabelFilters = new Map();
   let projectWorkspaceFindingNoteStateFilters = new Map();
+  let projectWorkspaceFindingOrphanFilters = new Map();
   let projectWorkspaceCollapsedFindingGroups = new Set();
   let projectWorkspaceCollapsedArtifactGroups = new Set();
+  let projectWorkspaceEntityTab = 'ip';
+  let projectWorkspaceEntitySelectMode = false;
+  let projectWorkspaceSelectedEntityIds = new Set();
+  let projectWorkspaceFindingSelectMode = false;
+  let projectWorkspaceSelectedFindingIds = new Set();
+  let projectWorkspaceEntityPicker = null;
   let projectPackageWizard = null;
   let projectNotesSaveTimer = null;
   let projectNotesSaveSeq = 0;
@@ -195,6 +202,11 @@
     { value: 'all', label: 'All notes' },
     { value: 'noted', label: 'With notes' },
     { value: 'unnoted', label: 'Without notes' },
+  ];
+  const PROJECT_FINDING_ORPHAN_OPTIONS = [
+    { value: 'hide', label: 'Hide orphans' },
+    { value: 'all', label: 'Show all' },
+    { value: 'only', label: 'Only orphans' },
   ];
   const PROJECT_FINDING_SEVERITY_RANK = {
     critical: 0,
@@ -914,6 +926,7 @@
     const counts = _projectCounts(summary);
     return [
       { id: 'runs', label: 'runs', value: counts.runs, tab: 'runs' },
+      { id: 'entities', label: 'entities', value: counts.entities, tab: 'entities' },
       { id: 'findings', label: 'findings', value: counts.findings, tab: 'findings' },
       { id: 'artifacts', label: 'artifacts', value: counts.artifacts, tab: 'artifacts' },
       { id: 'targets', label: 'targets', value: counts.targets, tab: 'details' },
@@ -924,6 +937,75 @@
 
   function _projectTargetItems(summary) {
     return summary && Array.isArray(summary.targets) ? summary.targets : [];
+  }
+
+  function _projectEntityItems(summary) {
+    return summary && Array.isArray(summary.entities) ? summary.entities : [];
+  }
+
+  function _projectEntityTabs() {
+    const atlasTabs = global.DarklabAtlasTabs && Array.isArray(global.DarklabAtlasTabs.tabs)
+      ? global.DarklabAtlasTabs.tabs
+      : [
+          { id: 'ip', label: 'Hosts/IPs', type: 'ip' },
+          { id: 'domain', label: 'Domains', type: 'domain' },
+          { id: 'hash', label: 'Hashes', type: 'hash' },
+          { id: 'cve', label: 'CVEs', type: 'cve' },
+          { id: 'url', label: 'URLs', type: 'url' },
+        ];
+    return atlasTabs.filter(tab => tab && tab.id !== 'findings' && tab.type);
+  }
+
+  function _projectEntityTypeLabel(type) {
+    if (global.DarklabAtlasTabs && typeof global.DarklabAtlasTabs.labelForType === 'function') {
+      return global.DarklabAtlasTabs.labelForType(type);
+    }
+    const fallback = _projectEntityTabs().find(tab => tab.type === String(type || ''));
+    return fallback ? fallback.label : String(type || 'Entity');
+  }
+
+  function _projectEntityIntelProviders(entity) {
+    const raw = entity && entity.intel_providers;
+    if (Array.isArray(raw)) {
+      return raw.map(provider => String(provider || '').trim()).filter(Boolean);
+    }
+    return String(raw || '').split(',').map(provider => provider.trim()).filter(Boolean);
+  }
+
+  function _projectEntityIntelSummary(entity) {
+    const providers = _projectEntityIntelProviders(entity);
+    const count = Number(entity && entity.intel_provider_count || providers.length || 0);
+    if (count <= 0) return '';
+    const providerText = providers.length
+      ? providers.slice(0, 3).join(', ') + (providers.length > 3 ? ` +${providers.length - 3}` : '')
+      : `${count} provider${count === 1 ? '' : 's'}`;
+    const refreshed = entity && entity.intel_last_refreshed
+      ? ` · refreshed ${_formatProjectDate(entity.intel_last_refreshed)}`
+      : '';
+    return `intel: ${providerText}${refreshed}`;
+  }
+
+  function _projectEntityCounts(summary) {
+    const counts = {};
+    _projectEntityTabs().forEach((tab) => { counts[tab.type] = 0; });
+    _projectEntityItems(summary).forEach((entity) => {
+      const type = String(entity && entity.type || '');
+      counts[type] = Number(counts[type] || 0) + 1;
+    });
+    return counts;
+  }
+
+  function _projectEntityItemsForActiveTab(summary) {
+    const activeTab = _projectEntityTabs().find(tab => tab.id === projectWorkspaceEntityTab)
+      || _projectEntityTabs()[0]
+      || { type: '' };
+    return _projectEntityItems(summary).filter(entity => !activeTab.type || String(entity && entity.type || '') === activeTab.type);
+  }
+
+  function _projectEntityById(summary, entityId) {
+    const normalized = String(entityId || '').trim();
+    if (!normalized) return null;
+    return _projectEntityItems(summary).find(item => String(item && item.id || '') === normalized) || null;
   }
 
   function _projectTargetById(summary, targetId) {
@@ -1060,6 +1142,15 @@
 
   function _projectFindingNoteStateFilterActive(projectId = projectWorkspaceSelectedId) {
     return _projectFindingNoteStateValue(projectId) !== 'all';
+  }
+
+  function _projectFindingOrphanFilterValue(projectId = projectWorkspaceSelectedId) {
+    const value = String(projectWorkspaceFindingOrphanFilters.get(String(projectId || '')) || 'hide');
+    return PROJECT_FINDING_ORPHAN_OPTIONS.some(option => option.value === value) ? value : 'hide';
+  }
+
+  function _projectFindingOrphanFilterActive(projectId = projectWorkspaceSelectedId) {
+    return _projectFindingOrphanFilterValue(projectId) !== 'hide';
   }
 
   function _projectFindingSortValue(projectId = projectWorkspaceSelectedId) {
@@ -2594,6 +2685,8 @@
     _projectFindingLabelFilterValues(projectId).forEach(label => params.append('label', label));
     const noteState = _projectFindingNoteStateValue(projectId);
     if (noteState !== 'all') params.set('note_state', noteState);
+    const orphanFilter = _projectFindingOrphanFilterValue(projectId);
+    if (orphanFilter !== 'hide') params.set('orphan_filter', orphanFilter);
     return params;
   }
 
@@ -2689,16 +2782,17 @@
     return row;
   }
 
-  function _projectItemRow({ title, meta = '', detail = '', badge = '', chips = [], action = null, accessory = null }) {
-    const row = document.createElement(action && !accessory ? 'button' : 'article');
-    row.className = 'project-explorer-item panel-row' + (action && !accessory ? ' panel-row-clickable' : '');
+  function _projectItemRow({ title, meta = '', detail = '', badge = '', chips = [], action = null, accessory = null, forceArticle = false }) {
+    const clickableButton = action && !accessory && !forceArticle;
+    const row = document.createElement(clickableButton ? 'button' : 'article');
+    row.className = 'project-explorer-item panel-row' + (clickableButton ? ' panel-row-clickable' : '');
     let contentHost = row;
     if (action) {
       if (row.tagName === 'BUTTON') {
         row.type = 'button';
         row.classList.add('control-row');
       }
-      else if (accessory) {
+      else if (accessory || forceArticle) {
         contentHost = document.createElement('button');
         contentHost.type = 'button';
         contentHost.className = 'control-row project-explorer-item-click-target';
@@ -2936,10 +3030,14 @@
 
     const actions = document.createElement('div');
     actions.className = 'project-target-actions';
+    const open = _makeProjectButton('Atlas', 'open-project-entity', projectId);
     const edit = _makeProjectButton('Edit', 'edit-target', projectId);
     const remove = _makeProjectButton('Remove', 'delete-target', projectId);
     const targetId = String(target.id || '');
-    const buttons = [];
+    open.dataset.entityId = targetId;
+    open.dataset.entityValue = String(target.value || '');
+    open.dataset.entityType = String(target.type || '');
+    const buttons = [open];
     if (String(target.review_state || '') === 'pending') {
       buttons.push(_makeProjectButton('Confirm', 'confirm-target', projectId, 'secondary'));
       buttons.push(_makeProjectButton('Dismiss', 'dismiss-target', projectId));
@@ -3341,6 +3439,24 @@
       }));
       controls.appendChild(_projectFilterDropdown('Filter by status', selectedStatuses.size, statusOptions));
 
+      const orphanWrap = document.createElement('label');
+      orphanWrap.className = 'project-finding-sort-control project-finding-orphan-control';
+      const orphanSelect = document.createElement('select');
+      orphanSelect.className = 'form-select project-finding-orphan-select';
+      orphanSelect.dataset.projectFindingOrphan = '1';
+      orphanSelect.dataset.projectId = projectId;
+      orphanSelect.setAttribute('aria-label', 'Filter findings by source runs');
+      const currentOrphan = _projectFindingOrphanFilterValue(projectId);
+      PROJECT_FINDING_ORPHAN_OPTIONS.forEach(({ value, label: labelText }) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = labelText;
+        option.selected = value === currentOrphan;
+        orphanSelect.appendChild(option);
+      });
+      orphanWrap.appendChild(orphanSelect);
+      controls.appendChild(orphanWrap);
+
       const sortWrap = document.createElement('label');
       sortWrap.className = 'project-finding-sort-control project-finding-source-order-control';
       const sortSelect = document.createElement('select');
@@ -3433,8 +3549,18 @@
         clearAttr: 'projectFindingNoteStateClear',
       }));
     }
+    const orphanState = _projectFindingOrphanFilterValue(projectId);
+    if (orphanState !== 'hide') {
+      const option = PROJECT_FINDING_ORPHAN_OPTIONS.find(item => item.value === orphanState);
+      chips.appendChild(_projectFilterChip({
+        projectId,
+        label: `sources: ${option ? option.label : orphanState}`,
+        value: orphanState,
+        clearAttr: 'projectFindingOrphanClear',
+      }));
+    }
     const hasFilters = selectedTargets.size || selectedRuns.size || selectedStatuses.size
-      || selectedLabels.size || noteState !== 'all';
+      || selectedLabels.size || noteState !== 'all' || orphanState !== 'hide';
     if (hasFilters) {
       const clearAll = document.createElement('button');
       clearAll.type = 'button';
@@ -3581,6 +3707,9 @@
       const noteState = _projectFindingNoteStateValue(projectId);
       if (noteState === 'noted') findings = findings.filter(finding => !!_entityNoteBody(finding));
       else if (noteState === 'unnoted') findings = findings.filter(finding => !_entityNoteBody(finding));
+      const orphanState = _projectFindingOrphanFilterValue(projectId);
+      if (orphanState === 'hide') findings = findings.filter(finding => !finding.orphan_source);
+      else if (orphanState === 'only') findings = findings.filter(finding => finding.orphan_source);
     }
     return _sortProjectFindings(findings, projectId, summary);
   }
@@ -3987,7 +4116,7 @@
   function _projectMobileCountEntries(summary) {
     return _projectCountEntries(summary)
       .filter(item => item.id !== 'artifacts' || _projectArtifactsVisible())
-      .filter(item => ['runs', 'findings', 'artifacts', 'targets', 'packages'].includes(item.id));
+      .filter(item => ['runs', 'entities', 'findings', 'artifacts', 'targets', 'packages'].includes(item.id));
   }
 
   function _projectMobileTabItems(projectId, summary) {
@@ -4000,6 +4129,7 @@
     return [
       { id: 'details', label: 'Details' },
       { id: 'runs', label: 'Runs', count: clamp(counts.runs) },
+      { id: 'entities', label: 'Entities', count: clamp(counts.entities) },
       { id: 'findings', label: 'Findings', count: clamp(counts.findings) },
       _projectArtifactsVisible()
         ? { id: 'artifacts', label: 'Artifacts', count: clamp(counts.artifacts) }
@@ -4842,6 +4972,7 @@
           actions.push({ label: 'Dismiss', action: 'dismiss-target', dataset: { targetId, targetValue: target.value } });
         }
         actions.push(
+          { label: 'Open in Atlas', action: 'open-project-entity', dataset: { entityId: targetId, entityValue: target.value, entityType: target.type } },
           { label: 'Edit', action: 'edit-target', dataset: { targetId, targetValue: target.value } },
           { label: 'Remove', action: 'delete-target', tone: 'danger', dataset: { targetId, targetValue: target.value } },
         );
@@ -4925,6 +5056,56 @@
     return fragment;
   }
 
+  function _renderProjectMobileEntitiesTab(projectId, summary) {
+    const fragment = document.createDocumentFragment();
+    const toolbar = document.createElement('div');
+    toolbar.className = 'project-mobile-tab-toolbar';
+    toolbar.append(
+      _makeProjectButton('Add entity', 'open-entity-picker', projectId, 'primary'),
+      _makeProjectButton('Export CSV', 'export-project-entities-csv', projectId),
+    );
+    fragment.appendChild(toolbar);
+    fragment.appendChild(_renderProjectEntityTypeTabs(projectId, summary));
+    const allEntities = _projectEntityItems(summary);
+    const entities = _projectEntityItemsForActiveTab(summary);
+    if (!allEntities.length) {
+      fragment.appendChild(_projectMobileEmptyPanel('No Atlas entities are linked to this project yet.', [
+        _makeProjectButton('Add entity', 'open-entity-picker', projectId, 'primary'),
+      ]));
+      return fragment;
+    }
+    if (!entities.length) {
+      fragment.appendChild(_emptyProjectPanel('No entities match this type.'));
+      return fragment;
+    }
+    const list = document.createElement('div');
+    list.className = 'project-mobile-content-list';
+    entities.forEach((entity) => {
+      const entityId = String(entity.id || '');
+      const value = String(entity.canonical_value || entity.value || '');
+      const actions = [
+        { label: 'Open in Atlas', action: 'open-project-entity', dataset: { entityId, entityValue: value, entityType: entity.type } },
+        { label: 'Unlink', action: 'unlink-project-entity', tone: 'danger', dataset: { entityId, entityValue: value } },
+      ];
+      list.appendChild(_projectMobileContentRow({
+        title: value || entityId,
+        meta: _projectEntityTypeLabel(entity.type),
+        detail: [
+          `${Number(entity.occurrence_count || entity.seen_count || 0).toLocaleString()} hit${Number(entity.occurrence_count || entity.seen_count || 0) === 1 ? '' : 's'}`,
+          _projectEntityIntelSummary(entity),
+        ].filter(Boolean),
+        chips: _projectEntityChips(entity),
+        action: {
+          action: 'open-project-entity',
+          dataset: { projectId, entityId, entityValue: value, entityType: String(entity.type || '') },
+        },
+        accessory: _projectMobileActionMenu(projectId, `Entity actions for ${value || entityId}`, actions),
+      }));
+    });
+    fragment.appendChild(list);
+    return fragment;
+  }
+
   function _projectMobileFindingReviewNode(finding, projectId) {
     const wrap = document.createElement('label');
     wrap.className = 'project-mobile-menu-field';
@@ -4943,15 +5124,8 @@
     }
     const allFindings = _projectFindingItems(projectId);
     const findings = _filteredProjectFindings(projectId, summary);
-    const linkedRuns = _projectRunItems(summary);
-    if (!linkedRuns.length) {
-      fragment.appendChild(_projectMobileEmptyPanel('No linked runs yet. Open Runs to link a run.', [
-        _makeProjectButton('Link last run', 'link-last-run', projectId, 'primary'),
-      ]));
-      return fragment;
-    }
     if (!allFindings.length) {
-      fragment.appendChild(_emptyProjectPanel('No findings captured for linked runs yet.'));
+      fragment.appendChild(_emptyProjectPanel('No persisted findings for linked runs or linked entities yet.'));
       return fragment;
     }
     if (!findings.length) {
@@ -5171,6 +5345,7 @@
     }
     const projectId = String(project.id || projectWorkspaceSelectedId || '');
     if (projectWorkspaceTab === 'runs') projectMobileDetailBody.appendChild(_renderProjectMobileRunsTab(projectId, summary));
+    else if (projectWorkspaceTab === 'entities') projectMobileDetailBody.appendChild(_renderProjectMobileEntitiesTab(projectId, summary));
     else if (projectWorkspaceTab === 'findings') projectMobileDetailBody.appendChild(_renderProjectMobileFindingsTab(projectId, summary));
     else if (projectWorkspaceTab === 'artifacts') projectMobileDetailBody.appendChild(_renderProjectMobileArtifactsTab(projectId, summary));
     else if (projectWorkspaceTab === 'packages') projectMobileDetailBody.appendChild(_renderProjectMobilePackagesTab(projectId, summary));
@@ -5340,6 +5515,7 @@
     const tabItems = [
       { id: 'details', label: 'Details' },
       { id: 'runs', label: 'Runs', count: _projectTabCountText(projectId, summary, 'runs', tabCounts.runs) },
+      { id: 'entities', label: 'Entities', count: _projectTabCountText(projectId, summary, 'entities', tabCounts.entities) },
       { id: 'findings', label: 'Findings', count: _projectTabCountText(projectId, summary, 'findings', tabCounts.findings) },
       _projectArtifactsVisible()
         ? { id: 'artifacts', label: 'Artifacts', count: _projectTabCountText(projectId, summary, 'artifacts', tabCounts.artifacts) }
@@ -5497,6 +5673,314 @@
     });
   }
 
+  function _projectEntityChips(entity) {
+    const chips = _entityMetadataChips(entity);
+    const intelCount = Number(entity && entity.intel_provider_count || 0);
+    if (intelCount > 0) {
+      const providers = _projectEntityIntelProviders(entity);
+      if (providers.length) {
+        providers.slice(0, 3).forEach(provider => chips.push({ label: provider, kind: 'label' }));
+        if (providers.length > 3) chips.push({ label: `+${providers.length - 3} providers`, kind: 'label' });
+      } else {
+        chips.push({ label: `intel: ${intelCount} provider${intelCount === 1 ? '' : 's'}`, kind: 'label' });
+      }
+    }
+    const runCount = Number(entity && entity.run_count || 0);
+    if (runCount > 0) {
+      chips.push({ label: `${runCount} run${runCount === 1 ? '' : 's'}`, kind: 'note' });
+    }
+    return chips;
+  }
+
+  function _projectEntityRowAccessory(projectId, entity) {
+    const entityId = String(entity && entity.id || '');
+    const value = String(entity && (entity.canonical_value || entity.value) || '');
+    const type = String(entity && entity.type || '');
+    const wrap = document.createElement('div');
+    wrap.className = 'project-entity-row-actions';
+    const open = _makeProjectButton('Open in Atlas', 'open-project-entity', projectId);
+    open.dataset.entityId = entityId;
+    open.dataset.entityValue = value;
+    open.dataset.entityType = type;
+    const unlink = _makeProjectButton('Unlink', 'unlink-project-entity', projectId, 'destructive');
+    unlink.dataset.entityId = entityId;
+    unlink.dataset.entityValue = value;
+    wrap.append(open, unlink);
+    return wrap;
+  }
+
+  function _renderProjectEntityTypeTabs(projectId, summary) {
+    const tabs = document.createElement('div');
+    tabs.className = 'project-entity-type-tabs';
+    tabs.setAttribute('role', 'tablist');
+    tabs.setAttribute('aria-label', 'Project entity types');
+    const counts = _projectEntityCounts(summary);
+    _projectEntityTabs().forEach((tab) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      const active = projectWorkspaceEntityTab === tab.id;
+      btn.className = 'toggle-btn project-entity-type-tab' + (active ? ' is-active' : '');
+      btn.dataset.projectEntityTab = tab.id;
+      btn.dataset.projectId = projectId;
+      btn.setAttribute('role', 'tab');
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      const label = document.createElement('span');
+      label.className = 'project-entity-type-tab-label';
+      label.textContent = tab.label;
+      const count = document.createElement('span');
+      count.className = 'project-entity-type-tab-count';
+      count.textContent = Number(counts[tab.type] || 0).toLocaleString();
+      btn.append(label, count);
+      _bindProjectRuntimePressable(btn);
+      tabs.appendChild(btn);
+    });
+    return tabs;
+  }
+
+  function _renderProjectEntityToolbar(projectId, summary, visibleEntities) {
+    const toolbar = document.createElement('div');
+    toolbar.className = 'project-entity-toolbar';
+    const actions = document.createElement('div');
+    actions.className = 'project-entity-toolbar-actions';
+    actions.append(
+      _makeProjectButton('Add entity', 'open-entity-picker', projectId, 'primary'),
+      _makeProjectButton('Export CSV', 'export-project-entities-csv', projectId),
+      _makeProjectButton('Export JSONL', 'export-project-entities-jsonl', projectId),
+    );
+    const select = document.createElement('div');
+    select.className = 'project-entity-select-actions';
+    const toggle = _makeProjectButton(projectWorkspaceEntitySelectMode ? 'Done' : 'Select', 'toggle-project-entity-select', projectId);
+    select.appendChild(toggle);
+    if (projectWorkspaceEntitySelectMode) {
+      const count = document.createElement('span');
+      count.className = 'project-entity-selection-count';
+      count.setAttribute('aria-live', 'polite');
+      count.textContent = `${projectWorkspaceSelectedEntityIds.size} selected`;
+      const selectAll = _makeProjectButton('Select all', 'select-all-project-entities', projectId);
+      selectAll.disabled = !visibleEntities.length;
+      const clear = _makeProjectButton('Clear', 'clear-project-entities', projectId);
+      clear.disabled = !projectWorkspaceSelectedEntityIds.size;
+      const unlink = _makeProjectButton('Unlink', 'bulk-unlink-project-entities', projectId, 'destructive');
+      unlink.disabled = !projectWorkspaceSelectedEntityIds.size;
+      select.append(count, selectAll, clear, unlink);
+    }
+    toolbar.append(actions, select);
+    return toolbar;
+  }
+
+  function _openProjectEntityInAtlas(projectId, summary, entity) {
+    if (typeof global.openAtlas !== 'function' || !entity) return;
+    const project = summary && summary.project && typeof summary.project === 'object' ? summary.project : null;
+    const tab = _projectEntityTabs().find(item => item.type === String(entity.type || ''));
+    closeProjectWorkspace({ refocus: false });
+    void global.openAtlas({
+      source: 'project-workspace',
+      projectId,
+      projectName: project ? _projectDisplayName(project) : '',
+      tab: tab ? tab.id : String(entity.type || ''),
+      entityValue: String(entity.canonical_value || entity.value || ''),
+    });
+  }
+
+  function _closeProjectEntityPicker() {
+    document.getElementById('project-entity-picker-overlay')?.remove();
+    projectWorkspaceEntityPicker = null;
+  }
+
+  function _projectEntityPickerLinkedIds(projectId) {
+    const summary = projectWorkspaceSummaries.get(String(projectId || ''));
+    return new Set(_projectEntityItems(summary).map(entity => String(entity && entity.id || '')).filter(Boolean));
+  }
+
+  async function _loadProjectEntityPickerRows() {
+    if (!projectWorkspaceEntityPicker) return;
+    const state = projectWorkspaceEntityPicker;
+    state.loading = true;
+    _renderProjectEntityPicker();
+    const params = new URLSearchParams({ limit: '100', orphan_filter: 'all' });
+    if (state.type) params.set('type', state.type);
+    if (state.query) params.set('q', state.query);
+    try {
+      const resp = await apiFetch(`/atlas/entities?${params.toString()}`, { cache: 'no-store' });
+      if (!resp.ok) throw await _projectResponseError(resp, 'Could not load Atlas entities.');
+      const data = await resp.json();
+      const linked = _projectEntityPickerLinkedIds(state.projectId);
+      state.rows = (Array.isArray(data.entities) ? data.entities : [])
+        .filter(entity => !linked.has(String(entity && entity.id || '')));
+    } catch (err) {
+      state.rows = [];
+      _setProjectWorkspaceMessage(err && err.message ? err.message : 'Could not load Atlas entities.', { error: true });
+      if (typeof logClientError === 'function') logClientError('failed to load project entity picker', err);
+    } finally {
+      state.loading = false;
+      _renderProjectEntityPicker();
+    }
+  }
+
+  function _openProjectEntityPicker(projectId) {
+    const tabs = _projectEntityTabs();
+    const active = tabs.find(tab => tab.id === projectWorkspaceEntityTab) || tabs[0] || { type: '' };
+    projectWorkspaceEntityPicker = {
+      projectId: String(projectId || ''),
+      query: '',
+      type: active.type || '',
+      rows: [],
+      selected: new Set(),
+      loading: false,
+    };
+    _renderProjectEntityPicker();
+    _loadProjectEntityPickerRows().catch(() => {});
+  }
+
+  function _renderProjectEntityPicker() {
+    if (!projectWorkspaceEntityPicker) return;
+    const state = projectWorkspaceEntityPicker;
+    let overlay = document.getElementById('project-entity-picker-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'project-entity-picker-overlay';
+      overlay.className = 'project-entity-picker-overlay';
+      document.body.appendChild(overlay);
+    }
+    overlay.replaceChildren();
+    const modal = document.createElement('div');
+    modal.className = 'project-entity-picker-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-label', 'Add Atlas entities to project');
+    const header = document.createElement('div');
+    header.className = 'project-entity-picker-header';
+    const title = document.createElement('h3');
+    title.textContent = 'Add Atlas entities';
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'btn btn-ghost btn-icon';
+    close.dataset.projectEntityPickerClose = '1';
+    close.setAttribute('aria-label', 'Close');
+    close.textContent = '×';
+    header.append(title, close);
+    const filters = document.createElement('div');
+    filters.className = 'project-entity-picker-filters';
+    const search = document.createElement('input');
+    search.type = 'search';
+    search.className = 'form-control';
+    search.placeholder = 'Search Atlas entities';
+    search.value = state.query;
+    search.dataset.projectEntityPickerSearch = '1';
+    const type = document.createElement('select');
+    type.className = 'form-select';
+    type.dataset.projectEntityPickerType = '1';
+    const all = document.createElement('option');
+    all.value = '';
+    all.textContent = 'All entity types';
+    type.appendChild(all);
+    _projectEntityTabs().forEach((tab) => {
+      const option = document.createElement('option');
+      option.value = tab.type;
+      option.textContent = tab.label;
+      option.selected = tab.type === state.type;
+      type.appendChild(option);
+    });
+    filters.append(search, type);
+    const body = document.createElement('div');
+    body.className = 'project-entity-picker-body';
+    if (state.loading) {
+      body.appendChild(_emptyProjectPanel('Loading Atlas entities...'));
+    } else if (!state.rows.length) {
+      body.appendChild(_emptyProjectPanel('No unlinked Atlas entities match this search.'));
+    } else {
+      state.rows.forEach((entity) => {
+        const entityId = String(entity.id || '');
+        const value = String(entity.canonical_value || entity.value || '');
+        const label = document.createElement('label');
+        label.className = 'project-entity-picker-row panel-row';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.dataset.projectEntityPickerSelect = entityId;
+        checkbox.checked = state.selected.has(entityId);
+        const textWrap = document.createElement('span');
+        textWrap.className = 'project-entity-picker-row-text';
+        const name = document.createElement('strong');
+        name.textContent = value || entityId;
+        const meta = document.createElement('span');
+        meta.textContent = _projectEntityTypeLabel(entity.type);
+        textWrap.append(name, meta);
+        label.append(checkbox, textWrap);
+        body.appendChild(label);
+      });
+    }
+    const footer = document.createElement('div');
+    footer.className = 'project-entity-picker-footer';
+    const count = document.createElement('span');
+    count.className = 'project-entity-picker-count';
+    count.textContent = `${state.selected.size} selected`;
+    const cancel = _makeProjectButton('Cancel', 'entity-picker-cancel', state.projectId);
+    const add = _makeProjectButton('Add selected', 'entity-picker-add', state.projectId, 'primary');
+    add.disabled = state.selected.size === 0;
+    footer.append(count, cancel, add);
+    modal.append(header, filters, body, footer);
+    overlay.appendChild(modal);
+    if (document.activeElement === document.body || !modal.contains(document.activeElement)) search.focus();
+  }
+
+  function _renderProjectEntities(container, projectId, summary) {
+    const allEntities = _projectEntityItems(summary);
+    const visibleEntities = _projectEntityItemsForActiveTab(summary);
+    projectWorkspaceSelectedEntityIds.forEach((entityId) => {
+      if (!visibleEntities.some(entity => String(entity && entity.id || '') === entityId)) {
+        projectWorkspaceSelectedEntityIds.delete(entityId);
+      }
+    });
+    container.appendChild(_renderProjectEntityTypeTabs(projectId, summary));
+    container.appendChild(_renderProjectEntityToolbar(projectId, summary, visibleEntities));
+    if (!allEntities.length) {
+      container.appendChild(_emptyProjectPanel('No Atlas entities are linked to this project yet.'));
+      return;
+    }
+    if (!visibleEntities.length) {
+      container.appendChild(_emptyProjectPanel(`No ${_projectEntityTypeLabel(_projectEntityTabs().find(tab => tab.id === projectWorkspaceEntityTab)?.type || '').toLowerCase()} linked yet.`));
+      return;
+    }
+    visibleEntities.forEach((entity) => {
+      const entityId = String(entity.id || '');
+      const value = String(entity.canonical_value || entity.value || '');
+      const metaParts = [
+        _projectEntityTypeLabel(entity.type),
+        `${Number(entity.occurrence_count || entity.seen_count || 0).toLocaleString()} hit${Number(entity.occurrence_count || entity.seen_count || 0) === 1 ? '' : 's'}`,
+        entity.last_seen ? `last seen ${_formatProjectDate(entity.last_seen)}` : '',
+      ].filter(Boolean);
+      const detailParts = [
+        entity.source_run_id ? `source run ${_shortProjectRunId(entity.source_run_id)}` : '',
+        _projectEntityIntelSummary(entity),
+      ].filter(Boolean);
+      const rowAccessory = _projectEntityRowAccessory(projectId, entity);
+      const row = _projectItemRow({
+        title: value || entityId,
+        meta: metaParts.join(' · '),
+        detail: detailParts.join(' · '),
+        chips: _projectEntityChips(entity),
+        accessory: rowAccessory,
+        action: {
+          action: projectWorkspaceEntitySelectMode ? 'toggle-project-entity-row' : 'open-project-entity',
+          dataset: { projectId, entityId, entityValue: value, entityType: String(entity.type || '') },
+        },
+      });
+      row.classList.add('project-entity-row');
+      if (projectWorkspaceEntitySelectMode) {
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'project-entity-select-checkbox';
+        checkbox.checked = projectWorkspaceSelectedEntityIds.has(entityId);
+        checkbox.dataset.projectEntitySelect = entityId;
+        checkbox.dataset.projectId = projectId;
+        checkbox.setAttribute('aria-label', `Select ${value || entityId}`);
+        row.prepend(checkbox);
+      }
+      container.appendChild(row);
+    });
+  }
+
   function _renderProjectFindings(container, projectId, summary) {
     if (projectWorkspaceFindingsLoadingId === projectId && !projectWorkspaceFindings.has(projectId)) {
       container.appendChild(_emptyProjectPanel('Loading findings...'));
@@ -5504,14 +5988,53 @@
     }
     const allFindings = _projectFindingItems(projectId);
     const findings = _filteredProjectFindings(projectId, summary);
+    projectWorkspaceSelectedFindingIds.forEach((findingId) => {
+      if (!findings.some(finding => String(finding && finding.id || '') === findingId)) {
+        projectWorkspaceSelectedFindingIds.delete(findingId);
+      }
+    });
+    const toolbar = document.createElement('div');
+    toolbar.className = 'project-finding-bulk-toolbar';
+    const selectToggle = _makeProjectButton(projectWorkspaceFindingSelectMode ? 'Done' : 'Select', 'toggle-project-finding-select', projectId);
+    toolbar.appendChild(selectToggle);
+    if (projectWorkspaceFindingSelectMode) {
+      const count = document.createElement('span');
+      count.className = 'project-finding-selection-count';
+      count.setAttribute('aria-live', 'polite');
+      count.textContent = `${projectWorkspaceSelectedFindingIds.size} selected`;
+      const selectAll = _makeProjectButton('Select all', 'select-all-project-findings', projectId);
+      selectAll.disabled = !findings.length;
+      const clear = _makeProjectButton('Clear', 'clear-project-findings', projectId);
+      clear.disabled = !projectWorkspaceSelectedFindingIds.size;
+      const apply = document.createElement('select');
+      apply.className = 'form-select form-control-compact project-finding-bulk-review';
+      apply.dataset.projectFindingBulkReview = '1';
+      apply.dataset.projectId = projectId;
+      apply.setAttribute('aria-label', 'Bulk review state');
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Set review...';
+      apply.appendChild(placeholder);
+      FINDING_REVIEW_STATES.forEach(({ value, label }) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        apply.appendChild(option);
+      });
+      apply.disabled = !projectWorkspaceSelectedFindingIds.size;
+      const del = _makeProjectButton('Delete', 'bulk-delete-project-findings', projectId, 'destructive');
+      del.disabled = !projectWorkspaceSelectedFindingIds.size;
+      toolbar.append(count, selectAll, clear, apply, del);
+    }
+    container.appendChild(toolbar);
     if (!allFindings.length) {
-      container.appendChild(_emptyProjectPanel('No persisted findings for linked runs yet.'));
+      container.appendChild(_emptyProjectPanel('No persisted findings for linked runs or linked entities yet.'));
       return;
     }
     if (!findings.length) {
       const message = _projectFindingServerFiltersActive(projectId, summary)
         ? 'No findings match the selected filters.'
-        : 'No persisted findings for linked runs yet.';
+        : 'No persisted findings for linked runs or linked entities yet.';
       container.appendChild(_emptyProjectPanel(message));
       return;
     }
@@ -5545,27 +6068,42 @@
       body.hidden = collapsed;
       items.forEach((finding) => {
         const lineIndex = Number(finding.line_number);
+        const findingId = String(finding.id || '');
         const metaParts = [
           finding.scope || 'finding',
           _projectFindingTargetText(summary, finding) || _projectTargetLabel(summary, finding.target_id),
           `line ${finding.line_number || 0}`,
         ].filter(Boolean);
-        body.appendChild(_projectItemRow({
+        const row = _projectItemRow({
           title: finding.title || finding.raw_line,
           meta: metaParts.join(' · '),
           detail: finding.raw_line || '',
           badge: finding.review_state || finding.severity || '',
           chips: _entityMetadataChips(finding),
-          accessory: _findingRowAccessory(finding, projectId),
+          accessory: projectWorkspaceFindingSelectMode ? null : _findingRowAccessory(finding, projectId),
+          forceArticle: projectWorkspaceFindingSelectMode,
           action: finding.run_id ? {
-            action: 'open-finding',
+            action: projectWorkspaceFindingSelectMode ? 'toggle-project-finding-row' : 'open-finding',
             dataset: {
+              findingId,
               runId: String(finding.run_id || ''),
               runCommand: String(finding.run_command || ''),
               lineIndex: Number.isInteger(lineIndex) ? String(lineIndex) : '',
             },
           } : null,
-        }));
+        });
+        if (projectWorkspaceFindingSelectMode) {
+          row.classList.add('project-finding-select-row');
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.className = 'project-finding-select-checkbox';
+          checkbox.checked = projectWorkspaceSelectedFindingIds.has(findingId);
+          checkbox.dataset.projectFindingSelect = findingId;
+          checkbox.dataset.projectId = projectId;
+          checkbox.setAttribute('aria-label', `Select ${finding.title || findingId}`);
+          row.prepend(checkbox);
+        }
+        body.appendChild(row);
       });
       group.appendChild(body);
       container.appendChild(group);
@@ -5682,24 +6220,31 @@
     }
     const projectId = String(project.id || '');
     const [header, tabs] = _renderProjectHeader(project, summary);
-    const filterBar = _renderProjectFilterBar(projectId, summary);
-    projectExplorerBody.append(header, filterBar, tabs);
+    const filterBar = ['runs', 'findings', 'artifacts'].includes(projectWorkspaceTab)
+      ? _renderProjectFilterBar(projectId, summary)
+      : null;
+    projectExplorerBody.append(header);
+    if (filterBar) projectExplorerBody.appendChild(filterBar);
+    projectExplorerBody.appendChild(tabs);
     const content = document.createElement('div');
     content.className = 'project-explorer-tab-panel';
     if (projectWorkspaceTab === 'details') {
       content.classList.add('project-explorer-tab-panel-details');
       _renderProjectDetails(content, project, summary);
     } else if (projectWorkspaceTab === 'runs') _renderProjectRuns(content, projectId, summary);
+    else if (projectWorkspaceTab === 'entities') _renderProjectEntities(content, projectId, summary);
     else if (projectWorkspaceTab === 'findings') _renderProjectFindings(content, projectId, summary);
     else if (projectWorkspaceTab === 'artifacts') _renderProjectArtifacts(content, projectId, summary);
     else if (projectWorkspaceTab === 'packages') _renderProjectPackages(content, projectId, summary);
     projectExplorerBody.appendChild(content);
     if (typeof global.enhanceAppSelects === 'function') {
       global.enhanceAppSelects(content);
-      global.enhanceAppSelects(filterBar);
+      if (filterBar) global.enhanceAppSelects(filterBar);
     }
-    _syncProjectFilterSortDivider(filterBar);
-    _scheduleProjectFilterSortDividerSync(filterBar);
+    if (filterBar) {
+      _syncProjectFilterSortDivider(filterBar);
+      _scheduleProjectFilterSortDividerSync(filterBar);
+    }
     if (
       projectWorkspaceTab === 'findings'
       || ['runs', 'artifacts'].includes(projectWorkspaceTab)
@@ -5832,6 +6377,7 @@
     _flushProjectNotesAutosave().catch(() => {});
     _closeProjectTargetEditor();
     _closeProjectEntityEditor();
+    _closeProjectEntityPicker();
     _closeProjectPackageManifest();
     _closeProjectPackageWizard({ render: false });
     _closeProjectMobileActionSheet({ restoreFocus: false });
@@ -5888,6 +6434,66 @@
     }
   }
 
+  async function _previewProjectRunEntitiesForLink(projectId, runIds) {
+    const normalizedProjectId = String(projectId || '').trim();
+    const ids = (Array.isArray(runIds) ? runIds : [runIds])
+      .map(runId => String(runId || '').trim())
+      .filter(Boolean);
+    if (!normalizedProjectId || !ids.length) return null;
+    const resp = await apiFetch(`/projects/${encodeURIComponent(normalizedProjectId)}/links/run-entities/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ run_ids: ids }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    return data && data.preview ? data.preview : null;
+  }
+
+  function _projectRunEntityLinkOption(preview) {
+    const count = Number(preview && preview.linkable || 0);
+    if (count <= 0) return null;
+    const wrap = document.createElement('div');
+    wrap.className = 'project-run-entities-option';
+    const label = document.createElement('label');
+    label.className = 'form-check';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = false;
+    const text = document.createElement('span');
+    const runCount = Number(preview && preview.run_count || 0);
+    text.textContent = runCount > 1
+      ? `Also add ${count.toLocaleString()} Atlas ${count === 1 ? 'entity' : 'entities'} found in these runs`
+      : `Also add ${count.toLocaleString()} Atlas ${count === 1 ? 'entity' : 'entities'} found in this run`;
+    label.append(checkbox, text);
+    wrap.appendChild(label);
+    return { wrap, checkbox };
+  }
+
+  async function _confirmProjectRunLink(projectId, runIds, label) {
+    const confirmFn = typeof showConfirm === 'function'
+      ? showConfirm
+      : (global && typeof global.showConfirm === 'function' ? global.showConfirm : null);
+    if (!confirmFn) return { includeEntities: false };
+    let option = null;
+    try {
+      option = _projectRunEntityLinkOption(await _previewProjectRunEntitiesForLink(projectId, runIds));
+    } catch (_) {
+      option = null;
+    }
+    const choice = await confirmFn({
+      body: label,
+      content: option ? option.wrap : null,
+      tone: null,
+      actions: [
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+        { id: 'add', label: 'Add to project', role: 'primary' },
+      ],
+    });
+    if (choice !== 'add') return null;
+    return { includeEntities: !!(option && option.checkbox.checked) };
+  }
+
   async function _linkLastRunToProject(projectId, summary) {
     const normalizedProjectId = String(projectId || projectWorkspaceSelectedId || '').trim();
     if (!normalizedProjectId) throw new Error('Select or create a project before linking runs.');
@@ -5901,16 +6507,22 @@
       return runId && !linkedRunIds.has(runId) && (!item.type || item.type === 'run');
     });
     if (!run) throw new Error('No unlinked recent run found.');
-    await _projectWorkspaceRequest(`/projects/${encodeURIComponent(normalizedProjectId)}/links`, {
+    const confirmed = await _confirmProjectRunLink(normalizedProjectId, [String(run.id || '')], 'Add the last run to this project?');
+    if (!confirmed) return;
+    const linkResp = await _projectWorkspaceRequest(`/projects/${encodeURIComponent(normalizedProjectId)}/links`, {
       method: 'POST',
       body: JSON.stringify({
         entity_type: 'run',
         entity_id: String(run.id || ''),
         source: 'manual',
+        ...(confirmed.includeEntities ? { include_entities: true } : {}),
       }),
     });
     await refreshProjectWorkspace();
-    _setProjectWorkspaceMessage('Last run linked to this project.');
+    const addedEntities = Number(linkResp && linkResp.linked_entities && linkResp.linked_entities.added || 0);
+    _setProjectWorkspaceMessage(addedEntities
+      ? `Last run and ${addedEntities.toLocaleString()} ${addedEntities === 1 ? 'entity' : 'entities'} linked to this project.`
+      : 'Last run linked to this project.');
   }
 
   async function _confirmProjectDestructive({ body, actionLabel, actionId, note }) {
@@ -6308,6 +6920,39 @@
       _renderProjectExplorer();
       return;
     }
+    const orphanControl = event.target.closest?.('[data-project-finding-orphan]');
+    if (orphanControl) {
+      event.stopPropagation();
+      const projectId = String(orphanControl.dataset.projectId || projectWorkspaceSelectedId || '');
+      if (!projectId) return;
+      const value = String(orphanControl.value || 'hide');
+      if (value === 'hide') projectWorkspaceFindingOrphanFilters.delete(projectId);
+      else projectWorkspaceFindingOrphanFilters.set(projectId, value);
+      _renderProjectExplorer();
+      return;
+    }
+    const bulkReview = event.target.closest?.('[data-project-finding-bulk-review]');
+    if (bulkReview) {
+      event.stopPropagation();
+      const projectId = String(bulkReview.dataset.projectId || projectWorkspaceSelectedId || '');
+      const reviewState = String(bulkReview.value || '');
+      if (!projectId || !reviewState || !projectWorkspaceSelectedFindingIds.size) return;
+      const findingIds = [...projectWorkspaceSelectedFindingIds];
+      try {
+        await _projectWorkspaceRequest('/atlas/findings/review', {
+          method: 'POST',
+          body: JSON.stringify({ finding_ids: findingIds, review_state: reviewState }),
+        });
+        findingIds.forEach(findingId => _setCachedFindingReviewState(projectId, findingId, reviewState));
+        projectWorkspaceSelectedFindingIds.clear();
+        projectWorkspaceFindingSelectMode = false;
+        _renderProjectExplorer();
+        _setProjectWorkspaceMessage('Finding review states updated.');
+      } catch (err) {
+        _setProjectWorkspaceMessage(err.message || 'Could not update finding review states.', { error: true });
+      }
+      return;
+    }
     const control = event.target.closest?.('[data-project-review-state]');
     if (!control) return;
     event.preventDefault();
@@ -6335,6 +6980,67 @@
         _renderProjectMobileDetail();
       }
       _setProjectWorkspaceMessage(err.message || 'Could not update finding review state.', { error: true });
+    }
+  });
+
+  document.addEventListener('input', (event) => {
+    const search = event.target.closest?.('[data-project-entity-picker-search]');
+    if (!search || !projectWorkspaceEntityPicker) return;
+    projectWorkspaceEntityPicker.query = String(search.value || '');
+    window.clearTimeout(projectWorkspaceEntityPicker.searchTimer);
+    projectWorkspaceEntityPicker.searchTimer = window.setTimeout(() => {
+      _loadProjectEntityPickerRows().catch(() => {});
+    }, 200);
+  });
+
+  document.addEventListener('change', (event) => {
+    const pickerType = event.target.closest?.('[data-project-entity-picker-type]');
+    if (pickerType && projectWorkspaceEntityPicker) {
+      projectWorkspaceEntityPicker.type = String(pickerType.value || '');
+      projectWorkspaceEntityPicker.selected.clear();
+      _loadProjectEntityPickerRows().catch(() => {});
+      return;
+    }
+    const pickerSelect = event.target.closest?.('[data-project-entity-picker-select]');
+    if (pickerSelect && projectWorkspaceEntityPicker) {
+      const entityId = String(pickerSelect.dataset.projectEntityPickerSelect || '');
+      if (entityId) {
+        if (pickerSelect.checked) projectWorkspaceEntityPicker.selected.add(entityId);
+        else projectWorkspaceEntityPicker.selected.delete(entityId);
+      }
+      _renderProjectEntityPicker();
+    }
+  });
+
+  document.addEventListener('click', async (event) => {
+    if (!projectWorkspaceEntityPicker) return;
+    const overlay = document.getElementById('project-entity-picker-overlay');
+    if (!overlay || !overlay.contains(event.target)) return;
+    const close = event.target.closest?.('[data-project-entity-picker-close]');
+    const cancel = event.target.closest?.('[data-project-action="entity-picker-cancel"]');
+    if (close || cancel) {
+      event.preventDefault();
+      _closeProjectEntityPicker();
+      return;
+    }
+    const add = event.target.closest?.('[data-project-action="entity-picker-add"]');
+    if (add) {
+      event.preventDefault();
+      const state = projectWorkspaceEntityPicker;
+      const entityIds = [...state.selected];
+      if (!entityIds.length) return;
+      try {
+        await _projectWorkspaceRequest(`/projects/${encodeURIComponent(state.projectId)}/links`, {
+          method: 'POST',
+          body: JSON.stringify({ entity_type: 'atlas_entity', entity_ids: entityIds }),
+        });
+        _closeProjectEntityPicker();
+        projectWorkspaceTab = 'entities';
+        await refreshProjectWorkspace();
+        _setProjectWorkspaceMessage(`${entityIds.length} ${entityIds.length === 1 ? 'entity' : 'entities'} added to project.`);
+      } catch (err) {
+        _setProjectWorkspaceMessage(err && err.message ? err.message : 'Could not add Atlas entities.', { error: true });
+      }
     }
   });
 
@@ -6587,6 +7293,15 @@
       _renderProjectExplorer();
       return;
     }
+    const orphanClear = event.target.closest?.('[data-project-finding-orphan-clear]');
+    if (orphanClear) {
+      event.preventDefault();
+      event.stopPropagation();
+      const projectId = String(orphanClear.dataset.projectId || projectWorkspaceSelectedId || '');
+      if (projectId) projectWorkspaceFindingOrphanFilters.delete(projectId);
+      _renderProjectExplorer();
+      return;
+    }
     const allFilterClear = event.target.closest?.('[data-project-filter-clear-all]');
     if (allFilterClear) {
       event.preventDefault();
@@ -6597,6 +7312,7 @@
       _projectFindingStatusFilterSet(projectId).clear();
       _projectFindingLabelFilterSet(projectId).clear();
       projectWorkspaceFindingNoteStateFilters.delete(projectId);
+      projectWorkspaceFindingOrphanFilters.delete(projectId);
       _renderProjectExplorer();
       return;
     }
@@ -6607,7 +7323,47 @@
       projectWorkspaceTab = tabBtn.dataset.projectTab || 'details';
       if (projectWorkspaceTab !== 'details') _closeProjectTargetEditor();
       _closeProjectEntityEditor();
+      if (projectWorkspaceTab !== 'entities') {
+        projectWorkspaceEntitySelectMode = false;
+        projectWorkspaceSelectedEntityIds.clear();
+      }
+      if (projectWorkspaceTab !== 'findings') {
+        projectWorkspaceFindingSelectMode = false;
+        projectWorkspaceSelectedFindingIds.clear();
+      }
       _setProjectWorkspaceMessage('');
+      _renderProjectExplorer();
+      return;
+    }
+    const entityTabBtn = event.target.closest?.('[data-project-entity-tab]');
+    if (entityTabBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      projectWorkspaceEntityTab = String(entityTabBtn.dataset.projectEntityTab || 'ip');
+      projectWorkspaceSelectedEntityIds.clear();
+      _renderProjectExplorer();
+      if (projectMobileView === 'detail') _renderProjectMobileDetail();
+      return;
+    }
+    const entityCheckbox = event.target.closest?.('[data-project-entity-select]');
+    if (entityCheckbox) {
+      event.stopPropagation();
+      const entityId = String(entityCheckbox.dataset.projectEntitySelect || '');
+      if (entityId) {
+        if (entityCheckbox.checked) projectWorkspaceSelectedEntityIds.add(entityId);
+        else projectWorkspaceSelectedEntityIds.delete(entityId);
+      }
+      _renderProjectExplorer();
+      return;
+    }
+    const findingCheckbox = event.target.closest?.('[data-project-finding-select]');
+    if (findingCheckbox) {
+      event.stopPropagation();
+      const findingId = String(findingCheckbox.dataset.projectFindingSelect || '');
+      if (findingId) {
+        if (findingCheckbox.checked) projectWorkspaceSelectedFindingIds.add(findingId);
+        else projectWorkspaceSelectedFindingIds.delete(findingId);
+      }
       _renderProjectExplorer();
       return;
     }
@@ -6684,6 +7440,134 @@
             projectName: project ? _projectDisplayName(project) : '',
           });
         }
+        return;
+      } else if (action === 'open-project-entity') {
+        const summary = projectWorkspaceSummaries.get(String(projectId || ''));
+        const entityId = String(btn.dataset.entityId || '');
+        const entity = _projectEntityById(summary, entityId) || {
+          id: entityId,
+          type: String(btn.dataset.entityType || ''),
+          canonical_value: String(btn.dataset.entityValue || ''),
+        };
+        _openProjectEntityInAtlas(projectId, summary, entity);
+        return;
+      } else if (action === 'toggle-project-entity-row') {
+        const entityId = String(btn.dataset.entityId || '');
+        if (entityId) {
+          if (projectWorkspaceSelectedEntityIds.has(entityId)) projectWorkspaceSelectedEntityIds.delete(entityId);
+          else projectWorkspaceSelectedEntityIds.add(entityId);
+        }
+        _renderProjectExplorer();
+        return;
+      } else if (action === 'toggle-project-entity-select') {
+        projectWorkspaceEntitySelectMode = !projectWorkspaceEntitySelectMode;
+        if (!projectWorkspaceEntitySelectMode) projectWorkspaceSelectedEntityIds.clear();
+        _renderProjectExplorer();
+        return;
+      } else if (action === 'select-all-project-entities') {
+        const summary = projectWorkspaceSummaries.get(String(projectId || ''));
+        _projectEntityItemsForActiveTab(summary).forEach((entity) => {
+          if (entity && entity.id) projectWorkspaceSelectedEntityIds.add(String(entity.id));
+        });
+        _renderProjectExplorer();
+        return;
+      } else if (action === 'clear-project-entities') {
+        projectWorkspaceSelectedEntityIds.clear();
+        _renderProjectExplorer();
+        return;
+      } else if (action === 'bulk-unlink-project-entities') {
+        if (!projectWorkspaceSelectedEntityIds.size) return;
+        const count = projectWorkspaceSelectedEntityIds.size;
+        const confirmed = await _confirmProjectDestructive({
+          body: `Unlink ${count} ${count === 1 ? 'entity' : 'entities'} from this project?`,
+          note: 'The entities stay in Atlas.',
+          actionLabel: 'Unlink',
+          actionId: 'unlink',
+        });
+        if (!confirmed) return;
+        await _projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/links`, {
+          method: 'DELETE',
+          body: JSON.stringify({ entity_type: 'atlas_entity', entity_ids: [...projectWorkspaceSelectedEntityIds] }),
+        });
+        projectWorkspaceSelectedEntityIds.clear();
+        projectWorkspaceEntitySelectMode = false;
+        await refreshProjectWorkspace();
+        _setProjectWorkspaceMessage('Entities unlinked from project.');
+        return;
+      } else if (action === 'unlink-project-entity') {
+        const entityId = String(btn.dataset.entityId || '');
+        if (!projectId || !entityId) throw new Error('Entity link is missing its identifier.');
+        const confirmed = await _confirmProjectDestructive({
+          body: 'Unlink this entity from the project?',
+          note: 'The entity stays in Atlas.',
+          actionLabel: 'Unlink',
+          actionId: 'unlink',
+        });
+        if (!confirmed) return;
+        await _projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/links`, {
+          method: 'DELETE',
+          body: JSON.stringify({ entity_type: 'atlas_entity', entity_id: entityId }),
+        });
+        await refreshProjectWorkspace();
+        _setProjectWorkspaceMessage('Entity unlinked from project.');
+        return;
+      } else if (action === 'export-project-entities-csv' || action === 'export-project-entities-jsonl') {
+        const format = action === 'export-project-entities-jsonl' ? 'jsonl' : 'csv';
+        const params = new URLSearchParams({ format, project_id: projectId, orphan_filter: 'all' });
+        const activeTab = _projectEntityTabs().find(tab => tab.id === projectWorkspaceEntityTab);
+        if (activeTab && activeTab.type) params.set('type', activeTab.type);
+        const resp = await _projectWorkspaceRequest(`/atlas/entities/export?${params.toString()}`, { cache: 'no-store' });
+        const blob = await resp.blob();
+        const filename = `darklab-project-entities-${projectId}.${format}`;
+        _downloadBlobAsAttachment(blob, filename, `Project ${format.toUpperCase()} export started.`);
+        return;
+      } else if (action === 'open-entity-picker') {
+        _openProjectEntityPicker(projectId);
+        return;
+      } else if (action === 'toggle-project-finding-select') {
+        projectWorkspaceFindingSelectMode = !projectWorkspaceFindingSelectMode;
+        if (!projectWorkspaceFindingSelectMode) projectWorkspaceSelectedFindingIds.clear();
+        _renderProjectExplorer();
+        return;
+      } else if (action === 'toggle-project-finding-row') {
+        const findingId = String(btn.dataset.findingId || '');
+        if (findingId) {
+          if (projectWorkspaceSelectedFindingIds.has(findingId)) projectWorkspaceSelectedFindingIds.delete(findingId);
+          else projectWorkspaceSelectedFindingIds.add(findingId);
+        }
+        _renderProjectExplorer();
+        return;
+      } else if (action === 'select-all-project-findings') {
+        const summary = projectWorkspaceSummaries.get(String(projectId || ''));
+        _filteredProjectFindings(projectId, summary).forEach((finding) => {
+          if (finding && finding.id) projectWorkspaceSelectedFindingIds.add(String(finding.id));
+        });
+        _renderProjectExplorer();
+        return;
+      } else if (action === 'clear-project-findings') {
+        projectWorkspaceSelectedFindingIds.clear();
+        _renderProjectExplorer();
+        return;
+      } else if (action === 'bulk-delete-project-findings') {
+        if (!projectWorkspaceSelectedFindingIds.size) return;
+        const count = projectWorkspaceSelectedFindingIds.size;
+        const confirmed = await _confirmProjectDestructive({
+          body: `Delete ${count} Atlas ${count === 1 ? 'finding' : 'findings'}?`,
+          note: 'This removes the selected findings from Atlas, not just this project.',
+          actionLabel: 'Delete',
+          actionId: 'delete',
+        });
+        if (!confirmed) return;
+        await _projectWorkspaceRequest('/atlas/findings/bulk-delete', {
+          method: 'POST',
+          body: JSON.stringify({ finding_ids: [...projectWorkspaceSelectedFindingIds] }),
+        });
+        projectWorkspaceSelectedFindingIds.clear();
+        projectWorkspaceFindingSelectMode = false;
+        _invalidateProjectFindings(projectId);
+        await _loadProjectFindings(projectId);
+        await refreshProjectWorkspace();
+        _setProjectWorkspaceMessage('Findings deleted.');
         return;
       } else if (action === 'new-target') {
         _setProjectWorkspaceMessage('');

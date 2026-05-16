@@ -856,6 +856,122 @@ describe('history panel actions', () => {
     expect(clipboard.writeText).toHaveBeenCalledWith('ping darklab.sh')
   })
 
+  it('shows remove from project in Run Details and can also unlink same-run entities', async () => {
+    let linked = true
+    const showConfirm = vi.fn((options = {}) => {
+      const content = options.content
+      expect(content.textContent).toContain('Also remove 1 Atlas entity found only in this run from this project')
+      expect(content.textContent).toContain('1 curated entity will stay linked.')
+      const checkbox = content.querySelector('input')
+      checkbox.checked = true
+      return Promise.resolve('remove')
+    })
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            roots: ['nmap'],
+            items: [{
+              id: 'run-linked',
+              type: 'run',
+              command: 'nmap darklab.sh',
+              label: 'nmap darklab.sh',
+              started: '2026-01-01T00:00:00Z',
+              created: '2026-01-01T00:00:00Z',
+              exit_code: 0,
+              project_links: linked ? [{
+                id: 'link-active',
+                project_id: 'project-active',
+                entity_type: 'run',
+                entity_id: 'run-linked',
+                project: { id: 'project-active', name: 'Active scope', status: 'active' },
+              }] : [],
+            }],
+            runs: [],
+          }),
+        })
+      }
+      if (url === '/history/run-linked?json&preview=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            command: 'nmap darklab.sh',
+            output: ['ok'],
+            exit_code: 0,
+          }),
+        })
+      }
+      if (url === '/entities/run/run-linked/findings') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ findings: [] }) })
+      }
+      if (url === '/projects/project-active/summary') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ runs: linked ? [{ id: 'run-linked' }] : [] }) })
+      }
+      if (url === '/projects/project-active/links/run-entities/remove-preview') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            preview: {
+              available: 2,
+              removable: 1,
+              kept_curated: 1,
+              removed: 0,
+              run_count: 1,
+            },
+          }),
+        })
+      }
+      if (url === '/projects/project-active/links' && options.method === 'DELETE') {
+        linked = false
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, unlinked_entities: { removed: 1, kept_curated: 1 } }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+    })
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      apiFetchImpl: apiFetch,
+      activeProject: { id: 'project-active', name: 'Active scope' },
+      showConfirmImpl: showConfirm,
+    })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+    document.querySelector('#history-list .history-entry')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect([...document.querySelectorAll('.history-run-action-menu [data-history-run-action]')].map(el => el.dataset.historyRunAction))
+      .toEqual([
+        'copy-command',
+        'edit-metadata',
+        'open-atlas',
+        'remove-project',
+        'copy-run-id',
+      ])
+    expect(document.querySelector('[data-history-run-action="add-active-project"]')).toBeNull()
+    expect(document.querySelector('[data-history-run-action="add-project"]')).toBeNull()
+
+    document.querySelector('[data-history-run-action="remove-project"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(showConfirm).toHaveBeenCalled()
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-active/links', expect.objectContaining({
+      method: 'DELETE',
+      body: JSON.stringify({ entity_type: 'run', entity_id: 'run-linked', include_entities: true }),
+    }))
+    expect([...document.querySelectorAll('.history-run-action-menu [data-history-run-action]')].map(el => el.dataset.historyRunAction))
+      .toContain('add-project')
+  })
+
   it('loads structured run findings into the run details findings tab', async () => {
     const apiFetch = vi.fn((url) => {
       if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
@@ -1317,6 +1433,7 @@ describe('history panel actions', () => {
   it('locks the bulk toolbar and selected rows while a bulk action is in flight', async () => {
     let resolveBulk
     const bulkPromise = new Promise((resolve) => { resolveBulk = resolve })
+    const showConfirm = vi.fn(() => Promise.resolve('add'))
     const apiFetch = vi.fn((url, options = {}) => {
       if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
         return Promise.resolve({
@@ -1342,6 +1459,7 @@ describe('history panel actions', () => {
     const { refreshHistoryPanel } = loadHistoryPanel({
       apiFetchImpl: apiFetch,
       activeProject: { id: 'project-active', name: 'Active scope' },
+      showConfirmImpl: showConfirm,
     })
 
     refreshHistoryPanel()
@@ -1363,6 +1481,7 @@ describe('history panel actions', () => {
       document.removeEventListener('click', bulkAddActiveDocumentClick)
     }
     await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
 
     expect(bulkAddActiveDocumentClick).not.toHaveBeenCalled()
     expect(document.querySelector('.history-bulk-toggle input').disabled).toBe(true)

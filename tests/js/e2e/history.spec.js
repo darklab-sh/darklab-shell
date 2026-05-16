@@ -543,6 +543,8 @@ test.describe('history drawer', () => {
 
     await bulkToolbar.locator('[data-action="history-bulk-menu"]').click()
     await activateHistoryBulkMenuItem(page, 'bulk-add-active-project')
+    await expect(page.locator('#confirm-host')).toContainText(`Add 2 selected runs to ${project.name}?`)
+    await page.locator('#confirm-host [data-confirm-action-id="add"]').click()
     await expect(page.locator('#permalink-toast')).toContainText('Added 2 runs')
     await expect.poll(() => projectRunLinkIds(page, project.id)).toEqual(selectedRunIds)
 
