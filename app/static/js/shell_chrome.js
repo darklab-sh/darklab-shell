@@ -6224,8 +6224,8 @@
       ? _renderProjectFilterBar(projectId, summary)
       : null;
     projectExplorerBody.append(header);
-    if (filterBar) projectExplorerBody.appendChild(filterBar);
     projectExplorerBody.appendChild(tabs);
+    if (filterBar) projectExplorerBody.appendChild(filterBar);
     const content = document.createElement('div');
     content.className = 'project-explorer-tab-panel';
     if (projectWorkspaceTab === 'details') {

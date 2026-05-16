@@ -170,6 +170,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Projects modal tabs stay anchored while switching tabs** — tab-specific filters now render below the shared tab row instead of above it, so moving between Runs, Findings, Artifacts, and the other project tabs no longer makes the tab bar jump.
 - **Command Registry examples now read as stacked reference rows** — long clickable examples keep the command on its own line and place the description underneath instead of squeezing both onto one row.
 - **Workflow command actions now match the Command Registry style** — clickable workflow steps use the same compact terminal-link formatting as command examples instead of the older rounded chip treatment.
 - **The `commands` helper now describes external tools** — allowed external command rows include the same one-sentence descriptions used by the Command Registry, such as `masscan - Runs high-speed port scans across hosts or networks.`

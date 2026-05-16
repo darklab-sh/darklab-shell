@@ -823,6 +823,11 @@ test.describe('project workspace modal', () => {
     await evidenceRunRow.locator('[data-project-action="filter-run-findings"]').click()
     await expect(page.locator('.project-explorer-tab.is-active')).toContainText('Findings')
     await expect(page.locator('[data-project-run-filter-clear]')).toContainText('run:')
+    await expect.poll(async () => page.locator('#project-explorer-body').evaluate((body) => {
+      const children = [...body.children].map((child) => child.className || '')
+      return children.findIndex((className) => String(className).includes('project-explorer-tabs'))
+        < children.findIndex((className) => String(className).includes('project-explorer-filter-panel'))
+    })).toBe(true)
     await expect(page.locator('.project-explorer-item').filter({ hasText: '80/tcp open http' }).first()).toBeVisible()
 
     await switchProjectTab(page, 'runs')
