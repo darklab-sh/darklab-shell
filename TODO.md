@@ -64,12 +64,6 @@ No known issues are currently tracked.
   - The Project Entities tab added the picker, entity-type tabs, counts, intel summary, label/note editor wiring, and entity overlay handlers directly to `app/static/js/shell_chrome.js`.
   - Move that surface into `app/static/js/features/projects/project_entities.js` so the hybrid feature-folder layout stays intact and `shell_chrome.js` doesn't keep absorbing large feature modules.
   - Share a small Atlas entity-row renderer from `app/static/js/features/atlas/` so the Projects picker and Atlas list don't keep separate lookup/filter/rendering behavior.
-- Refactor the storage diagnostics helper/cache.
-  - `_diag_table_storage_breakdown` in `app/blueprints/assets.py` repeats row-access fallback logic throughout the function even though real DB rows come from `sqlite3.Row`.
-  - Extract the repeated row access into a small helper, then split storage collection into a structured `app/services/diagnostics/storage.py` snapshot.
-  - Reuse that snapshot from both `/diag` and `RuntimeStateCollector._collect_database` so `dbstat`, row counts, FTS orphan checks, and largest-run hints aren't re-queried separately by HTML diagnostics and Prometheus scrapes.
-  - Cache the snapshot briefly, roughly 5-10 seconds, so operators still see fresh storage data while a tight Grafana scrape interval can't double-tax large SQLite databases.
-
 ---
 
 ## Feature Enhancements

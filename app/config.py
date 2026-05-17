@@ -251,6 +251,12 @@ def load_config(conf_dir=None):
         conf_path = Path(__file__).resolve().parent / "conf"
     defaults.update(_load_yaml_config(conf_path / "config.yaml"))
     defaults.update(_load_yaml_config_optional(conf_path / "config.local.yaml"))
+    env_workspace_root = str(os.environ.get("WORKSPACE_ROOT") or "").strip()
+    if env_workspace_root:
+        defaults["workspace_root"] = env_workspace_root
+    env_prometheus_multiproc_dir = str(os.environ.get("PROMETHEUS_MULTIPROC_DIR") or "").strip()
+    if env_prometheus_multiproc_dir:
+        defaults["prometheus_multiproc_dir"] = env_prometheus_multiproc_dir
     env_database_backend = str(os.environ.get("DATABASE_BACKEND") or "").strip()
     if env_database_backend:
         defaults["database_backend"] = env_database_backend

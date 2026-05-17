@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,871
+- behavior tests: 2,874
 - docs/inventory meta-tests: 32
-- `pytest`: 1490 (1458 behavior + 32 meta)
+- `pytest`: 1493 (1461 behavior + 32 meta)
 - `vitest`: 1161
 - `playwright`: 252
-- total: 2,903
+- total: 2,906
 
 This document is organized in two parts:
 
@@ -258,7 +258,7 @@ Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py
 
 ### Container Smoke Test
 
-`scripts/container_smoke_test.sh` reuses the stable `darklab_shell-test:cache` image when it exists, runs every user-facing command from the shared smoke corpus through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. Pass `--build` to force a cache-image rebuild after Dockerfile, base-image, or packaged-tool changes. The shared corpus includes `app/conf/commands.yaml` examples that do not require workspace setup or encrypted provider secrets, plus workflow step commands, so the smoke suite covers the commands the shell suggests directly plus the guided playbooks exposed through the workflows UI. It also enables Files in the smoke container and runs the workspace-required command examples from `app/conf/commands.yaml` against `tests/py/fixtures/container_smoke_test-workspace-expectations.json`, covering session-file reads, writes, managed Amass database directories, and generated output files. Interactive PTY examples marked with `interactive: true` run through `/pty/runs` against `tests/py/fixtures/container_smoke_test-interactive-expectations.json`, so the smoke pass can catch missing PTY-only tools and broken trigger-flag wiring separately from regular `/runs` commands. The fixture removes stale `darklab_shell-test-*` Compose containers/networks/volumes before startup and after teardown so interrupted local runs do not leave Redis or shell containers behind. It catches drift between those surfaced commands and actual tool behavior — renamed flags, changed output, missing tools, or broken workspace path rewriting. Not part of the default fast loop; run after Dockerfile, packaged-tool, base-image, command-registry example changes, workspace file-flag changes, interactive PTY example changes, or workflow command changes.
+`scripts/container_smoke_test.sh` reuses the stable `darklab_shell-test:cache` image when it exists and still matches the Docker runtime inputs, runs every user-facing command from the shared smoke corpus through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. Pass `--build` to force a cache-image rebuild; otherwise the cache refreshes itself when `Dockerfile`, `app/requirements.txt`, or `entrypoint.sh` changes. The shared corpus includes `app/conf/commands.yaml` examples that do not require workspace setup or encrypted provider secrets, plus workflow step commands, so the smoke suite covers the commands the shell suggests directly plus the guided playbooks exposed through the workflows UI. It also enables Files in the smoke container and runs the workspace-required command examples from `app/conf/commands.yaml` against `tests/py/fixtures/container_smoke_test-workspace-expectations.json`, covering session-file reads, writes, managed Amass database directories, and generated output files. Interactive PTY examples marked with `interactive: true` run through `/pty/runs` against `tests/py/fixtures/container_smoke_test-interactive-expectations.json`, so the smoke pass can catch missing PTY-only tools and broken trigger-flag wiring separately from regular `/runs` commands. The fixture removes stale `darklab_shell-test-*` Compose containers/networks/volumes before startup and after teardown so interrupted local runs do not leave Redis or shell containers behind. It catches drift between those surfaced commands and actual tool behavior — renamed flags, changed output, missing tools, or broken workspace path rewriting. Not part of the default fast loop; run after Dockerfile, packaged-tool, base-image, command-registry example changes, workspace file-flag changes, interactive PTY example changes, or workflow command changes.
 
 ```bash
 ./scripts/container_smoke_test.sh                           # full run
@@ -391,7 +391,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestLoadConfig.test_resolve_data_dir_uses_configured_data_dir_when_environment_is_unset` | Verifies that operator-configured `data_dir` is used when the internal environment override is absent. |
 | `TestLoadConfig.test_resolve_data_dir_falls_back_to_tmp_when_data_is_not_writable` | Verifies that auto-detection falls back to `/tmp` when image-created `/data` is not writable. |
 | `TestLoadConfig.test_resolve_data_dir_rejects_unwritable_configured_data_dir` | Verifies that an explicit but unwritable `data_dir` fails loudly instead of silently falling back. |
-| `TestLoadConfig.test_workspace_root_env_warning_only_logs_on_mismatch` | Verifies that startup warns when `WORKSPACE_ROOT` and configured `workspace_root` diverge, without warning for matching paths. |
+| `TestLoadConfig.test_workspace_root_env_warning_only_logs_on_mismatch` | Verifies that the workspace-root drift helper warns when raw env/config paths diverge, without warning for matching paths. |
 | `TestDatabaseBackend.test_backend_defaults_to_sqlite_and_exposes_sqlite_dialect` | Verifies the database backend helper defaults to SQLite and exposes the current SQLite dialect shape. |
 | `TestDatabaseBackend.test_postgres_backend_exposes_dialect_and_pool_settings` | Verifies the Postgres backend exposes dialect helpers, pool settings, and the SQLite-route guard. |
 | `TestDatabaseBackend.test_postgres_pool_uses_psycopg_pool_lazily` | Verifies the Postgres pool is imported lazily, cached by pool settings, and closed cleanly. |
@@ -743,6 +743,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `test_post_run_kills_early_when_stop_text_is_seen` | Checks that post run kills early when stop text is seen. |
 | `test_needs_nuclei_template_warmup` | Checks that the smoke suite warms nuclei templates only when scan-style nuclei commands are in the selected corpus. |
 | `test_force_smoke_image_build_reads_wrapper_env` | Verifies that the smoke fixture only forces a cache-image rebuild when the wrapper sets `RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD=1`. |
+| `test_smoke_image_cache_key_tracks_docker_runtime_inputs` | Verifies that Dockerfile, Python requirements, and entrypoint changes refresh the stable smoke cache image. |
+| `test_smoke_image_cache_status_requires_matching_label` | Verifies that the smoke fixture reuses only cache images with the expected build-input label. |
+| `test_smoke_image_cache_status_rebuilds_when_image_is_missing` | Verifies that a missing stable smoke cache image triggers a rebuild. |
 | `test_container_smoke_test_startup` | Checks that container smoke test startup. |
 | `test_container_smoke_test_expectations_cover_all_user_facing_commands` | Checks that the smoke-test expectation fixture covers every command in the shared user-facing smoke corpus. |
 | `test_container_smoke_test_interactive_expectations_cover_all_pty_examples` | Checks that the interactive smoke-test expectation fixture covers every PTY-gated command example. |

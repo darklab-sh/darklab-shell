@@ -27,7 +27,7 @@ ARG VT_CLI_VERSION=latest
 ARG IPINFO_CLI_VERSION=ipinfo-3.3.2
 ARG URLSCAN_CLI_VERSION=v2026.03.26
 ARG CHAOS_CLIENT_VERSION=v0.5.2
-ARG SETUPTOOLS_VERSION=80.9.0
+ARG SETUPTOOLS_VERSION=82.0.1
 
 # Remove dpkg config that prevents man pages from being installed
 RUN rm -f /etc/dpkg/dpkg.cfg.d/docker

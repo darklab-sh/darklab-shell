@@ -842,7 +842,7 @@ Atlas entity detail responses include a backend-derived `intel_summary` built fr
 
 The session workspace is the per-session file scratchpad that command rewrites, file built-ins, and the Files panel all share. Workspaces live under the configured `workspace_root`, one hashed `sess_*` directory per session, with the runtime `0730` mode on the root and `3730` on the hashed session directories. App-created files sit at `0640`; command-created files that the `scanner` user must still write to land at `0660` through the shared `appuser` run group.
 
-For workspace-backed host bind mounts, the host path should already be owned by the numeric UID/GID for the image's `appuser` account. The current image creates `appuser` as `995:995` and `scanner` as `994:994`, and launches scanner commands with the shared `appuser` run group when executing user commands. The runtime still attempts to repair ownership and modes on startup, including files directly inside each `sess_*` directory, but pre-setting the bind mount keeps rootless Docker, NFS-like mounts, and stricter host policies from leaving the workspace root owned by `root:root`. Permission-repair failures are warning-logged rather than swallowed, and startup warning-logs if the `WORKSPACE_ROOT` environment value prepared by the entrypoint differs from the app's configured `workspace_root`.
+For workspace-backed host bind mounts, the host path should already be owned by the numeric UID/GID for the image's `appuser` account. The current image creates `appuser` as `995:995` and `scanner` as `994:994`, and launches scanner commands with the shared `appuser` run group when executing user commands. The runtime still attempts to repair ownership and modes on startup, including files directly inside each `sess_*` directory, but pre-setting the bind mount keeps rootless Docker, NFS-like mounts, and stricter host policies from leaving the workspace root owned by `root:root`. Permission-repair failures are warning-logged rather than swallowed. In Compose deployments, `WORKSPACE_ROOT` is both the entrypoint preparation path and the app-side `workspace_root` override, so the bind-mount path only needs one environment setting.
 
 Workspace cleanup is request-driven rather than a separate daemon. Each worker checks periodically before handling a request, then calls the backend cleanup helper when workspace storage is enabled. Cleanup evaluates the hashed session directory mtime as the workspace activity marker and only deletes resolved `sess_*` roots under the configured workspace root. Normal workspace path resolution rejects symlink components before use, and file reads/downloads also open the final component with no-follow semantics where the platform supports it so a same-principal symlink swap cannot escape the session root between validation and open.
 
@@ -1437,12 +1437,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,871
+- behavior tests: 2,874
 - docs/inventory meta-tests: 32
-- `pytest`: 1490 (1458 behavior + 32 meta)
+- `pytest`: 1493 (1461 behavior + 32 meta)
 - `vitest`: 1161
 - `playwright`: 252
-- total: 2,903
+- total: 2,906
 
 ### Testing Architecture
 

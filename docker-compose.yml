@@ -54,15 +54,14 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - APP_PORT=${APP_PORT:-8888}
-      - PROMETHEUS_MULTIPROC_DIR=/tmp/darklab_shell-prom
+      - PROMETHEUS_MULTIPROC_DIR=${PROMETHEUS_MULTIPROC_DIR:-/tmp/darklab_shell-prom}
       - DATABASE_BACKEND=${DATABASE_BACKEND:-sqlite}
       - DATABASE_URL=${DATABASE_URL:-}
       - DATABASE_POOL_MIN=${DATABASE_POOL_MIN:-1}
       - DATABASE_POOL_MAX=${DATABASE_POOL_MAX:-5}
-      # Must match app/conf/config.yaml workspace_root when customized.
       # The entrypoint uses this path to normalize workspace permissions before
-      # dropping privileges; the app uses workspace_root for runtime access.
-      # Set WORKSPACE_ROOT directly here, in an override, or via .env.
+      # dropping privileges. The app also treats WORKSPACE_ROOT as the runtime
+      # workspace_root override, so Compose deployments only need this setting.
       - WORKSPACE_ROOT=${WORKSPACE_ROOT:-/tmp/darklab_shell-workspaces}
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -f http://localhost:${APP_PORT:-8888}/health"]

@@ -12,17 +12,9 @@ from config import APP_VERSION, CFG
 from core import database, process
 from core.database_backend import (
     DatabaseBackend,
-    postgres_storage_rows,
-    postgres_table_names,
-    postgres_table_row_count,
     SQLiteConnection,
-    SQLiteOperationalError,
-    sqlite_dbstat_rows,
-    sqlite_fts_orphan_count,
-    sqlite_page_stats,
-    sqlite_table_names,
-    sqlite_table_row_count,
 )
+from services.diagnostics.storage import storage_snapshot
 from services.intel.registry import INTEL_PROVIDERS
 from services.metrics import build_info_labels
 from services.workspace.files import workspace_root, workspace_settings
@@ -44,56 +36,6 @@ def _db_file_size(path: str) -> int:
         return os.path.getsize(path)
     except OSError:
         return 0
-
-
-def _table_names(conn: SQLiteConnection) -> list[str]:
-    if database.DB_BACKEND == DatabaseBackend.POSTGRES:
-        return postgres_table_names(conn)
-    return sqlite_table_names(conn)
-
-
-def _count_rows(conn: SQLiteConnection, table: str) -> int:
-    if database.DB_BACKEND == DatabaseBackend.POSTGRES:
-        return postgres_table_row_count(conn, table)
-    return sqlite_table_row_count(conn, table)
-
-
-def _allocated_bytes(conn: SQLiteConnection) -> dict[str, int]:
-    if database.DB_BACKEND == DatabaseBackend.POSTGRES:
-        try:
-            return {
-                str(row["name"]): _safe_int(row["allocated"])
-                for row in postgres_storage_rows(conn)
-            }
-        except Exception:
-            return {}
-    try:
-        rows = sqlite_dbstat_rows(conn)
-    except SQLiteOperationalError:
-        return {}
-    return {str(row["name"]): _safe_int(row["allocated"]) for row in rows}
-
-
-def _db_freelist_bytes(conn: SQLiteConnection) -> int:
-    if database.DB_BACKEND == DatabaseBackend.POSTGRES:
-        return 0
-    stats = sqlite_page_stats(conn)
-    return _safe_int(stats["page_size"]) * _safe_int(stats["freelist_count"])
-
-
-def _fts_orphans(conn: SQLiteConnection) -> int:
-    if database.DB_BACKEND == DatabaseBackend.POSTGRES:
-        return 0
-    try:
-        return sqlite_fts_orphan_count(conn)
-    except SQLiteOperationalError:
-        return 0
-
-
-def _db_size_bytes(conn: SQLiteConnection) -> int:
-    if database.DB_BACKEND == DatabaseBackend.POSTGRES:
-        return sum(_safe_int(row.get("allocated")) for row in postgres_storage_rows(conn))
-    return _db_file_size(database.DB_PATH)
 
 
 def _workspace_usage() -> tuple[int, int]:
@@ -270,14 +212,18 @@ class RuntimeStateCollector:
             with database.db_connect() as conn:
                 conn.execute("SELECT 1")
                 health.add_metric(["db"], 1)
-                db_size.add_metric([], _db_size_bytes(conn))
-                reclaimable.add_metric([], _db_freelist_bytes(conn))
-                allocated = _allocated_bytes(conn)
-                for name in _table_names(conn):
-                    table_rows.add_metric([name], _count_rows(conn, name))
+                snapshot = storage_snapshot(conn, database.DB_BACKEND, db_path=database.DB_PATH)
+                db_size.add_metric([], _safe_int(snapshot.get("size")))
+                reclaimable.add_metric([], _safe_int(snapshot.get("reclaimable_size")))
+                allocated = snapshot.get("allocated_by_object") or {}
+                for item in snapshot.get("tables") or []:
+                    name = str(item.get("name") or "")
+                    if not name:
+                        continue
+                    table_rows.add_metric([name], _safe_int(item.get("rows")))
                     if name in allocated:
-                        table_bytes.add_metric([name], allocated[name])
-                fts_orphans.add_metric([], _fts_orphans(conn))
+                        table_bytes.add_metric([name], _safe_int(allocated[name]))
+                fts_orphans.add_metric([], _safe_int(snapshot.get("fts_orphans")))
                 self._add_atlas(conn, atlas_entities)
                 self._add_findings(conn, findings)
                 self._add_snapshots(conn, snapshots)

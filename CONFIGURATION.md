@@ -78,7 +78,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `trusted_proxy_cidrs` | `["127.0.0.1/32", "::1/128"]` | IPs / CIDRs allowed to supply `X-Forwarded-For`. Requests outside these ranges ignore forwarded headers and use the direct connection IP |
 | `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access `/diag` and `/metrics`. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so `X-Forwarded-For` is honored only when the direct peer is inside `trusted_proxy_cidrs`. Empty list disables the page entirely and prevents metrics scrapes. When enabled, a `diag` button appears in the desktop rail and the mobile menu for matching visitors |
 | `metrics_enabled` | `true` | Enables the Prometheus `/metrics` endpoint for callers allowed by `diagnostics_allowed_cidrs`. Set to `false` to hide `/metrics` while keeping `/diag` available |
-| `prometheus_multiproc_dir` | `/tmp/darklab_shell-prom` | Writable shared directory used by `prometheus_client` to aggregate counters and histograms across Gunicorn workers. The container entrypoint creates it on tmpfs and clears stale worker shards at startup |
+| `prometheus_multiproc_dir` | `/tmp/darklab_shell-prom` | Writable shared directory used by `prometheus_client` to aggregate counters and histograms across Gunicorn workers. `PROMETHEUS_MULTIPROC_DIR` overrides this value when set |
 | `metrics_histogram_buckets_run_duration` | `[0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 900, 1800, 3600]` | Prometheus run and PTY duration histogram buckets, in seconds |
 | `metrics_histogram_buckets_http_duration` | `[0.005, 0.01, 0.05, 0.1, 0.5, 1, 5]` | Prometheus HTTP request duration histogram buckets, in seconds |
 | `restricted_command_input_cidrs` | `[]` | IPs / CIDRs that command validation rejects when supplied in metadata-known target slots. Applies to literal IP/CIDR values, URLs with literal IP hosts, host:port values, and inspectable workspace input files passed through declared read flags. Domain names are not DNS-resolved |
@@ -174,7 +174,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `full_output_max_mb` | `5 MB` | Server-side only. Hard cap on the uncompressed UTF-8 payload written into a full-output artifact before gzip compression. `0` means unlimited |
 | `workspace_enabled` | `false` | Server-side only. Enables the app-managed per-session workspace foundation. This does not enable shell navigation or redirection by itself |
 | `workspace_backend` | `tmpfs` | Server-side only. Storage intent label for workspaces: `tmpfs` for short-lived in-memory storage or `volume` for a Docker-mounted location. The label does not mount storage by itself |
-| `workspace_root` | `/tmp/darklab_shell-workspaces` | Server-side only. Root directory that contains hashed per-session workspace directories. If changed, also point the Compose `WORKSPACE_ROOT` environment variable at the same path so the entrypoint prepares permissions there |
+| `workspace_root` | `/tmp/darklab_shell-workspaces` | Server-side only. Root directory that contains hashed per-session workspace directories. In Compose deployments, `WORKSPACE_ROOT` overrides this value so the entrypoint and app use the same path |
 | `workspace_quota_mb` | `50 MB` | Server-side only. Per-session workspace quota |
 | `workspace_max_file_mb` | `5 MB` | Server-side only. Maximum single app-managed text file size |
 | `workspace_max_files` | `100` | Server-side only. Maximum file count per session workspace |
@@ -548,6 +548,7 @@ APP_PORT=8888
 WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 # WEB_CONCURRENCY=4
 # WEB_THREADS=4
+# PROMETHEUS_MULTIPROC_DIR=/tmp/darklab_shell-prom
 # COMPOSE_PROFILES=postgres
 # DATABASE_BACKEND=postgres
 # DATABASE_URL=postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell
@@ -563,9 +564,10 @@ WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 | Variable | Used by | Purpose |
 |----------|---------|---------|
 | `APP_PORT` | Docker Compose, Dockerfile/entrypoint healthcheck path | App port exposed by the container and published by the base Compose file |
-| `WORKSPACE_ROOT` | Docker entrypoint and Compose environment | Path prepared by the container before dropping privileges; keep aligned with `workspace_root` in app config |
+| `WORKSPACE_ROOT` | Docker entrypoint, Compose environment, Flask app | Path prepared by the container before dropping privileges. When set, it also overrides `workspace_root` in app config so Compose deployments only need one workspace path setting |
 | `WEB_CONCURRENCY` | Gunicorn entrypoint | Number of Gunicorn worker processes |
 | `WEB_THREADS` | Gunicorn entrypoint | Number of threads per Gunicorn worker |
+| `PROMETHEUS_MULTIPROC_DIR` | Docker Compose, Flask app, Prometheus client | Optional override for `prometheus_multiproc_dir`. The app creates this scratch directory and exports it for `prometheus_client` multiprocess metrics |
 | `COMPOSE_PROFILES` | Docker Compose | Optional comma-separated Compose profiles to enable. Set to `postgres` when you want the profile-gated Postgres service included without passing `--profile postgres` |
 | `DATABASE_BACKEND` | Flask app | Optional override for `database_backend`. Use `sqlite` for the default local/single-user path or `postgres` for a Postgres-backed deployment |
 | `DATABASE_URL` | Flask app | Optional override for `database_url`, normally a Postgres DSN when `DATABASE_BACKEND=postgres` |
@@ -667,10 +669,10 @@ Application log format and Docker log transport are separate controls. To emit G
 
 Files/workspace storage has two coordinated settings:
 
-- `workspace_root` in `app/conf/config.yaml` or `app/conf/config.local.yaml` is the path the app uses at runtime.
-- `WORKSPACE_ROOT` in Compose is the path the Docker entrypoint prepares before dropping privileges.
+- `WORKSPACE_ROOT` in Compose is the path the Docker entrypoint prepares before dropping privileges. The app also treats it as the runtime `workspace_root` override, so Compose deployments only need this setting.
+- `workspace_root` in `app/conf/config.yaml` or `app/conf/config.local.yaml` is still available for non-Compose runs or file-based config.
 
-Those two values should match whenever you move storage away from the default `/tmp/darklab_shell-workspaces`.
+Do not set conflicting values in `.env` and `config.local.yaml`: the environment wins.
 
 ### Short-lived tmpfs storage
 
@@ -678,7 +680,6 @@ Those two values should match whenever you move storage away from the default `/
 # app/conf/config.local.yaml
 workspace_enabled: true
 workspace_backend: tmpfs
-workspace_root: /tmp/darklab_shell-workspaces
 ```
 
 ```yaml
@@ -691,13 +692,12 @@ services:
 
 ### Persistent bind mount
 
-The production Compose override uses `./workspaces:/workspaces` plus `WORKSPACE_ROOT=/workspaces`. Pair that with:
+The production Compose override uses `./workspaces:/workspaces` plus `WORKSPACE_ROOT=/workspaces`. Pair that with the volume backend in app config:
 
 ```yaml
 # app/conf/config.local.yaml
 workspace_enabled: true
 workspace_backend: volume
-workspace_root: /workspaces
 ```
 
 Prepare the host bind-mount directory with the numeric UID/GID used by `appuser` inside the built image, not a host username. The current image creates `appuser` as `995:995` and `scanner` as `994:994`; scanner commands use the shared `appuser` run group when they access validated workspace files:
@@ -729,7 +729,6 @@ Use the same app config as the bind-mount example:
 ```yaml
 workspace_enabled: true
 workspace_backend: volume
-workspace_root: /workspaces
 ```
 
 ---
@@ -799,10 +798,9 @@ sudo sysctl --system
 # app/conf/config.local.yaml
 workspace_enabled: true
 workspace_backend: tmpfs
-workspace_root: /tmp/darklab_shell-workspaces
 ```
 
-Make sure `WORKSPACE_ROOT` in Compose points at the same path.
+For Compose runs, set `WORKSPACE_ROOT` when you want a path other than the default. The app uses that environment value as the runtime workspace root.
 
 ### Enable Interactive PTY
 

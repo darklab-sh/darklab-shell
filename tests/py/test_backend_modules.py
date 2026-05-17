@@ -169,13 +169,22 @@ class TestLoadConfig:
             "DATABASE_URL": "postgresql://darklab:secret@postgres:5432/darklab_shell",
             "DATABASE_POOL_MIN": "2",
             "DATABASE_POOL_MAX": "4",
+            "WORKSPACE_ROOT": "/env/workspaces",
+            "PROMETHEUS_MULTIPROC_DIR": "/env/prometheus",
         }):
+            with open(os.path.join(tmp, "config.yaml"), "w") as f:
+                f.write(
+                    "workspace_root: /yaml/workspaces\n"
+                    "prometheus_multiproc_dir: /yaml/prometheus\n"
+                )
             cfg = app_config.load_config(tmp)
 
         assert cfg["database_backend"] == "postgres"
         assert cfg["database_url"] == "postgresql://darklab:secret@postgres:5432/darklab_shell"
         assert cfg["database_pool_min"] == 2
         assert cfg["database_pool_max"] == 4
+        assert cfg["workspace_root"] == "/env/workspaces"
+        assert cfg["prometheus_multiproc_dir"] == "/env/prometheus"
 
     def test_local_config_overrides_base_config_without_replacing_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:

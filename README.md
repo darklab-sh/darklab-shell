@@ -299,10 +299,10 @@ The container filesystem is set to read-only (`read_only: true`) and the app vol
 
 Files/workspace storage has two coordinated settings:
 
-- `workspace_root` in `app/conf/config.yaml` or `app/conf/config.local.yaml` is the path the app uses at runtime.
-- `WORKSPACE_ROOT` in Compose is the path the Docker entrypoint prepares before dropping privileges. Set it directly in `docker-compose.yml`, in a Compose override, or through `.env`; `.env` is optional and only provides variable values for Compose interpolation.
+- `WORKSPACE_ROOT` in Compose is the path the Docker entrypoint prepares before dropping privileges. The app also treats it as the runtime `workspace_root` override, so Compose deployments only need this setting.
+- `workspace_root` in `app/conf/config.yaml` or `app/conf/config.local.yaml` is still available for non-Compose runs or file-based config.
 
-Those two values should match whenever you move storage away from the default `/tmp/darklab_shell-workspaces`.
+Do not set conflicting values in `.env` and `config.local.yaml`: the environment wins.
 
 For short-lived tmpfs storage, keep the default model:
 
@@ -310,7 +310,6 @@ For short-lived tmpfs storage, keep the default model:
 # app/conf/config.local.yaml
 workspace_enabled: true
 workspace_backend: tmpfs
-workspace_root: /tmp/darklab_shell-workspaces
 ```
 
 ```yaml
@@ -321,13 +320,12 @@ services:
       - WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 ```
 
-For persistent storage with a host bind mount, the production Compose override uses `./workspaces:/workspaces` plus `WORKSPACE_ROOT=/workspaces`. Pair that with:
+For persistent storage with a host bind mount, the production Compose override uses `./workspaces:/workspaces` plus `WORKSPACE_ROOT=/workspaces`. Pair that with the volume backend in app config:
 
 ```yaml
 # app/conf/config.local.yaml
 workspace_enabled: true
 workspace_backend: volume
-workspace_root: /workspaces
 ```
 
 Prepare the host bind-mount directory with the numeric UID/GID used by `appuser` inside the built image, not a host username. The current image creates `appuser` as `995:995` and `scanner` as `994:994`; scanner commands are launched with the shared `appuser` run group when they access validated workspace files:
@@ -510,6 +508,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── registry_loader.py # Command registry YAML loading, normalization, and overlay merging
 │   │   │   ├── registry_validation.py # Command tokenization, policy matching, deny checks, and runtime-command detection
 │   │   │   └── wordlists.py    # SecLists catalog loader and filtering helpers for wordlist command/autocomplete
+│   │   ├── diagnostics/
+│   │   │   ├── __init__.py     # Diagnostics service package marker
+│   │   │   └── storage.py      # Shared cached database storage snapshot for /diag and Prometheus
 │   │   ├── history/
 │   │   │   ├── __init__.py     # History service package marker
 │   │   │   ├── permalinks.py   # Flask context/render helpers for /history/<id> and /share/<id>

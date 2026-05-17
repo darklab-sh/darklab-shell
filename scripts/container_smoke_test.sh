@@ -4,12 +4,13 @@
 #
 # Run this after upgrading the base image, apt packages, or any pinned
 # tool version in the Dockerfile (Go binaries, pip packages, gems).
-# It reuses the stable smoke-test cache image when present, starts the
+# It reuses the stable smoke-test cache image when present and current, starts the
 # container, and runs every user-facing command in the shared smoke corpus
 # through /runs (commands.yaml examples plus workflow steps), checking each one against the expected output recorded in
 # tests/py/fixtures/container_smoke_test-expectations.json.
 # Pass --build to force a fresh cache-image build after Dockerfile or
-# dependency changes.
+# dependency changes; otherwise the cache refreshes automatically when
+# Dockerfile, app/requirements.txt, or entrypoint.sh changes.
 #
 # A failure means a command is missing, broken, or producing unexpected
 # output in the new image — review the diff before merging the upgrade.

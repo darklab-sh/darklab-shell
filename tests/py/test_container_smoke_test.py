@@ -15,6 +15,7 @@ Run with:
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -27,6 +28,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 from collections.abc import Mapping, Sequence
+from typing import Any
 from urllib.error import HTTPError
 
 import pytest
@@ -61,6 +63,7 @@ SMOKE_COMMAND_RETRY_DELAY_SECONDS = float(
     os.environ.get("RUN_CONTAINER_SMOKE_TEST_RETRY_DELAY_SECONDS", "3")
 )
 SMOKE_PROJECT_PREFIX = "darklab_shell-test-"
+SMOKE_IMAGE_CACHE_KEY_LABEL = "org.darklab.shell.container-smoke.cache-key"
 
 UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
 TIME_RE = re.compile(r"\b\d{2}:\d{2}:\d{2}\b")
@@ -137,13 +140,54 @@ def _run_streaming(cmd: list[str], *, timeout: int) -> subprocess.CompletedProce
     return subprocess.CompletedProcess(cmd, proc.returncode, stdout, "")
 
 
-def _docker_image_exists(image_tag: str) -> bool:
+def _hash_smoke_build_input(hasher: Any, path: Path) -> None:
+    hasher.update(str(path).encode("utf-8"))
+    hasher.update(b"\0")
+    hasher.update(path.read_bytes())
+    hasher.update(b"\0")
+
+
+def _smoke_image_cache_key(build_context: Path, dockerfile_path: Path) -> str:
+    hasher = hashlib.sha256()
+    hasher.update(b"container-smoke-cache-v1\0")
+    for path in (
+        dockerfile_path,
+        build_context / "app" / "requirements.txt",
+        build_context / "entrypoint.sh",
+    ):
+        _hash_smoke_build_input(hasher, path)
+    return hasher.hexdigest()
+
+
+def _smoke_image_cache_status(image_tag: str, expected_cache_key: str) -> tuple[bool, str]:
     proc = _run(
-        ["docker", "image", "inspect", image_tag],
+        [
+            "docker",
+            "image",
+            "inspect",
+            image_tag,
+            "--format",
+            "{{json .Config.Labels}}",
+        ],
         timeout=30,
         check=False,
     )
-    return proc.returncode == 0
+    if proc.returncode != 0:
+        return False, "cache image missing"
+
+    try:
+        labels = json.loads(proc.stdout.strip() or "null") or {}
+    except json.JSONDecodeError:
+        return False, "cache labels unreadable"
+    if not isinstance(labels, Mapping):
+        return False, "cache labels unreadable"
+
+    actual_cache_key = labels.get(SMOKE_IMAGE_CACHE_KEY_LABEL)
+    if actual_cache_key == expected_cache_key:
+        return True, "cache image current"
+    if actual_cache_key is None:
+        return False, "cache image missing cache label"
+    return False, "cache image stale"
 
 
 def _docker_names_matching(prefix: str) -> list[str]:
@@ -425,6 +469,72 @@ def test_force_smoke_image_build_reads_wrapper_env(monkeypatch):
 
     monkeypatch.setenv("RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD", "1")
     assert _force_smoke_image_build() is True
+
+
+def test_smoke_image_cache_key_tracks_docker_runtime_inputs(tmp_path: Path) -> None:
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    dockerfile = tmp_path / "Dockerfile"
+    requirements = app_dir / "requirements.txt"
+    entrypoint = tmp_path / "entrypoint.sh"
+
+    dockerfile.write_text("FROM python:3.14-slim\n", encoding="utf-8")
+    requirements.write_text("flask==3.1.2\n", encoding="utf-8")
+    entrypoint.write_text("#!/usr/bin/env sh\n", encoding="utf-8")
+
+    original_key = _smoke_image_cache_key(tmp_path, dockerfile)
+
+    requirements.write_text("flask==3.1.2\nprometheus-client==0.25.0\n", encoding="utf-8")
+    requirements_key = _smoke_image_cache_key(tmp_path, dockerfile)
+    assert requirements_key != original_key
+
+    dockerfile.write_text("FROM python:3.14.5-slim\n", encoding="utf-8")
+    dockerfile_key = _smoke_image_cache_key(tmp_path, dockerfile)
+    assert dockerfile_key != requirements_key
+
+    entrypoint.write_text("#!/usr/bin/env sh\nexec \"$@\"\n", encoding="utf-8")
+    assert _smoke_image_cache_key(tmp_path, dockerfile) != dockerfile_key
+
+
+def test_smoke_image_cache_status_requires_matching_label(monkeypatch: pytest.MonkeyPatch) -> None:
+    def inspect_with_labels(labels: object):
+        def fake_run(cmd: list[str], *, timeout: int, check: bool = True, **kwargs):
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(labels), "")
+
+        return fake_run
+
+    monkeypatch.setattr(sys.modules[__name__], "_run", inspect_with_labels({
+        SMOKE_IMAGE_CACHE_KEY_LABEL: "expected",
+    }))
+    assert _smoke_image_cache_status("darklab_shell-test:cache", "expected") == (
+        True,
+        "cache image current",
+    )
+
+    monkeypatch.setattr(sys.modules[__name__], "_run", inspect_with_labels({}))
+    assert _smoke_image_cache_status("darklab_shell-test:cache", "expected") == (
+        False,
+        "cache image missing cache label",
+    )
+
+    monkeypatch.setattr(sys.modules[__name__], "_run", inspect_with_labels({
+        SMOKE_IMAGE_CACHE_KEY_LABEL: "old",
+    }))
+    assert _smoke_image_cache_status("darklab_shell-test:cache", "expected") == (
+        False,
+        "cache image stale",
+    )
+
+
+def test_smoke_image_cache_status_rebuilds_when_image_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(cmd: list[str], *, timeout: int, check: bool = True, **kwargs):
+        return subprocess.CompletedProcess(cmd, 1, "", "missing")
+
+    monkeypatch.setattr(sys.modules[__name__], "_run", fake_run)
+    assert _smoke_image_cache_status("darklab_shell-test:cache", "expected") == (
+        False,
+        "cache image missing",
+    )
 
 
 def _load_expectations() -> dict[str, dict[str, object]]:
@@ -1067,10 +1177,12 @@ def container_smoke_test():
         try:
             try:
                 force_build = _force_smoke_image_build()
-                if _docker_image_exists(image_tag) and not force_build:
+                cache_key = _smoke_image_cache_key(build_context, dockerfile_path)
+                cache_current, cache_reason = _smoke_image_cache_status(image_tag, cache_key)
+                if cache_current and not force_build:
                     print(f"[container-smoke-test] using cached image: {image_tag}", flush=True)
                 else:
-                    reason = "forced rebuild" if force_build else "cache image missing"
+                    reason = "forced rebuild" if force_build else cache_reason
                     print(f"[container-smoke-test] building image: {image_tag} ({reason})", flush=True)
                     _run_streaming(
                         [
@@ -1078,6 +1190,8 @@ def container_smoke_test():
                             "build",
                             "-t",
                             image_tag,
+                            "--label",
+                            f"{SMOKE_IMAGE_CACHE_KEY_LABEL}={cache_key}",
                             "-f",
                             str(dockerfile_path),
                             str(build_context),
