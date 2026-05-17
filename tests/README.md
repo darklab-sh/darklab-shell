@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,847
+- behavior tests: 2,848
 - docs/inventory meta-tests: 32
-- `pytest`: 1466 (1434 behavior + 32 meta)
+- `pytest`: 1467 (1435 behavior + 32 meta)
 - `vitest`: 1161
 - `playwright`: 252
-- total: 2,879
+- total: 2,880
 
 This document is organized in two parts:
 
@@ -410,7 +410,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunHistorySearchClauses.test_sqlite_command_scope_searches_command_only` | Verifies command-scoped history search only matches the command text. |
 | `TestRunHistorySearchClauses.test_postgres_history_search_uses_trigram_friendly_ilike` | Verifies Postgres history search uses substring `ILIKE` clauses that can use trigram indexes without referencing SQLite FTS tables. |
 | `TestPostgresMigrationHelper.test_discovers_app_tables_and_skips_sqlite_fts_shadow_tables` | Verifies the offline Postgres migration helper copies app tables while skipping SQLite FTS internals. |
-| `TestPostgresMigrationHelper.test_create_table_sql_maps_json_columns_and_primary_key` | Verifies migration-created Postgres tables preserve primary keys and JSON column types. |
+| `TestPostgresMigrationHelper.test_required_migration_versions_match_app_registry` | Verifies the migration helper's required Postgres app migration versions stay aligned with the app migration registry. |
+| `TestPostgresMigrationHelper.test_copy_plan_requires_app_migration_destination_columns` | Verifies the migration helper plans copies from SQLite columns into the app-created Postgres schema instead of creating copy-compatible tables. |
 | `TestPostgresMigrationHelper.test_file_validation_checks_artifacts_and_body_store_pointers` | Verifies migration preflight checks run-output artifacts and body-store pointer files. |
 | `TestPostgresMigrationHelper.test_file_validation_accepts_legacy_run_output_prefixed_paths` | Verifies migration file validation accepts older run-output artifact rows that already include the `run-output/` prefix. |
 | `TestPostgresMigrationHelper.test_secret_preflight_requires_key_confirmation` | Verifies encrypted secret rows require explicit key-continuity confirmation before migration. |

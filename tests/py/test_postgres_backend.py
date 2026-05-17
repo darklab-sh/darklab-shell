@@ -323,53 +323,71 @@ def _build_migration_sqlite_fixture(root: Path) -> Path:
             """
             CREATE TABLE runs (
                 id TEXT PRIMARY KEY,
-                session TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                run_kind TEXT NOT NULL DEFAULT 'external',
+                owner_tab_id TEXT NOT NULL DEFAULT '',
                 command TEXT NOT NULL,
                 output TEXT NOT NULL DEFAULT '',
                 output_preview TEXT NOT NULL DEFAULT '',
+                preview_truncated INTEGER NOT NULL DEFAULT 0,
+                output_line_count INTEGER NOT NULL DEFAULT 0,
+                full_output_available INTEGER NOT NULL DEFAULT 0,
+                full_output_truncated INTEGER NOT NULL DEFAULT 0,
                 output_search_text TEXT NOT NULL DEFAULT '',
                 exit_code INTEGER,
-                started TEXT NOT NULL
+                started TEXT NOT NULL,
+                finished TEXT
             );
             CREATE VIRTUAL TABLE runs_fts USING fts5(command, output_search_text);
             CREATE TABLE run_output_artifacts (
-                id TEXT PRIMARY KEY,
-                run_id TEXT NOT NULL,
-                session TEXT NOT NULL,
+                run_id TEXT PRIMARY KEY,
                 rel_path TEXT NOT NULL,
+                compression TEXT NOT NULL DEFAULT 'gzip',
                 byte_size INTEGER NOT NULL,
+                line_count INTEGER NOT NULL DEFAULT 0,
+                truncated INTEGER NOT NULL DEFAULT 0,
                 created TEXT NOT NULL
             );
             CREATE TABLE snapshots (
                 id TEXT PRIMARY KEY,
-                session TEXT NOT NULL,
-                command TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                label TEXT NOT NULL,
                 content TEXT NOT NULL,
                 created TEXT NOT NULL
             );
             CREATE TABLE session_preferences (
-                session_token TEXT PRIMARY KEY,
-                preferences TEXT NOT NULL
+                session_id TEXT PRIMARY KEY,
+                preferences TEXT NOT NULL,
+                updated TEXT NOT NULL
             );
             CREATE TABLE entities (
                 id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL,
                 type TEXT NOT NULL,
-                canonical_value TEXT NOT NULL
+                canonical_value TEXT NOT NULL,
+                signature_hash TEXT NOT NULL,
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                occurrence_count INTEGER NOT NULL DEFAULT 0,
+                created TEXT NOT NULL
             );
             CREATE TABLE entity_intel_snapshots (
                 id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
                 entity_id TEXT NOT NULL,
                 provider TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT '',
                 summary TEXT NOT NULL,
                 data_json TEXT NOT NULL,
-                fetched_at TEXT NOT NULL
+                fetched_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE secrets (
                 session_token TEXT NOT NULL,
                 name TEXT NOT NULL,
                 ciphertext BLOB NOT NULL,
                 nonce BLOB NOT NULL,
+                consumer_envs TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (session_token, name)
@@ -378,50 +396,82 @@ def _build_migration_sqlite_fixture(root: Path) -> Path:
         )
         conn.execute(
             """
-            INSERT INTO runs (id, session, command, output, output_preview, output_search_text, exit_code, started)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO runs (
+                id, session_id, run_kind, owner_tab_id, command, output, output_preview,
+                preview_truncated, output_line_count, full_output_available,
+                full_output_truncated, output_search_text, exit_code, started, finished
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "run-1",
                 "sess-1",
+                "external",
+                "",
                 "host darklab.sh",
                 "darklab.sh has address 104.21.4.35",
                 "darklab.sh has address 104.21.4.35",
+                0,
+                1,
+                0,
+                0,
                 "darklab.sh has address 104.21.4.35",
                 0,
                 "2026-05-16T00:00:00Z",
+                "2026-05-16T00:00:01Z",
             ),
         )
         conn.execute(
-            "INSERT INTO run_output_artifacts VALUES (?, ?, ?, ?, ?, ?)",
-            ("out-1", "run-1", "sess-1", "run-1.txt.gz", artifact.stat().st_size, "2026-05-16T00:00:01Z"),
+            "INSERT INTO run_output_artifacts VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("run-1", "run-1.txt.gz", "gzip", artifact.stat().st_size, 1, 0, "2026-05-16T00:00:01Z"),
         )
         conn.execute(
             "INSERT INTO snapshots VALUES (?, ?, ?, ?, ?)",
             ("snap-1", "sess-1", "host darklab.sh", pointer, "2026-05-16T00:00:02Z"),
         )
         conn.execute(
-            "INSERT INTO session_preferences VALUES (?, ?)",
-            ("sess-1", json.dumps({"theme": "dark", "atlas": {"enabled": True}})),
+            "INSERT INTO session_preferences VALUES (?, ?, ?)",
+            ("sess-1", json.dumps({"theme": "dark", "atlas": {"enabled": True}}), "2026-05-16T00:00:03Z"),
         )
         conn.execute(
-            "INSERT INTO entities VALUES (?, ?, ?, ?)",
-            ("ent-1", "sess-1", "domain", "darklab.sh"),
-        )
-        conn.execute(
-            "INSERT INTO entity_intel_snapshots VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO entities VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                "intel-1",
                 "ent-1",
-                "urlscan",
-                "1 result",
-                json.dumps({"verdict": "clean", "matches": ["darklab.sh"]}),
-                "2026-05-16T00:00:03Z",
+                "sess-1",
+                "domain",
+                "darklab.sh",
+                "sig-darklab",
+                "2026-05-16T00:00:00Z",
+                "2026-05-16T00:00:00Z",
+                1,
+                "2026-05-16T00:00:00Z",
             ),
         )
         conn.execute(
-            "INSERT INTO secrets VALUES (?, ?, ?, ?, ?, ?)",
-            ("sess-1", "SHODAN_API_KEY", b"ciphertext", b"nonce", "2026-05-16T00:00:04Z", "2026-05-16T00:00:04Z"),
+            "INSERT INTO entity_intel_snapshots VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "intel-1",
+                "sess-1",
+                "ent-1",
+                "urlscan",
+                "ok",
+                "1 result",
+                json.dumps({"verdict": "clean", "matches": ["darklab.sh"]}),
+                "2026-05-16T00:00:03Z",
+                "2026-05-17T00:00:03Z",
+            ),
+        )
+        conn.execute(
+            "INSERT INTO secrets VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                "sess-1",
+                "SHODAN_API_KEY",
+                b"ciphertext",
+                b"nonce",
+                "[]",
+                "2026-05-16T00:00:04Z",
+                "2026-05-16T00:00:04Z",
+            ),
         )
         conn.commit()
     finally:
@@ -432,6 +482,11 @@ def _build_migration_sqlite_fixture(root: Path) -> Path:
 @pytest.mark.postgres
 def test_migration_helper_copies_fixture_into_isolated_postgres_schema(tmp_path, postgres_dsn, postgres_schema):
     migration = _load_migration_module()
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+
+    run_migrations_with_advisory_lock(postgres_schema.conn, MIGRATIONS)
+    postgres_schema.conn.commit()
     db_path = _build_migration_sqlite_fixture(tmp_path)
     args = migration.build_parser().parse_args([
         "--sqlite-db",

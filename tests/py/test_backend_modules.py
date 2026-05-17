@@ -757,22 +757,97 @@ class TestPostgresMigrationHelper:
             "runs_fts_config",
         }
 
-    def test_create_table_sql_maps_json_columns_and_primary_key(self):
+    def test_required_migration_versions_match_app_registry(self):
         migration = _load_postgres_migration_module()
-        table = migration.TableInfo(
-            name="entity_intel_snapshots",
+        from core.migrations import MIGRATIONS
+
+        assert migration.REQUIRED_APP_MIGRATIONS == tuple(item.version for item in MIGRATIONS)
+
+        class FakePostgresConnection:
+            def execute(self, sql, _params=()):
+                normalized = " ".join(str(sql).split())
+                if "FROM pg_catalog.pg_tables" in normalized:
+                    return _Rows([{"tablename": "schema_migrations"}])
+                if "FROM \"public\".schema_migrations" in normalized:
+                    return _Rows([{"version": "0001"}])
+                raise AssertionError(normalized)
+
+        class _Rows:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def fetchall(self):
+                return self._rows
+
+        with pytest.raises(RuntimeError, match="Missing migration version\\(s\\): 0002"):
+            migration._validate_app_migration_level(FakePostgresConnection(), "public")
+
+    def test_copy_plan_requires_app_migration_destination_columns(self):
+        migration = _load_postgres_migration_module()
+
+        class FakePostgresConnection:
+            def execute(self, sql, params=()):
+                normalized = " ".join(str(sql).split())
+                if "FROM pg_catalog.pg_tables" in normalized:
+                    return _Rows([
+                        {"tablename": "runs"},
+                        {"tablename": "schema_migrations"},
+                    ])
+                if "FROM information_schema.columns" in normalized:
+                    assert params == ("public", "runs")
+                    return _Rows([
+                        {
+                            "column_name": "id",
+                            "data_type": "text",
+                            "is_nullable": "NO",
+                            "column_default": None,
+                        },
+                        {
+                            "column_name": "session_id",
+                            "data_type": "text",
+                            "is_nullable": "NO",
+                            "column_default": None,
+                        },
+                        {
+                            "column_name": "run_kind",
+                            "data_type": "text",
+                            "is_nullable": "NO",
+                            "column_default": "'external'::text",
+                        },
+                        {
+                            "column_name": "preview_truncated",
+                            "data_type": "boolean",
+                            "is_nullable": "NO",
+                            "column_default": "false",
+                        },
+                    ])
+                raise AssertionError(normalized)
+
+        class _Rows:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def fetchall(self):
+                return self._rows
+
+        source = migration.TableInfo(
+            name="runs",
             columns=(
                 migration.ColumnInfo("id", "TEXT", True, None, 1),
-                migration.ColumnInfo("data_json", "TEXT", True, "'{}'", 0),
-                migration.ColumnInfo("fetched_at", "TEXT", True, None, 0),
+                migration.ColumnInfo("session_id", "TEXT", True, None, 0),
+                migration.ColumnInfo("preview_truncated", "INTEGER", True, "0", 0),
             ),
         )
 
-        sql = migration.create_table_sql(table)
+        plans, skipped = migration._build_copy_plans(FakePostgresConnection(), "public", [source])
 
-        assert '"id" TEXT NOT NULL' in sql
-        assert '"data_json" JSONB NOT NULL DEFAULT \'{}\'' in sql
-        assert 'PRIMARY KEY ("id")' in sql
+        assert skipped == []
+        assert [column.name for column in plans[0].source_columns] == [
+            "id",
+            "session_id",
+            "preview_truncated",
+        ]
+        assert plans[0].destination_columns[-1].data_type == "boolean"
 
     def test_file_validation_checks_artifacts_and_body_store_pointers(self):
         migration = _load_postgres_migration_module()

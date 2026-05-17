@@ -11,18 +11,16 @@ Postgres backend configuration lives in [CONFIGURATION.md](../CONFIGURATION.md#d
 The migration helper:
 
 - reads the source SQLite database in read-only mode
-- creates matching Postgres tables for app-owned tables
+- copies into the app-created Postgres schema after verifying the expected app migration versions are present
 - writes to the `public` schema by default, or to a named schema with `--schema`
 - skips SQLite-only FTS5 tables such as `runs_fts` and its shadow tables
 - copies rows in batches while preserving primary keys and JSON values
-- creates Postgres indexes from the SQLite index list where possible
 - verifies referenced run-output artifact files under `run-output/` and body-store files under `body-store/`
 - optionally copies referenced files to a new artifact root
 - requires an explicit `--confirm-secrets-key` flag when encrypted secrets exist
 - can validate row counts after the copy
-- can create the `pg_trgm` extension and search indexes for run command/output search
 
-The helper does not merge unrelated databases by default. If the destination schema already has tables, the helper stops unless you pass `--resume` or `--allow-non-empty`.
+The helper does not merge unrelated databases by default. The destination schema must already have the app migration table and current app tables, but if those tables already contain rows, the helper stops unless you pass `--resume` or `--allow-non-empty`.
 
 ## Before You Start
 
@@ -50,6 +48,8 @@ Start the profile-gated Postgres service, stop the app service so SQLite is quie
 ```bash
 docker compose --profile postgres up -d postgres
 docker compose stop shell
+DATABASE_BACKEND=postgres docker compose --profile postgres run --rm --no-deps shell python -c \
+  "from core.database import db_init; db_init()"
 
 docker compose --profile postgres run --rm --no-deps --entrypoint python shell - \
   --sqlite-db /data/history.db \
@@ -59,7 +59,7 @@ docker compose --profile postgres run --rm --no-deps --entrypoint python shell -
   --validate < scripts/migrate_sqlite_to_postgres.py
 ```
 
-That command pipes the checked-in helper into the one-off `shell` container because the normal app container only mounts `./app` and `./data`, not `./scripts`. The one-off container still joins the Compose network, so `postgres:5432` resolves without exposing the database to the OS.
+The short `db_init()` command runs the app-owned Postgres migrations before data is copied. The migration command pipes the checked-in helper into the one-off `shell` container because the normal app container only mounts `./app` and `./data`, not `./scripts`. The one-off container still joins the Compose network, so `postgres:5432` resolves without exposing the database to the OS.
 
 Adjust the username, password, and database name if your `.env` overrides `POSTGRES_USER`, `POSTGRES_PASSWORD`, or `POSTGRES_DB`.
 
@@ -76,7 +76,7 @@ python scripts/migrate_sqlite_to_postgres.py \
   --validate
 ```
 
-Use `--schema <name>` when you want to test the migration in an isolated Postgres schema before touching `public`. The helper creates the schema if needed and checks whether that schema already contains tables before copying.
+Use `--schema <name>` when you want to test the migration in an isolated Postgres schema before touching `public`. Run the app migrations against that schema first; the helper creates the schema if needed, checks `schema_migrations`, and refuses to copy into schemas that are missing the expected app migration versions.
 
 If you want the helper to copy referenced artifact and body-store files into a new data root, add:
 
@@ -106,13 +106,7 @@ python scripts/migrate_sqlite_to_postgres.py \
 
 ## Search Indexes
 
-SQLite FTS5 data is not copied. Postgres search uses backend-specific indexes instead. By default, the helper tries to create `pg_trgm` and GIN trigram indexes for `runs.command` and `runs.output_search_text`.
-
-If your database user cannot create extensions or you plan to manage search indexes separately, pass:
-
-```bash
---skip-search-backfill
-```
+SQLite FTS5 data is not copied. Postgres search uses backend-specific indexes created by the app migrations instead. The helper still accepts `--skip-search-backfill` for older saved commands, but current migrations already create the `pg_trgm` extension and GIN trigram indexes for `runs.command` and `runs.output_search_text`.
 
 ## Rollback
 

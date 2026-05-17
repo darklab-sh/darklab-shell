@@ -54,6 +54,7 @@ BODY_POINTER_COLUMNS = frozenset({
     ("snapshots", "content"),
     ("entity_intel_snapshots", "data_json"),
 })
+REQUIRED_APP_MIGRATIONS = ("0001", "0002")
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,21 @@ class ColumnInfo:
 class TableInfo:
     name: str
     columns: tuple[ColumnInfo, ...]
+
+
+@dataclass(frozen=True)
+class DestinationColumnInfo:
+    name: str
+    data_type: str
+    nullable: bool
+    default: str | None
+
+
+@dataclass(frozen=True)
+class CopyTablePlan:
+    name: str
+    source_columns: tuple[ColumnInfo, ...]
+    destination_columns: tuple[DestinationColumnInfo, ...]
 
 
 @dataclass
@@ -132,77 +148,6 @@ def discover_migration_tables(conn: sqlite3.Connection) -> tuple[list[TableInfo]
         if columns:
             tables.append(TableInfo(name=name, columns=columns))
     return tables, skipped
-
-
-def _postgres_type(table: str, column: ColumnInfo) -> str:
-    if (table, column.name) in JSON_COLUMNS:
-        return "JSONB"
-    sqlite_type = column.sqlite_type.upper()
-    if "BLOB" in sqlite_type:
-        return "BYTEA"
-    if "INT" in sqlite_type:
-        return "BIGINT"
-    if any(token in sqlite_type for token in ("REAL", "FLOA", "DOUB")):
-        return "DOUBLE PRECISION"
-    return "TEXT"
-
-
-def _literal_default(value: str | None) -> str:
-    if value is None:
-        return ""
-    raw = str(value).strip()
-    if not raw:
-        return ""
-    upper = raw.upper()
-    if upper in {"NULL", "CURRENT_TIMESTAMP", "TRUE", "FALSE"}:
-        return f"DEFAULT {upper}"
-    if raw in {"0", "1"} or raw.replace(".", "", 1).isdigit():
-        return f"DEFAULT {raw}"
-    if raw.startswith("'") and raw.endswith("'"):
-        return f"DEFAULT {raw}"
-    return ""
-
-
-def create_table_sql(table: TableInfo) -> str:
-    primary_columns = sorted(
-        (column for column in table.columns if column.primary_key_order),
-        key=lambda column: column.primary_key_order,
-    )
-    definitions = []
-    for column in table.columns:
-        parts = [_quote_ident(column.name), _postgres_type(table.name, column)]
-        if column.not_null or column.primary_key_order:
-            parts.append("NOT NULL")
-        parts.append(_literal_default(column.default))
-        definitions.append(" ".join(part for part in parts if part).strip())
-    if primary_columns:
-        names = ", ".join(_quote_ident(column.name) for column in primary_columns)
-        definitions.append(f"PRIMARY KEY ({names})")
-    return f"CREATE TABLE IF NOT EXISTS {_quote_ident(table.name)} (\n  " + ",\n  ".join(definitions) + "\n)"
-
-
-def _index_columns(conn: sqlite3.Connection, table: str, index_name: str) -> list[str]:
-    rows = conn.execute(f"PRAGMA index_info({_quote_ident(index_name)})").fetchall()
-    return [str(row["name"]) for row in rows if row["name"] is not None]
-
-
-def postgres_index_sql(conn: sqlite3.Connection, table: TableInfo) -> list[str]:
-    statements: list[str] = []
-    rows = conn.execute(f"PRAGMA index_list({_quote_ident(table.name)})").fetchall()
-    for row in rows:
-        index_name = str(row["name"])
-        columns = _index_columns(conn, table.name, index_name)
-        if not columns:
-            continue
-        suffix = "_".join(columns)[:80].replace('"', "")
-        pg_name = f"idx_{table.name}_{suffix}"
-        unique = "UNIQUE " if int(row["unique"] or 0) else ""
-        column_sql = ", ".join(_quote_ident(column) for column in columns)
-        statements.append(
-            f"CREATE {unique}INDEX IF NOT EXISTS {_quote_ident(pg_name)} "
-            f"ON {_quote_ident(table.name)} ({column_sql})"
-        )
-    return statements
 
 
 def _decode_body_pointer(value: Any) -> dict[str, Any] | None:
@@ -337,6 +282,82 @@ def _prepare_postgres_schema(pg_conn: Any, schema: str) -> None:
     pg_conn.execute(f"SET search_path TO {_quote_ident(schema)}")
 
 
+def _destination_columns(pg_conn: Any, schema: str, table: str) -> dict[str, DestinationColumnInfo]:
+    rows = pg_conn.execute(
+        """
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns
+        WHERE table_schema = %s AND table_name = %s
+        ORDER BY ordinal_position
+        """,
+        (schema, table),
+    ).fetchall()
+    return {
+        str(row["column_name"]): DestinationColumnInfo(
+            name=str(row["column_name"]),
+            data_type=str(row["data_type"]),
+            nullable=str(row["is_nullable"]).upper() == "YES",
+            default=None if row["column_default"] is None else str(row["column_default"]),
+        )
+        for row in rows
+    }
+
+
+def _applied_app_migrations(pg_conn: Any, schema: str) -> set[str]:
+    tables = set(_postgres_tables(pg_conn, schema))
+    if "schema_migrations" not in tables:
+        return set()
+    rows = pg_conn.execute(  # nosec B608
+        f"SELECT version FROM {_quote_ident(schema)}.schema_migrations"
+    ).fetchall()
+    return {str(row["version"]) for row in rows}
+
+
+def _validate_app_migration_level(pg_conn: Any, schema: str) -> None:
+    applied = _applied_app_migrations(pg_conn, schema)
+    missing = [version for version in REQUIRED_APP_MIGRATIONS if version not in applied]
+    if missing:
+        versions = ", ".join(missing)
+        raise RuntimeError(
+            "Destination Postgres schema has not been initialized by the app migrations. "
+            f"Missing migration version(s): {versions}. Start the app once with "
+            "DATABASE_BACKEND=postgres, or run the app migration runner, before copying SQLite data."
+        )
+
+
+def _build_copy_plans(pg_conn: Any, schema: str, source_tables: list[TableInfo]) -> tuple[list[CopyTablePlan], list[str]]:
+    destination_tables = set(_postgres_tables(pg_conn, schema))
+    plans: list[CopyTablePlan] = []
+    skipped: list[str] = []
+    for table in source_tables:
+        if table.name not in destination_tables:
+            skipped.append(table.name)
+            continue
+        destination_by_name = _destination_columns(pg_conn, schema, table.name)
+        source_by_name = {column.name: column for column in table.columns}
+        copy_source_columns: list[ColumnInfo] = []
+        copy_destination_columns: list[DestinationColumnInfo] = []
+        for destination in destination_by_name.values():
+            source = source_by_name.get(destination.name)
+            if source is not None:
+                copy_source_columns.append(source)
+                copy_destination_columns.append(destination)
+                continue
+            if destination.nullable or destination.default is not None:
+                continue
+            raise RuntimeError(
+                f"Source SQLite table {table.name!r} is missing required destination column "
+                f"{destination.name!r}; run the app's SQLite migrations before migrating."
+            )
+        if copy_source_columns:
+            plans.append(CopyTablePlan(
+                name=table.name,
+                source_columns=tuple(copy_source_columns),
+                destination_columns=tuple(copy_destination_columns),
+            ))
+    return plans, skipped
+
+
 def _json_value(value: Any, jsonb_type: Any) -> Any:
     if value is None:
         return None
@@ -348,12 +369,14 @@ def _json_value(value: Any, jsonb_type: Any) -> Any:
         return jsonb_type(str(value))
 
 
-def _convert_row(table: TableInfo, row: sqlite3.Row, jsonb_type: Any) -> tuple[Any, ...]:
+def _convert_row(plan: CopyTablePlan, row: sqlite3.Row, jsonb_type: Any) -> tuple[Any, ...]:
     values = []
-    for column in table.columns:
-        value = row[column.name]
-        if (table.name, column.name) in JSON_COLUMNS:
+    for source, destination in zip(plan.source_columns, plan.destination_columns):
+        value = row[source.name]
+        if (plan.name, source.name) in JSON_COLUMNS or destination.data_type == "jsonb":
             values.append(_json_value(value, jsonb_type))
+        elif destination.data_type == "boolean" and value is not None:
+            values.append(bool(value))
         else:
             values.append(value)
     return tuple(values)
@@ -362,26 +385,26 @@ def _convert_row(table: TableInfo, row: sqlite3.Row, jsonb_type: Any) -> tuple[A
 def _copy_table(
     sqlite_conn: sqlite3.Connection,
     pg_conn: Any,
-    table: TableInfo,
+    plan: CopyTablePlan,
     *,
     jsonb_type: Any,
     batch_size: int,
     resume: bool,
 ) -> int:
-    columns = [column.name for column in table.columns]
+    columns = [column.name for column in plan.source_columns]
     placeholders = ", ".join(["%s"] * len(columns))
     conflict = " ON CONFLICT DO NOTHING" if resume else ""
     insert_sql = (
-        f"INSERT INTO {_quote_ident(table.name)} "  # nosec B608
+        f"INSERT INTO {_quote_ident(plan.name)} "  # nosec B608
         f"({', '.join(_quote_ident(column) for column in columns)}) "
         f"VALUES ({placeholders}){conflict}"
     )
-    select_sql = f"SELECT {', '.join(_quote_ident(column) for column in columns)} FROM {_quote_ident(table.name)}"  # nosec B608
+    select_sql = f"SELECT {', '.join(_quote_ident(column) for column in columns)} FROM {_quote_ident(plan.name)}"  # nosec B608
     copied = 0
     rows: list[tuple[Any, ...]] = []
     with pg_conn.cursor() as cursor:
         for row in sqlite_conn.execute(select_sql):
-            rows.append(_convert_row(table, row, jsonb_type))
+            rows.append(_convert_row(plan, row, jsonb_type))
             if len(rows) >= batch_size:
                 cursor.executemany(insert_sql, rows)
                 copied += len(rows)
@@ -400,6 +423,14 @@ def _sqlite_row_count(conn: sqlite3.Connection, table: str) -> int:
 def _postgres_row_count(pg_conn: Any, table: str) -> int:
     row = pg_conn.execute(f"SELECT COUNT(*) AS count FROM {_quote_ident(table)}").fetchone()  # nosec B608
     return int(row["count"] if row else 0)
+
+
+def _destination_has_rows(pg_conn: Any, plans: list[CopyTablePlan]) -> list[str]:
+    tables_with_rows: list[str] = []
+    for plan in plans:
+        if _postgres_row_count(pg_conn, plan.name) > 0:
+            tables_with_rows.append(plan.name)
+    return tables_with_rows
 
 
 def _preflight_secrets(conn: sqlite3.Connection, confirm_secrets_key: bool) -> None:
@@ -463,24 +494,23 @@ def migrate(args: argparse.Namespace) -> MigrationReport:
 
         with psycopg.connect(database_url, row_factory=dict_row) as pg_conn:
             _prepare_postgres_schema(pg_conn, schema)
-            existing_tables = _postgres_tables(pg_conn, schema)
-            if existing_tables and not args.resume and not args.allow_non_empty:
+            _validate_app_migration_level(pg_conn, schema)
+            plans, destination_skipped = _build_copy_plans(pg_conn, schema, tables)
+            skipped.extend(destination_skipped)
+            populated_tables = _destination_has_rows(pg_conn, plans)
+            if populated_tables and not args.resume and not args.allow_non_empty:
                 raise RuntimeError(
-                    "Destination Postgres database is not empty. Use --resume to continue an "
-                    "interrupted migration or --allow-non-empty if you have intentionally prepared it."
+                    "Destination Postgres schema already has data in app tables. Use --resume to continue "
+                    "an interrupted migration or --allow-non-empty if you have intentionally prepared it. "
+                    "Tables with rows: " + ", ".join(populated_tables[:20])
                 )
-            for table in tables:
-                pg_conn.execute(create_table_sql(table))
-            for table in tables:
-                for statement in postgres_index_sql(sqlite_conn, table):
-                    pg_conn.execute(statement)
 
             copied_rows = {}
-            for table in tables:
-                copied_rows[table.name] = _copy_table(
+            for plan in plans:
+                copied_rows[plan.name] = _copy_table(
                     sqlite_conn,
                     pg_conn,
-                    table,
+                    plan,
                     jsonb_type=jsonb_type,
                     batch_size=max(1, int(args.batch_size)),
                     resume=args.resume,
@@ -491,11 +521,11 @@ def migrate(args: argparse.Namespace) -> MigrationReport:
 
             if args.validate:
                 mismatches = []
-                for table in tables:
-                    source_count = _sqlite_row_count(sqlite_conn, table.name)
-                    target_count = _postgres_row_count(pg_conn, table.name)
+                for plan in plans:
+                    source_count = _sqlite_row_count(sqlite_conn, plan.name)
+                    target_count = _postgres_row_count(pg_conn, plan.name)
                     if source_count != target_count:
-                        mismatches.append(f"{table.name}: sqlite={source_count}, postgres={target_count}")
+                        mismatches.append(f"{plan.name}: sqlite={source_count}, postgres={target_count}")
                 if mismatches:
                     raise RuntimeError("Row-count validation failed:\n" + "\n".join(mismatches))
             pg_conn.commit()
