@@ -780,6 +780,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── record_demo.sh          # Records the desktop demo through OBS while Playwright drives the browser
 │   ├── record_demo_mobile.sh   # Records the mobile demo through OBS with the in-page keyboard overlay
 │   ├── run_playwright.sh       # Local Playwright wrapper — quiet by default, clears ports, and passes through specs/grep/config
+│   ├── run_postgres_tests.sh   # Opt-in Postgres pytest lane with host DSN and Compose-network modes
 │   ├── run_pytest.sh           # Local pytest wrapper — pins repo config/rootdir and keeps collection scoped
 │   └── seed_history.py         # Populates history.db with registry-backed example runs under a UUID or tok_ session; includes the named visual-flows preset used by capture/demo work
 └── tests/

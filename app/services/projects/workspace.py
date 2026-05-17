@@ -23,10 +23,12 @@ from urllib.parse import urlparse
 import config as _config
 import services.runs.comparison as run_comparison
 from core.database import (
+    DB_BACKEND,
     db_connect,
     validate_project_entity_type,
     validate_project_link_source,
 )
+from core.database_backend import DatabaseBackend, dialect_for_backend
 from core.output_signals import strip_ansi_codes
 from services.atlas.materializer import (
     canonicalize_entity_record,
@@ -136,6 +138,28 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _db_bool(value):
+    return dialect_for_backend(DB_BACKEND).boolean_param(value)
+
+
+def _json_param(value):
+    return dialect_for_backend(DB_BACKEND).json_param(value)
+
+
+def _decode_json_dict(value):
+    if isinstance(value, dict):
+        return value
+    try:
+        parsed = json.loads(value or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _begin_write(conn):
+    conn.execute("BEGIN" if DB_BACKEND == DatabaseBackend.POSTGRES else "BEGIN IMMEDIATE")
+
+
 def _new_project_id() -> str:
     return "prj_" + secrets.token_hex(8)
 
@@ -240,14 +264,7 @@ def _row_to_target(row):
     if not row:
         return None
     if "canonical_value" in row.keys():
-        source_detail = {}
-        if "source_detail" in row.keys():
-            try:
-                parsed = json.loads(row["source_detail"] or "{}")
-                if isinstance(parsed, dict):
-                    source_detail = parsed
-            except (TypeError, ValueError):
-                source_detail = {}
+        source_detail = _decode_json_dict(row["source_detail"]) if "source_detail" in row.keys() else {}
         return {
             "id": row["id"],
             "project_id": row["project_id"] if "project_id" in row.keys() else "",
@@ -276,10 +293,7 @@ def _row_to_target(row):
             "created": row["created"],
             "updated": row["updated"] if "updated" in row.keys() else row["last_seen_at"] or row["created"],
         }
-    try:
-        source_detail = json.loads(row["source_detail"] or "{}")
-    except (TypeError, ValueError):
-        source_detail = {}
+    source_detail = _decode_json_dict(row["source_detail"])
     return {
         "id": row["id"],
         "project_id": row["project_id"],
@@ -518,7 +532,7 @@ def _row_to_evidence_package(row):
     if not row:
         return None
     try:
-        manifest = json.loads(row["manifest"] or "{}")
+        manifest = _decode_json_dict(row["manifest"])
     except (TypeError, ValueError):
         manifest = {}
     return {
@@ -2178,6 +2192,16 @@ def _count_rows_for_ids(conn, table, column, ids):
 
 def _project_atlas_entity_select_sql(*, target_only=False):
     type_filter = "AND e.type IN ('domain', 'ip', 'url') " if target_only else ""
+    provider_list_expr = (
+        "STRING_AGG(DISTINCT eis.provider, ',')"
+        if DB_BACKEND == DatabaseBackend.POSTGRES
+        else "GROUP_CONCAT(DISTINCT eis.provider)"
+    )
+    value_order_expr = (
+        "LOWER(e.canonical_value) ASC"
+        if DB_BACKEND == DatabaseBackend.POSTGRES
+        else "e.canonical_value COLLATE NOCASE ASC"
+    )
     return (
         "SELECT e.id, l.project_id, e.type, e.canonical_value, "  # nosec
         "COALESCE(("
@@ -2199,7 +2223,7 @@ def _project_atlas_entity_select_sql(*, target_only=False):
         "AND (eis.status = 'ok' OR eis.status = 'partial')"
         "), 0) AS intel_provider_count "
         ", COALESCE(("
-        "SELECT GROUP_CONCAT(DISTINCT eis.provider) FROM entity_intel_snapshots eis "
+        "SELECT " + provider_list_expr + " FROM entity_intel_snapshots eis "
         "WHERE eis.session_id = e.session_id AND eis.entity_id = e.id "
         "AND (eis.status = 'ok' OR eis.status = 'partial')"
         "), '') AS intel_providers "
@@ -2211,7 +2235,7 @@ def _project_atlas_entity_select_sql(*, target_only=False):
         "FROM project_links l JOIN entities e ON e.id = l.entity_id "
         "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' AND e.session_id = ? "
         + type_filter
-        + "ORDER BY e.type ASC, e.canonical_value COLLATE NOCASE ASC"
+        + "ORDER BY e.type ASC, " + value_order_expr
     )
 
 
@@ -2425,9 +2449,10 @@ def create_project(session_id, data):
             project_id = _new_project_id()
             slug = _allocate_slug(conn, session_id, payload["name"])
             result = conn.execute(
-                "INSERT OR IGNORE INTO projects "
+                "INSERT INTO projects "
                 "(id, session_id, name, slug, description, status, color, created, updated) "
-                "VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?) "
+                "ON CONFLICT(id) DO NOTHING",
                 (
                     project_id,
                     session_id,
@@ -3061,9 +3086,10 @@ def _save_new_package_metadata(conn, session_id, package_id, labels, notes):
         for _ in range(10):
             label_id = _new_entity_label_id()
             result = conn.execute(
-                "INSERT OR IGNORE INTO entity_labels "
+                "INSERT INTO entity_labels "
                 "(id, session_id, entity_type, entity_id, label, source, created) "
-                "VALUES (?, ?, 'package', ?, ?, 'manual', ?)",
+                "VALUES (?, ?, 'package', ?, ?, 'manual', ?) "
+                "ON CONFLICT(id) DO NOTHING",
                 (label_id, session_id, package_id, label, _now()),
             )
             if result.rowcount:
@@ -3087,9 +3113,10 @@ def _save_new_package_metadata(conn, session_id, package_id, labels, notes):
     for _ in range(10):
         note_id = _new_entity_note_id()
         result = conn.execute(
-            "INSERT OR IGNORE INTO entity_notes "
+            "INSERT INTO entity_notes "
             "(id, session_id, entity_type, entity_id, body, created, updated) "
-            "VALUES (?, ?, 'package', ?, ?, ?, ?)",
+            "VALUES (?, ?, 'package', ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO NOTHING",
             (note_id, session_id, package_id, body, now, now),
         )
         if result.rowcount:
@@ -3124,10 +3151,11 @@ def create_evidence_package(session_id, project_id, data):
         for _ in range(10):
             package_id = _new_evidence_package_id()
             result = conn.execute(
-                "INSERT OR IGNORE INTO evidence_packages "
+                "INSERT INTO evidence_packages "
                 "(id, session_id, project_id, name, description, redaction_mode, "
                 "include_artifacts, manifest, status, created, updated) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?) "
+                "ON CONFLICT(id) DO NOTHING",
                 (
                     package_id,
                     session_id,
@@ -3135,8 +3163,8 @@ def create_evidence_package(session_id, project_id, data):
                     payload["name"],
                     payload["description"],
                     payload["redaction_mode"],
-                    1 if payload["include_artifacts"] else 0,
-                    json.dumps(manifest, sort_keys=True),
+                    _db_bool(payload["include_artifacts"]),
+                    _json_param(manifest),
                     created,
                     created,
                 ),
@@ -3530,9 +3558,10 @@ def link_run_to_active_project(conn, session_id, run_id):
     for _ in range(10):
         link_id = _new_project_link_id()
         conn.execute(
-            "INSERT OR IGNORE INTO project_links "
+            "INSERT INTO project_links "
             "(id, project_id, entity_type, entity_id, source, created) "
-            "VALUES (?, ?, 'run', ?, 'active_project', ?)",
+            "VALUES (?, ?, 'run', ?, 'active_project', ?) "
+            "ON CONFLICT(project_id, entity_type, entity_id) DO NOTHING",
             (link_id, project_id, run_id, created),
         )
         row = conn.execute(
@@ -3562,13 +3591,14 @@ def _insert_project_link(
     entity_type = validate_project_entity_type(entity_type)
     source = validate_project_link_source(source)
     created = _now()
-    detail_json = json.dumps(source_detail if isinstance(source_detail, dict) else {}, sort_keys=True)
+    detail_json = _json_param(source_detail if isinstance(source_detail, dict) else {})
     for _ in range(10):
         link_id = _new_project_link_id()
         conn.execute(
-            "INSERT OR IGNORE INTO project_links "
+            "INSERT INTO project_links "
             "(id, project_id, entity_type, entity_id, source, confidence, review_state, source_detail, updated, created) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(project_id, entity_type, entity_id) DO NOTHING",
             (link_id, project_id, entity_type, entity_id, source, confidence, review_state, detail_json, created, created),
         )
         row = conn.execute(
@@ -3793,7 +3823,7 @@ def unlink_project_run_entities(session_id, project_id, run_ids):
         seen.add(run_id)
         normalized_run_ids.append(run_id)
     with db_connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        _begin_write(conn)
         project = conn.execute(
             "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
             [session_id, project_id],
@@ -3819,7 +3849,7 @@ def unlink_project_run_entities(session_id, project_id, run_ids):
 def link_project_run_entities(session_id, project_id, run_ids, source="manual"):
     source = validate_project_link_source(source)
     with db_connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        _begin_write(conn)
         project = conn.execute(
             "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
             [session_id, project_id],
@@ -3904,10 +3934,11 @@ def record_run_file_artifacts(conn, session_id, run_id, artifacts):
         for _ in range(10):
             candidate_id = _new_run_file_artifact_id()
             conn.execute(
-                "INSERT OR IGNORE INTO run_file_artifacts "
+                "INSERT INTO run_file_artifacts "
                 "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
                 "detected_by, content_type, preview_type, content_sha256, created) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(id) DO NOTHING",
                 (
                     candidate_id,
                     session_id,
@@ -4133,8 +4164,9 @@ def record_run_findings(conn, session_id, run_id, entries):
                 ),
             )
         conn.execute(
-            "INSERT OR IGNORE INTO findings_occurrences "
-            "(finding_id, run_id, line_number, snippet, seen_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO findings_occurrences "
+            "(finding_id, run_id, line_number, snippet, seen_at) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(finding_id, run_id, line_number) DO NOTHING",
             (finding_id, run_id, line_index, raw_line, created),
         )
         occurrence_row = conn.execute(
@@ -4402,7 +4434,7 @@ def _ensure_project_entity_link(
     source_detail=None,
 ):
     source = validate_project_link_source(source)
-    detail_json = json.dumps(source_detail if isinstance(source_detail, dict) else {}, sort_keys=True)
+    detail_json = _json_param(source_detail if isinstance(source_detail, dict) else {})
     entity_id = upsert_entity(
         conn,
         session_id,
@@ -4633,9 +4665,10 @@ def link_project_entity(session_id, project_id, data):
         for _ in range(10):
             link_id = _new_project_link_id()
             conn.execute(
-                "INSERT OR IGNORE INTO project_links "
+                "INSERT INTO project_links "
                 "(id, project_id, entity_type, entity_id, source, created) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(project_id, entity_type, entity_id) DO NOTHING",
                 (link_id, project_id, entity_type, entity_id, source, created),
             )
             row = conn.execute(
@@ -4708,7 +4741,7 @@ def link_project_entities(session_id, project_id, data):
     }
     results = []
     with db_connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        _begin_write(conn)
         project = conn.execute(
             "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
             [session_id, project_id],
@@ -4861,9 +4894,10 @@ def add_project_target(session_id, project_id, data):
         )
         if payload["source_run_id"]:
             conn.execute(
-                "INSERT OR IGNORE INTO entity_run_links "
+                "INSERT INTO entity_run_links "
                 "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
-                "VALUES (?, ?, ?, ?, 0)",
+                "VALUES (?, ?, ?, ?, 0) "
+                "ON CONFLICT(entity_id, run_id) DO NOTHING",
                 (entity_id, payload["source_run_id"], _now(), _now()),
             )
         row = _select_project_target_row(conn, session_id, project_id, entity_id)
@@ -4945,9 +4979,10 @@ def record_project_target_discoveries(conn, session_id, project_id, run_id, comm
                 source_detail=detail,
             )
             conn.execute(
-                "INSERT OR IGNORE INTO entity_run_links "
+                "INSERT INTO entity_run_links "
                 "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
-                "VALUES (?, ?, ?, ?, 0)",
+                "VALUES (?, ?, ?, ?, 0) "
+                "ON CONFLICT(entity_id, run_id) DO NOTHING",
                 (entity_id, run_id, created, created),
             )
             if already_linked:
@@ -5003,9 +5038,10 @@ def update_project_target(session_id, project_id, target_id, data):
             )
         if source_run_id:
             conn.execute(
-                "INSERT OR IGNORE INTO entity_run_links "
+                "INSERT INTO entity_run_links "
                 "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
-                "VALUES (?, ?, ?, ?, 0)",
+                "VALUES (?, ?, ?, ?, 0) "
+                "ON CONFLICT(entity_id, run_id) DO NOTHING",
                 (entity_id, source_run_id, _now(), _now()),
             )
         row = _select_project_target_row(conn, session_id, project_id, entity_id)

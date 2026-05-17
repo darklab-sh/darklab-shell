@@ -55,6 +55,12 @@ BODY_POINTER_COLUMNS = frozenset({
     ("entity_intel_snapshots", "data_json"),
 })
 REQUIRED_APP_MIGRATIONS = ("0001", "0002")
+DEDUPLICATE_COPY_KEYS = {
+    "findings_occurrences": ("finding_id", "run_id", "line_number"),
+}
+MIGRATION_DISABLED_TRIGGERS = {
+    "findings": ("findings_legacy_ai",),
+}
 
 
 @dataclass(frozen=True)
@@ -94,6 +100,7 @@ class MigrationReport:
     verified_files: int
     copied_files: int
     missing_files: list[str]
+    deduplicated_rows: dict[str, int]
 
 
 @dataclass(frozen=True)
@@ -393,13 +400,13 @@ def _copy_table(
 ) -> int:
     columns = [column.name for column in plan.source_columns]
     placeholders = ", ".join(["%s"] * len(columns))
-    conflict = " ON CONFLICT DO NOTHING" if resume else ""
+    conflict = " ON CONFLICT DO NOTHING" if resume or plan.name in DEDUPLICATE_COPY_KEYS else ""
     insert_sql = (
         f"INSERT INTO {_quote_ident(plan.name)} "  # nosec B608
         f"({', '.join(_quote_ident(column) for column in columns)}) "
         f"VALUES ({placeholders}){conflict}"
     )
-    select_sql = f"SELECT {', '.join(_quote_ident(column) for column in columns)} FROM {_quote_ident(plan.name)}"  # nosec B608
+    select_sql = _copy_select_sql(plan, columns)
     copied = 0
     rows: list[tuple[Any, ...]] = []
     with pg_conn.cursor() as cursor:
@@ -415,9 +422,44 @@ def _copy_table(
     return copied
 
 
+def _copy_select_sql(plan: CopyTablePlan, columns: list[str]) -> str:
+    column_sql = ", ".join(_quote_ident(column) for column in columns)
+    table_sql = _quote_ident(plan.name)
+    keys = DEDUPLICATE_COPY_KEYS.get(plan.name)
+    if keys and all(key in columns for key in keys):
+        key_sql = ", ".join(_quote_ident(key) for key in keys)
+        return (  # nosec B608
+            f"SELECT {column_sql} FROM {table_sql} "
+            f"WHERE rowid IN (SELECT MIN(rowid) FROM {table_sql} GROUP BY {key_sql})"
+        )
+    return f"SELECT {column_sql} FROM {table_sql}"  # nosec B608
+
+
 def _sqlite_row_count(conn: sqlite3.Connection, table: str) -> int:
     row = conn.execute(f"SELECT COUNT(*) AS count FROM {_quote_ident(table)}").fetchone()  # nosec B608
     return int(row["count"] if row else 0)
+
+
+def _sqlite_effective_row_count(conn: sqlite3.Connection, plan: CopyTablePlan) -> int:
+    keys = DEDUPLICATE_COPY_KEYS.get(plan.name)
+    if not keys:
+        return _sqlite_row_count(conn, plan.name)
+    source_columns = {column.name for column in plan.source_columns}
+    if not all(key in source_columns for key in keys):
+        return _sqlite_row_count(conn, plan.name)
+    key_sql = ", ".join(_quote_ident(key) for key in keys)
+    row = conn.execute(  # nosec B608
+        f"SELECT COUNT(*) AS count FROM ("
+        f"SELECT 1 FROM {_quote_ident(plan.name)} GROUP BY {key_sql}"
+        f")"
+    ).fetchone()
+    return int(row["count"] if row else 0)
+
+
+def _deduplicated_row_count(conn: sqlite3.Connection, plan: CopyTablePlan) -> int:
+    source_count = _sqlite_row_count(conn, plan.name)
+    effective_count = _sqlite_effective_row_count(conn, plan)
+    return max(0, source_count - effective_count)
 
 
 def _postgres_row_count(pg_conn: Any, table: str) -> int:
@@ -461,6 +503,18 @@ def _create_search_indexes(pg_conn: Any, schema: str) -> None:
     )
 
 
+def _set_migration_triggers(pg_conn: Any, plans: list[CopyTablePlan], *, enabled: bool) -> None:
+    action = "ENABLE" if enabled else "DISABLE"
+    planned_tables = {plan.name for plan in plans}
+    for table_name, trigger_names in MIGRATION_DISABLED_TRIGGERS.items():
+        if table_name not in planned_tables:
+            continue
+        for trigger_name in trigger_names:
+            pg_conn.execute(  # nosec B608
+                f"ALTER TABLE {_quote_ident(table_name)} {action} TRIGGER {_quote_ident(trigger_name)}"
+            )
+
+
 def migrate(args: argparse.Namespace) -> MigrationReport:
     sqlite_path = Path(args.sqlite_db).expanduser()
     artifact_root = Path(args.artifact_root or sqlite_path.parent).expanduser()
@@ -484,9 +538,9 @@ def migrate(args: argparse.Namespace) -> MigrationReport:
             raise RuntimeError(
                 "Referenced files are missing; fix the artifact root or restore the files before migrating:\n"
                 + "\n".join(f"  {path}" for path in missing_files[:20])
-            )
+        )
         if args.dry_run:
-            return MigrationReport({}, skipped, verified_files, copied_files, [])
+            return MigrationReport({}, skipped, verified_files, copied_files, [], {})
         if not database_url:
             raise RuntimeError("--database-url or DATABASE_URL is required")
 
@@ -506,15 +560,25 @@ def migrate(args: argparse.Namespace) -> MigrationReport:
                 )
 
             copied_rows = {}
-            for plan in plans:
-                copied_rows[plan.name] = _copy_table(
-                    sqlite_conn,
-                    pg_conn,
-                    plan,
-                    jsonb_type=jsonb_type,
-                    batch_size=max(1, int(args.batch_size)),
-                    resume=args.resume,
-                )
+            deduplicated_rows = {}
+            _set_migration_triggers(pg_conn, plans, enabled=False)
+            try:
+                for plan in plans:
+                    copied_rows[plan.name] = _copy_table(
+                        sqlite_conn,
+                        pg_conn,
+                        plan,
+                        jsonb_type=jsonb_type,
+                        batch_size=max(1, int(args.batch_size)),
+                        resume=args.resume,
+                    )
+                    deduplicated = _deduplicated_row_count(sqlite_conn, plan)
+                    if deduplicated:
+                        deduplicated_rows[plan.name] = deduplicated
+            except Exception:
+                raise
+            else:
+                _set_migration_triggers(pg_conn, plans, enabled=True)
 
             if not args.skip_search_backfill:
                 _create_search_indexes(pg_conn, schema)
@@ -522,14 +586,14 @@ def migrate(args: argparse.Namespace) -> MigrationReport:
             if args.validate:
                 mismatches = []
                 for plan in plans:
-                    source_count = _sqlite_row_count(sqlite_conn, plan.name)
+                    source_count = _sqlite_effective_row_count(sqlite_conn, plan)
                     target_count = _postgres_row_count(pg_conn, plan.name)
                     if source_count != target_count:
                         mismatches.append(f"{plan.name}: sqlite={source_count}, postgres={target_count}")
                 if mismatches:
                     raise RuntimeError("Row-count validation failed:\n" + "\n".join(mismatches))
             pg_conn.commit()
-            return MigrationReport(copied_rows, skipped, verified_files, copied_files, [])
+            return MigrationReport(copied_rows, skipped, verified_files, copied_files, [], deduplicated_rows)
     finally:
         sqlite_conn.close()
 
@@ -582,6 +646,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"referenced files copied: {report.copied_files}")
     if report.skipped_tables:
         print("skipped SQLite-only tables: " + ", ".join(report.skipped_tables))
+    if report.deduplicated_rows:
+        details = ", ".join(
+            f"{table}={count}"
+            for table, count in sorted(report.deduplicated_rows.items())
+        )
+        print("deduplicated source rows: " + details)
     if not report.copied_rows:
         print("dry run complete")
     return 0

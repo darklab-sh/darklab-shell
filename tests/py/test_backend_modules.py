@@ -544,6 +544,26 @@ class TestDatabaseBackend:
         with pytest.raises(database_backend.PostgresConnectionError, match="database_url"):
             database_backend.postgres_pool_settings({"database_backend": "postgres"})
 
+    def test_run_kind_import_does_not_cycle_through_metrics(self):
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(REPO_ROOT / "app")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "from services.runs.kinds import RUN_KIND_BUILTIN; print(RUN_KIND_BUILTIN)",
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "builtin"
+
     def test_postgres_identifier_quoting_and_advisory_lock_are_stable(self):
         assert database_backend.quote_postgres_identifier('odd"name') == '"odd""name"'
         assert database_backend.quote_identifier('odd"name', "sqlite") == '"odd""name"'
@@ -964,6 +984,117 @@ class TestPostgresMigrationHelper:
 
         assert report.copied_rows == {}
         assert report.verified_files == 0
+
+    def test_findings_occurrence_copy_deduplicates_legacy_duplicate_keys(self):
+        migration = _load_postgres_migration_module()
+        source = migration.TableInfo(
+            name="findings_occurrences",
+            columns=(
+                migration.ColumnInfo("finding_id", "TEXT", True, None, 0),
+                migration.ColumnInfo("run_id", "TEXT", True, None, 0),
+                migration.ColumnInfo("line_number", "INTEGER", True, None, 0),
+                migration.ColumnInfo("snippet", "TEXT", True, None, 0),
+                migration.ColumnInfo("seen_at", "TEXT", True, None, 0),
+            ),
+        )
+        plan = migration.CopyTablePlan(
+            name="findings_occurrences",
+            source_columns=source.columns,
+            destination_columns=tuple(
+                migration.DestinationColumnInfo(column.name, "text", False, None)
+                for column in source.columns
+            ),
+        )
+
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute(
+                """
+                CREATE TABLE findings_occurrences (
+                    finding_id TEXT,
+                    run_id TEXT,
+                    line_number INTEGER,
+                    snippet TEXT,
+                    seen_at TEXT
+                )
+                """
+            )
+            conn.executemany(
+                "INSERT INTO findings_occurrences VALUES (?, ?, ?, ?, ?)",
+                [
+                    ("fnd-1", "run-1", 42, "first", "2026-05-17T00:00:00Z"),
+                    ("fnd-1", "run-1", 42, "duplicate", "2026-05-17T00:01:00Z"),
+                    ("fnd-1", "run-1", 43, "next", "2026-05-17T00:02:00Z"),
+                ],
+            )
+
+            rows = conn.execute(migration._copy_select_sql(plan, [column.name for column in source.columns])).fetchall()
+
+            assert [row["snippet"] for row in rows] == ["first", "next"]
+            assert migration._sqlite_effective_row_count(conn, plan) == 2
+            assert migration._deduplicated_row_count(conn, plan) == 1
+
+            class FakeCursor:
+                def __init__(self):
+                    self.calls = []
+
+                def executemany(self, sql, rows):
+                    self.calls.append((sql, list(rows)))
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, traceback):
+                    return False
+
+            class FakePostgresConnection:
+                def __init__(self):
+                    self.cursor_obj = FakeCursor()
+
+                def cursor(self):
+                    return self.cursor_obj
+
+            pg_conn = FakePostgresConnection()
+            copied = migration._copy_table(
+                conn,
+                pg_conn,
+                plan,
+                jsonb_type=lambda value: value,
+                batch_size=10,
+                resume=False,
+            )
+
+            assert copied == 2
+            assert len(pg_conn.cursor_obj.calls) == 1
+            assert "ON CONFLICT DO NOTHING" in pg_conn.cursor_obj.calls[0][0]
+        finally:
+            conn.close()
+
+    def test_migration_temporarily_disables_findings_legacy_trigger(self):
+        migration = _load_postgres_migration_module()
+        plan = migration.CopyTablePlan(
+            name="findings",
+            source_columns=(migration.ColumnInfo("id", "TEXT", True, None, 1),),
+            destination_columns=(migration.DestinationColumnInfo("id", "text", False, None),),
+        )
+
+        class FakePostgresConnection:
+            def __init__(self):
+                self.statements = []
+
+            def execute(self, sql, _params=()):
+                self.statements.append(" ".join(str(sql).split()))
+
+        pg_conn = FakePostgresConnection()
+
+        migration._set_migration_triggers(pg_conn, [plan], enabled=False)
+        migration._set_migration_triggers(pg_conn, [plan], enabled=True)
+
+        assert pg_conn.statements == [
+            'ALTER TABLE "findings" DISABLE TRIGGER "findings_legacy_ai"',
+            'ALTER TABLE "findings" ENABLE TRIGGER "findings_legacy_ai"',
+        ]
 
 
 class TestIntelServices:

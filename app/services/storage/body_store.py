@@ -28,13 +28,16 @@ def _encode_pointer(pointer: dict[str, Any]) -> str:
     return json.dumps(pointer, separators=(",", ":"), sort_keys=True)
 
 
-def _decode_pointer(value: str | None) -> dict[str, Any] | None:
+def _decode_pointer(value: str | dict[str, Any] | None) -> dict[str, Any] | None:
     if not value:
         return None
-    try:
-        parsed = json.loads(value)
-    except (TypeError, json.JSONDecodeError):
-        return None
+    if isinstance(value, dict):
+        parsed = value
+    else:
+        try:
+            parsed = json.loads(value)
+        except (TypeError, json.JSONDecodeError):
+            return None
     if not isinstance(parsed, dict):
         return None
     if parsed.get(_POINTER_KEY) != _POINTER_VERSION:
@@ -122,11 +125,11 @@ def maybe_store_text_body(
     })
 
 
-def stored_body_pointer(value: str | None) -> dict[str, Any] | None:
+def stored_body_pointer(value: str | dict[str, Any] | None) -> dict[str, Any] | None:
     return _decode_pointer(value)
 
 
-def load_text_body(value: str | None, *, fallback_to_preview: bool = True) -> str:
+def load_text_body(value: str | dict[str, Any] | None, *, fallback_to_preview: bool = True) -> str:
     pointer = _decode_pointer(value)
     if pointer is None:
         return str(value or "")
@@ -143,7 +146,7 @@ def load_text_body(value: str | None, *, fallback_to_preview: bool = True) -> st
     return body
 
 
-def delete_text_body(value: str | None) -> None:
+def delete_text_body(value: str | dict[str, Any] | None) -> None:
     pointer = _decode_pointer(value)
     if pointer is None:
         return

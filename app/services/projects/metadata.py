@@ -8,7 +8,8 @@ import secrets
 from datetime import datetime, timezone
 
 import config as _config
-from core.database import db_connect, validate_project_entity_type
+from core.database import DB_BACKEND, db_connect, validate_project_entity_type
+from core.database_backend import DatabaseBackend
 from services.projects.contracts import (
     ENTITY_METADATA_TYPES,
     MAX_ENTITY_ID_LEN,
@@ -47,6 +48,10 @@ def _raise_quota(message):
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _label_order_sql() -> str:
+    return "LOWER(label) ASC, created ASC" if DB_BACKEND == DatabaseBackend.POSTGRES else "label COLLATE NOCASE ASC, created ASC"
 
 
 def _new_entity_label_id() -> str:
@@ -106,7 +111,7 @@ def _entity_labels_by_id(conn, session_id, entity_type, entity_ids):
         "SELECT id, session_id, entity_type, entity_id, label, source, created "  # nosec
         "FROM entity_labels WHERE session_id = ? AND entity_type = ? "
         f"AND entity_id IN ({placeholders}) "
-        "ORDER BY label COLLATE NOCASE ASC, created ASC",
+        "ORDER BY " + _label_order_sql(),
         [session_id, entity_type, *values],
     ).fetchall()
     grouped = {value: [] for value in values}
@@ -211,9 +216,10 @@ def _save_project_note(conn, session_id, project_id, notes):
     for _ in range(10):
         note_id = _new_entity_note_id()
         result = conn.execute(
-            "INSERT OR IGNORE INTO entity_notes "
+            "INSERT INTO entity_notes "
             "(id, session_id, entity_type, entity_id, body, created, updated) "
-            "VALUES (?, ?, 'project', ?, ?, ?, ?)",
+            "VALUES (?, ?, 'project', ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO NOTHING",
             (note_id, session_id, project_id, body, now, now),
         )
         if result.rowcount:
@@ -314,9 +320,9 @@ def list_entity_labels(session_id, entity_type, entity_id):
         if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
             return None
         rows = conn.execute(
-            "SELECT id, session_id, entity_type, entity_id, label, source, created "
+            "SELECT id, session_id, entity_type, entity_id, label, source, created "  # nosec B608
             "FROM entity_labels WHERE session_id = ? AND entity_type = ? AND entity_id = ? "
-            "ORDER BY label COLLATE NOCASE ASC, created ASC",
+            "ORDER BY " + _label_order_sql(),
             (session_id, entity_type, entity_id),
         ).fetchall()
     return [_row_to_label(row) for row in rows]
@@ -361,9 +367,10 @@ def add_entity_label(session_id, entity_type, entity_id, data):
         for _ in range(10):
             label_id = _new_entity_label_id()
             conn.execute(
-                "INSERT OR IGNORE INTO entity_labels "
+                "INSERT INTO entity_labels "
                 "(id, session_id, entity_type, entity_id, label, source, created) "
-                "VALUES (?, ?, ?, ?, ?, 'manual', ?)",
+                "VALUES (?, ?, ?, ?, ?, 'manual', ?) "
+                "ON CONFLICT(session_id, entity_type, entity_id, label) DO NOTHING",
                 (label_id, session_id, entity_type, entity_id, label, created),
             )
             row = conn.execute(
@@ -449,9 +456,10 @@ def upsert_entity_note(session_id, entity_type, entity_id, data):
         for _ in range(10):
             note_id = _new_entity_note_id()
             conn.execute(
-                "INSERT OR IGNORE INTO entity_notes "
+                "INSERT INTO entity_notes "
                 "(id, session_id, entity_type, entity_id, body, created, updated) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(session_id, entity_type, entity_id) DO NOTHING",
                 (
                     note_id,
                     session_id,

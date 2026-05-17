@@ -36,7 +36,8 @@ from services.commands.registry import (
     validate_command,
 )
 from config import CFG, SCANNER_PREFIX
-from core.database import db_connect
+from core.database import DB_BACKEND, db_connect
+from core.database_backend import DatabaseBackend
 from extensions import limiter
 from services.commands.builtins import (
     execute_builtin_command,
@@ -184,6 +185,102 @@ CLIENT_SIDE_RUN_ROOTS = {
     "wc",
 }
 
+
+def _db_bool(value: object) -> bool | int:
+    normalized = bool(value)
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        return normalized
+    return 1 if normalized else 0
+
+
+def _insert_run_row(
+    conn,
+    *,
+    run_id: str,
+    session_id: str,
+    run_kind: str,
+    owner_tab_id: str,
+    command: str,
+    started: str,
+    finished: str,
+    exit_code: int,
+    output_preview: str,
+    preview_truncated: object,
+    output_line_count: int,
+    full_output_available: object,
+    full_output_truncated: object,
+    output_search_text: str,
+) -> None:
+    conn.execute(
+        "INSERT INTO runs "
+        "("
+        "id, session_id, run_kind, owner_tab_id, command, started, finished, exit_code, output, output_preview, "
+        "preview_truncated, output_line_count, full_output_available, full_output_truncated, "
+        "output_search_text"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            run_id,
+            session_id,
+            run_kind,
+            owner_tab_id,
+            command,
+            started,
+            finished,
+            exit_code,
+            None,
+            output_preview,
+            _db_bool(preview_truncated),
+            int(output_line_count or 0),
+            _db_bool(full_output_available),
+            _db_bool(full_output_truncated),
+            output_search_text,
+        ),
+    )
+
+
+def _upsert_run_output_artifact(
+    conn,
+    *,
+    run_id: str,
+    rel_path: str,
+    compression: str,
+    byte_size: int,
+    line_count: int,
+    truncated: object,
+    created: str,
+) -> None:
+    params = (
+        run_id,
+        rel_path,
+        compression,
+        int(byte_size or 0),
+        int(line_count or 0),
+        _db_bool(truncated),
+        created,
+    )
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        conn.execute(
+            "INSERT INTO run_output_artifacts "
+            "(run_id, rel_path, compression, byte_size, line_count, truncated, created) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(run_id) DO UPDATE SET "
+            "rel_path = excluded.rel_path, "
+            "compression = excluded.compression, "
+            "byte_size = excluded.byte_size, "
+            "line_count = excluded.line_count, "
+            "truncated = excluded.truncated, "
+            "created = excluded.created",
+            params,
+        )
+        return
+    conn.execute(
+        "INSERT OR REPLACE INTO run_output_artifacts "
+        "(run_id, rel_path, compression, byte_size, line_count, truncated, created) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        params,
+    )
+
+
 def _variable_notice_line(expanded_command: str, used_names: tuple[str, ...]) -> str:
     variables = ", ".join(f"${name}" for name in used_names)
     return f"[vars] expanded {variables}: {expanded_command}"
@@ -305,45 +402,33 @@ def _save_completed_run(
             inline_threshold_bytes(CFG.get("runs_search_text_inline_max_bytes")),
         )
         with db_connect() as conn:
-            conn.execute(
-                "INSERT INTO runs "
-                "("
-                "id, session_id, run_kind, owner_tab_id, command, started, finished, exit_code, output, output_preview, "
-                "preview_truncated, output_line_count, full_output_available, full_output_truncated, "
-                "output_search_text"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    run_id,
-                    session_id,
-                    run_kind,
-                    owner_tab_id,
-                    command,
-                    run_started,
-                    finished_iso,
-                    exit_code,
-                    None,
-                    json.dumps(preview_lines),
-                    int(capture.preview_truncated),
-                    capture.output_line_count,
-                    int(capture.full_output_available),
-                    int(capture.full_output_truncated),
-                    stored_search_text,
-                )
+            _insert_run_row(
+                conn,
+                run_id=run_id,
+                session_id=session_id,
+                run_kind=run_kind,
+                owner_tab_id=owner_tab_id,
+                command=command,
+                started=run_started,
+                finished=finished_iso,
+                exit_code=exit_code,
+                output_preview=json.dumps(preview_lines),
+                preview_truncated=capture.preview_truncated,
+                output_line_count=capture.output_line_count,
+                full_output_available=capture.full_output_available,
+                full_output_truncated=capture.full_output_truncated,
+                output_search_text=stored_search_text,
             )
             if capture.full_output_available and capture.artifact_rel_path:
-                conn.execute(
-                    "INSERT OR REPLACE INTO run_output_artifacts "
-                    "(run_id, rel_path, compression, byte_size, line_count, truncated, created) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        run_id,
-                        capture.artifact_rel_path,
-                        "gzip",
-                        capture.full_output_bytes,
-                        capture.output_line_count,
-                        int(capture.full_output_truncated),
-                        finished_iso,
-                    )
+                _upsert_run_output_artifact(
+                    conn,
+                    run_id=run_id,
+                    rel_path=capture.artifact_rel_path,
+                    compression="gzip",
+                    byte_size=capture.full_output_bytes,
+                    line_count=capture.output_line_count,
+                    truncated=capture.full_output_truncated,
+                    created=finished_iso,
                 )
             if link_active_project:
                 try:
@@ -614,30 +699,22 @@ def save_client_side_run():
     )
 
     with db_connect() as conn:
-        conn.execute(
-            "INSERT INTO runs "
-            "("
-            "id, session_id, run_kind, owner_tab_id, command, started, finished, exit_code, output, output_preview, "
-            "preview_truncated, output_line_count, full_output_available, full_output_truncated, "
-            "output_search_text"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                run_id,
-                session_id,
-                RUN_KIND_BUILTIN,
-                _active_run_owner_value(data.get("tab_id", "")),
-                command,
-                started.isoformat(),
-                finished.isoformat(),
-                exit_code,
-                None,
-                json.dumps(lines),
-                preview_truncated,
-                raw_line_count,
-                0,
-                0,
-                stored_output_search_text,
-            ),
+        _insert_run_row(
+            conn,
+            run_id=run_id,
+            session_id=session_id,
+            run_kind=RUN_KIND_BUILTIN,
+            owner_tab_id=_active_run_owner_value(data.get("tab_id", "")),
+            command=command,
+            started=started.isoformat(),
+            finished=finished.isoformat(),
+            exit_code=exit_code,
+            output_preview=json.dumps(lines),
+            preview_truncated=preview_truncated,
+            output_line_count=raw_line_count,
+            full_output_available=False,
+            full_output_truncated=False,
+            output_search_text=stored_output_search_text,
         )
         conn.commit()
 

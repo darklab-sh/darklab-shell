@@ -7,6 +7,8 @@ import io
 import json
 from typing import Any
 
+from core.database import DB_BACKEND
+from core.database_backend import DatabaseBackend
 from services.atlas.materializer import ATLAS_ENTITY_TYPES
 from services.intel.registry import provider_label
 from services.projects.contracts import FINDING_REVIEW_STATES
@@ -107,14 +109,40 @@ def _row_to_run_link(row) -> dict[str, Any]:
     }
 
 
-def _row_to_intel_snapshot(row) -> dict[str, Any]:
-    data: dict[str, Any] = {}
+def _label_order_sql(prefix: str = "") -> str:
+    column = f"{prefix}label" if prefix else "label"
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        return f"LOWER({column}) ASC, created ASC"
+    return f"{column} COLLATE NOCASE ASC, created ASC"
+
+
+def _name_order_sql(prefix: str = "") -> str:
+    column = f"{prefix}name" if prefix else "name"
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        return f"LOWER({column}) ASC"
+    return f"{column} COLLATE NOCASE ASC"
+
+
+def _provider_order_sql() -> str:
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        return "LOWER(provider) ASC"
+    return "provider COLLATE NOCASE ASC"
+
+
+def _load_json_dict(value: object) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if value is not None and not isinstance(value, str):
+        return {}
     try:
-        parsed = json.loads(load_text_body(row["data_json"]) or "{}")
-        if isinstance(parsed, dict):
-            data = parsed
+        parsed = json.loads(load_text_body(value) or "{}")
     except (TypeError, json.JSONDecodeError, ValueError):
-        data = {}
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _row_to_intel_snapshot(row) -> dict[str, Any]:
+    data = _load_json_dict(row["data_json"])
     return {
         "id": row["id"],
         "provider": row["provider"],
@@ -490,9 +518,9 @@ def _row_to_finding(row) -> dict[str, Any]:
 
 def _metadata_for_entity(conn, session_id: str, entity_id: str) -> dict[str, Any]:
     labels = conn.execute(
-        "SELECT id, label, source, created "
+        "SELECT id, label, source, created "  # nosec B608
         "FROM entity_labels WHERE session_id = ? AND entity_type = 'atlas_entity' AND entity_id = ? "
-        "ORDER BY label COLLATE NOCASE ASC, created ASC",
+        "ORDER BY " + _label_order_sql(),
         (session_id, entity_id),
     ).fetchall()
     note = conn.execute(
@@ -803,13 +831,8 @@ def list_entities(
     }
 
 
-def _has_intel_data(data_json: str) -> bool:
-    try:
-        payload = json.loads(load_text_body(data_json) or "{}")
-    except (TypeError, json.JSONDecodeError, ValueError):
-        return False
-    if not isinstance(payload, dict):
-        return False
+def _has_intel_data(data_json: object) -> bool:
+    payload = _load_json_dict(data_json)
     summary = payload.get("summary")
     if isinstance(summary, dict):
         providers = summary.get("providers_with_data")
@@ -900,7 +923,7 @@ def _query_export_entities(
     labels = conn.execute(
         "SELECT entity_id, label FROM entity_labels "
         "WHERE session_id = ? AND entity_type = 'atlas_entity' "
-        f"AND entity_id IN ({placeholders}) ORDER BY label COLLATE NOCASE ASC",  # nosec
+        f"AND entity_id IN ({placeholders}) ORDER BY " + _label_order_sql(),  # nosec
         [session_id, *entity_ids],
     ).fetchall()
     notes = conn.execute(
@@ -912,12 +935,12 @@ def _query_export_entities(
     projects = conn.execute(
         "SELECT l.entity_id, p.name FROM project_links l JOIN projects p ON p.id = l.project_id "
         "WHERE p.session_id = ? AND l.entity_type = 'atlas_entity' "
-        f"AND l.entity_id IN ({placeholders}) ORDER BY p.name COLLATE NOCASE ASC",  # nosec
+        f"AND l.entity_id IN ({placeholders}) ORDER BY " + _name_order_sql("p."),  # nosec
         [session_id, *entity_ids],
     ).fetchall()
     snapshots = conn.execute(
         "SELECT entity_id, provider, data_json FROM entity_intel_snapshots "
-        f"WHERE session_id = ? AND entity_id IN ({placeholders}) ORDER BY provider COLLATE NOCASE ASC",  # nosec
+        f"WHERE session_id = ? AND entity_id IN ({placeholders}) ORDER BY " + _provider_order_sql(),  # nosec
         [session_id, *entity_ids],
     ).fetchall()
     by_id = {str(entity["id"]): entity for entity in entities}
@@ -928,7 +951,7 @@ def _query_export_entities(
     for row in projects:
         by_id[str(row["entity_id"])]["project_names"].append(str(row["name"] or ""))
     for row in snapshots:
-        if _has_intel_data(str(row["data_json"] or "")):
+        if _has_intel_data(row["data_json"]):
             by_id[str(row["entity_id"])]["intel_providers_with_data"].append(str(row["provider"] or ""))
     return entities
 

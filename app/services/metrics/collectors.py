@@ -11,6 +11,10 @@ from prometheus_client.core import GaugeMetricFamily
 from config import APP_VERSION, CFG
 from core import database, process
 from core.database_backend import (
+    DatabaseBackend,
+    postgres_storage_rows,
+    postgres_table_names,
+    postgres_table_row_count,
     SQLiteConnection,
     SQLiteOperationalError,
     sqlite_dbstat_rows,
@@ -43,14 +47,26 @@ def _db_file_size(path: str) -> int:
 
 
 def _table_names(conn: SQLiteConnection) -> list[str]:
+    if database.DB_BACKEND == DatabaseBackend.POSTGRES:
+        return postgres_table_names(conn)
     return sqlite_table_names(conn)
 
 
 def _count_rows(conn: SQLiteConnection, table: str) -> int:
+    if database.DB_BACKEND == DatabaseBackend.POSTGRES:
+        return postgres_table_row_count(conn, table)
     return sqlite_table_row_count(conn, table)
 
 
 def _allocated_bytes(conn: SQLiteConnection) -> dict[str, int]:
+    if database.DB_BACKEND == DatabaseBackend.POSTGRES:
+        try:
+            return {
+                str(row["name"]): _safe_int(row["allocated"])
+                for row in postgres_storage_rows(conn)
+            }
+        except Exception:
+            return {}
     try:
         rows = sqlite_dbstat_rows(conn)
     except SQLiteOperationalError:
@@ -59,15 +75,25 @@ def _allocated_bytes(conn: SQLiteConnection) -> dict[str, int]:
 
 
 def _db_freelist_bytes(conn: SQLiteConnection) -> int:
+    if database.DB_BACKEND == DatabaseBackend.POSTGRES:
+        return 0
     stats = sqlite_page_stats(conn)
     return _safe_int(stats["page_size"]) * _safe_int(stats["freelist_count"])
 
 
 def _fts_orphans(conn: SQLiteConnection) -> int:
+    if database.DB_BACKEND == DatabaseBackend.POSTGRES:
+        return 0
     try:
         return sqlite_fts_orphan_count(conn)
     except SQLiteOperationalError:
         return 0
+
+
+def _db_size_bytes(conn: SQLiteConnection) -> int:
+    if database.DB_BACKEND == DatabaseBackend.POSTGRES:
+        return sum(_safe_int(row.get("allocated")) for row in postgres_storage_rows(conn))
+    return _db_file_size(database.DB_PATH)
 
 
 def _workspace_usage() -> tuple[int, int]:
@@ -128,13 +154,18 @@ def _redis_stream_length_sample(client: Any, prefix: str) -> int:
 def _secret_envs_with_rows(conn: SQLiteConnection) -> set[str]:
     try:
         rows = conn.execute("SELECT name, consumer_envs FROM secrets").fetchall()
-    except SQLiteOperationalError:
+    except Exception:
         return set()
     envs = set()
     for row in rows:
         envs.add(str(row["name"]))
-        raw = str(row["consumer_envs"] or "")
-        for token in raw.replace("[", "").replace("]", "").replace('"', "").split(","):
+        raw_value = row["consumer_envs"] or ""
+        if isinstance(raw_value, (list, tuple)):
+            tokens = [str(item) for item in raw_value]
+        else:
+            raw = str(raw_value)
+            tokens = raw.replace("[", "").replace("]", "").replace('"', "").split(",")
+        for token in tokens:
             token = token.strip()
             if token:
                 envs.add(token)
@@ -194,22 +225,34 @@ class RuntimeStateCollector:
         yield broker
 
     def _collect_database(self, health: GaugeMetricFamily):
-        db_size = GaugeMetricFamily("darklab_db_size_bytes", "SQLite database file size in bytes.")
-        db_size.add_metric([], _db_file_size(database.DB_PATH))
-        yield db_size
+        backend_info = GaugeMetricFamily(
+            "darklab_db_backend_info",
+            "Database backend marker.",
+            labels=("backend",),
+        )
+        backend_info.add_metric([database.DB_BACKEND.value], 1)
+        yield backend_info
 
-        wal_size = GaugeMetricFamily("darklab_db_wal_size_bytes", "SQLite WAL file size in bytes.")
-        wal_size.add_metric([], _db_file_size(f"{database.DB_PATH}-wal"))
+        db_size = GaugeMetricFamily("darklab_db_size_bytes", "Database storage size in bytes.")
+
+        wal_size = GaugeMetricFamily("darklab_db_wal_size_bytes", "SQLite WAL file size in bytes; 0 for Postgres.")
+        wal_size.add_metric(
+            [],
+            0 if database.DB_BACKEND == DatabaseBackend.POSTGRES else _db_file_size(f"{database.DB_PATH}-wal"),
+        )
         yield wal_size
 
-        reclaimable = GaugeMetricFamily("darklab_db_reclaimable_bytes", "SQLite freelist bytes.")
-        table_rows = GaugeMetricFamily("darklab_db_table_rows", "SQLite table row counts.", labels=("table",))
+        reclaimable = GaugeMetricFamily("darklab_db_reclaimable_bytes", "Database reclaimable bytes when available.")
+        table_rows = GaugeMetricFamily("darklab_db_table_rows", "Database table row counts.", labels=("table",))
         table_bytes = GaugeMetricFamily(
             "darklab_db_table_allocated_bytes",
-            "SQLite allocated bytes by object.",
+            "Database allocated bytes by object.",
             labels=("table",),
         )
-        fts_orphans = GaugeMetricFamily("darklab_db_fts_orphans", "FTS rows without matching runs rows.")
+        fts_orphans = GaugeMetricFamily(
+            "darklab_db_fts_orphans",
+            "SQLite FTS rows without matching runs rows; 0 for Postgres.",
+        )
         atlas_entities = GaugeMetricFamily("darklab_atlas_entities", "Atlas entity counts by type.", labels=("type",))
         findings = GaugeMetricFamily(
             "darklab_findings_total",
@@ -227,6 +270,7 @@ class RuntimeStateCollector:
             with database.db_connect() as conn:
                 conn.execute("SELECT 1")
                 health.add_metric(["db"], 1)
+                db_size.add_metric([], _db_size_bytes(conn))
                 reclaimable.add_metric([], _db_freelist_bytes(conn))
                 allocated = _allocated_bytes(conn)
                 for name in _table_names(conn):
@@ -240,9 +284,11 @@ class RuntimeStateCollector:
                 self._add_intel_missing(conn, intel_missing)
         except Exception:
             health.add_metric(["db"], 0)
+            db_size.add_metric([], 0)
             reclaimable.add_metric([], 0)
             fts_orphans.add_metric([], 0)
             snapshots.add_metric([], 0)
+        yield db_size
         yield reclaimable
         yield table_rows
         yield table_bytes
@@ -255,7 +301,7 @@ class RuntimeStateCollector:
     def _add_atlas(self, conn: SQLiteConnection, metric: GaugeMetricFamily) -> None:
         try:
             rows = conn.execute("SELECT type, COUNT(*) AS count FROM entities GROUP BY type").fetchall()
-        except SQLiteOperationalError:
+        except Exception:
             rows = []
         for row in rows:
             metric.add_metric([str(row["type"] or "unknown")], _safe_int(row["count"]))
@@ -267,7 +313,7 @@ class RuntimeStateCollector:
                 "COALESCE(NULLIF(status, ''), 'new') AS status, COUNT(*) AS count "
                 "FROM findings GROUP BY severity, status"
             ).fetchall()
-        except SQLiteOperationalError:
+        except Exception:
             rows = []
         for row in rows:
             metric.add_metric([str(row["severity"]), str(row["status"])], _safe_int(row["count"]))
@@ -276,7 +322,7 @@ class RuntimeStateCollector:
         try:
             row = conn.execute("SELECT COUNT(*) AS count FROM snapshots").fetchone()
             metric.add_metric([], _safe_int(row["count"] if row else 0))
-        except SQLiteOperationalError:
+        except Exception:
             metric.add_metric([], 0)
 
     def _add_intel_missing(self, conn: SQLiteConnection, metric: GaugeMetricFamily) -> None:

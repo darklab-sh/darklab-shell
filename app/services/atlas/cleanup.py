@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.database import DB_BACKEND
+from core.database_backend import DatabaseBackend
 from services.storage.body_store import delete_text_body
 
 
@@ -18,6 +20,12 @@ def _unique_ids(values: list[str] | tuple[str, ...] | set[str] | None) -> list[s
 
 def _placeholders(values: list[str]) -> str:
     return ",".join("?" for _ in values)
+
+
+def _insert_ignore_sql(table: str) -> str:
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        return f"INSERT INTO {table} (id) VALUES (?) ON CONFLICT(id) DO NOTHING"  # nosec
+    return f"INSERT OR IGNORE INTO {table} (id) VALUES (?)"  # nosec
 
 
 def _public_preview(preview: dict[str, Any]) -> dict[str, Any]:
@@ -114,13 +122,13 @@ def atlas_run_cleanup_preview(
     conn.execute("DELETE FROM atlas_cleanup_excluded_entities")
     conn.execute("DELETE FROM atlas_cleanup_excluded_findings")
     conn.execute("DELETE FROM atlas_cleanup_allowed_findings")
-    conn.executemany("INSERT OR IGNORE INTO atlas_cleanup_run_ids (id) VALUES (?)", [(item,) for item in ids])
+    conn.executemany(_insert_ignore_sql("atlas_cleanup_run_ids"), [(item,) for item in ids])
     conn.executemany(
-        "INSERT OR IGNORE INTO atlas_cleanup_excluded_entities (id) VALUES (?)",
+        _insert_ignore_sql("atlas_cleanup_excluded_entities"),
         [(item,) for item in excluded_entities],
     )
     conn.executemany(
-        "INSERT OR IGNORE INTO atlas_cleanup_excluded_findings (id) VALUES (?)",
+        _insert_ignore_sql("atlas_cleanup_excluded_findings"),
         [(item,) for item in excluded_findings],
     )
 
@@ -151,7 +159,7 @@ def atlas_run_cleanup_preview(
 
     excluded_findings_for_entities = _unique_ids([row["id"] for row in finding_rows] + excluded_findings)
     conn.executemany(
-        "INSERT OR IGNORE INTO atlas_cleanup_allowed_findings (id) VALUES (?)",
+        _insert_ignore_sql("atlas_cleanup_allowed_findings"),
         [(item,) for item in excluded_findings_for_entities],
     )
 

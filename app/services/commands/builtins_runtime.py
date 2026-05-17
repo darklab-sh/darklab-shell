@@ -8,7 +8,8 @@ import json
 from typing import TypedDict
 
 from config import CFG
-from core.database import db_connect
+from core.database import DB_BACKEND, db_connect
+from core.database_backend import DatabaseBackend
 from core.helpers import is_failed_exit_code
 from core.process import active_runs_for_session, redis_client
 from services.commands.builtins_format import (
@@ -41,6 +42,24 @@ class _StatsBucket(TypedDict):
     failed: int
     incomplete: int
     durations: list[float]
+
+
+def _stats_elapsed_sql() -> str:
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        return """
+                   CASE
+                       WHEN started IS NOT NULL AND finished IS NOT NULL
+                       THEN EXTRACT(EPOCH FROM (finished::timestamptz - started::timestamptz))
+                       ELSE NULL
+                   END AS elapsed_s
+        """
+    return """
+                   CASE
+                       WHEN started IS NOT NULL AND finished IS NOT NULL
+                       THEN (julianday(finished) - julianday(started)) * 86400.0
+                       ELSE NULL
+                   END AS elapsed_s
+        """
 
 
 def _recent_runs(session_id: str, limit: int | None = None):
@@ -635,20 +654,17 @@ def run_builtin_stats(
     active_builtin_command_roots: Callable[[], set[str]],
     active_runs: Callable[[str], list[dict]] = active_runs_for_session,
 ) -> list[dict[str, str]]:
+    elapsed_sql = _stats_elapsed_sql()
     with db_connect() as conn:
         raw_rows = conn.execute(
-            """
+            f"""
             SELECT command,
                    exit_code,
-                   CASE
-                       WHEN started IS NOT NULL AND finished IS NOT NULL
-                       THEN (julianday(finished) - julianday(started)) * 86400.0
-                       ELSE NULL
-                   END AS elapsed_s
+                   {elapsed_sql}
               FROM runs
              WHERE session_id = ?
              ORDER BY started ASC, id ASC
-            """,
+            """,  # nosec B608
             (session_id,),
         ).fetchall()
 

@@ -14,8 +14,14 @@ from flask import Blueprint, abort, current_app, jsonify, render_template, reque
 
 from services.commands.registry import command_root, load_command_policy
 from config import APP_VERSION, CFG, get_theme_entry
-from core.database import DB_PATH, db_connect
+from core.database import DB_BACKEND, DB_PATH, db_connect
 from core.database_backend import (
+    DatabaseBackend,
+    postgres_storage_rows,
+    postgres_table_columns,
+    postgres_table_names,
+    postgres_table_row_count,
+    quote_identifier,
     quote_sqlite_identifier,
     sqlite_compileoption_used,
     sqlite_dbstat_rows,
@@ -60,6 +66,18 @@ def _fmt_elapsed(seconds):
         m, r = s // 60, s % 60
         return f"{m}m {r}s" if r else f"{m}m"
     return f"{s}s"
+
+
+def _fmt_diag_duration_ms(value):
+    ms = float(value or 0)
+    if ms >= 1000:
+        seconds = ms / 1000
+        if seconds >= 10:
+            return f"{seconds:.0f}s"
+        return f"{seconds:.1f}s"
+    if ms >= 100:
+        return f"{ms:.0f} ms"
+    return f"{ms:g} ms"
 
 
 _ANSI_UP_JS = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "ansi_up.js"
@@ -269,16 +287,216 @@ def _diag_storage_bucket_for_table(name: str, kind: str = "table") -> str:
     return _DIAG_STORAGE_BUCKET_BY_TABLE.get(name, "Other")
 
 
-def _diag_sum_payload_expr(text_columns: tuple[str, ...], byte_columns: tuple[str, ...] = ()) -> str:
+def _diag_sum_payload_expr(
+    text_columns: tuple[str, ...],
+    byte_columns: tuple[str, ...] = (),
+    *,
+    backend: DatabaseBackend = DatabaseBackend.SQLITE,
+) -> str:
     parts = [
-        "COALESCE(SUM(LENGTH(COALESCE(" + quote_sqlite_identifier(column) + ", ''))), 0)"
+        "COALESCE(SUM(LENGTH(COALESCE("
+        + quote_identifier(column, backend)
+        + ("::text" if backend == DatabaseBackend.POSTGRES else "")
+        + ", ''))), 0)"
         for column in text_columns
     ]
     parts.extend(
-        "COALESCE(SUM(" + quote_sqlite_identifier(column) + "), 0)"
+        "COALESCE(SUM(" + quote_identifier(column, backend) + "), 0)"
         for column in byte_columns
     )
     return " + ".join(parts) or "0"
+
+
+def _diag_row_value(row, key: str, index: int, default=None):
+    if hasattr(row, "keys"):
+        try:
+            return row[key]
+        except KeyError:
+            pass
+    try:
+        return row[index]
+    except (IndexError, KeyError, TypeError):
+        return default
+
+
+def _diag_live_table_columns(conn, table_name: str) -> set[str]:
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        return postgres_table_columns(conn, table_name)
+    return sqlite_table_columns(conn, table_name)
+
+
+def _diag_postgres_table_storage_breakdown(conn, table_counts: dict[str, int]) -> dict:
+    result: dict = {
+        "backend": "postgres",
+        "dbstat_available": False,
+        "storage_stats_available": True,
+        "buckets": [],
+        "largest_runs": [],
+        "total_allocated_bytes": 0,
+        "total_payload_bytes": 0,
+        "total_logical_payload_bytes": 0,
+        "wasted_bytes": 0,
+        "errors": [],
+    }
+    entries: dict[str, dict] = {}
+    try:
+        rows = postgres_storage_rows(conn)
+    except Exception as exc:
+        rows = []
+        result["storage_stats_available"] = False
+        result["errors"].append(f"Postgres storage aggregate failed: {exc}")
+
+    for row in rows:
+        name = str(_diag_row_value(row, "name", 0) or "")
+        relkind = str(_diag_row_value(row, "kind", 1) or "")
+        kind = "index" if relkind == "i" else "table"
+        allocated = int(_diag_row_value(row, "allocated", 2, 0) or 0)
+        payload = int(_diag_row_value(row, "payload", 3, 0) or 0)
+        overhead = int(_diag_row_value(row, "overhead", 4, 0) or 0)
+        estimated_rows = _diag_row_value(row, "rows", 5)
+        entries[name] = {
+            "name": name,
+            "kind": kind,
+            "bucket": _diag_storage_bucket_for_table(name, kind),
+            "rows": table_counts.get(name, int(estimated_rows or 0) if kind != "index" else None),
+            "allocated": allocated,
+            "payload": payload,
+            "overhead": overhead,
+            "unused": None,
+            "pages": None,
+            "logical_payload": None,
+            "shadows": [],
+        }
+
+    for table_name, count in table_counts.items():
+        entries.setdefault(table_name, {
+            "name": table_name,
+            "kind": "table",
+            "bucket": _diag_storage_bucket_for_table(table_name),
+            "rows": count,
+            "allocated": None,
+            "payload": None,
+            "overhead": None,
+            "unused": None,
+            "pages": None,
+            "logical_payload": None,
+            "shadows": [],
+        })
+
+    for table_name, columns in _DIAG_PAYLOAD_COLUMNS.items():
+        if table_name not in entries:
+            continue
+        try:
+            live_columns = postgres_table_columns(conn, table_name)
+            selected_text = tuple(column for column in columns if column in live_columns)
+            selected_bytes = tuple(
+                column for column in _DIAG_PAYLOAD_BYTE_COLUMNS.get(table_name, ())
+                if column in live_columns
+            )
+            if not selected_text and not selected_bytes:
+                entries[table_name]["logical_payload"] = 0
+                continue
+            expr = _diag_sum_payload_expr(selected_text, selected_bytes, backend=DatabaseBackend.POSTGRES)
+            value = conn.execute(
+                "SELECT " + expr + " AS value FROM " + quote_identifier(table_name, DatabaseBackend.POSTGRES),  # nosec B608
+            ).fetchone()
+            entries[table_name]["logical_payload"] = int(_diag_row_value(value, "value", 0, 0) or 0)
+        except Exception as exc:
+            entries[table_name]["payload_error"] = str(exc)
+
+    for entry in entries.values():
+        for key in ("allocated", "payload", "overhead", "unused", "logical_payload"):
+            value = entry.get(key)
+            entry[f"{key}_human"] = _diag_fmt_bytes(value) if value is not None else "—"
+        rows = entry.get("rows")
+        logical_payload = entry.get("logical_payload")
+        entry["avg_row_payload"] = (
+            int(logical_payload / rows)
+            if rows and logical_payload is not None
+            else None
+        )
+        entry["avg_row_payload_human"] = (
+            _diag_fmt_bytes(entry["avg_row_payload"])
+            if entry["avg_row_payload"] is not None
+            else "—"
+        )
+
+    bucket_map: dict[str, dict] = {}
+    bucket_order = [name for name, _ in _DIAG_STORAGE_BUCKETS] + ["Indexes", "Other"]
+    for entry in entries.values():
+        bucket_name = str(entry.get("bucket") or "Other")
+        bucket = bucket_map.setdefault(bucket_name, {
+            "name": bucket_name,
+            "allocated": 0,
+            "payload": 0,
+            "logical_payload": 0,
+            "rows": [],
+        })
+        bucket["rows"].append(entry)
+        for key in ("allocated", "payload", "logical_payload"):
+            bucket[key] += int(entry.get(key) or 0)
+    for bucket_name in bucket_order:
+        bucket = bucket_map.get(bucket_name)
+        if not bucket:
+            continue
+        bucket["rows"].sort(key=lambda item: (
+            int(item.get("allocated") or 0),
+            int(item.get("logical_payload") or 0),
+            str(item.get("name") or ""),
+        ), reverse=True)
+        for key in ("allocated", "payload", "logical_payload"):
+            bucket[f"{key}_human"] = _diag_fmt_bytes(bucket[key])
+        result["buckets"].append(bucket)
+
+    result["total_allocated_bytes"] = sum(int(entry.get("allocated") or 0) for entry in entries.values())
+    result["total_payload_bytes"] = sum(int(entry.get("payload") or 0) for entry in entries.values())
+    result["total_logical_payload_bytes"] = sum(int(entry.get("logical_payload") or 0) for entry in entries.values())
+    result["wasted_bytes"] = max(0, result["total_allocated_bytes"] - result["total_payload_bytes"])
+    for key in ("total_allocated_bytes", "total_payload_bytes", "total_logical_payload_bytes", "wasted_bytes"):
+        result[f"{key}_human"] = _diag_fmt_bytes(result[key])
+
+    largest_entry = max(
+        entries.values(),
+        key=lambda item: (int(item.get("allocated") or 0), int(item.get("logical_payload") or 0)),
+        default=None,
+    )
+    if largest_entry:
+        result["largest_object"] = {
+            "name": largest_entry.get("name"),
+            "allocated": largest_entry.get("allocated"),
+            "allocated_human": largest_entry.get("allocated_human"),
+            "logical_payload": largest_entry.get("logical_payload"),
+            "logical_payload_human": largest_entry.get("logical_payload_human"),
+        }
+
+    try:
+        if "runs" in entries:
+            live_run_columns = postgres_table_columns(conn, "runs")
+            required_columns = {"id", "command"}
+            if not required_columns.issubset(live_run_columns):
+                raise ValueError("runs table is missing required identity columns")
+            payload_columns = tuple(
+                column
+                for column in ("output", "output_preview", "output_search_text")
+                if column in live_run_columns
+            )
+            rows = conn.execute(
+                _DIAG_LARGEST_RUNS_SQL_BY_COLUMNS[payload_columns],
+                (_DIAG_LARGEST_RUNS_LIMIT,),
+            ).fetchall()
+            result["largest_runs"] = [
+                {
+                    "id": str(_diag_row_value(row, "id", 0)),
+                    "command": str(_diag_row_value(row, "command", 1)),
+                    "payload": int(_diag_row_value(row, "payload_bytes", 2, 0) or 0),
+                    "payload_human": _diag_fmt_bytes(_diag_row_value(row, "payload_bytes", 2, 0)),
+                }
+                for row in rows
+            ]
+    except Exception as exc:
+        result["errors"].append(f"largest runs probe failed: {exc}")
+
+    return result
 
 
 def _diag_table_storage_breakdown(conn, table_counts: dict[str, int] | None = None) -> dict:
@@ -292,8 +510,14 @@ def _diag_table_storage_breakdown(conn, table_counts: dict[str, int] | None = No
     unless `dbstat` is available, keeping the route from becoming a surprise
     full-table sorter on very large databases.
     """
+    table_counts = dict(table_counts or {})
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        return _diag_postgres_table_storage_breakdown(conn, table_counts)
+
     result: dict = {
+        "backend": "sqlite",
         "dbstat_available": False,
+        "storage_stats_available": False,
         "buckets": [],
         "largest_runs": [],
         "total_allocated_bytes": 0,
@@ -302,7 +526,6 @@ def _diag_table_storage_breakdown(conn, table_counts: dict[str, int] | None = No
         "wasted_bytes": 0,
         "errors": [],
     }
-    table_counts = dict(table_counts or {})
     master: dict[str, dict] = {}
     virtual_names: set[str] = set()
 
@@ -349,6 +572,7 @@ def _diag_table_storage_breakdown(conn, table_counts: dict[str, int] | None = No
     if result["dbstat_available"]:
         try:
             rows = sqlite_dbstat_rows(conn)
+            result["storage_stats_available"] = True
             for row in rows:
                 name = str(row["name"] if hasattr(row, "keys") else row[0])
                 allocated = int((row["allocated"] if hasattr(row, "keys") else row[1]) or 0)
@@ -424,7 +648,7 @@ def _diag_table_storage_breakdown(conn, table_counts: dict[str, int] | None = No
                 continue
             expr = _diag_sum_payload_expr(selected_text, selected_bytes)
             value = conn.execute(
-                "SELECT " + expr + " FROM " + quote_sqlite_identifier(table_name),  # nosec
+        "SELECT " + expr + " FROM " + quote_sqlite_identifier(table_name),  # nosec
             ).fetchone()[0]
             entries[table_name]["logical_payload"] = int(value or 0)
         except Exception as exc:
@@ -750,13 +974,39 @@ def _diag_redis_stats(client):
 
 
 def _diag_db_stats() -> dict:
-    """Snapshot SQLite health beyond a count probe — file/WAL sizes, last
-    write, journal mode, freelist (reclaimable bytes), per-table row
-    counts, and FTS5 orphan probe. Each subsection is independently
-    guarded so a missing pragma or absent FTS table never blanks the
-    whole panel.
-    """
+    """Snapshot database health without letting optional probes blank the panel."""
     info: dict = {}
+    info["backend"] = DB_BACKEND.value
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        with db_connect() as conn:
+            t0 = time.perf_counter()
+            conn.execute("SELECT 1").fetchone()
+            info["ping_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+            info["ping_human"] = _fmt_diag_duration_ms(info["ping_ms"])
+            try:
+                tables: list[dict] = []
+                for name in postgres_table_names(conn):
+                    try:
+                        tables.append({"name": name, "rows": postgres_table_row_count(conn, name)})
+                    except Exception:
+                        continue
+                info["tables"] = tables
+                table_counts = {str(t["name"]): int(t["rows"]) for t in tables}
+                info["runs"] = table_counts.get("runs", 0)
+                info["snapshots"] = table_counts.get("snapshots", 0)
+                info["project_workspace"] = {
+                    label: table_counts.get(table_name, 0)
+                    for table_name, label in _DIAG_PROJECT_WORKSPACE_COUNT_TABLES.items()
+                }
+                info["storage"] = _diag_table_storage_breakdown(conn, table_counts)
+                info["dbstat_available"] = bool(info["storage"].get("dbstat_available"))
+                info["storage_stats_available"] = bool(info["storage"].get("storage_stats_available"))
+                info["size"] = int(info["storage"].get("total_allocated_bytes") or 0)
+                info["size_human"] = _diag_fmt_bytes(info["size"])
+            except Exception:
+                pass
+        return info
+
     db_path = Path(DB_PATH)
 
     # File-system stats — independent of the connection.
@@ -781,6 +1031,13 @@ def _diag_db_stats() -> dict:
 
     # Pragma + table queries — single connection.
     with db_connect() as conn:
+        try:
+            t0 = time.perf_counter()
+            conn.execute("SELECT 1").fetchone()
+            info["ping_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+            info["ping_human"] = _fmt_diag_duration_ms(info["ping_ms"])
+        except Exception:
+            pass
         try:
             info["journal_mode"] = sqlite_journal_mode(conn)
         except Exception:
@@ -836,6 +1093,7 @@ def _diag_db_stats() -> dict:
             info["project_workspace"] = project_counts
             info["storage"] = _diag_table_storage_breakdown(conn, table_counts)
             info["dbstat_available"] = bool(info["storage"].get("dbstat_available"))
+            info["storage_stats_available"] = bool(info["storage"].get("storage_stats_available"))
         except Exception:
             pass
 
@@ -1027,7 +1285,12 @@ def diag():
     try:
         t0 = time.perf_counter()
         db_info.update(_diag_db_stats())
-        db_info["query_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+        probe_ms = round((time.perf_counter() - t0) * 1000, 2)
+        db_info["probe_ms"] = probe_ms
+        db_info["probe_human"] = _fmt_diag_duration_ms(probe_ms)
+        # Backward-compatible alias for callers that still read the original
+        # field. The top card now labels this as the full diagnostics probe.
+        db_info["query_ms"] = probe_ms
         db_info["ok"] = True
     except Exception as exc:
         db_info["error"] = str(exc)
@@ -1143,14 +1406,23 @@ def diag():
                 stats["top_by_freq"] = [{"command": r[0], "count": r[1]} for r in rows]
 
                 # Top 5 longest individual runs
-                rows = conn.execute(
-                    """SELECT command,
-                              ROUND((julianday(finished) - julianday(started)) * 86400) AS elapsed_s
-                         FROM runs
-                        WHERE finished IS NOT NULL AND started IS NOT NULL
-                        ORDER BY elapsed_s DESC
-                        LIMIT 5"""
-                ).fetchall()
+                if DB_BACKEND == DatabaseBackend.POSTGRES:
+                    duration_sql = """SELECT command,
+                                             ROUND(EXTRACT(EPOCH FROM (
+                                                 finished::timestamptz - started::timestamptz
+                                             ))) AS elapsed_s
+                                        FROM runs
+                                       WHERE finished IS NOT NULL AND started IS NOT NULL
+                                       ORDER BY elapsed_s DESC
+                                       LIMIT 5"""
+                else:
+                    duration_sql = """SELECT command,
+                                             ROUND((julianday(finished) - julianday(started)) * 86400) AS elapsed_s
+                                        FROM runs
+                                       WHERE finished IS NOT NULL AND started IS NOT NULL
+                                       ORDER BY elapsed_s DESC
+                                       LIMIT 5"""
+                rows = conn.execute(duration_sql).fetchall()
                 stats["top_by_duration"] = [
                     {"command": r[0], "elapsed": _fmt_elapsed(r[1])}
                     for r in rows

@@ -48,6 +48,25 @@ test-py-pytest:
   script:
     - pytest tests/py/ -v
 
+test-py-postgres:
+  stage: test
+  services:
+    - name: postgres:17-alpine
+      alias: postgres
+  variables:
+    POSTGRES_DB: darklab_shell
+    POSTGRES_USER: darklab
+    POSTGRES_PASSWORD: darklab_dev_password
+    DARKLAB_TEST_POSTGRES_DSN: "postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell"
+  rules:
+    - if: $RUN_POSTGRES_TESTS == "1"
+    - when: never
+  before_script:
+    - apt-get update -q && apt-get install -y -q git
+    - pip install -q -r app/requirements.txt -r requirements-dev.txt
+  script:
+    - bash scripts/run_postgres_tests.sh
+
 test-js-unit:
   stage: test
   image: $CI_NODE_IMAGE

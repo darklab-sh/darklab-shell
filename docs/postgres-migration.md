@@ -22,6 +22,8 @@ The migration helper:
 
 The helper does not merge unrelated databases by default. The destination schema must already have the app migration table and current app tables, but if those tables already contain rows, the helper stops unless you pass `--resume` or `--allow-non-empty`.
 
+Legacy SQLite databases may contain duplicate finding occurrence rows from older capture paths. The Postgres schema enforces one occurrence per `(finding_id, run_id, line_number)`, so the helper keeps the earliest matching source row and reports the number of skipped duplicate `findings_occurrences` rows at the end of the run. The helper also disables the Postgres legacy finding-insert trigger during the bulk copy so copied `findings` rows do not pre-create duplicate occurrence rows before the source `findings_occurrences` table is copied.
+
 ## Before You Start
 
 Stop writes before copying. The safest path is:
@@ -46,9 +48,11 @@ When using the bundled Compose stack, Postgres does not publish `5432` to the ho
 Start the profile-gated Postgres service, stop the app service so SQLite is quiet, then run the helper from a one-off container on the same Compose network:
 
 ```bash
+docker compose build shell
 docker compose --profile postgres up -d postgres
 docker compose stop shell
-DATABASE_BACKEND=postgres docker compose --profile postgres run --rm --no-deps shell python -c \
+DATABASE_BACKEND=postgres DATABASE_URL=postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell \
+  docker compose --profile postgres run --rm --no-deps --entrypoint python shell -c \
   "from core.database import db_init; db_init()"
 
 docker compose --profile postgres run --rm --no-deps --entrypoint python shell - \
@@ -59,7 +63,7 @@ docker compose --profile postgres run --rm --no-deps --entrypoint python shell -
   --validate < scripts/migrate_sqlite_to_postgres.py
 ```
 
-The short `db_init()` command runs the app-owned Postgres migrations before data is copied. The migration command pipes the checked-in helper into the one-off `shell` container because the normal app container only mounts `./app` and `./data`, not `./scripts`. The one-off container still joins the Compose network, so `postgres:5432` resolves without exposing the database to the OS.
+The rebuild makes sure the `shell` image includes the current Python dependencies, including `psycopg[binary,pool]` for Postgres. The short `db_init()` command runs the app-owned Postgres migrations before data is copied. Both one-off commands override the normal container entrypoint so they run Python directly instead of starting Gunicorn. The migration command pipes the checked-in helper into the one-off `shell` container because the normal app container only mounts `./app` and `./data`, not `./scripts`. The one-off container still joins the Compose network, so `postgres:5432` resolves without exposing the database to the OS.
 
 Adjust the username, password, and database name if your `.env` overrides `POSTGRES_USER`, `POSTGRES_PASSWORD`, or `POSTGRES_DB`.
 
@@ -111,6 +115,23 @@ SQLite FTS5 data is not copied. Postgres search uses backend-specific indexes cr
 ## Rollback
 
 Rollback is the original SQLite snapshot plus the original artifact directory. Do not delete them until the Postgres deployment has been validated under real use.
+
+## Testing the Postgres Path
+
+The Postgres pytest lane is opt-in and uses isolated schemas so it can run against a shared test database:
+
+```bash
+DARKLAB_TEST_POSTGRES_DSN=postgresql://darklab:darklab_dev_password@localhost:5432/darklab_shell \
+  npm run test:postgres
+```
+
+If you use the bundled Compose Postgres service and do not publish port `5432`, run the same lane inside the Compose network:
+
+```bash
+bash scripts/run_postgres_tests.sh --compose
+```
+
+That command starts the profile-gated `postgres` service, mounts the checkout into a disposable `shell` container, installs dev test dependencies in that one-off container, and runs the Postgres smoke, route, backend-module, output-search, and migration-helper checks without exposing the database to the host OS.
 
 ---
 

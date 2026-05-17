@@ -14,8 +14,13 @@ from flask import Blueprint, jsonify, request
 
 import config as _config
 import services.runs.comparison as run_comparison
-from core.database import db_connect, delete_run_artifacts, delete_snapshot_metadata
-from core.database_backend import SQLiteOperationalError, sqlite_table_columns, sqlite_table_exists
+from core.database import DB_BACKEND, db_connect, delete_run_artifacts, delete_snapshot_metadata
+from core.database_backend import (
+    DatabaseBackend,
+    SQLiteOperationalError,
+    sqlite_table_columns,
+    sqlite_table_exists,
+)
 from core.helpers import (
     GRACEFUL_TERMINATION_EXIT_CODE,
     get_client_ip,
@@ -93,6 +98,15 @@ def _history_add_filters(sql, params, command_root, exit_code_filter, date_range
 
 
 def _history_run_root_sql(column):
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        trimmed = f"TRIM({column})"
+        space_pos = f"POSITION(' ' IN {trimmed})"
+        return (
+            "LOWER(CASE "
+            f"WHEN {space_pos} > 0 THEN SUBSTRING({trimmed} FROM 1 FOR ({space_pos} - 1)) "
+            f"ELSE {trimmed} "
+            "END)"
+        )
     return (
         "LOWER(CASE "
         f"WHEN instr(trim({column}), ' ') > 0 THEN substr(trim({column}), 1, instr(trim({column}), ' ') - 1) "
@@ -103,22 +117,35 @@ def _history_run_root_sql(column):
 
 def _history_command_roots(conn, session_id):
     rows = conn.execute(
-        """
-        SELECT
-          CASE
-            WHEN instr(trim(command), ' ') > 0 THEN substr(trim(command), 1, instr(trim(command), ' ') - 1)
-            ELSE trim(command)
-          END AS root,
-          MAX(started) AS latest_started
-        FROM runs
-        WHERE session_id = ? AND trim(command) != ''
-        GROUP BY root
-        ORDER BY latest_started DESC
-        LIMIT 50
-        """,
+        "SELECT command, "
+        "MAX(started) AS latest_started "
+        "FROM runs "
+        "WHERE session_id = ? AND trim(command) != '' "
+        "GROUP BY command "
+        "ORDER BY latest_started DESC "
+        "LIMIT 1000",
         (session_id,),
     ).fetchall()
-    return [str(row["root"]) for row in rows if row["root"]]
+    return [row["root"] for row in _history_root_rows_from_command_rows(rows)]
+
+
+def _history_root_rows_from_command_rows(rows):
+    latest_by_root: dict[str, str] = {}
+    for row in rows:
+        root = _history_run_root(str(row["command"] or ""))
+        if not root:
+            continue
+        latest_started = str(row["latest_started"] or "")
+        if root not in latest_by_root or latest_started > latest_by_root[root]:
+            latest_by_root[root] = latest_started
+    return [
+        {"root": root, "latest_started": latest_started}
+        for root, latest_started in sorted(
+            latest_by_root.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:50]
+    ]
 
 
 def _parse_history_bool(value):
@@ -138,10 +165,26 @@ def _parse_history_int(value, default, *, minimum=1, maximum=None):
 
 
 def _history_table_exists(conn, table_name):
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        row = conn.execute(
+            "SELECT 1 AS present "
+            "FROM information_schema.tables "
+            "WHERE table_schema = current_schema() AND table_name = ?",
+            (table_name,),
+        ).fetchone()
+        return row is not None
     return sqlite_table_exists(conn, table_name)
 
 
 def _history_column_exists(conn, table_name, column_name):
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        row = conn.execute(
+            "SELECT 1 AS present "
+            "FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?",
+            (table_name, column_name),
+        ).fetchone()
+        return row is not None
     try:
         columns = sqlite_table_columns(conn, table_name)
     except SQLiteOperationalError:
@@ -163,11 +206,12 @@ def _history_run_kind_sql(column):
 
 def _history_match_clause(query, scope, force_like=False):
     clause = run_search_clause(
-        "sqlite",
+        DB_BACKEND,
         query,
         scope,
         alias="r",
-        prefer_sqlite_fts=not force_like,
+        prefer_sqlite_fts=DB_BACKEND != DatabaseBackend.POSTGRES and not force_like,
+        postgres_placeholder="?",
     )
     return clause.sql, clause.params, clause.fts_query
 
@@ -219,8 +263,12 @@ def _history_snapshot_base_clause(session_id, query, date_range, project_id=""):
     if project_id:
         sql += " AND 1 = 0"
     if query:
-        sql += " AND LOWER(s.label) LIKE ?"
-        params.append(f"%{query.lower()}%")
+        if DB_BACKEND == DatabaseBackend.POSTGRES:
+            sql += " AND s.label ILIKE ?"
+            params.append(f"%{query}%")
+        else:
+            sql += " AND LOWER(s.label) LIKE ?"
+            params.append(f"%{query.lower()}%")
     cutoff = _history_cutoff_for_range(date_range)
     if cutoff:
         sql += " AND s.created >= ?"
@@ -229,8 +277,8 @@ def _history_snapshot_base_clause(session_id, query, date_range, project_id=""):
 
 
 def _session_history_stats(conn, session_id: str) -> dict[str, Any]:
-    run_row = conn.execute(
-        """
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        run_stats_sql = """
         SELECT COUNT(*) AS total,
                SUM(CASE WHEN exit_code = 0 THEN 1 ELSE 0 END) AS succeeded,
                SUM(
@@ -243,14 +291,42 @@ def _session_history_stats(conn, session_id: str) -> dict[str, Any]:
                SUM(CASE WHEN exit_code IS NULL THEN 1 ELSE 0 END) AS incomplete,
                AVG(
                    CASE
-                       WHEN started IS NOT NULL AND finished IS NOT NULL
+                       WHEN NULLIF(started, '') IS NOT NULL AND NULLIF(finished, '') IS NOT NULL
+                       THEN EXTRACT(
+                           EPOCH FROM (
+                               NULLIF(finished, '')::timestamptz - NULLIF(started, '')::timestamptz
+                           )
+                       )
+                       ELSE NULL
+                   END
+               ) AS average_elapsed_seconds
+          FROM runs
+         WHERE session_id = ?
+        """
+    else:
+        run_stats_sql = """
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN exit_code = 0 THEN 1 ELSE 0 END) AS succeeded,
+               SUM(
+                   CASE
+                       WHEN exit_code IS NOT NULL AND exit_code != 0 AND exit_code != ?
+                       THEN 1
+                       ELSE 0
+                   END
+               ) AS failed,
+               SUM(CASE WHEN exit_code IS NULL THEN 1 ELSE 0 END) AS incomplete,
+               AVG(
+                   CASE
+                       WHEN NULLIF(started, '') IS NOT NULL AND NULLIF(finished, '') IS NOT NULL
                        THEN (julianday(finished) - julianday(started)) * 86400.0
                        ELSE NULL
                    END
                ) AS average_elapsed_seconds
           FROM runs
          WHERE session_id = ?
-        """,
+        """
+    run_row = conn.execute(
+        run_stats_sql,
         (GRACEFUL_TERMINATION_EXIT_CODE, session_id),
     ).fetchone()
     snapshots = 0
@@ -611,7 +687,7 @@ def _project_links_by_run(conn, session_id, run_ids):
         "AND l.entity_type = 'run' "
         "AND r.session_id = ? AND r.run_kind = ? "
         f"AND l.entity_id IN ({placeholders}) "
-        "ORDER BY p.name COLLATE NOCASE ASC, l.created ASC",
+        "ORDER BY LOWER(p.name) ASC, l.created ASC",
         [session_id, session_id, RUN_KIND_EXTERNAL, *ids],
     ).fetchall()
     grouped = {run_id: [] for run_id in ids}
@@ -682,7 +758,7 @@ def _entity_labels_by_entity_ids(conn, entity_type, entity_ids):
         "SELECT id, session_id, entity_type, entity_id, label, source, created FROM entity_labels "  # nosec
         "WHERE entity_type = ? "
         f"AND entity_id IN ({placeholders}) "
-        "ORDER BY label COLLATE NOCASE ASC, created ASC",
+        "ORDER BY LOWER(label) ASC, created ASC",
         [entity_type, *ids],
     ).fetchall()
     grouped = {entity_id: [] for entity_id in ids}
@@ -865,19 +941,15 @@ def get_history():
                 has_run_kind_column=has_run_kind_column,
                 force_like=force_like,
             )
-            roots_rows = conn.execute(
-                "SELECT "
-                "CASE "
-                "WHEN instr(trim(r.command), ' ') > 0 THEN substr(trim(r.command), 1, instr(trim(r.command), ' ') - 1) "
-                "ELSE trim(r.command) "
-                "END AS root, "
-                "MAX(r.started) AS latest_started"
+            root_command_rows = conn.execute(
+                "SELECT r.command, MAX(r.started) AS latest_started"
                 + run_sql
-                + " GROUP BY root "
+                + " GROUP BY r.command "
                 + " ORDER BY latest_started DESC "
-                + " LIMIT 50",
+                + " LIMIT 1000",
                 run_params,
             ).fetchall()
+            roots_rows = _history_root_rows_from_command_rows(root_command_rows)
 
         snap_sql = ""
         snap_params: list[Any] = []

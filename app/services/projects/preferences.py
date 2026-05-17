@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
+from core.database import DB_BACKEND
+from core.database_backend import dialect_for_backend
 from services.projects.contracts import (
     ACTIVE_PROJECT_PREF_KEY,
     PROJECT_AUTO_LINK_EXTERNAL_RUNS_PREF_KEY,
@@ -22,10 +24,13 @@ def load_session_preferences(conn, session_id):
     ).fetchone()
     if not row:
         return {}
-    try:
-        preferences = json.loads(row["preferences"] or "{}")
-    except (TypeError, ValueError):
-        return {}
+    if isinstance(row["preferences"], dict):
+        preferences = row["preferences"]
+    else:
+        try:
+            preferences = json.loads(row["preferences"] or "{}")
+        except (TypeError, ValueError):
+            return {}
     return preferences if isinstance(preferences, dict) else {}
 
 
@@ -34,7 +39,7 @@ def save_session_preferences(conn, session_id, preferences):
     conn.execute(
         "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (?, ?, ?) "
         "ON CONFLICT(session_id) DO UPDATE SET preferences = excluded.preferences, updated = excluded.updated",
-        (session_id, json.dumps(preferences, sort_keys=True), updated),
+        (session_id, dialect_for_backend(DB_BACKEND).json_param(preferences), updated),
     )
 
 

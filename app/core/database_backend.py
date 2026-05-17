@@ -7,6 +7,7 @@ of baking SQLite details into every call site.
 
 from __future__ import annotations
 
+import atexit
 from dataclasses import dataclass
 from enum import Enum
 import json
@@ -277,6 +278,9 @@ def connect_postgres(cfg: dict[str, Any]) -> Any:
     return get_postgres_pool(cfg).connection()
 
 
+atexit.register(close_postgres_pool)
+
+
 def _is_read_only_sql(sql: str) -> bool:
     normalized = str(sql or "").lstrip().lower()
     return normalized.startswith(("select ", "with ", "show "))
@@ -488,18 +492,25 @@ def postgres_advisory_lock_id(namespace: str = "darklab_shell") -> int:
 def postgres_table_names(conn: Any) -> list[str]:
     rows = conn.execute(
         "SELECT tablename FROM pg_catalog.pg_tables "
-        "WHERE schemaname = 'public' ORDER BY tablename"
+        "WHERE schemaname = current_schema() ORDER BY tablename"
     ).fetchall()
     return [str(row["tablename"]) for row in rows]
 
 
 def postgres_table_row_count(conn: Any, table_name: str) -> int:
     row = conn.execute(
-        "SELECT reltuples::bigint AS estimated_rows "
-        "FROM pg_class WHERE oid = %s::regclass",
-        (table_name,),
+        "SELECT COUNT(*) AS count FROM " + quote_postgres_identifier(table_name),  # nosec B608
     ).fetchone()
-    return int(row["estimated_rows"] if row else 0)
+    return int(row["count"] if row else 0)
+
+
+def postgres_table_columns(conn: Any, table_name: str) -> set[str]:
+    rows = conn.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = %s",
+        (table_name,),
+    ).fetchall()
+    return {str(row["column_name"]) for row in rows}
 
 
 def postgres_storage_rows(conn: Any) -> list[dict[str, Any]]:
@@ -512,7 +523,7 @@ def postgres_storage_rows(conn: Any) -> list[dict[str, Any]]:
             "GREATEST(pg_total_relation_size(c.oid) - pg_relation_size(c.oid), 0) AS overhead, "
             "c.reltuples::bigint AS rows "
             "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
-            "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'i') "
+            "WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p', 'i') "
             "ORDER BY pg_total_relation_size(c.oid) DESC"
         ).fetchall()
     ]

@@ -3550,13 +3550,25 @@ class TestDiagRoute:
         assert info["runs"] == 1
         assert info["fts_orphans"] == 0
 
-    def test_db_section_reports_query_latency(self):
+    def test_db_section_reports_ping_and_probe_timings(self):
         client = self._allowed_client()
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
-            data = json.loads(client.get("/diag?format=json").data)
+            resp = client.get("/diag?format=json")
+            data = json.loads(resp.data)
         assert data["db"]["ok"] is True
+        assert isinstance(data["db"]["ping_ms"], (int, float))
+        assert data["db"]["ping_ms"] >= 0
+        assert isinstance(data["db"]["probe_ms"], (int, float))
+        assert data["db"]["probe_ms"] >= data["db"]["ping_ms"]
         assert isinstance(data["db"]["query_ms"], (int, float))
-        assert data["db"]["query_ms"] >= 0
+        assert data["db"]["query_ms"] == data["db"]["probe_ms"]
+        assert data["db"]["ping_human"]
+        assert data["db"]["probe_human"]
+
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            body = client.get("/diag").get_data(as_text=True)
+        assert "ping " in body
+        assert "diag probe " in body
 
     def test_assets_section_reports_loaded_when_files_present(self):
         client = self._allowed_client()

@@ -24,9 +24,17 @@ import tempfile
 from typing import Any, BinaryIO
 
 from config import CFG
-from services import metrics as app_metrics
 
 log = logging.getLogger(__name__)
+
+
+class _MetricsProxy:
+    def __getattr__(self, name: str) -> Any:
+        from services import metrics  # noqa: PLC0415
+        return getattr(metrics, name)
+
+
+app_metrics = _MetricsProxy()
 
 # Session directories are sticky + setgid so files created by scanner tools
 # inherit the shared appuser group without becoming world-readable.

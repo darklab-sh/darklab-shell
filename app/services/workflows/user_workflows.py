@@ -8,7 +8,8 @@ import json
 import secrets
 from datetime import datetime, timezone
 
-from core.database import db_connect
+from core.database import DB_BACKEND, db_connect
+from core.database_backend import DatabaseBackend, dialect_for_backend
 from services.workflows.catalog import normalize_workflow_entry
 
 
@@ -29,11 +30,17 @@ def _now() -> str:
 
 
 def _decode_json_list(value):
+    if isinstance(value, list):
+        return value
     try:
         parsed = json.loads(value or "[]")
-    except json.JSONDecodeError:
+    except (TypeError, json.JSONDecodeError):
         return []
     return parsed if isinstance(parsed, list) else []
+
+
+def _json_param(value):
+    return dialect_for_backend(DB_BACKEND).json_param(value)
 
 
 def _row_to_workflow(row):
@@ -141,16 +148,24 @@ def create_user_workflow(session_id, data):
         for _ in range(10):
             workflow_id = _new_workflow_id()
             result = conn.execute(
-                "INSERT OR IGNORE INTO user_workflows "
-                "(id, session_id, title, description, inputs, steps, created, updated) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "INSERT INTO user_workflows "
+                    "(id, session_id, title, description, inputs, steps, created, updated) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(id) DO NOTHING"
+                    if DB_BACKEND == DatabaseBackend.POSTGRES
+                    else
+                    "INSERT OR IGNORE INTO user_workflows "
+                    "(id, session_id, title, description, inputs, steps, created, updated) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+                ),
                 (
                     workflow_id,
                     session_id,
                     workflow["title"],
                     workflow["description"],
-                    json.dumps(workflow["inputs"], sort_keys=True),
-                    json.dumps(workflow["steps"], sort_keys=True),
+                    _json_param(workflow["inputs"]),
+                    _json_param(workflow["steps"]),
                     created,
                     created,
                 ),
@@ -172,8 +187,8 @@ def update_user_workflow(session_id, workflow_id, data):
             (
                 workflow["title"],
                 workflow["description"],
-                json.dumps(workflow["inputs"], sort_keys=True),
-                json.dumps(workflow["steps"], sort_keys=True),
+                _json_param(workflow["inputs"]),
+                _json_param(workflow["steps"]),
                 updated,
                 session_id,
                 workflow_id,

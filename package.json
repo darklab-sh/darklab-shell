@@ -5,6 +5,7 @@
   "scripts": {
     "test": "npm run test:pytest && npm run test:unit && npm run test:e2e",
     "test:pytest": "bash scripts/run_pytest.sh -c .tooling/pytest.ini --rootdir=. tests/py",
+    "test:postgres": "bash scripts/run_postgres_tests.sh",
     "test:unit": "vitest run --config .tooling/vitest.config.js",
     "test:unit:watch": "vitest --config .tooling/vitest.config.js",
     "test:e2e": "bash scripts/run_playwright.sh",

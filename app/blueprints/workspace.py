@@ -8,7 +8,8 @@ from typing import Any
 
 from flask import Blueprint, Response, jsonify, request, send_file
 
-from core.database import db_connect
+from core.database import DB_BACKEND, db_connect
+from core.database_backend import DatabaseBackend
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from services.workspace.files import (
     InvalidWorkspacePath,
@@ -34,6 +35,18 @@ from services.workspace.files import (
 log = logging.getLogger("shell")
 
 workspace_bp = Blueprint("workspace", __name__)
+
+
+def _workspace_project_names_expr() -> str:
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        return "STRING_AGG(DISTINCT p.name, ',')"
+    return "GROUP_CONCAT(DISTINCT p.name)"
+
+
+def _workspace_label_order_sql() -> str:
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        return "LOWER(label) ASC, created ASC"
+    return "label COLLATE NOCASE ASC, created ASC"
 
 
 def _session_or_error() -> tuple[str | None, tuple[Response, int] | None]:
@@ -72,11 +85,13 @@ def _workspace_file_metadata_by_path(session_id: str, paths: list[Any]) -> dict[
     if not clean_paths:
         return {}
     placeholders = ",".join("?" for _ in clean_paths)
+    project_names_expr = _workspace_project_names_expr()
+    label_order_sql = _workspace_label_order_sql()
     with db_connect() as conn:
         rows = conn.execute(
             "SELECT rfa.workspace_path, COUNT(DISTINCT rfa.id) AS artifact_count, "  # nosec
             "COUNT(DISTINCT rfa.run_id) AS run_count, MAX(r.started) AS last_seen, "
-            "GROUP_CONCAT(DISTINCT p.name) AS project_names "
+            f"{project_names_expr} AS project_names "
             "FROM run_file_artifacts rfa "
             "LEFT JOIN runs r ON r.id = rfa.run_id AND r.session_id = rfa.session_id "
             "LEFT JOIN project_links pl ON pl.entity_type = 'run' AND pl.entity_id = rfa.run_id "
@@ -90,7 +105,7 @@ def _workspace_file_metadata_by_path(session_id: str, paths: list[Any]) -> dict[
             "SELECT id, session_id, entity_type, entity_id, label, source, created "  # nosec
             "FROM entity_labels WHERE session_id = ? AND entity_type = 'workspace_file' "
             f"AND entity_id IN ({placeholders}) "
-            "ORDER BY label COLLATE NOCASE ASC, created ASC",
+            f"ORDER BY {label_order_sql}",
             [session_id, *clean_paths],
         ).fetchall()
         note_rows = conn.execute(

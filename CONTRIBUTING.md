@@ -176,12 +176,14 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **1467 pytest + 1161 Vitest + 252 Playwright = 2,880 tests**.
-That total includes 2,848 behavior tests plus 32 docs/inventory meta-tests.
+Current totals: **1485 pytest + 1161 Vitest + 252 Playwright = 2,898 tests**.
+That total includes 2,866 behavior tests plus 32 docs/inventory meta-tests.
 
-Postgres backend checks are opt-in. Set `DARKLAB_TEST_POSTGRES_DSN` or pass
-`--postgres-dsn` to pytest when you want the Postgres smoke and migration
-integration tests to run against an isolated test schema.
+Postgres backend checks are opt-in. Use `npm run test:postgres` with
+`DARKLAB_TEST_POSTGRES_DSN` set when you want the Postgres smoke, route, and
+migration integration tests to run against isolated test schemas. Use
+`bash scripts/run_postgres_tests.sh --compose` to run the same lane against the
+profile-gated Compose Postgres service without publishing the database port.
 
 Playwright notes:
 

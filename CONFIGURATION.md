@@ -613,7 +613,19 @@ Postgres connection notes:
 
 For an existing SQLite install, run the offline migration before switching the app over. See [docs/postgres-migration.md](docs/postgres-migration.md).
 
-For backend development, Postgres tests are opt-in. Set `DARKLAB_TEST_POSTGRES_DSN` or pass `--postgres-dsn` to pytest to run the Postgres smoke and migration integration tests against isolated schemas.
+For backend development, Postgres tests are opt-in:
+
+```bash
+npm run test:postgres
+```
+
+Host-mode tests use `DARKLAB_TEST_POSTGRES_DSN`, or a pytest `--postgres-dsn` when you call pytest directly. To test against the bundled profile-gated Postgres service without publishing port `5432` to the host, run:
+
+```bash
+bash scripts/run_postgres_tests.sh --compose
+```
+
+The Postgres test lane creates isolated schemas and keeps normal local development SQLite-only unless a test DSN is explicitly set.
 
 ---
 
