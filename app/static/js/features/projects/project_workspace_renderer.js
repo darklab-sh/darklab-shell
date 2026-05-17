@@ -1,0 +1,122 @@
+// Project workspace renderer.
+// Loaded before shell_chrome.js; shell chrome supplies project state and tab renderers.
+
+(function projectWorkspaceRendererModule(global) {
+  'use strict';
+
+  function createProjectWorkspaceRendererController(context) {
+    const ctx = context || {};
+
+    function renderExplorer() {
+      const body = ctx.projectExplorerBody;
+      if (!body) return;
+      const currentTab = ctx.workspaceTab();
+      body.classList.toggle('project-explorer-body-details', currentTab === 'details');
+      body.replaceChildren();
+      ctx.ensureSelectedProject();
+      const project = ctx.selectedProject();
+      const summary = ctx.projectSummary();
+      if (ctx.projectWorkspaceLoading()) {
+        body.appendChild(ctx.emptyProjectPanel('Loading project explorer...'));
+        return;
+      }
+      if (!project) {
+        body.appendChild(ctx.emptyProjectPanel('Create or select a project to explore related work.'));
+        ctx.syncProjectForms(null);
+        return;
+      }
+      ctx.syncProjectForms(project);
+      if (ctx.workspaceTab() === 'artifacts' && !ctx.projectArtifactsVisible()) {
+        ctx.setWorkspaceTab('details');
+      }
+      const projectId = String(project.id || '');
+      const [header, tabs] = ctx.renderProjectHeader(project, summary);
+      const activeTab = ctx.workspaceTab();
+      const filterBar = ['runs', 'findings', 'artifacts'].includes(activeTab)
+        ? ctx.renderProjectFilterBar(projectId, summary)
+        : null;
+      body.append(header);
+      body.appendChild(tabs);
+      if (filterBar) body.appendChild(filterBar);
+      const content = document.createElement('div');
+      content.className = 'project-explorer-tab-panel';
+      if (activeTab === 'details') {
+        content.classList.add('project-explorer-tab-panel-details');
+        ctx.renderProjectDetails(content, project, summary);
+      } else if (activeTab === 'runs') ctx.renderProjectRuns(content, projectId, summary);
+      else if (activeTab === 'entities') ctx.renderProjectEntities(content, projectId, summary);
+      else if (activeTab === 'findings') ctx.renderProjectFindings(content, projectId, summary);
+      else if (activeTab === 'artifacts') ctx.renderProjectArtifacts(content, projectId, summary);
+      else if (activeTab === 'packages') ctx.renderProjectPackages(content, projectId, summary);
+      body.appendChild(content);
+      ctx.enhanceAppSelects?.(content);
+      if (filterBar) ctx.enhanceAppSelects?.(filterBar);
+      if (filterBar) {
+        ctx.syncProjectFilterSortDivider(filterBar);
+        ctx.scheduleProjectFilterSortDividerSync(filterBar);
+      }
+      if (
+        ctx.workspaceTab() === 'findings'
+        || ['runs', 'artifacts'].includes(ctx.workspaceTab())
+        || ctx.projectPackageWizardActive(projectId)
+        || ctx.projectTargetFilterActive(projectId, summary)
+        || !ctx.projectFindingsLoaded(projectId)
+      ) {
+        ctx.loadProjectFindings(projectId).catch(() => {});
+      }
+      if (
+        ctx.workspaceTab() === 'findings'
+        && ctx.projectFindingsLoaded(projectId)
+        && ctx.projectFindingServerFiltersActive(projectId, summary)
+      ) {
+        ctx.loadProjectFilteredFindings(projectId, summary).catch(() => {});
+      }
+    }
+
+    function renderWorkspace() {
+      if (ctx.projectWorkspaceSubtitle) {
+        const count = ctx.projectRows().length;
+        ctx.projectWorkspaceSubtitle.textContent = count
+          ? `${count} project workspace${count === 1 ? '' : 's'} in this session.`
+          : 'Select a project to review its targets, runs, findings, artifacts, and packages.';
+      }
+      ctx.renderProjectList();
+      ctx.renderProjectMobile();
+      renderExplorer();
+      ctx.renderProjectPackageWizardModal();
+    }
+
+    function cycleTab(offset = 1) {
+      if (!ctx.isProjectWorkspaceOpen()) return false;
+      const project = ctx.selectedProject();
+      if (!project) return false;
+      const projectId = String(project.id || '');
+      const summary = ctx.projectSummary(projectId);
+      const items = ctx.projectMobileTabItems(projectId, summary);
+      if (items.length < 2) return false;
+      const currentIndex = Math.max(0, items.findIndex(item => item.id === ctx.workspaceTab()));
+      const nextIndex = (currentIndex + Number(offset || 1) + items.length) % items.length;
+      const nextTab = items[nextIndex].id || 'details';
+      if (!nextTab || nextTab === ctx.workspaceTab()) return false;
+      ctx.flushProjectNotesAutosave().catch(() => {});
+      ctx.setWorkspaceTab(nextTab);
+      if (ctx.workspaceTab() !== 'details') ctx.closeProjectTargetEditor();
+      ctx.closeProjectEntityEditor();
+      ctx.setProjectWorkspaceMessage('');
+      if (ctx.mobileView() === 'detail' && ctx.projectMobileDetailBody) ctx.projectMobileDetailBody.scrollTop = 0;
+      renderWorkspace();
+      ctx.focusProjectWorkspaceTab(nextTab);
+      return true;
+    }
+
+    return {
+      cycleTab,
+      renderExplorer,
+      renderWorkspace,
+    };
+  }
+
+  global.DarklabProjectWorkspaceRenderer = {
+    createProjectWorkspaceRendererController,
+  };
+})(globalThis);

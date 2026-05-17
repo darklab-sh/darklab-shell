@@ -10,6 +10,106 @@ const PROJECT_TARGET_VALIDATION_SRC = readFileSync(
   resolve(REPO_ROOT, 'app/static/js/features/projects/project_target_validation.js'),
   'utf8',
 )
+const PROJECT_ACTIVE_CONTEXT_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_active_context.js'),
+  'utf8',
+)
+const PROJECT_WORKSPACE_CONSTANTS_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_constants.js'),
+  'utf8',
+)
+const PROJECT_SHARED_UI_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_shared_ui.js'),
+  'utf8',
+)
+const PROJECT_DETAILS_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_details.js'),
+  'utf8',
+)
+const PROJECT_LIST_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_list.js'),
+  'utf8',
+)
+const PROJECT_NAVIGATION_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_navigation.js'),
+  'utf8',
+)
+const PROJECT_ENTITY_EDITOR_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_entity_editor.js'),
+  'utf8',
+)
+const PROJECT_WORKSPACE_ACTIONS_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_actions.js'),
+  'utf8',
+)
+const PROJECT_WORKSPACE_SHELL_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_shell.js'),
+  'utf8',
+)
+const PROJECT_WORKSPACE_LIFECYCLE_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_lifecycle.js'),
+  'utf8',
+)
+const PROJECT_WORKSPACE_RENDERER_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_renderer.js'),
+  'utf8',
+)
+const PROJECT_WORKSPACE_BOOTSTRAP_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_bootstrap.js'),
+  'utf8',
+)
+const PROJECT_NESTED_SHEETS_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_nested_sheets.js'),
+  'utf8',
+)
+const PROJECT_WORKSPACE_EVENTS_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_events.js'),
+  'utf8',
+)
+const PROJECT_TARGETS_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_targets.js'),
+  'utf8',
+)
+const PROJECT_RUNS_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_runs.js'),
+  'utf8',
+)
+const PROJECT_MOBILE_COMPARE_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_mobile_compare.js'),
+  'utf8',
+)
+const PROJECT_MOBILE_SHELL_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_mobile_shell.js'),
+  'utf8',
+)
+const PROJECT_MOBILE_DETAIL_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_mobile_detail.js'),
+  'utf8',
+)
+const PROJECT_FINDINGS_DATA_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_findings_data.js'),
+  'utf8',
+)
+const PROJECT_FILTERS_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_filters.js'),
+  'utf8',
+)
+const PROJECT_ENTITIES_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_entities.js'),
+  'utf8',
+)
+const PROJECT_FINDINGS_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_findings.js'),
+  'utf8',
+)
+const PROJECT_ARTIFACTS_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_artifacts.js'),
+  'utf8',
+)
+const PROJECT_PACKAGES_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_packages.js'),
+  'utf8',
+)
 const SHELL_CHROME_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/shell_chrome.js'), 'utf8')
 
 function tick() {
@@ -284,6 +384,31 @@ function loadShellChrome({
       global.openActionSheet = window.openActionSheet;
       global.closeActionSheet = window.closeActionSheet;
       ${PROJECT_TARGET_VALIDATION_SRC}
+      ${PROJECT_WORKSPACE_CONSTANTS_SRC}
+      ${PROJECT_ACTIVE_CONTEXT_SRC}
+      ${PROJECT_SHARED_UI_SRC}
+      ${PROJECT_DETAILS_SRC}
+      ${PROJECT_LIST_SRC}
+      ${PROJECT_NAVIGATION_SRC}
+      ${PROJECT_ENTITY_EDITOR_SRC}
+      ${PROJECT_WORKSPACE_ACTIONS_SRC}
+      ${PROJECT_WORKSPACE_SHELL_SRC}
+      ${PROJECT_WORKSPACE_LIFECYCLE_SRC}
+      ${PROJECT_WORKSPACE_RENDERER_SRC}
+      ${PROJECT_WORKSPACE_BOOTSTRAP_SRC}
+      ${PROJECT_NESTED_SHEETS_SRC}
+      ${PROJECT_WORKSPACE_EVENTS_SRC}
+      ${PROJECT_TARGETS_SRC}
+      ${PROJECT_RUNS_SRC}
+      ${PROJECT_MOBILE_COMPARE_SRC}
+      ${PROJECT_MOBILE_SHELL_SRC}
+      ${PROJECT_MOBILE_DETAIL_SRC}
+      ${PROJECT_FINDINGS_DATA_SRC}
+      ${PROJECT_FILTERS_SRC}
+      ${PROJECT_ENTITIES_SRC}
+      ${PROJECT_FINDINGS_SRC}
+      ${PROJECT_ARTIFACTS_SRC}
+      ${PROJECT_PACKAGES_SRC}
       ${SHELL_CHROME_SRC}
     `,
   )(

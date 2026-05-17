@@ -60,10 +60,9 @@ No known issues are currently tracked.
 
 ## Technical Debt
 
-- Extract Project Entities out of `shell_chrome.js`.
-  - The Project Entities tab added the picker, entity-type tabs, counts, intel summary, label/note editor wiring, and entity overlay handlers directly to `app/static/js/shell_chrome.js`.
-  - Move that surface into `app/static/js/features/projects/project_entities.js` so the hybrid feature-folder layout stays intact and `shell_chrome.js` doesn't keep absorbing large feature modules.
-  - Share a small Atlas entity-row renderer from `app/static/js/features/atlas/` so the Projects picker and Atlas list don't keep separate lookup/filter/rendering behavior.
+- Share a small Atlas entity-row renderer between Projects and Atlas.
+  - Projects now owns its entity surface in `app/static/js/features/projects/project_entities.js`, but the Projects picker and Atlas list still keep separate lookup/filter/rendering behavior.
+  - Move the shared row bits into `app/static/js/features/atlas/` so both surfaces render Atlas entity search results through one helper.
 ---
 
 ## Feature Enhancements
@@ -102,7 +101,7 @@ No known issues are currently tracked.
   - Add parallel PATCH routes for partial project and target updates if the project workspace API ever becomes more than a trusted browser-only surface.
 - **Code organization**
   - Split `project_workspace.py` into focused modules once the surface settles. Natural boundaries are core project CRUD, entity metadata, findings, packages, and session migration.
-  - Move Projects modal rendering and event wiring out of `shell_chrome.js` into a dedicated project workspace browser module.
+  - Continue moving Projects modal rendering and event wiring out of `shell_chrome.js` into focused project workspace browser modules.
   - Reduce repeated `projects.py` route boilerplate with small serialization/404 helpers.
 - **Capture, tagging, and navigation**
   - Expose `Add label`, `Add note`, `Open in project`, and `Add as project target` on transcript right-click or signal-tagged token long-press; this should replace the removed Projects-modal quick-add target flow.

@@ -135,6 +135,56 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Project active context moved into a feature module** — Active Project HUD context, refresh, and target discovery helpers now live in `app/static/js/features/projects/project_active_context.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project Entities moved into a feature module** — the Project Entities tab, entity-type tabs, mobile entity list, picker overlay, export wiring, and Atlas handoff helpers now live in `app/static/js/features/projects/project_entities.js` instead of continuing to grow `shell_chrome.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project metadata editor moved into a feature module** — the Project metadata editor lifecycle and save flow now live in `app/static/js/features/projects/project_entity_editor.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project workspace lifecycle moved into a feature module** — Project workspace loading, summary fetches, and selected-project lifecycle now live in `app/static/js/features/projects/project_workspace_lifecycle.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project workspace events moved into a feature module** — Project workspace modal event routing, filter changes, review updates, and action handling now live in `app/static/js/features/projects/project_workspace_events.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project workspace shell moved into a feature module** — Project workspace open/close behavior, modal messages, request wrapper, project creation, and cross-tab refresh broadcasts now live in `app/static/js/features/projects/project_workspace_shell.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project workspace actions moved into a feature module** — Project confirmations, link-last-run, and shared metadata sync helpers now live in `app/static/js/features/projects/project_workspace_actions.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project Details moved into a feature module** — Project Details labels, notes autosave, save indicators, and the target section renderer now live in `app/static/js/features/projects/project_details.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project list moved into a feature module** — the Project workspace list/sidebar ordering, current/archive sections, and desktop/mobile project rows now live in `app/static/js/features/projects/project_list.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project navigation moved into a feature module** — Project desktop/mobile headers, tabs, and section counts now live in `app/static/js/features/projects/project_navigation.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project targets moved into a feature module** — the Project target editor save flow, target rows, target metadata chips, and target editor validation glue now live in `app/static/js/features/projects/project_targets.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project runs moved into a feature module** — Project run rows, count chips, and desktop run comparison controls now live in `app/static/js/features/projects/project_runs.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project mobile run comparison moved into a feature module** — the mobile compare sheet, stepper, and selection flow now live in `app/static/js/features/projects/project_mobile_compare.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project mobile shell moved into a feature module** — mobile Projects view state, create-form toggling, project actions, and list composition now live in `app/static/js/features/projects/project_mobile_shell.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project mobile detail moved into a feature module** — the mobile Project detail tab bodies, content rows, and action sheets now live in `app/static/js/features/projects/project_mobile_detail.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project nested sheets moved into a feature module** — nested sheet focus, parent workspace background suppression, and mobile keyboard helpers now live in `app/static/js/features/projects/project_nested_sheets.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project shared UI helpers moved into a feature module** — shared Project formatting, metadata chips, row builders, grouping helpers, attachment downloads, and button helpers now live in `app/static/js/features/projects/project_shared_ui.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project workspace rendering moved into a feature module** — Project workspace explorer rendering, mobile/list composition, lazy Findings loading, and tab cycling now live in `app/static/js/features/projects/project_workspace_renderer.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project workspace bootstrap moved into a feature module** — Project workspace form bindings, modal close controls, package-wizard events, dismissible overlays, and mobile-sheet bindings now live in `app/static/js/features/projects/project_workspace_bootstrap.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project workspace constants moved into a feature module** — Project workspace timing values, finding filter options, sort ranks, and the cross-tab broadcast key now live in `app/static/js/features/projects/project_workspace_constants.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project Findings data moved into a feature module** — Project Findings cache, filtered result cache, server loading, and invalidation helpers now live in `app/static/js/features/projects/project_findings_data.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project filters moved into a feature module** — the Project workspace filter state, dropdowns, removable chips, filtered Runs/Findings/Artifacts helpers, menu state, and finding sort divider layout helper now live in `app/static/js/features/projects/project_filters.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project Findings moved into a feature module** — Project Findings rows, group toggles, the bulk review toolbar, and review state controls now live in `app/static/js/features/projects/project_findings.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Project Artifacts moved into a feature module** — Project Artifact rows, status badges, file preview, and download helpers now live in `app/static/js/features/projects/project_artifacts.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
+- **Evidence packages moved into a feature module** — package rows, mobile package actions, manifest previews, the evidence package wizard, package creation, and package downloads now live in `app/static/js/features/projects/project_packages.js`.
+  - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
 - **Mobile Atlas now continues the native list/detail flow** — the mobile Atlas list has a Filters disclosure with orphan and finding-status controls, an orphan-only clear chip, a shared action-sheet overflow menu, visible-page select mode with a sticky bulk bar, long-press row actions, detail overflow actions, and detail deep-linking for transcript/project entity launches. The legacy collapsed-desktop fallback has been removed, dedicated Vitest and Playwright coverage now protect the mobile flow, shared action-sheet rows stay content-sized instead of stretching into oversized cards, and Projects now delegates its mobile action sheet to the same shared `openActionSheet()` primitive.
 - **Mobile capture and demo scripts now exercise the real Atlas mobile flow** — the mobile UI capture pack and mobile demo recording script now open Atlas filters, verify the shared overflow action sheet, drill from Hosts/IPs into the mobile entity detail view, expand a provider intel card, and close through the mobile sheet path instead of checking old desktop-only controls.
 - **Select dropdowns now share the app-native primitive path** — dynamically rendered confirmation content now enhances `.form-select` controls after mounting, so the encrypted-secret picker uses the same app-native dropdown formatting as the rest of the UI. App-native select menus are height-capped and scrollable so long provider lists stay on-screen, and selects inside dialogs, modals, and sheets now portal above clipped containers so Options controls near the bottom stay reachable on desktop and mobile. Confirmation modals focus the themed select trigger instead of opening the mobile browser picker on mount. History filters now carry the same primitive classes, and Vitest fails if app source adds native select markup or JS-created selects without `.form-select`.

@@ -660,7 +660,32 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── secrets_panel.js # Options modal encrypted secret list, replace, delete, and terminal value prompt helpers
 │   │       │   │   └── session_token_controls.js # Options modal session token generation, migration, and clearing controls
 │   │       │   ├── projects/
-│   │       │   │   └── project_target_validation.js # Project target editor copy and value validation helpers
+│   │       │   │   ├── project_active_context.js # Active Project HUD context, refresh, and target discovery helpers
+│   │       │   │   ├── project_artifacts.js # Project Artifacts rows, status badges, preview, and download helpers
+│   │       │   │   ├── project_details.js # Project Details labels, notes autosave, and target section rendering
+│   │       │   │   ├── project_entities.js # Project Entities tab rendering, picker, export, and Atlas handoff helpers
+│   │       │   │   ├── project_entity_editor.js # Project metadata editor lifecycle and save flow
+│   │       │   │   ├── project_filters.js # Project workspace filter state, dropdowns, chips, and filtered view helpers
+│   │       │   │   ├── project_findings.js # Project Findings rows, bulk review toolbar, and review controls
+│   │       │   │   ├── project_findings_data.js # Project Findings cache, filtered results, and loading helpers
+│   │       │   │   ├── project_list.js # Project list/sidebar ordering, sections, and desktop/mobile row rendering
+│   │       │   │   ├── project_mobile_compare.js # Project mobile run comparison sheet
+│   │       │   │   ├── project_mobile_detail.js # Project mobile detail tab bodies, rows, and action sheets
+│   │       │   │   ├── project_mobile_shell.js # Project mobile view state, create form, and project list composition
+│   │       │   │   ├── project_navigation.js # Project desktop/mobile header, tabs, and section counts
+│   │       │   │   ├── project_nested_sheets.js # Project nested sheet focus, background suppression, and mobile keyboard helpers
+│   │       │   │   ├── project_packages.js # Evidence package rows, manifest preview, wizard, and download helpers
+│   │       │   │   ├── project_runs.js # Project run rows, count chips, and desktop run comparison controls
+│   │       │   │   ├── project_shared_ui.js # Shared Project formatting, metadata chips, rows, and button helpers
+│   │       │   │   ├── project_target_validation.js # Project target editor copy and value validation helpers
+│   │       │   │   ├── project_targets.js # Project target editor save flow, target rows, and target metadata controls
+│   │       │   │   ├── project_workspace_actions.js # Project confirmations, link-last-run, and metadata sync helpers
+│   │       │   │   ├── project_workspace_bootstrap.js # Project workspace form, modal, dismissible, and mobile-sheet bindings
+│   │       │   │   ├── project_workspace_constants.js # Project workspace timing, filter, rank, and broadcast constants
+│   │       │   │   ├── project_workspace_events.js # Project workspace modal event routing and action handling
+│   │       │   │   ├── project_workspace_lifecycle.js # Project workspace loading, summaries, and selected-project lifecycle
+│   │       │   │   ├── project_workspace_renderer.js # Project workspace explorer, mobile/list composition, and tab cycling
+│   │       │   │   └── project_workspace_shell.js # Project workspace modal shell, messages, request, and refresh broadcast helpers
 │   │       │   ├── run-comparison/
 │   │       │   │   ├── history_compare_controls.js # Run Comparison view/context controls and actions menu
 │   │       │   │   ├── history_compare_core.js # Pure Run Comparison formatting, preference, and anchor-map helpers
