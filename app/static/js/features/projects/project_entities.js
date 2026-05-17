@@ -3,6 +3,7 @@
 
 (function initProjectEntities(global) {
   if (typeof document === 'undefined') return;
+  const entityRowApi = global.DarklabAtlasEntityRow || {};
 
   function _entityItems(summary) {
     return summary && Array.isArray(summary.entities) ? summary.entities : [];
@@ -402,28 +403,32 @@
           entity.source_run_id ? `source run ${ctx.shortProjectRunId(entity.source_run_id)}` : '',
           intelSummary(entity),
         ].filter(Boolean);
-        const row = ctx.projectItemRow({
-          title: value || entityId,
-          meta: metaParts.join(' · '),
-          detail: detailParts.join(' · '),
-          chips: chips(entity),
-          accessory: rowAccessory(projectId, entity),
-          action: {
-            action: selectMode() ? 'toggle-project-entity-row' : 'open-project-entity',
-            dataset: { projectId, entityId, entityValue: value, entityType: String(entity.type || '') },
-          },
-        });
-        row.classList.add('project-entity-row');
-        if (selectMode()) {
-          const checkbox = document.createElement('input');
+        const checkbox = selectMode() ? document.createElement('input') : null;
+        if (checkbox) {
           checkbox.type = 'checkbox';
           checkbox.className = 'project-entity-select-checkbox';
           checkbox.checked = currentSelected.has(entityId);
           checkbox.dataset.projectEntitySelect = entityId;
           checkbox.dataset.projectId = projectId;
           checkbox.setAttribute('aria-label', `Select ${value || entityId}`);
-          row.prepend(checkbox);
         }
+        const row = entityRowApi.renderProjectEntityRow({
+          entity,
+          projectId,
+          title: value || entityId,
+          meta: metaParts.join(' · '),
+          detail: detailParts.join(' · '),
+          chips: chips(entity),
+          accessory: rowAccessory(projectId, entity),
+          checkbox,
+          selected: currentSelected.has(entityId),
+          chipClass: ctx.entityMetadataChipClass,
+          bindPressable: ctx.bindProjectRuntimePressable,
+          action: {
+            action: selectMode() ? 'toggle-project-entity-row' : 'open-project-entity',
+            dataset: { projectId, entityId, entityValue: value, entityType: String(entity.type || '') },
+          },
+        });
         container.appendChild(row);
       });
     }

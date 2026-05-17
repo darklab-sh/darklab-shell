@@ -64,6 +64,8 @@ const _OUTPUT_APPEND_LINES_CHUNK_SIZE = 300;
 const _OUTPUT_RESTORE_TAIL_DELAYS = [0, 16, 64, 160, 320];
 const _pendingOutputBatches = new Map();
 const _OUTPUT_SIGNAL_SCOPES = _outputCore.OUTPUT_SIGNAL_SCOPES;
+const _HIGH_VOLUME_OUTPUT_DEFAULT_LINE_THRESHOLD = 50000;
+const _HIGH_VOLUME_OUTPUT_DEFAULT_STATUS_INTERVAL_LINES = 50000;
 
 function _promptUsernameOverride() {
   let value = '';
@@ -353,6 +355,25 @@ function _assignOutputLineNumber(out, tab, line) {
   return next;
 }
 
+function _assignRawOutputLineNumber(out, tab, rawLine) {
+  if (!out || !rawLine) return 0;
+  const existing = Number(rawLine.line_number || 0);
+  if (existing > 0) {
+    if (tab) tab._outputLineCounter = Math.max(Number(tab._outputLineCounter || 0), existing);
+    out.dataset.outputLineCounter = String(Math.max(Number(out.dataset.outputLineCounter || 0), existing));
+    return existing;
+  }
+  const base = Math.max(
+    Number(tab?._outputLineCounter || 0),
+    Number(out.dataset?.outputLineCounter || 0),
+  );
+  const next = base + 1;
+  rawLine.line_number = next;
+  if (tab) tab._outputLineCounter = next;
+  out.dataset.outputLineCounter = String(next);
+  return next;
+}
+
 function _getPendingOutputBatch(tabId) {
   // Output can arrive very quickly from SSE. Batch DOM writes per tab so large
   // scans do not thrash layout on every single line.
@@ -402,28 +423,28 @@ function _applyOutputSignalMetadata(span, rawLine, metadata) {
   const signals = _normalizeOutputSignals(metadata.signals);
   if (signals.length) {
     rawLine.signals = signals;
-    span.dataset.signals = signals.join(',');
+    if (span) span.dataset.signals = signals.join(',');
   }
   if (Number.isInteger(metadata.line_index)) {
     rawLine.line_index = metadata.line_index;
-    span.dataset.lineIndex = String(metadata.line_index);
+    if (span) span.dataset.lineIndex = String(metadata.line_index);
   }
   if (Number.isInteger(metadata.line_number)) {
     rawLine.line_number = metadata.line_number;
-    span.dataset.lineNumber = String(metadata.line_number);
+    if (span) span.dataset.lineNumber = String(metadata.line_number);
   }
   if (typeof metadata.command_root === 'string' && metadata.command_root) {
     rawLine.command_root = metadata.command_root;
-    span.dataset.commandRoot = metadata.command_root;
+    if (span) span.dataset.commandRoot = metadata.command_root;
   }
   if (typeof metadata.target === 'string' && metadata.target) {
     rawLine.target = metadata.target;
-    span.dataset.signalTarget = metadata.target;
+    if (span) span.dataset.signalTarget = metadata.target;
   }
   const entities = _normalizeOutputEntities(metadata.entities);
   if (entities.length) {
     rawLine.entities = entities;
-    span.dataset.entities = JSON.stringify(entities);
+    if (span) span.dataset.entities = JSON.stringify(entities);
   }
 }
 
@@ -635,6 +656,151 @@ function _bindOutputEntityTokenEvents() {
 
 _bindOutputEntityTokenEvents();
 
+function _highVolumeOutputLineThreshold() {
+  const configured = Number(APP_CONFIG?.high_volume_output_line_threshold);
+  if (Number.isFinite(configured)) return Math.max(0, Math.floor(configured));
+  return _HIGH_VOLUME_OUTPUT_DEFAULT_LINE_THRESHOLD;
+}
+
+function _highVolumeOutputStatusIntervalLines() {
+  const configured = Number(APP_CONFIG?.high_volume_output_status_interval_lines);
+  if (Number.isFinite(configured)) return Math.max(1, Math.floor(configured));
+  return _HIGH_VOLUME_OUTPUT_DEFAULT_STATUS_INTERVAL_LINES;
+}
+
+function _isLiveOutputMetadata(metadata) {
+  return !!(metadata && typeof metadata === 'object' && metadata.live_output === true);
+}
+
+function _ensureHighVolumeOutputState(tab) {
+  if (!tab) return null;
+  if (!tab.highVolumeOutput || typeof tab.highVolumeOutput !== 'object') {
+    tab.highVolumeOutput = {
+      active: false,
+      receivedLines: 0,
+      skippedLines: 0,
+      lastNoticeLine: 0,
+      resumeRequested: false,
+      resumeDisabled: false,
+    };
+  }
+  return tab.highVolumeOutput;
+}
+
+function _formatHighVolumeCount(value) {
+  return Number(value || 0).toLocaleString('en-US');
+}
+
+function _rawOutputLine(text, cls, tabId, now, runStart, metadata = null) {
+  const tsC = new Date(now).toTimeString().slice(0, 8);
+  const tsE = runStart ? '+' + ((now - runStart) / 1000).toFixed(1) + 's' : '+0.0s';
+  let rawTextForStorage = text;
+  if (cls === 'prompt-echo') {
+    const prefix = _outputPromptPrefix();
+    rawTextForStorage = `${prefix}${text ? ' ' + text : ''}`;
+  }
+  const rawLine = { text: rawTextForStorage, cls: cls || '', tsC, tsE };
+  _applyOutputSignalMetadata(null, rawLine, metadata);
+  return rawLine;
+}
+
+function _appendHighVolumeOutputNotice(tabId, state, { force = false } = {}) {
+  if (!state || (!force && state.receivedLines - state.lastNoticeLine < _highVolumeOutputStatusIntervalLines())) return;
+  state.lastNoticeLine = state.receivedLines;
+  appendLine(
+    `[high-volume output mode: ${_formatHighVolumeCount(state.receivedLines)} lines received; live rendering paused]`,
+    'notice',
+    tabId,
+    { high_volume_resume: true },
+  );
+}
+
+function _flushPendingOutputBeforeHighVolumeSkip(tabId) {
+  const state = _pendingOutputBatches.get(tabId);
+  if (!state || !state.items.length) return;
+  while (state.items.length > 0) {
+    _flushPendingOutputBatch(tabId);
+    const latest = _pendingOutputBatches.get(tabId);
+    if (!latest || latest === state && !latest.items.length) break;
+  }
+}
+
+function _shouldSkipLiveOutputRender(tab, metadata) {
+  if (!_isLiveOutputMetadata(metadata)) return false;
+  const state = _ensureHighVolumeOutputState(tab);
+  if (!state) return false;
+  state.receivedLines += 1;
+  const threshold = _highVolumeOutputLineThreshold();
+  if (!threshold || state.resumeRequested || state.resumeDisabled) return false;
+  if (!state.active && state.receivedLines > threshold) {
+    state.active = true;
+  }
+  return state.active;
+}
+
+function resetHighVolumeOutputState(tabId) {
+  const tab = getTab(tabId);
+  if (!tab) return;
+  tab.highVolumeOutput = {
+    active: false,
+    receivedLines: 0,
+    skippedLines: 0,
+    lastNoticeLine: 0,
+    resumeRequested: false,
+    resumeDisabled: false,
+  };
+}
+
+function disableHighVolumeOutputResumeControls(tabId) {
+  const tab = getTab(tabId);
+  const state = _ensureHighVolumeOutputState(tab);
+  if (state) {
+    state.active = false;
+    state.resumeDisabled = true;
+  }
+  const out = getOutput(tabId);
+  if (!out || typeof out.querySelectorAll !== 'function') return;
+  out.querySelectorAll('[data-high-volume-resume-tab]').forEach(button => {
+    if (String(button.dataset.highVolumeResumeTab || '') !== String(tabId || '')) return;
+    button.disabled = true;
+    button.setAttribute('aria-disabled', 'true');
+    button.title = 'This command is no longer running';
+  });
+}
+
+function _resumeHighVolumeLiveOutput(tabId) {
+  const tab = getTab(tabId);
+  const state = _ensureHighVolumeOutputState(tab);
+  if (!tab || !state) return;
+  if (state.resumeDisabled || tab.st !== 'running') {
+    disableHighVolumeOutputResumeControls(tabId);
+    return;
+  }
+  state.active = false;
+  state.resumeRequested = true;
+  appendLine(
+    `[live output rendering resumed after ${_formatHighVolumeCount(state.skippedLines)} skipped lines; new lines will render live]`,
+    'notice',
+    tabId,
+  );
+}
+
+function _bindHighVolumeOutputControls() {
+  if (typeof document === 'undefined' || document._darklabHighVolumeOutputBound) return;
+  document._darklabHighVolumeOutputBound = true;
+  document.addEventListener('click', (event) => {
+    const button = event.target && event.target.closest
+      ? event.target.closest('[data-high-volume-resume-tab]')
+      : null;
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+    _resumeHighVolumeLiveOutput(String(button.dataset.highVolumeResumeTab || ''));
+  });
+}
+
+_bindHighVolumeOutputControls();
+
 function _activateOutputCommandChip(command) {
   const activate = typeof globalThis.activateFaqCommandChip === 'function'
     ? globalThis.activateFaqCommandChip
@@ -682,6 +848,16 @@ function _buildOutputLine(text, cls, tabId, now, runStart, metadata = null) {
     content.appendChild(prefixEl);
     if (text) content.appendChild(document.createTextNode(text));
     rawTextForStorage = `${prefix}${text ? ' ' + text : ''}`;
+  } else if (metadata && metadata.high_volume_resume) {
+    content.appendChild(document.createTextNode(text));
+    content.appendChild(document.createTextNode(' '));
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn btn-ghost btn-compact high-volume-output-resume';
+    button.dataset.highVolumeResumeTab = String(tabId || '');
+    button.textContent = 'Resume live rendering';
+    button.title = 'Render new output lines live again';
+    content.appendChild(button);
   } else if (cls === 'exit-ok' || cls === 'exit-fail' || cls === 'denied' || cls === 'notice') {
     content.textContent = text;
   } else if (metadata && typeof metadata.faq_command === 'string' && metadata.faq_command.trim()) {
@@ -987,6 +1163,18 @@ function appendLine(text, cls, tabId, metadata = null) {
   const tab = getTab(id);
   const now = Date.now();
   const runStart = tab?.runStart || 0;
+  if (_shouldSkipLiveOutputRender(tab, metadata)) {
+    _flushPendingOutputBeforeHighVolumeSkip(id);
+    const state = _ensureHighVolumeOutputState(tab);
+    const rawLine = _rawOutputLine(text, cls, id, now, runStart, metadata);
+    _assignRawOutputLineNumber(out, tab, rawLine);
+    _syncTabRawLines(tab, rawLine);
+    if (state) {
+      state.skippedLines += 1;
+      _appendHighVolumeOutputNotice(id, state, { force: state.skippedLines === 1 });
+    }
+    return;
+  }
   const state = _getPendingOutputBatch(id);
   const shouldBatch = state.scheduled || state.items.length > 0 || state.burstCount >= _OUTPUT_SYNC_BURST_LIMIT;
   const { span, rawLine } = _buildOutputLine(text, cls, id, now, runStart, metadata);
@@ -1044,6 +1232,17 @@ function appendLines(lines, tabId) {
       const end = Math.min(index + _OUTPUT_APPEND_LINES_CHUNK_SIZE, sourceLines.length);
       for (; index < end; index += 1) {
         const entry = _normalizeAppendLinesEntry(sourceLines[index]);
+        if (_shouldSkipLiveOutputRender(tab, entry.metadata)) {
+          const state = _ensureHighVolumeOutputState(tab);
+          const rawLine = _rawOutputLine(entry.text, entry.cls, id, now, runStart, entry.metadata);
+          _assignRawOutputLineNumber(out, tab, rawLine);
+          _syncTabRawLines(tab, rawLine);
+          if (state) {
+            state.skippedLines += 1;
+            _appendHighVolumeOutputNotice(id, state, { force: state.skippedLines === 1 });
+          }
+          continue;
+        }
         const { span, rawLine } = _buildOutputLine(entry.text, entry.cls, id, now, runStart, entry.metadata);
         const lineNumber = _assignOutputLineNumber(out, tab, span);
         if (lineNumber > 0) rawLine.line_number = lineNumber;

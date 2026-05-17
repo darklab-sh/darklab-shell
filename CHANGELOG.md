@@ -10,6 +10,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **High-volume live-output mode** — brokered commands now pause per-line browser rendering after `high_volume_output_line_threshold` received lines and show periodic status rows with a resume-live-rendering action for new output.
+  - **Why:** very noisy tools should not make the terminal tab sluggish just because the browser is trying to paint every live row.
+  - **What:** the output renderer keeps bounded raw preview lines, line counts, signal/entity metadata, and normal kill controls intact while high-volume mode is active. Stale resume controls are disabled when the command exits or is killed, and high-volume counters reset at the start of the next brokered run. Backend storage policy is unchanged: saved previews and full-output artifacts still follow `max_output_lines`, `output_preview_max_mb`, `persist_full_run_output`, and `full_output_max_mb`.
+  - **Tests:** added unit coverage for high-volume render suppression, resume behavior, stale-resume disabling, run-start state reset, and brokered stream metadata.
 - **Prometheus `/metrics` endpoint** — operators can now scrape darklab_shell with Prometheus and import a starter Grafana dashboard.
   - **Why:** `/diag` is great for a point-in-time check, but long-running deployments need trendable signals for load, latency, rate-limit pressure, storage growth, provider health, and failed run cleanup.
   - **What:** added an IP-gated `/metrics` route behind the same `diagnostics_allowed_cidrs` gate as `/diag`, with `metrics_enabled`, `prometheus_multiproc_dir`, and histogram-bucket config. Metrics use the `darklab_` prefix, bounded labels, Prometheus base units, and the multiprocess collector so Gunicorn workers aggregate correctly. The initial set covers HTTP volume/latency, active and completed runs, PTY lifecycle/input/snapshots, rate limits, broker mode/events/subscribers/errors, selected DB hot-path latency, DB/Redis/workspace scrape-time gauges, intel provider calls/cache size, evidence package builds, findings, snapshots, client errors, and unhandled exceptions. Container startup now prepares the multiprocess directory on tmpfs and clears stale metric shards, and `examples/grafana/darklab-overview.json` provides a starter dashboard.
@@ -135,6 +139,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Atlas entity rows now share one renderer** — Atlas desktop/mobile lists and the Project Entities desktop list now use `app/static/js/features/atlas/atlas_entity_row.js` for the common entity row structure.
+  - **Tests:** updated the Atlas desktop/mobile and shell chrome unit harnesses for the shared renderer and kept the docs inventory aligned.
 - **Project active context moved into a feature module** — Active Project HUD context, refresh, and target discovery helpers now live in `app/static/js/features/projects/project_active_context.js`.
   - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
 - **Project Entities moved into a feature module** — the Project Entities tab, entity-type tabs, mobile entity list, picker overlay, export wiring, and Atlas handoff helpers now live in `app/static/js/features/projects/project_entities.js` instead of continuing to grow `shell_chrome.js`.

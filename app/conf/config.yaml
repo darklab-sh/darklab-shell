@@ -471,6 +471,19 @@
 # Server default if unset: 5000
 # max_output_lines: 5000
 
+# Pause live DOM rendering for brokered command output after this many received
+# lines. The run keeps counting output, kill controls stay active, and saved
+# previews/full-output artifacts still follow max_output_lines,
+# output_preview_max_mb, persist_full_run_output, and full_output_max_mb.
+# Set to 0 to disable the high-volume live-output pause.
+# Server default if unset: 50000
+# high_volume_output_line_threshold: 50000
+
+# While high-volume live-output mode is active, show a fresh status line after
+# this many additional received lines.
+# Server default if unset: 50000
+# high_volume_output_status_interval_lines: 50000
+
 # Hard cap for the saved run preview payload, expressed in megabytes.
 # This protects history reads from huge single-line outputs such as JSON.
 # Set to 0 for unlimited.

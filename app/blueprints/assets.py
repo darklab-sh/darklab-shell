@@ -107,6 +107,8 @@ _DIAG_CONFIG_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Run execution", (
         "command_timeout_seconds",
         "heartbeat_interval_seconds",
+        "high_volume_output_line_threshold",
+        "high_volume_output_status_interval_lines",
         "max_output_lines",
         "max_tabs",
     )),
@@ -644,6 +646,8 @@ def diag():
         "rate_limit_per_second":      CFG.get("rate_limit_per_second"),
         "command_timeout_seconds":    CFG.get("command_timeout_seconds"),
         "heartbeat_interval_seconds": CFG.get("heartbeat_interval_seconds"),
+        "high_volume_output_line_threshold": CFG.get("high_volume_output_line_threshold"),
+        "high_volume_output_status_interval_lines": CFG.get("high_volume_output_status_interval_lines"),
         "max_output_lines":           CFG.get("max_output_lines"),
         "max_tabs":                   CFG.get("max_tabs"),
         "persist_full_run_output":    CFG.get("persist_full_run_output"),

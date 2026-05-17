@@ -6,6 +6,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
 const ENTITY_METADATA_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_entity_metadata.js'), 'utf8')
 const UI_ACTION_SHEET_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui/ui_action_sheet.js'), 'utf8')
+const ATLAS_ENTITY_ROW_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/features/atlas/atlas_entity_row.js'), 'utf8')
 const PROJECT_TARGET_VALIDATION_SRC = readFileSync(
   resolve(REPO_ROOT, 'app/static/js/features/projects/project_target_validation.js'),
   'utf8',
@@ -381,6 +382,7 @@ function loadShellChrome({
       window.enhanceAppSelects = global.enhanceAppSelects;
       ${ENTITY_METADATA_SRC}
       ${UI_ACTION_SHEET_SRC}
+      ${ATLAS_ENTITY_ROW_SRC}
       global.openActionSheet = window.openActionSheet;
       global.closeActionSheet = window.closeActionSheet;
       ${PROJECT_TARGET_VALIDATION_SRC}

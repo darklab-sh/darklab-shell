@@ -23,6 +23,7 @@
 
 (function initAtlasMobile(global) {
   const controller = global.DarklabAtlasOverlay;
+  const entityRowApi = global.DarklabAtlasEntityRow || {};
   if (!controller || typeof controller.registerMobileRenderer !== 'function') {
     // Atlas overlay didn't initialize (likely a non-Atlas page). Nothing
     // to do; the mobile module is dormant.
@@ -592,47 +593,7 @@
   }
 
   function renderEntityRow(entity, state) {
-    const row = document.createElement('div');
-    row.className = 'chrome-row chrome-row-clickable atlas-entity-row atlas-mobile-row';
-    if (String(entity.id) === String(state.selectedId)) row.classList.add('is-selected');
-    row.dataset.atlasMobileEntityId = entity.id;
-    row.tabIndex = 0;
-    row.setAttribute('role', state.selectMode ? 'checkbox' : 'button');
-    if (state.selectMode) row.setAttribute('aria-checked', String(state.selectedEntityIds.has(String(entity.id || ''))));
-    row.setAttribute('aria-label', `Open ${entity.canonical_value || entity.id}`);
-
-    const main = document.createElement('span');
-    main.className = 'atlas-entity-main';
-    const value = document.createElement('span');
-    value.className = 'atlas-entity-value';
-    value.textContent = controller.text(entity.canonical_value, entity.id);
-    const meta = document.createElement('span');
-    meta.className = 'atlas-muted';
-    const runs = Number(entity.run_count || 0);
-    const occ = Number(entity.occurrence_count || 0);
-    meta.textContent = `${controller.countLabel(occ, 'hit', 'hits')} · ${controller.countLabel(runs, 'run', 'runs')}`;
-    main.append(value, meta);
-
-    const badges = document.createElement('span');
-    badges.className = 'atlas-entity-badges';
-    if (entity.project_link_count) {
-      badges.appendChild(controller.badge(`${entity.project_link_count} projects`, 'green'));
-    }
-    const labels = Array.isArray(entity.labels) ? entity.labels : [];
-    labels.slice(0, 2).forEach(label => {
-      badges.appendChild(controller.badge(controller.text(label.label || label), 'muted'));
-    });
-
-    const chev = document.createElement('span');
-    chev.className = 'atlas-mobile-row-chev drill-chev';
-    chev.setAttribute('aria-hidden', 'true');
-    chev.textContent = '›';
-
-    row.append(main, badges, chev);
-    if (state.selectMode) {
-      appendMobileSelectionCheckbox(row, entity, state, `Select entity: ${entity.canonical_value || entity.id}`);
-    }
-    row.addEventListener('click', () => {
+    const handleActivation = () => {
       if (view.suppressNextClick) {
         view.suppressNextClick = false;
         return;
@@ -643,11 +604,21 @@
       }
       controller.selectEntity(entity.id);
       setView('entity');
-    });
-    row.addEventListener('keydown', (event) => {
-      if (event.key !== 'Enter' && event.key !== ' ') return;
-      event.preventDefault();
-      row.click();
+    };
+    const row = entityRowApi.renderAtlasEntityRow({
+      entity,
+      selected: state.selectMode
+        ? state.selectedEntityIds.has(String(entity.id || ''))
+        : String(entity.id) === String(state.selectedId),
+      selectMode: state.selectMode,
+      mobile: true,
+      text: controller.text,
+      countLabel: controller.countLabel,
+      badge: controller.badge,
+      appendSelectionControl: state.selectMode
+        ? targetRow => appendMobileSelectionCheckbox(targetRow, entity, state, `Select entity: ${entity.canonical_value || entity.id}`)
+        : null,
+      onActivate: handleActivation,
     });
     return row;
   }

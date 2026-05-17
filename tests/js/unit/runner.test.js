@@ -713,6 +713,8 @@ function loadRunnerFns({
   isProjectWorkspaceOpen: isProjectWorkspaceOpenOverride = undefined,
   notifyProjectWorkspaceChanged: notifyProjectWorkspaceChangedOverride = undefined,
   emitUiEvent: emitUiEventOverride = undefined,
+  disableHighVolumeOutputResumeControls = () => {},
+  resetHighVolumeOutputState = () => {},
   runnerInitCode = '',
 } = {}) {
   const normalizedTabs = tabs.map((tab) => ({
@@ -891,6 +893,8 @@ function loadRunnerFns({
       ...(isProjectWorkspaceOpenOverride ? { isProjectWorkspaceOpen: isProjectWorkspaceOpenOverride } : {}),
       ...(notifyProjectWorkspaceChangedOverride ? { notifyProjectWorkspaceChanged: notifyProjectWorkspaceChangedOverride } : {}),
       ...(emitUiEventOverride ? { emitUiEvent: emitUiEventOverride } : {}),
+      disableHighVolumeOutputResumeControls,
+      resetHighVolumeOutputState,
       ...(NotificationOverride !== undefined ? { Notification: NotificationOverride } : {}),
     },
     `{
@@ -1385,12 +1389,14 @@ describe('runner helpers', () => {
     const appendLine = vi.fn()
     const notifyProjectWorkspaceChanged = vi.fn()
     const emitUiEvent = vi.fn()
+    const disableHighVolumeOutputResumeControls = vi.fn()
     const { _handleRunStreamMessage, tabs } = loadRunnerFns({
       clientId: 'client-1',
       tabs: [{ id: 'tab-1', st: 'running', runId: 'run-1', pendingKill: false, killed: false, attachMode: 'attached' }],
       appendLine,
       notifyProjectWorkspaceChanged,
       emitUiEvent,
+      disableHighVolumeOutputResumeControls,
     })
 
     _handleRunStreamMessage({ type: 'owner', owner_client_id: 'client-2', owner_tab_id: 'tab-9' }, 'tab-1')
@@ -1408,6 +1414,7 @@ describe('runner helpers', () => {
       'notice',
       'tab-1',
     )
+    expect(disableHighVolumeOutputResumeControls).toHaveBeenCalledWith('tab-1')
 
     _handleRunStreamMessage({
       type: 'notice',
@@ -1424,6 +1431,30 @@ describe('runner helpers', () => {
       project_name: 'Demo',
       count: 2,
     })
+  })
+
+  it('resets high-volume output state when a new brokered run starts', () => {
+    const resetHighVolumeOutputState = vi.fn()
+    const { _handleRunStreamMessage } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'running', runId: null, pendingKill: false, killed: false }],
+      resetHighVolumeOutputState,
+    })
+
+    _handleRunStreamMessage({ type: 'started', run_id: 'run-fresh' }, 'tab-1')
+
+    expect(resetHighVolumeOutputState).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('disables high-volume resume controls when a brokered run exits', () => {
+    const disableHighVolumeOutputResumeControls = vi.fn()
+    const { _handleRunStreamMessage } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'running', runId: 'run-1', pendingKill: false, killed: false }],
+      disableHighVolumeOutputResumeControls,
+    })
+
+    _handleRunStreamMessage({ type: 'exit', code: 0, elapsed: 0.1 }, 'tab-1')
+
+    expect(disableHighVolumeOutputResumeControls).toHaveBeenCalledWith('tab-1')
   })
 
   it('pollActiveRunsAfterReload restores a completed reconnected run through history', async () => {
@@ -2043,6 +2074,35 @@ describe('runner helpers', () => {
 
     expect(appendLine).toHaveBeenCalledWith('Q  Example question', 'builtin-faq-q', 'tab-1')
     expect(appendLine).toHaveBeenCalledWith('A  Example answer', 'builtin-faq-a', 'tab-1')
+  })
+
+  it('marks brokered output as live when high-volume output handling is configured', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = brokerApiFetch(
+      [
+        'data: {"type":"started","run_id":"run-live"}',
+        'data: {"type":"output","text":"streamed"}',
+        'data: {"type":"exit","code":0,"elapsed":0.1}',
+      ].join('\n\n') + '\n\n',
+      { runId: 'run-live' },
+    )
+    const loaded = loadRunnerFns({
+      cmdValue: 'printf streamed',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appConfig: { high_volume_output_line_threshold: 50000 },
+      apiFetch,
+      appendLine,
+    })
+
+    loaded.runCommand()
+    await flushPromises()
+
+    expect(appendLine).toHaveBeenCalledWith(
+      'streamed',
+      '',
+      'tab-1',
+      expect.objectContaining({ live_output: true }),
+    )
   })
 
   it('runCommand suppresses nc inverse-host-lookup noise while keeping the open-port result', async () => {

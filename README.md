@@ -633,6 +633,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── features/
 │   │       │   ├── atlas/
 │   │       │   │   ├── atlas_entity_detail.js # Session Entity Atlas entity detail rendering helpers
+│   │       │   │   ├── atlas_entity_row.js # Shared Atlas entity rows used by Atlas and Projects
 │   │       │   │   ├── atlas_mobile.js # Mobile Session Entity Atlas list/detail, filters, and action-sheet controller
 │   │       │   │   ├── atlas_overlay.js # Session Entity Atlas overlay controller and route wiring
 │   │       │   │   └── atlas_tabs.js # Session Entity Atlas tab metadata and count helpers

@@ -188,6 +188,8 @@ def load_config(conf_dir=None):
         "intel_negative_cache_threatfox_quota_seconds": 21600,
         "intel_negative_cache_securitytrails_quota_seconds": 21600,
         "max_output_lines":           5000,
+        "high_volume_output_line_threshold": 50000,
+        "high_volume_output_status_interval_lines": 50000,
         "output_preview_max_mb":      1,
         "persist_full_run_output":    True,
         "full_output_max_mb":         5,

@@ -128,6 +128,8 @@ def _frontend_config_payload():
         "motd":                  cfg["motd"],
         "recent_commands_limit": cfg["recent_commands_limit"],
         "max_output_lines":      cfg["max_output_lines"],
+        "high_volume_output_line_threshold": cfg["high_volume_output_line_threshold"],
+        "high_volume_output_status_interval_lines": cfg["high_volume_output_status_interval_lines"],
         "max_tabs":              cfg["max_tabs"],
         "history_panel_limit":      cfg["history_panel_limit"],
         "command_timeout_seconds":  cfg["command_timeout_seconds"],

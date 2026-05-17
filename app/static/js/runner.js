@@ -581,6 +581,9 @@ function _handleRunKilled(msg, tabId) {
     );
   }
   setTabStatus(tabId, 'killed');
+  if (typeof disableHighVolumeOutputResumeControls === 'function') {
+    disableHighVolumeOutputResumeControls(tabId);
+  }
   hideTabKillBtn(tabId);
   if (tabId === activeTabId) {
     setStatus('killed');
@@ -602,6 +605,9 @@ function _markTabKilledByUser(tabId, secs, { suppressTranscript = false } = {}) 
   _maybeNotify(t.command, 'killed', secs != null ? _formatElapsed(secs) : null);
   if (typeof emitUiEvent === 'function') emitUiEvent('app:last-exit-changed', { value: 'killed' });
   setTabStatus(tabId, 'killed');
+  if (typeof disableHighVolumeOutputResumeControls === 'function') {
+    disableHighVolumeOutputResumeControls(tabId);
+  }
   hideTabKillBtn(tabId);
   if (tabId === activeTabId) {
     setStatus('killed');
@@ -617,6 +623,9 @@ function _handleRunTransportFailure(err, tabId) {
   appendLine('[connection error] ' + _describeRunnerFetchError(err), 'exit-fail', tabId);
   if (tabId === activeTabId) setStatus('fail');
   setTabStatus(tabId, 'fail');
+  if (typeof disableHighVolumeOutputResumeControls === 'function') {
+    disableHighVolumeOutputResumeControls(tabId);
+  }
   stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
 }
 
@@ -656,8 +665,12 @@ function _streamOutputMetadata(msg) {
   return Object.keys(metadata).length ? metadata : null;
 }
 
-function _appendStreamLine(text, cls, tabId, msg) {
-  const metadata = _streamOutputMetadata(msg);
+function _appendStreamLine(text, cls, tabId, msg, options = {}) {
+  let metadata = _streamOutputMetadata(msg);
+  if (options.liveOutput && APP_CONFIG && APP_CONFIG.high_volume_output_line_threshold) {
+    metadata = metadata || {};
+    metadata.live_output = true;
+  }
   if (metadata) appendLine(text, cls, tabId, metadata);
   else appendLine(text, cls, tabId);
 }
@@ -700,6 +713,9 @@ function _markTabRunStarted(tabId, runId) {
   t.runId = runId;
   t.historyRunId = runId;
   if (!sameRun) t.lastEventId = '';
+  if (!sameRun && typeof resetHighVolumeOutputState === 'function') {
+    resetHighVolumeOutputState(tabId);
+  }
   t.unknownCommand = false;
   t.reconnectedRun = false;
   if (t.pendingKill) {
@@ -759,7 +775,7 @@ function _handleRunStreamMessage(msg, tabId) {
     }
     String(msg.text || '').split('\n').forEach((line, i, arr) => {
       if ((i < arr.length - 1 || line) && !_shouldSuppressStreamOutputLine(t, line)) {
-        _appendStreamLine(line, msg.cls || '', tabId, msg);
+        _appendStreamLine(line, msg.cls || '', tabId, msg, { liveOutput: true });
       }
     });
   } else if (msg.type === 'exit') {
@@ -781,6 +797,9 @@ function _handleRunStreamMessage(msg, tabId) {
       t.killed = false;
       stopTimer();
       _setRunButtonDisabled(false); hideTabKillBtn(tabId);
+      if (typeof disableHighVolumeOutputResumeControls === 'function') {
+        disableHighVolumeOutputResumeControls(tabId);
+      }
       if (t.closing && typeof finalizeClosingTab === 'function') {
         finalizeClosingTab(tabId);
         if (isHistoryPanelOpen()) refreshHistoryPanel();
@@ -800,10 +819,16 @@ function _handleRunStreamMessage(msg, tabId) {
       if (!(t && t.syntheticClear)) appendLine(`[process exited with code 0${dur}]`, 'exit-ok', tabId);
       if (tabId === activeTabId) setStatus('ok');
       setTabStatus(tabId, 'ok');
+      if (typeof disableHighVolumeOutputResumeControls === 'function') {
+        disableHighVolumeOutputResumeControls(tabId);
+      }
     } else {
       appendLine(`[process exited with code ${msg.code}${dur}]`, 'exit-fail', tabId);
       if (tabId === activeTabId) setStatus('fail');
       setTabStatus(tabId, 'fail');
+      if (typeof disableHighVolumeOutputResumeControls === 'function') {
+        disableHighVolumeOutputResumeControls(tabId);
+      }
     }
     if (typeof addToRecentPreview === 'function' && t && t.command && !t.unknownCommand) {
       addToRecentPreview(t.command);
@@ -829,6 +854,9 @@ function _handleRunStreamMessage(msg, tabId) {
     appendLine('[error] ' + msg.text, 'exit-fail', tabId);
     if (tabId === activeTabId) setStatus('fail');
     setTabStatus(tabId, 'fail');
+    if (typeof disableHighVolumeOutputResumeControls === 'function') {
+      disableHighVolumeOutputResumeControls(tabId);
+    }
     stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
   }
 }

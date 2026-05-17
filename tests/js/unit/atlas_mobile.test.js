@@ -207,6 +207,7 @@ function loadMobileAtlas(controller) {
   return fromDomScripts(
     [
       'app/static/js/ui/ui_action_sheet.js',
+      'app/static/js/features/atlas/atlas_entity_row.js',
       'app/static/js/features/atlas/atlas_mobile.js',
     ],
     {

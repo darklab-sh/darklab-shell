@@ -209,6 +209,7 @@ function loadAtlas({
       [
         'app/static/js/ui/ui_entity_metadata.js',
         'app/static/js/features/atlas/atlas_tabs.js',
+        'app/static/js/features/atlas/atlas_entity_row.js',
         'app/static/js/features/atlas/atlas_entity_detail.js',
         'app/static/js/features/atlas/atlas_overlay.js',
       ],

@@ -2607,8 +2607,9 @@ class TestConfigRoute:
         data = json.loads(client.get("/config").data)
         for key in (
             "app_name", "project_readme", "prompt_username", "prompt_domain", "default_theme",
-            "max_tabs", "max_output_lines", "workspace_enabled", "interactive_pty_commands",
-            "tour_chapters",
+            "max_tabs", "max_output_lines", "high_volume_output_line_threshold",
+            "high_volume_output_status_interval_lines", "workspace_enabled",
+            "interactive_pty_commands", "tour_chapters",
         ):
             assert key in data
         assert "share_redaction_enabled" in data
@@ -3008,6 +3009,7 @@ class TestDiagRoute:
             data = json.loads(client.get("/diag?format=json").data)
         cfg = data["config"]
         for key in ("rate_limit_enabled", "command_timeout_seconds", "max_output_lines",
+                    "high_volume_output_line_threshold", "high_volume_output_status_interval_lines",
                     "persist_full_run_output", "permalink_retention_days",
                     "share_redaction_enabled", "custom_redaction_rule_count"):
             assert key in cfg, f"missing config key: {key}"

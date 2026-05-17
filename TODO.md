@@ -7,7 +7,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
-  - [High-volume output handling](#high-volume-output-handling)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
 - [Feature Enhancements](#feature-enhancements)
@@ -45,12 +44,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-### High-volume output handling
-- Add a high-volume live-output mode for normal brokered commands once a run crosses a large output threshold, such as 100k rendered lines or a configurable byte/event rate. The mode should keep counting, bounded persistence, history metadata, and kill controls working while reducing browser rendering pressure.
-- In high-volume mode, stop rendering every line live. Render a periodic status line instead, for example `[high-volume output mode: 1,250,000 lines received; live rendering paused]`, and offer an explicit "resume live rendering" action only if the user wants the browser to catch up.
-- Preserve raw-output fidelity in backend storage according to the existing `persist_full_run_output`, `full_output_max_mb`, `max_output_lines`, and `output_preview_max_mb` settings. High-volume mode should protect the browser, not silently alter the saved-output policy.
-- Surface the mode in the run UI and history preview so users can tell the command is still running and producing output even though the transcript is intentionally throttled.
-- Add regression coverage with synthetic noisy output to verify the browser does not become unresponsive, the line count continues increasing, the kill button still works, and the completed run records the correct `output_line_count` plus truncation state.
+No open TODOs are currently tracked.
 
 ## Known Issues
 
@@ -60,9 +54,8 @@ No known issues are currently tracked.
 
 ## Technical Debt
 
-- Share a small Atlas entity-row renderer between Projects and Atlas.
-  - Projects now owns its entity surface in `app/static/js/features/projects/project_entities.js`, but the Projects picker and Atlas list still keep separate lookup/filter/rendering behavior.
-  - Move the shared row bits into `app/static/js/features/atlas/` so both surfaces render Atlas entity search results through one helper.
+No technical debt items are currently tracked.
+
 ---
 
 ## Feature Enhancements

@@ -3,6 +3,7 @@
 (function initAtlasOverlay(global) {
   const tabsApi = global.DarklabAtlasTabs || {};
   const detailApi = global.DarklabAtlasDetail || {};
+  const entityRowApi = global.DarklabAtlasEntityRow || {};
   const metadataApi = global.DarklabEntityMetadata || {};
 
   const overlay = document.getElementById('atlas-overlay');
@@ -506,44 +507,6 @@
       return;
     }
     state.entities.forEach(entity => {
-      const row = document.createElement('div');
-      row.className = 'chrome-row chrome-row-clickable atlas-entity-row';
-      row.classList.toggle('is-selecting', state.selectMode);
-      row.classList.toggle(
-        'is-selected',
-        state.selectMode
-          ? state.selectedEntityIds.has(String(entity.id || ''))
-          : entity.id === state.selectedId,
-      );
-      row.dataset.entityId = entity.id;
-
-      const main = document.createElement('span');
-      main.className = 'atlas-entity-main';
-      const value = document.createElement('span');
-      value.className = 'atlas-entity-value';
-      value.textContent = text(entity.canonical_value, entity.id);
-      const meta = document.createElement('span');
-      meta.className = 'atlas-muted';
-      const runCount = Number(entity.run_count || 0);
-      const occurrenceCount = Number(entity.occurrence_count || 0);
-      meta.textContent = `${countLabel(occurrenceCount, 'hit', 'hits')} · ${countLabel(runCount, 'run', 'runs')}`;
-      main.append(value, meta);
-
-      const badges = document.createElement('span');
-      badges.className = 'atlas-entity-badges';
-      if (entity.project_link_count) badges.appendChild(badge(`${entity.project_link_count} projects`, 'green'));
-      const labels = Array.isArray(entity.labels) ? entity.labels : [];
-      labels.slice(0, 2).forEach(label => badges.appendChild(badge(text(label.label || label), 'muted')));
-
-      if (state.selectMode) {
-        appendSelectionCheckbox(
-          row,
-          entity,
-          state.selectedEntityIds,
-          `Select entity: ${entity.canonical_value || entity.id}`,
-        );
-      }
-      row.append(main, badges);
       const handleActivation = () => {
         if (state.selectMode) {
           toggleItemSelection(entity);
@@ -551,8 +514,26 @@
         }
         selectEntity(entity.id);
       };
-      row.addEventListener('click', handleActivation);
-      if (!state.selectMode) activateRowOnKeyboard(row, handleActivation);
+      const row = entityRowApi.renderAtlasEntityRow({
+        entity,
+        selected: state.selectMode
+          ? state.selectedEntityIds.has(String(entity.id || ''))
+          : entity.id === state.selectedId,
+        selecting: state.selectMode,
+        selectMode: state.selectMode,
+        text,
+        countLabel,
+        badge,
+        appendSelectionControl: state.selectMode
+          ? (targetRow) => appendSelectionCheckbox(
+              targetRow,
+              entity,
+              state.selectedEntityIds,
+              `Select entity: ${entity.canonical_value || entity.id}`,
+            )
+          : null,
+        onActivate: handleActivation,
+      });
       listHost.appendChild(row);
     });
   }

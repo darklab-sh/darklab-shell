@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,874
+- behavior tests: 2,881
 - docs/inventory meta-tests: 32
 - `pytest`: 1493 (1461 behavior + 32 meta)
-- `vitest`: 1161
+- `vitest`: 1168
 - `playwright`: 252
-- total: 2,906
+- total: 2,913
 
 This document is organized in two parts:
 
@@ -2264,6 +2264,10 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `does nothing when there is no output container for the target tab` | Verifies that does nothing when there is no output container for the target tab. |
 | `re-sticks restored output to the tail after delayed layout growth` | Verifies that restored transcripts keep the prompt tail visible after delayed layout growth. |
 | `batches large bursts of output and finishes rendering on the next tick` | Verifies that batches large bursts of output and finishes rendering on the next tick. |
+| `pauses live rendering for high-volume brokered output while keeping raw lines` | Verifies that high-volume brokered output pauses live row rendering while keeping bounded raw transcript data. |
+| `resumes live rendering for new high-volume output when requested` | Verifies that the high-volume output resume action renders later live output again. |
+| `disables high-volume resume controls once the run is no longer active` | Verifies that stale high-volume resume controls are disabled after a run leaves the running state. |
+| `resets high-volume counters for a new run` | Verifies that high-volume output counters reset before a fresh brokered run starts in the same tab. |
 | `queues multi-line appends in chunks and updates raw lines once flushed` | Verifies that bulk output replay queues multi-line output through the batch flusher and syncs raw lines after flush. |
 | `uses delayed tail restore for large mobile output bursts` | Verifies that large mobile output bursts keep the transcript pinned to the prompt after delayed layout growth. |
 
@@ -2390,6 +2394,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `attachActiveRunFromMonitor opens an attached subscribed tab with kill controls` | Verifies that Status Monitor Attach opens a live subscribed tab with normal kill controls. |
 | `attachActiveRunFromMonitor subscribes without claiming ownership` | Verifies that Status Monitor Attach subscribes directly to the broker stream without calling an ownership route. |
 | `keeps subscribed tabs killable on owner metadata and reports remote kills` | Verifies that owner metadata does not hide kill controls and that remote killed events render a clear notice. |
+| `resets high-volume output state when a new brokered run starts` | Verifies that a new brokered run clears high-volume output state from any previous run in the tab. |
+| `disables high-volume resume controls when a brokered run exits` | Verifies that completed brokered runs disable stale high-volume resume controls. |
 | `pollActiveRunsAfterReload restores a completed reconnected run through history` | Verifies that a reconnected placeholder tab swaps into the saved history view when the active run disappears. |
 | `pollActiveRunsAfterReload fails a missing reconnected run with no saved history` | Verifies that reconnect placeholders fail visibly instead of waiting forever when a run disappears after an app restart. |
 | `doKill marks pendingKill when runId is not yet available` | Verifies that doKill marks pendingKill when runId is not yet available. |
@@ -2413,6 +2419,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `runCommand appends a count-aware preview truncation notice on exit` | Verifies that runCommand appends a count-aware preview truncation notice on exit. |
 | `runCommand refreshes and broadcasts project context after successful project built-ins` | Verifies that successful terminal project commands refresh local project context and notify passive same-session tabs. |
 | `runCommand preserves output classes from streamed events` | Verifies that runCommand preserves output classes from streamed events. |
+| `marks brokered output as live when high-volume output handling is configured` | Verifies that brokered stream output carries the live-output marker used by high-volume browser rendering. |
 | `runCommand suppresses nc inverse-host-lookup noise while keeping the open-port result` | Verifies that `nc` reverse-DNS warning noise is filtered while the meaningful open-port line remains visible. |
 | `doKill shows a notice when the kill request fails` | Verifies that doKill shows a notice when the kill request fails. |
 | `returns true on empty input (blank Enter)` | Verifies that returns true on empty input (blank Enter). |

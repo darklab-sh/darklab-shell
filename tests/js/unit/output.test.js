@@ -17,7 +17,7 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {}, AnsiUpCtor = null } 
       document,
       AnsiUp: AnsiUpCtor || FakeAnsiUp,
       activeTabId: 'tab-1',
-      tabs: [{ id: 'tab-1', rawLines: [], runStart: 1000 }],
+      tabs: [{ id: 'tab-1', st: 'running', rawLines: [], runStart: 1000 }],
       APP_CONFIG: { max_output_lines: 2, ...appConfig },
       getOutput: () => document.getElementById('out'),
       shellPromptWrap: document.getElementById('shell-prompt-wrap'),
@@ -26,7 +26,9 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {}, AnsiUpCtor = null } 
     `{
     appendLine,
     appendLines,
+    disableHighVolumeOutputResumeControls,
     renderRestoredTabOutput,
+    resetHighVolumeOutputState,
     _restoreOutputTailAfterLayout,
     _setTsMode,
     _setLnMode,
@@ -40,6 +42,8 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {}, AnsiUpCtor = null } 
 
 describe('appendLine', () => {
   beforeEach(() => {
+    delete document._darklabHighVolumeOutputBound
+    delete document._darklabOutputEntityTokensBound
     document.body.className = ''
     document.body.innerHTML = `
       <div id="out" class="output">
@@ -494,6 +498,95 @@ describe('appendLine', () => {
     expect(lines).toHaveLength(65)
     expect(lines[0].textContent).toContain('line 1')
     expect(lines[64].textContent).toContain('line 65')
+  })
+
+  it('pauses live rendering for high-volume brokered output while keeping raw lines', () => {
+    const { appendLine, _getTabs } = loadOutputFns({
+      appConfig: {
+        high_volume_output_line_threshold: 3,
+        high_volume_output_status_interval_lines: 2,
+        max_output_lines: 20,
+      },
+    })
+
+    appendLine('line 1', '', 'tab-1', { live_output: true })
+    appendLine('line 2', '', 'tab-1', { live_output: true })
+    appendLine('line 3', '', 'tab-1', { live_output: true })
+    appendLine('line 4', '', 'tab-1', { live_output: true })
+
+    const renderedText = Array.from(document.querySelectorAll('.line')).map(line => line.textContent)
+    expect(renderedText.join('\n')).toContain('line 1')
+    expect(renderedText.join('\n')).not.toContain('line 4')
+    expect(renderedText.join('\n')).toContain('high-volume output mode: 4 lines received')
+    expect(document.querySelector('[data-high-volume-resume-tab="tab-1"]')).not.toBeNull()
+
+    const rawLines = _getTabs()[0].rawLines.map(line => line.text)
+    expect(rawLines).toContain('line 4')
+  })
+
+  it('resumes live rendering for new high-volume output when requested', () => {
+    const { appendLine } = loadOutputFns({
+      appConfig: {
+        high_volume_output_line_threshold: 1,
+        high_volume_output_status_interval_lines: 1,
+        max_output_lines: 20,
+      },
+    })
+
+    appendLine('line 1', '', 'tab-1', { live_output: true })
+    appendLine('line 2', '', 'tab-1', { live_output: true })
+
+    document.querySelector('[data-high-volume-resume-tab="tab-1"]').click()
+    appendLine('line 3', '', 'tab-1', { live_output: true })
+
+    const renderedText = Array.from(document.querySelectorAll('.line')).map(line => line.textContent).join('\n')
+    expect(renderedText).not.toContain('line 2')
+    expect(renderedText).toContain('live output rendering resumed after 1 skipped lines')
+    expect(renderedText).toContain('line 3')
+  })
+
+  it('disables high-volume resume controls once the run is no longer active', () => {
+    const { appendLine, disableHighVolumeOutputResumeControls, _getTabs } = loadOutputFns({
+      appConfig: {
+        high_volume_output_line_threshold: 1,
+        high_volume_output_status_interval_lines: 1,
+        max_output_lines: 20,
+      },
+    })
+
+    appendLine('line 1', '', 'tab-1', { live_output: true })
+    appendLine('line 2', '', 'tab-1', { live_output: true })
+    const button = document.querySelector('[data-high-volume-resume-tab="tab-1"]')
+
+    _getTabs()[0].st = 'ok'
+    disableHighVolumeOutputResumeControls('tab-1')
+    button.click()
+    appendLine('line 3', '', 'tab-1', { live_output: true })
+
+    const renderedText = Array.from(document.querySelectorAll('.line')).map(line => line.textContent).join('\n')
+    expect(button.disabled).toBe(true)
+    expect(renderedText).not.toContain('live output rendering resumed')
+    expect(renderedText).toContain('line 3')
+  })
+
+  it('resets high-volume counters for a new run', () => {
+    const { appendLine, resetHighVolumeOutputState, _getTabs } = loadOutputFns({
+      appConfig: {
+        high_volume_output_line_threshold: 1,
+        high_volume_output_status_interval_lines: 1,
+        max_output_lines: 20,
+      },
+    })
+
+    appendLine('line 1', '', 'tab-1', { live_output: true })
+    appendLine('line 2', '', 'tab-1', { live_output: true })
+    resetHighVolumeOutputState('tab-1')
+    _getTabs()[0].st = 'running'
+    appendLine('line 3', '', 'tab-1', { live_output: true })
+
+    const renderedText = Array.from(document.querySelectorAll('.line')).map(line => line.textContent).join('\n')
+    expect(renderedText).not.toContain('high-volume output mode: 3 lines received')
+    expect(renderedText).toContain('line 3')
   })
 
   it('queues multi-line appends in chunks and updates raw lines once flushed', async () => {
