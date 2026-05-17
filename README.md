@@ -2,7 +2,7 @@
 
 darklab_shell is a self-hosted web terminal for network diagnostics and security recon. It gives you a polished browser shell for tools like nmap, nuclei, httpx, katana, and amass without handing users a raw shell.
 
-The backend runs on Flask/Gunicorn, Redis, and SQLite. Commands go through allow and deny rules, loopback checks, path checks, and shell-metacharacter blocking before anything starts. Scanner commands run as an unprivileged `scanner` user and can only write to the app-managed places you allow.
+The backend runs on Flask/Gunicorn, Redis, and SQLite by default, with Postgres available for larger deployments. Commands go through allow and deny rules, loopback checks, path checks, and shell-metacharacter blocking before anything starts. Scanner commands run as an unprivileged `scanner` user and can only write to the app-managed places you allow.
 
 The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile shell, session Files, project workspaces, sharing/redaction, themes, and coverage across pytest, Vitest, Playwright, and container smoke tests. A live instance is available at [shell.darklab.sh](https://shell.darklab.sh/).
 
@@ -53,7 +53,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Security and operations** — registry-backed command policy with deny-prefix lists for loopback and path blocking, shell metacharacter blocking, Redis-backed rate limiting and PID tracking, structured logging with `text` and `gelf` format support, an IP-gated `/diag` page for live operator checks, and an IP-gated `/metrics` endpoint for Prometheus/Grafana monitoring
 - **Pre-installed security tooling** — nmap, rustscan, naabu, masscan, nuclei, ffuf, gobuster, katana, amass, wafw00f, sslscan, sslyze, openssl, and more, all sandboxed under a dedicated `scanner` user with enforced allowlists and the full [SecLists](https://github.com/danielmiessler/SecLists) collection pre-installed at `/usr/share/wordlists/seclists/`; the built-in `wordlist` command and typed autocomplete catalog show high-signal SecLists entries without dumping the whole corpus into suggestions
 - **Operator customization** — external-tool command metadata and runtime tweaks in `conf/commands.yaml`, custom FAQ entries in `conf/faq.yaml`, and welcome animation settings in `conf/welcome.yaml`, all reloaded without a server restart where the app supports live reload
-- **Configurable deployment** — Docker-first runtime, non-Docker local mode, YAML-driven config and theme overlays, SQLite persistence for history, previews, snapshots, and artifacts, optional large-body offload under `data_dir/body-store`, and configurable retention pruning via `permalink_retention_days`
+- **Configurable deployment** — Docker-first runtime, non-Docker local mode, YAML-driven config and theme overlays, SQLite by default, Postgres for larger deployments, optional large-body offload under `data_dir/body-store`, and configurable retention pruning via `permalink_retention_days`
 
 See [FEATURES.md](FEATURES.md) for the full grouped capability reference.
 
@@ -134,7 +134,7 @@ flowchart LR
   Browser["Browser UI"]
   Flask["Flask + Gunicorn"]
   Redis["Redis"]
-  Storage["SQLite + output artifacts"]
+  Storage["SQLite/Postgres + output artifacts"]
   Runner["Scanner subprocesses"]
 
   Browser -->|HTTP + SSE| Flask
@@ -148,7 +148,7 @@ At a high level:
 - the browser renders the shell UI and reads SSE output streams
 - Flask/Gunicorn handles routes, validation, built-in commands, and run setup
 - Redis coordinates shared worker state such as rate limits, run replay, and kill tracking
-- SQLite plus output files store history and share data
+- SQLite or Postgres plus output files store history and share data
 - real commands run in subprocesses, not inside the web worker
 
 For system design, contributor workflow, and detailed test references, use the specialized docs in the [Documentation Map](#documentation-map).
@@ -170,7 +170,7 @@ Use [CONFIGURATION.md](CONFIGURATION.md) for the full operator reference, includ
 - Files/workspace storage recipes
 - production host tuning notes
 
-SQLite is the default backend. If you're moving an existing install to Postgres, read [CONFIGURATION.md](CONFIGURATION.md#database-backend-selection) first, then use [docs/postgres-migration.md](docs/postgres-migration.md) for the offline migration workflow.
+SQLite is the default backend for local and single-user installs. Postgres is supported for larger deployments; with Compose, set both the `.env` values that start the `postgres` service and the app database settings described in [CONFIGURATION.md](CONFIGURATION.md#database-backend-selection). If you're moving an existing install to Postgres, use [docs/postgres-migration.md](docs/postgres-migration.md) for the offline migration workflow after you've backed up the SQLite data directory.
 
 Theme authoring details stay in [THEME.md](THEME.md), and command registry integration details stay in [docs/external-command-integrations.md](docs/external-command-integrations.md).
 
@@ -271,7 +271,7 @@ docker compose -f docker-compose.yml -f examples/docker-compose.prod.yml up --bu
 
 The production overlay adds reverse-proxy-aware environment values, GELF Docker log transport, an external Docker network model, persistent workspace storage at `/workspaces`, scanner-friendly `ulimits` and network sysctls, and optional Gunicorn sizing through `.env`.
 
-Use [CONFIGURATION.md](CONFIGURATION.md) for the full production configuration reference, including `.env`, `DOCKER_GELF_ADDRESS`, workspace bind-mount permissions, Docker daemon `nofile` limits, connection-tracking tuning, and Redis memory-overcommit guidance.
+Use [CONFIGURATION.md](CONFIGURATION.md) for the full production configuration reference, including `.env`, Postgres backend settings, `DOCKER_GELF_ADDRESS`, workspace bind-mount permissions, Docker daemon `nofile` limits, connection-tracking tuning, and Redis memory-overcommit guidance.
 
 ---
 
@@ -292,7 +292,7 @@ This section is intentionally operator-focused. For the developer-facing details
 
 The container filesystem is set to read-only (`read_only: true`) and the app volume is mounted read-only (`./app:/app:ro`). There are two intentional exceptions:
 
-- **`/data`** — a writable bind mount for the SQLite database, owned by `appuser` with `chmod 700`. Only Gunicorn can write here; the `scanner` user that runs commands has no access. If `data_dir` is unset and `/data` is not writable, the app falls back to `/tmp` for local/dev runs
+- **`/data`** — a writable bind mount for the default SQLite database, run-output artifacts, body-store files, and app-owned secret key file, owned by `appuser` with `chmod 700`. Postgres deployments still use this path for filesystem-backed artifacts and app-owned files. Only Gunicorn can write here; the `scanner` user that runs commands has no access. If `data_dir` is unset and `/data` is not writable, the app falls back to `/tmp` for local/dev runs
 - **`/tmp`** — a `tmpfs` mount (in-memory, wiped on restart) used by tools that need scratch space for templates, sessions, cache files, and optional session workspaces. Workspace session directories are app-managed, sticky, setgid, and group-scoped so `appuser` and `scanner` can share validated files without making them world-readable
 
 ### Session Files Storage
@@ -463,15 +463,16 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── config.py               # load_config(), CFG defaults, SCANNER_PREFIX detection, theme registry
 │   ├── core/
 │   │   ├── __init__.py         # Core helper package marker
-│   │   ├── database.py         # SQLite connection, schema init, retention pruning
-│   │   ├── database_backend.py # Database backend enum, dialect helpers, and SQLite diagnostics boundary
+│   │   ├── database.py         # DB connection, schema init, retention pruning
+│   │   ├── database_backend.py # Backend enum, dialect helpers, pool setup, and storage diagnostics boundary
 │   │   ├── helpers.py          # Trusted-proxy IP resolver, session-ID extraction, and shared request helpers
 │   │   ├── logging_setup.py    # Structured logging formatters and logger configuration
 │   │   ├── migrations/         # Postgres schema migration registry and runner
 │   │   │   ├── __init__.py     # Ordered Postgres migration list
 │   │   │   ├── runner.py       # Advisory-lock migration runner for Postgres startup
 │   │   │   ├── v0001_postgres_baseline.py # Current app schema baseline for Postgres
-│   │   │   └── v0002_postgres_run_search.py # Trigram-backed Postgres run-history search indexes
+│   │   │   ├── v0002_postgres_run_search.py # Trigram-backed Postgres run-history search indexes
+│   │   │   └── v0003_postgres_atlas_search.py # Trigram-backed Postgres Atlas search indexes
 │   │   ├── output_signals.py   # Server-side output signal and entity classifier
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and in-process fallback
 │   │   └── redaction.py        # Snapshot-share redaction helpers and built-in rule application
@@ -566,7 +567,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── secrets/
 │   │   │   ├── __init__.py     # Secrets service package marker
 │   │   │   ├── audit.py        # Structured audit events for secret metadata operations
-│   │   │   ├── storage.py      # SQLite metadata and ciphertext row helpers for encrypted session secrets
+│   │   │   ├── storage.py      # Metadata and ciphertext row helpers for encrypted session secrets
 │   │   │   └── vault.py        # Master-key loading, HKDF derivation, and AES-GCM wrap/unwrap helpers
 │   │   ├── session/
 │   │   │   ├── __init__.py     # Session service package marker
@@ -739,7 +740,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │       ├── theme_vars_script.html # Injected JS theme metadata/bootstrap block
 │       └── theme_vars_style.html # Injected CSS variable block for the active theme
 ├── assets/                     # README media assets (demo videos)
-├── data/                       # Writable volume — SQLite database (auto-created)
+├── data/                       # Writable volume — SQLite database, artifacts, body-store files, and secret key file
 │   └── history.db              #   stores run history and tab snapshots
 ├── docker-compose.yml
 ├── docs/
@@ -780,7 +781,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── record_demo.sh          # Records the desktop demo through OBS while Playwright drives the browser
 │   ├── record_demo_mobile.sh   # Records the mobile demo through OBS with the in-page keyboard overlay
 │   ├── run_playwright.sh       # Local Playwright wrapper — quiet by default, clears ports, and passes through specs/grep/config
-│   ├── run_postgres_tests.sh   # Opt-in Postgres pytest lane with host DSN and Compose-network modes
+│   ├── run_postgres_tests.sh   # Opt-in Postgres pytest lane with disposable container, host DSN, and Compose-network modes
 │   ├── run_pytest.sh           # Local pytest wrapper — pins repo config/rootdir and keeps collection scoped
 │   └── seed_history.py         # Populates history.db with registry-backed example runs under a UUID or tok_ session; includes the named visual-flows preset used by capture/demo work
 └── tests/
@@ -872,7 +873,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   ├── test_logging.py     # Structured logging: formatters, configure_logging, and event coverage
     │   ├── test_metrics_endpoint.py # Prometheus /metrics gate, label, bucket, and runtime-gauge coverage
     │   ├── test_output_search.py # SQLite FTS history-search coverage and fallback behavior
-    │   ├── test_postgres_backend.py # Optional Postgres backend smoke and migration-helper integration coverage
+    │   ├── test_postgres_backend.py # Postgres backend smoke and migration-helper integration coverage
     │   ├── test_request_kill_and_commands.py # /kill, request parsing, loader edges, and built-in command resolution
     │   ├── test_routes.py      # Flask integration tests via test client (all HTTP routes)
     │   ├── test_run_history_share.py # Higher-value /runs, history, share, built-in command, and persistence flows

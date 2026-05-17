@@ -28,7 +28,7 @@ from core.database import (
     validate_project_entity_type,
     validate_project_link_source,
 )
-from core.database_backend import DatabaseBackend, dialect_for_backend
+from core.database_backend import dialect_for_backend
 from core.output_signals import strip_ansi_codes
 from services.atlas.materializer import (
     canonicalize_entity_record,
@@ -138,28 +138,6 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _db_bool(value):
-    return dialect_for_backend(DB_BACKEND).boolean_param(value)
-
-
-def _json_param(value):
-    return dialect_for_backend(DB_BACKEND).json_param(value)
-
-
-def _decode_json_dict(value):
-    if isinstance(value, dict):
-        return value
-    try:
-        parsed = json.loads(value or "{}")
-    except (TypeError, ValueError):
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
-def _begin_write(conn):
-    conn.execute("BEGIN" if DB_BACKEND == DatabaseBackend.POSTGRES else "BEGIN IMMEDIATE")
-
-
 def _new_project_id() -> str:
     return "prj_" + secrets.token_hex(8)
 
@@ -264,7 +242,11 @@ def _row_to_target(row):
     if not row:
         return None
     if "canonical_value" in row.keys():
-        source_detail = _decode_json_dict(row["source_detail"]) if "source_detail" in row.keys() else {}
+        source_detail = (
+            dialect_for_backend(DB_BACKEND).decode_json_dict(row["source_detail"])
+            if "source_detail" in row.keys()
+            else {}
+        )
         return {
             "id": row["id"],
             "project_id": row["project_id"] if "project_id" in row.keys() else "",
@@ -293,7 +275,7 @@ def _row_to_target(row):
             "created": row["created"],
             "updated": row["updated"] if "updated" in row.keys() else row["last_seen_at"] or row["created"],
         }
-    source_detail = _decode_json_dict(row["source_detail"])
+    source_detail = dialect_for_backend(DB_BACKEND).decode_json_dict(row["source_detail"])
     return {
         "id": row["id"],
         "project_id": row["project_id"],
@@ -532,7 +514,7 @@ def _row_to_evidence_package(row):
     if not row:
         return None
     try:
-        manifest = _decode_json_dict(row["manifest"])
+        manifest = dialect_for_backend(DB_BACKEND).decode_json_dict(row["manifest"])
     except (TypeError, ValueError):
         manifest = {}
     return {
@@ -2192,16 +2174,9 @@ def _count_rows_for_ids(conn, table, column, ids):
 
 def _project_atlas_entity_select_sql(*, target_only=False):
     type_filter = "AND e.type IN ('domain', 'ip', 'url') " if target_only else ""
-    provider_list_expr = (
-        "STRING_AGG(DISTINCT eis.provider, ',')"
-        if DB_BACKEND == DatabaseBackend.POSTGRES
-        else "GROUP_CONCAT(DISTINCT eis.provider)"
-    )
-    value_order_expr = (
-        "LOWER(e.canonical_value) ASC"
-        if DB_BACKEND == DatabaseBackend.POSTGRES
-        else "e.canonical_value COLLATE NOCASE ASC"
-    )
+    dialect = dialect_for_backend(DB_BACKEND)
+    provider_list_expr = dialect.string_agg_distinct("eis.provider")
+    value_order_expr = dialect.case_insensitive_order("e.canonical_value")
     return (
         "SELECT e.id, l.project_id, e.type, e.canonical_value, "  # nosec
         "COALESCE(("
@@ -3163,8 +3138,8 @@ def create_evidence_package(session_id, project_id, data):
                     payload["name"],
                     payload["description"],
                     payload["redaction_mode"],
-                    _db_bool(payload["include_artifacts"]),
-                    _json_param(manifest),
+                    dialect_for_backend(DB_BACKEND).boolean_param(payload["include_artifacts"]),
+                    dialect_for_backend(DB_BACKEND).json_param(manifest),
                     created,
                     created,
                 ),
@@ -3591,7 +3566,7 @@ def _insert_project_link(
     entity_type = validate_project_entity_type(entity_type)
     source = validate_project_link_source(source)
     created = _now()
-    detail_json = _json_param(source_detail if isinstance(source_detail, dict) else {})
+    detail_json = dialect_for_backend(DB_BACKEND).json_param(source_detail if isinstance(source_detail, dict) else {})
     for _ in range(10):
         link_id = _new_project_link_id()
         conn.execute(
@@ -3823,7 +3798,7 @@ def unlink_project_run_entities(session_id, project_id, run_ids):
         seen.add(run_id)
         normalized_run_ids.append(run_id)
     with db_connect() as conn:
-        _begin_write(conn)
+        conn.execute(dialect_for_backend(DB_BACKEND).begin_immediate_sql())
         project = conn.execute(
             "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
             [session_id, project_id],
@@ -3849,7 +3824,7 @@ def unlink_project_run_entities(session_id, project_id, run_ids):
 def link_project_run_entities(session_id, project_id, run_ids, source="manual"):
     source = validate_project_link_source(source)
     with db_connect() as conn:
-        _begin_write(conn)
+        conn.execute(dialect_for_backend(DB_BACKEND).begin_immediate_sql())
         project = conn.execute(
             "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
             [session_id, project_id],
@@ -4434,7 +4409,7 @@ def _ensure_project_entity_link(
     source_detail=None,
 ):
     source = validate_project_link_source(source)
-    detail_json = _json_param(source_detail if isinstance(source_detail, dict) else {})
+    detail_json = dialect_for_backend(DB_BACKEND).json_param(source_detail if isinstance(source_detail, dict) else {})
     entity_id = upsert_entity(
         conn,
         session_id,
@@ -4741,7 +4716,7 @@ def link_project_entities(session_id, project_id, data):
     }
     results = []
     with db_connect() as conn:
-        _begin_write(conn)
+        conn.execute(dialect_for_backend(DB_BACKEND).begin_immediate_sql())
         project = conn.execute(
             "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
             [session_id, project_id],

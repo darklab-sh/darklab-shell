@@ -664,7 +664,7 @@ def run_builtin_stats(
               FROM runs
              WHERE session_id = ?
              ORDER BY started ASC, id ASC
-            """,  # nosec B608
+            """,  # nosec
             (session_id,),
         ).fetchall()
 

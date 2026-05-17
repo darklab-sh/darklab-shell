@@ -13,6 +13,7 @@ import json
 import logging
 import os
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 
 import fcntl
 
@@ -1013,14 +1014,23 @@ def _prune_retention(conn):
     """Delete runs and snapshots older than permalink_retention_days."""
     days = CFG.get("permalink_retention_days", 0)
     if days and days > 0:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=int(days))).strftime("%Y-%m-%d %H:%M:%S")
+        if DB_BACKEND == DatabaseBackend.POSTGRES:
+            run_older_sql = "r.started::timestamptz < ?::timestamptz"
+            started_older_sql = "started::timestamptz < ?::timestamptz"
+            created_older_sql = "created::timestamptz < ?::timestamptz"
+        else:
+            run_older_sql = "datetime(r.started) < ?"
+            started_older_sql = "datetime(started) < ?"
+            created_older_sql = "datetime(created) < ?"
         linked_run_row = conn.execute(
-            "SELECT COUNT(DISTINCT r.id), COUNT(DISTINCT l.project_id) "
+            "SELECT COUNT(DISTINCT r.id) AS linked_runs, COUNT(DISTINCT l.project_id) AS linked_projects "
             "FROM runs r JOIN project_links l ON l.entity_type = 'run' AND l.entity_id = r.id "
-            "WHERE r.started < datetime('now', ?)",
-            (f"-{days} days",),
+            f"WHERE {run_older_sql}",  # nosec B608
+            (cutoff,),
         ).fetchone()
-        linked_run_count = int(linked_run_row[0] or 0) if linked_run_row else 0
-        linked_project_count = int(linked_run_row[1] or 0) if linked_run_row else 0
+        linked_run_count = int(linked_run_row["linked_runs"] or 0) if linked_run_row else 0
+        linked_project_count = int(linked_run_row["linked_projects"] or 0) if linked_run_row else 0
         if linked_run_count:
             log.warning("PROJECT_RETENTION_WARNING", extra={
                 "linked_runs": linked_run_count,
@@ -1030,26 +1040,26 @@ def _prune_retention(conn):
         old_run_ids = [
             row["id"]
             for row in conn.execute(
-                "SELECT id FROM runs WHERE started < datetime('now', ?)",
-                (f"-{days} days",)
+                f"SELECT id FROM runs WHERE {started_older_sql}",  # nosec B608
+                (cutoff,)
             ).fetchall()
         ]
         old_snapshot_ids = [
             row["id"]
             for row in conn.execute(
-                "SELECT id FROM snapshots WHERE created < datetime('now', ?)",
-                (f"-{days} days",)
+                f"SELECT id FROM snapshots WHERE {created_older_sql}",  # nosec B608
+                (cutoff,)
             ).fetchall()
         ]
         delete_run_artifacts(conn, old_run_ids)
         delete_snapshot_metadata(conn, old_snapshot_ids)
         cur_runs  = conn.execute(
-            "DELETE FROM runs WHERE started < datetime('now', ?)",
-            (f"-{days} days",)
+            f"DELETE FROM runs WHERE {started_older_sql}",  # nosec B608
+            (cutoff,)
         )
         cur_snaps = conn.execute(
-            "DELETE FROM snapshots WHERE created < datetime('now', ?)",
-            (f"-{days} days",)
+            f"DELETE FROM snapshots WHERE {created_older_sql}",  # nosec B608
+            (cutoff,)
         )
         if cur_runs.rowcount or cur_snaps.rowcount:
             log.info("DB_PRUNED", extra={
@@ -1064,6 +1074,9 @@ def db_init():
     ensure_run_output_dir()
     if DB_BACKEND == DatabaseBackend.POSTGRES:
         _postgres_db_init()
+        with db_connect() as conn:
+            _prune_retention(conn)
+            conn.commit()
         return
     with _db_init_lock():
         with db_connect() as conn:

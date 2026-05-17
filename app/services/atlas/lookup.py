@@ -8,11 +8,11 @@ import json
 from typing import Any
 
 from core.database import DB_BACKEND
-from core.database_backend import DatabaseBackend
+from core.database_backend import dialect_for_backend
 from services.atlas.materializer import ATLAS_ENTITY_TYPES
 from services.intel.registry import provider_label
 from services.projects.contracts import FINDING_REVIEW_STATES
-from services.storage.body_store import load_text_body
+from services.storage.body_store import load_text_body, stored_body_pointer
 
 
 FINDING_STATUS_ORDER = {
@@ -38,6 +38,10 @@ ATLAS_ENTITY_EXPORT_FIELDS = (
 
 MAX_INTEL_SUMMARY_HIGHLIGHTS = 8
 ORPHAN_FILTERS = {"all", "hide", "only"}
+
+
+def _sql_join(parts: tuple[str, ...]) -> str:
+    return "".join(parts)
 
 
 def _row_to_entity(row) -> dict[str, Any]:
@@ -111,34 +115,33 @@ def _row_to_run_link(row) -> dict[str, Any]:
 
 def _label_order_sql(prefix: str = "") -> str:
     column = f"{prefix}label" if prefix else "label"
-    if DB_BACKEND == DatabaseBackend.POSTGRES:
-        return f"LOWER({column}) ASC, created ASC"
-    return f"{column} COLLATE NOCASE ASC, created ASC"
+    return dialect_for_backend(DB_BACKEND).case_insensitive_order(column) + ", created ASC"
 
 
 def _name_order_sql(prefix: str = "") -> str:
     column = f"{prefix}name" if prefix else "name"
-    if DB_BACKEND == DatabaseBackend.POSTGRES:
-        return f"LOWER({column}) ASC"
-    return f"{column} COLLATE NOCASE ASC"
+    return dialect_for_backend(DB_BACKEND).case_insensitive_order(column)
 
 
 def _provider_order_sql() -> str:
-    if DB_BACKEND == DatabaseBackend.POSTGRES:
-        return "LOWER(provider) ASC"
-    return "provider COLLATE NOCASE ASC"
+    return dialect_for_backend(DB_BACKEND).case_insensitive_order("provider")
+
+
+def _atlas_search_clause(columns: list[str]) -> str:
+    dialect = dialect_for_backend(DB_BACKEND)
+    return "AND (? = '' OR " + " OR ".join(dialect.text_search_expr(column) for column in columns) + ") "
 
 
 def _load_json_dict(value: object) -> dict[str, Any]:
     if isinstance(value, dict):
-        return value
-    if value is not None and not isinstance(value, str):
+        if not stored_body_pointer(value):
+            return value
+        text = load_text_body(value)
+    elif isinstance(value, str) or value is None:
+        text = load_text_body(value)
+    else:
         return {}
-    try:
-        parsed = json.loads(load_text_body(value) or "{}")
-    except (TypeError, json.JSONDecodeError, ValueError):
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
+    return dialect_for_backend(DB_BACKEND).decode_json_dict(text)
 
 
 def _row_to_intel_snapshot(row) -> dict[str, Any]:
@@ -605,8 +608,14 @@ def list_findings(
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
-    search = str(query or "").strip().lower()
-    search_like = f"%{search}%" if search else ""
+    search = str(query or "").strip()
+    search_like = dialect_for_backend(DB_BACKEND).text_search_param(search) if search else ""
+    search_clause = _atlas_search_clause([
+        "f.title",
+        "f.raw_line",
+        "f.tool_root",
+        "e.canonical_value",
+    ])
     project_filter = str(project_id or "").strip()
     normalized_orphan_filter = _normalize_orphan_filter(orphan_filter)
     statuses = _normalize_finding_statuses(review_states)
@@ -624,77 +633,75 @@ def list_findings(
         *status_params,
         *_orphan_params(normalized_orphan_filter),
     ]
-    total = int(conn.execute(
-        "SELECT COUNT(*) AS count FROM findings f "
-        "LEFT JOIN entities e ON e.id = f.entity_id "
-        "WHERE f.session_id = ? "
-        "AND (? = '' OR lower(f.title) LIKE ? OR lower(f.raw_line) LIKE ? "
-        "OR lower(f.tool_root) LIKE ? OR lower(COALESCE(e.canonical_value, '')) LIKE ?) "
-        "AND (? = '' OR EXISTS ("
-        "  SELECT 1 FROM project_links filter_link "
-        "  JOIN projects filter_project ON filter_project.id = filter_link.project_id "
-        "  WHERE filter_link.entity_type = 'atlas_entity' "
-        "  AND filter_link.entity_id = f.entity_id "
-        "  AND filter_link.project_id = ? "
-        "  AND filter_project.session_id = f.session_id"
-        ")) "
-        "AND (? = 0 OR f.status IN (?, ?, ?, ?, ?)) "
-        "AND (? = 'all' "
-        "OR (? = 'hide' AND EXISTS ("
-        "  SELECT 1 FROM findings_occurrences orphan_fo "
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id "
-        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id"
-        ")) "
-        "OR (? = 'only' AND NOT EXISTS ("
-        "  SELECT 1 FROM findings_occurrences orphan_fo "
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id "
-        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id"
+    total_sql = _sql_join((
+        "SELECT COUNT(*) AS count FROM findings f ",
+        "LEFT JOIN entities e ON e.id = f.entity_id ",
+        "WHERE f.session_id = ? ",
+        search_clause,
+        "AND (? = '' OR EXISTS (",
+        "  SELECT 1 FROM project_links filter_link ",
+        "  JOIN projects filter_project ON filter_project.id = filter_link.project_id ",
+        "  WHERE filter_link.entity_type = 'atlas_entity' ",
+        "  AND filter_link.entity_id = f.entity_id ",
+        "  AND filter_link.project_id = ? ",
+        "  AND filter_project.session_id = f.session_id",
+        ")) ",
+        "AND (? = 0 OR f.status IN (?, ?, ?, ?, ?)) ",
+        "AND (? = 'all' ",
+        "OR (? = 'hide' AND EXISTS (",
+        "  SELECT 1 FROM findings_occurrences orphan_fo ",
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id ",
+        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id",
+        ")) ",
+        "OR (? = 'only' AND NOT EXISTS (",
+        "  SELECT 1 FROM findings_occurrences orphan_fo ",
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id ",
+        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id",
         "))) ",
-        params,
-    ).fetchone()["count"] or 0)
+    ))
+    total = int(conn.execute(total_sql, params).fetchone()["count"] or 0)
     page_limit = max(1, min(int(limit or 50), 200))
     page_offset = max(0, int(offset or 0))
-    rows = conn.execute(
-        "SELECT f.id, f.entity_id, e.type AS entity_type, e.canonical_value AS entity_value, "
-        "f.subject_key, f.severity, f.kind, f.tool_root, f.first_run_id, f.last_run_id, "
-        "r.command AS run_command, r.run_kind AS run_kind, "
-        "f.first_seen_at, f.last_seen_at, f.occurrence_count, f.status, f.title, f.raw_line, f.created, "
-        "(SELECT fo.line_number FROM findings_occurrences fo WHERE fo.finding_id = f.id "
-        " ORDER BY fo.seen_at DESC, fo.run_id DESC LIMIT 1) AS line_number, "
-        "(SELECT fo.snippet FROM findings_occurrences fo WHERE fo.finding_id = f.id "
-        " ORDER BY fo.seen_at DESC, fo.run_id DESC LIMIT 1) AS snippet "
-        "FROM findings f "
-        "LEFT JOIN entities e ON e.id = f.entity_id "
-        "LEFT JOIN runs r ON r.id = f.last_run_id AND r.session_id = f.session_id "
-        "WHERE f.session_id = ? "
-        "AND (? = '' OR lower(f.title) LIKE ? OR lower(f.raw_line) LIKE ? "
-        "OR lower(f.tool_root) LIKE ? OR lower(COALESCE(e.canonical_value, '')) LIKE ?) "
-        "AND (? = '' OR EXISTS ("
-        "  SELECT 1 FROM project_links filter_link "
-        "  JOIN projects filter_project ON filter_project.id = filter_link.project_id "
-        "  WHERE filter_link.entity_type = 'atlas_entity' "
-        "  AND filter_link.entity_id = f.entity_id "
-        "  AND filter_link.project_id = ? "
-        "  AND filter_project.session_id = f.session_id"
-        ")) "
-        "AND (? = 0 OR f.status IN (?, ?, ?, ?, ?)) "
-        "AND (? = 'all' "
-        "OR (? = 'hide' AND EXISTS ("
-        "  SELECT 1 FROM findings_occurrences orphan_fo "
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id "
-        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id"
-        ")) "
-        "OR (? = 'only' AND NOT EXISTS ("
-        "  SELECT 1 FROM findings_occurrences orphan_fo "
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id "
-        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id"
-        "))) "
-        "ORDER BY CASE f.status "
-        "WHEN 'new' THEN 0 WHEN 'needs_followup' THEN 1 WHEN 'important' THEN 2 "
-        "WHEN 'reviewed' THEN 3 WHEN 'false_positive' THEN 4 ELSE 9 END, "
+    rows_sql = _sql_join((
+        "SELECT f.id, f.entity_id, e.type AS entity_type, e.canonical_value AS entity_value, ",
+        "f.subject_key, f.severity, f.kind, f.tool_root, f.first_run_id, f.last_run_id, ",
+        "r.command AS run_command, r.run_kind AS run_kind, ",
+        "f.first_seen_at, f.last_seen_at, f.occurrence_count, f.status, f.title, f.raw_line, f.created, ",
+        "(SELECT fo.line_number FROM findings_occurrences fo WHERE fo.finding_id = f.id ",
+        " ORDER BY fo.seen_at DESC, fo.run_id DESC LIMIT 1) AS line_number, ",
+        "(SELECT fo.snippet FROM findings_occurrences fo WHERE fo.finding_id = f.id ",
+        " ORDER BY fo.seen_at DESC, fo.run_id DESC LIMIT 1) AS snippet ",
+        "FROM findings f ",
+        "LEFT JOIN entities e ON e.id = f.entity_id ",
+        "LEFT JOIN runs r ON r.id = f.last_run_id AND r.session_id = f.session_id ",
+        "WHERE f.session_id = ? ",
+        search_clause,
+        "AND (? = '' OR EXISTS (",
+        "  SELECT 1 FROM project_links filter_link ",
+        "  JOIN projects filter_project ON filter_project.id = filter_link.project_id ",
+        "  WHERE filter_link.entity_type = 'atlas_entity' ",
+        "  AND filter_link.entity_id = f.entity_id ",
+        "  AND filter_link.project_id = ? ",
+        "  AND filter_project.session_id = f.session_id",
+        ")) ",
+        "AND (? = 0 OR f.status IN (?, ?, ?, ?, ?)) ",
+        "AND (? = 'all' ",
+        "OR (? = 'hide' AND EXISTS (",
+        "  SELECT 1 FROM findings_occurrences orphan_fo ",
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id ",
+        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id",
+        ")) ",
+        "OR (? = 'only' AND NOT EXISTS (",
+        "  SELECT 1 FROM findings_occurrences orphan_fo ",
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_fo.run_id ",
+        "  WHERE orphan_fo.finding_id = f.id AND orphan_run.session_id = f.session_id",
+        "))) ",
+        "ORDER BY CASE f.status ",
+        "WHEN 'new' THEN 0 WHEN 'needs_followup' THEN 1 WHEN 'important' THEN 2 ",
+        "WHEN 'reviewed' THEN 3 WHEN 'false_positive' THEN 4 ELSE 9 END, ",
         "f.last_seen_at DESC, f.created DESC LIMIT ? OFFSET ?",
-        [*params, page_limit, page_offset],
-    ).fetchall()
+    ))
+    rows = conn.execute(rows_sql, [*params, page_limit, page_offset]).fetchall()
     counts = {status: 0 for status in sorted(FINDING_REVIEW_STATES, key=lambda item: FINDING_STATUS_ORDER.get(item, 99))}
     count_rows = conn.execute(
         "SELECT f.status, COUNT(*) AS count FROM findings f WHERE f.session_id = ? "
@@ -738,8 +745,9 @@ def list_entities(
     normalized_type = str(entity_type or "").strip().lower()
     if normalized_type not in ATLAS_ENTITY_TYPES:
         normalized_type = ""
-    search = str(query or "").strip().lower()
-    search_like = f"%{search}%" if search else ""
+    search = str(query or "").strip()
+    search_like = dialect_for_backend(DB_BACKEND).text_search_param(search) if search else ""
+    search_clause = _atlas_search_clause(["e.canonical_value"])
     project_filter = str(project_id or "").strip()
     normalized_orphan_filter = _normalize_orphan_filter(orphan_filter)
     common_params: list[Any] = [
@@ -752,67 +760,67 @@ def list_entities(
         project_filter,
         *_orphan_params(normalized_orphan_filter),
     ]
-    total = int(conn.execute(
-        "SELECT COUNT(*) AS count "
-        "FROM entities e "
-        "WHERE e.session_id = ? "
-        "AND (? = '' OR e.type = ?) "
-        "AND (? = '' OR lower(e.canonical_value) LIKE ?) "
-        "AND (? = '' OR EXISTS ("
-        "  SELECT 1 FROM project_links filter_link "
-        "  JOIN projects filter_project ON filter_project.id = filter_link.project_id "
-        "  WHERE filter_link.entity_type = 'atlas_entity' "
-        "  AND filter_link.entity_id = e.id "
-        "  AND filter_link.project_id = ? "
-        "  AND filter_project.session_id = e.session_id"
-        ")) "
-        "AND (? = 'all' "
-        "OR (? = 'hide' AND EXISTS ("
-        "  SELECT 1 FROM entity_run_links orphan_erl "
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id "
-        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id"
-        ")) "
-        "OR (? = 'only' AND NOT EXISTS ("
-        "  SELECT 1 FROM entity_run_links orphan_erl "
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id "
-        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id"
+    total_sql = _sql_join((
+        "SELECT COUNT(*) AS count ",
+        "FROM entities e ",
+        "WHERE e.session_id = ? ",
+        "AND (? = '' OR e.type = ?) ",
+        search_clause,
+        "AND (? = '' OR EXISTS (",
+        "  SELECT 1 FROM project_links filter_link ",
+        "  JOIN projects filter_project ON filter_project.id = filter_link.project_id ",
+        "  WHERE filter_link.entity_type = 'atlas_entity' ",
+        "  AND filter_link.entity_id = e.id ",
+        "  AND filter_link.project_id = ? ",
+        "  AND filter_project.session_id = e.session_id",
+        ")) ",
+        "AND (? = 'all' ",
+        "OR (? = 'hide' AND EXISTS (",
+        "  SELECT 1 FROM entity_run_links orphan_erl ",
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id ",
+        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id",
+        ")) ",
+        "OR (? = 'only' AND NOT EXISTS (",
+        "  SELECT 1 FROM entity_run_links orphan_erl ",
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id ",
+        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id",
         "))) ",
-        common_params,
-    ).fetchone()["count"] or 0)
+    ))
+    total = int(conn.execute(total_sql, common_params).fetchone()["count"] or 0)
     page_limit = max(1, min(int(limit or 50), 200))
     page_offset = max(0, int(offset or 0))
-    rows = conn.execute(
-        "SELECT e.id, e.session_id, e.type, e.canonical_value, e.first_seen_at, e.last_seen_at, "
-        "e.occurrence_count, e.created, COUNT(DISTINCT entity_run.id) AS run_count "
-        "FROM entities e "
-        "LEFT JOIN entity_run_links erl ON erl.entity_id = e.id "
-        "LEFT JOIN runs entity_run ON entity_run.id = erl.run_id AND entity_run.session_id = e.session_id "
-        "WHERE e.session_id = ? "
-        "AND (? = '' OR e.type = ?) "
-        "AND (? = '' OR lower(e.canonical_value) LIKE ?) "
-        "AND (? = '' OR EXISTS ("
-        "  SELECT 1 FROM project_links filter_link "
-        "  JOIN projects filter_project ON filter_project.id = filter_link.project_id "
-        "  WHERE filter_link.entity_type = 'atlas_entity' "
-        "  AND filter_link.entity_id = e.id "
-        "  AND filter_link.project_id = ? "
-        "  AND filter_project.session_id = e.session_id"
-        ")) "
-        "AND (? = 'all' "
-        "OR (? = 'hide' AND EXISTS ("
-        "  SELECT 1 FROM entity_run_links orphan_erl "
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id "
-        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id"
-        ")) "
-        "OR (? = 'only' AND NOT EXISTS ("
-        "  SELECT 1 FROM entity_run_links orphan_erl "
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id "
-        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id"
-        "))) "
-        "GROUP BY e.id "
+    rows_sql = _sql_join((
+        "SELECT e.id, e.session_id, e.type, e.canonical_value, e.first_seen_at, e.last_seen_at, ",
+        "e.occurrence_count, e.created, COUNT(DISTINCT entity_run.id) AS run_count ",
+        "FROM entities e ",
+        "LEFT JOIN entity_run_links erl ON erl.entity_id = e.id ",
+        "LEFT JOIN runs entity_run ON entity_run.id = erl.run_id AND entity_run.session_id = e.session_id ",
+        "WHERE e.session_id = ? ",
+        "AND (? = '' OR e.type = ?) ",
+        search_clause,
+        "AND (? = '' OR EXISTS (",
+        "  SELECT 1 FROM project_links filter_link ",
+        "  JOIN projects filter_project ON filter_project.id = filter_link.project_id ",
+        "  WHERE filter_link.entity_type = 'atlas_entity' ",
+        "  AND filter_link.entity_id = e.id ",
+        "  AND filter_link.project_id = ? ",
+        "  AND filter_project.session_id = e.session_id",
+        ")) ",
+        "AND (? = 'all' ",
+        "OR (? = 'hide' AND EXISTS (",
+        "  SELECT 1 FROM entity_run_links orphan_erl ",
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id ",
+        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id",
+        ")) ",
+        "OR (? = 'only' AND NOT EXISTS (",
+        "  SELECT 1 FROM entity_run_links orphan_erl ",
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id ",
+        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id",
+        "))) ",
+        "GROUP BY e.id ",
         "ORDER BY e.last_seen_at DESC, e.canonical_value ASC LIMIT ? OFFSET ?",
-        [*common_params, page_limit, page_offset],
-    ).fetchall()
+    ))
+    rows = conn.execute(rows_sql, [*common_params, page_limit, page_offset]).fetchall()
     entities = []
     for row in rows:
         item = _row_to_entity(row)
@@ -857,8 +865,9 @@ def _query_export_entities(
     normalized_type = str(entity_type or "").strip().lower()
     if normalized_type not in ATLAS_ENTITY_TYPES:
         normalized_type = ""
-    search = str(query or "").strip().lower()
-    search_like = f"%{search}%" if search else ""
+    search = str(query or "").strip()
+    search_like = dialect_for_backend(DB_BACKEND).text_search_param(search) if search else ""
+    search_clause = _atlas_search_clause(["e.canonical_value"])
     project_filter = str(project_id or "").strip()
     normalized_orphan_filter = _normalize_orphan_filter(orphan_filter)
     page_limit = max(1, min(int(limit or 10000), 10000))
@@ -873,34 +882,34 @@ def _query_export_entities(
         *_orphan_params(normalized_orphan_filter),
         page_limit,
     ]
-    rows = conn.execute(
-        "SELECT e.id, e.type, e.canonical_value, e.first_seen_at, e.last_seen_at, e.occurrence_count "
-        "FROM entities e "
-        "WHERE e.session_id = ? "
-        "AND (? = '' OR e.type = ?) "
-        "AND (? = '' OR lower(e.canonical_value) LIKE ?) "
-        "AND (? = '' OR EXISTS ("
-        "  SELECT 1 FROM project_links filter_link "
-        "  JOIN projects filter_project ON filter_project.id = filter_link.project_id "
-        "  WHERE filter_link.entity_type = 'atlas_entity' "
-        "  AND filter_link.entity_id = e.id "
-        "  AND filter_link.project_id = ? "
-        "  AND filter_project.session_id = e.session_id"
-        ")) "
-        "AND (? = 'all' "
-        "OR (? = 'hide' AND EXISTS ("
-        "  SELECT 1 FROM entity_run_links orphan_erl "
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id "
-        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id"
-        ")) "
-        "OR (? = 'only' AND NOT EXISTS ("
-        "  SELECT 1 FROM entity_run_links orphan_erl "
-        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id "
-        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id"
-        "))) "
+    rows_sql = _sql_join((
+        "SELECT e.id, e.type, e.canonical_value, e.first_seen_at, e.last_seen_at, e.occurrence_count ",
+        "FROM entities e ",
+        "WHERE e.session_id = ? ",
+        "AND (? = '' OR e.type = ?) ",
+        search_clause,
+        "AND (? = '' OR EXISTS (",
+        "  SELECT 1 FROM project_links filter_link ",
+        "  JOIN projects filter_project ON filter_project.id = filter_link.project_id ",
+        "  WHERE filter_link.entity_type = 'atlas_entity' ",
+        "  AND filter_link.entity_id = e.id ",
+        "  AND filter_link.project_id = ? ",
+        "  AND filter_project.session_id = e.session_id",
+        ")) ",
+        "AND (? = 'all' ",
+        "OR (? = 'hide' AND EXISTS (",
+        "  SELECT 1 FROM entity_run_links orphan_erl ",
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id ",
+        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id",
+        ")) ",
+        "OR (? = 'only' AND NOT EXISTS (",
+        "  SELECT 1 FROM entity_run_links orphan_erl ",
+        "  JOIN runs orphan_run ON orphan_run.id = orphan_erl.run_id ",
+        "  WHERE orphan_erl.entity_id = e.id AND orphan_run.session_id = e.session_id",
+        "))) ",
         "ORDER BY e.last_seen_at DESC, e.canonical_value ASC LIMIT ?",
-        params,
-    ).fetchall()
+    ))
+    rows = conn.execute(rows_sql, params).fetchall()
     entities = [
         {
             "id": row["id"],

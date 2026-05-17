@@ -37,18 +37,6 @@ def _snapshot_summary(payload: dict[str, Any], fallback: str = "") -> str:
     return "lookup completed"
 
 
-def _json_param(value: dict[str, Any]):
-    return dialect_for_backend(DB_BACKEND).json_param(value)
-
-
-def _stored_payload(value: str) -> dict[str, Any]:
-    try:
-        parsed = json.loads(value or "{}")
-    except json.JSONDecodeError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
 def refresh_entity_intel(session_id: str, entity_id: str) -> dict[str, Any] | None:
     """Refresh provider intel for one Atlas entity and persist snapshots."""
     with db_connect() as conn:
@@ -89,7 +77,7 @@ def refresh_entity_intel(session_id: str, entity_id: str) -> dict[str, Any] | No
                 json.dumps(payload, sort_keys=True),
                 inline_threshold_bytes(CFG.get("intel_payload_inline_max_bytes")),
             )
-            data_json = _stored_payload(data_json_text)
+            data_json = dialect_for_backend(DB_BACKEND).decode_json_dict(data_json_text)
             conn.execute(
                 "INSERT INTO entity_intel_snapshots "
                 "(id, session_id, entity_id, provider, status, summary, data_json, fetched_at, expires_at) "
@@ -97,7 +85,16 @@ def refresh_entity_intel(session_id: str, entity_id: str) -> dict[str, Any] | No
                 "ON CONFLICT(entity_id, provider) DO UPDATE SET "
                 "status = excluded.status, summary = excluded.summary, data_json = excluded.data_json, "
                 "fetched_at = excluded.fetched_at, expires_at = excluded.expires_at",
-                (snapshot_id, session_id, entity_id, provider, status, summary, _json_param(data_json), fetched_at),
+                (
+                    snapshot_id,
+                    session_id,
+                    entity_id,
+                    provider,
+                    status,
+                    summary,
+                    dialect_for_backend(DB_BACKEND).json_param(data_json),
+                    fetched_at,
+                ),
             )
             if existing and existing["data_json"] != data_json:
                 replaced_payloads.append(existing["data_json"])

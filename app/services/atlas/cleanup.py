@@ -5,8 +5,15 @@ from __future__ import annotations
 from typing import Any
 
 from core.database import DB_BACKEND
-from core.database_backend import DatabaseBackend
+from core.database_backend import DatabaseBackend, dialect_for_backend
 from services.storage.body_store import delete_text_body
+
+_ATLAS_CLEANUP_TEMP_TABLES = (
+    "atlas_cleanup_run_ids",
+    "atlas_cleanup_excluded_entities",
+    "atlas_cleanup_excluded_findings",
+    "atlas_cleanup_allowed_findings",
+)
 
 
 def _unique_ids(values: list[str] | tuple[str, ...] | set[str] | None) -> list[str]:
@@ -23,9 +30,17 @@ def _placeholders(values: list[str]) -> str:
 
 
 def _insert_ignore_sql(table: str) -> str:
+    return f"INSERT INTO {table} (id) VALUES (?) {dialect_for_backend(DB_BACKEND).insert_or_ignore_clause(('id',))}"  # nosec
+
+
+def _create_cleanup_temp_table(conn, table_name: str) -> None:
     if DB_BACKEND == DatabaseBackend.POSTGRES:
-        return f"INSERT INTO {table} (id) VALUES (?) ON CONFLICT(id) DO NOTHING"  # nosec
-    return f"INSERT OR IGNORE INTO {table} (id) VALUES (?)"  # nosec
+        conn.execute(f"DROP TABLE IF EXISTS pg_temp.{table_name}")  # nosec
+        conn.execute(
+            f"CREATE TEMP TABLE {table_name} (id TEXT PRIMARY KEY) ON COMMIT DROP"  # nosec
+        )
+        return
+    conn.execute(f"CREATE TEMP TABLE IF NOT EXISTS {table_name} (id TEXT PRIMARY KEY)")  # nosec
 
 
 def _public_preview(preview: dict[str, Any]) -> dict[str, Any]:
@@ -114,10 +129,8 @@ def atlas_run_cleanup_preview(
             "curated_finding_count": 0,
         }
 
-    conn.execute("CREATE TEMP TABLE IF NOT EXISTS atlas_cleanup_run_ids (id TEXT PRIMARY KEY)")
-    conn.execute("CREATE TEMP TABLE IF NOT EXISTS atlas_cleanup_excluded_entities (id TEXT PRIMARY KEY)")
-    conn.execute("CREATE TEMP TABLE IF NOT EXISTS atlas_cleanup_excluded_findings (id TEXT PRIMARY KEY)")
-    conn.execute("CREATE TEMP TABLE IF NOT EXISTS atlas_cleanup_allowed_findings (id TEXT PRIMARY KEY)")
+    for table_name in _ATLAS_CLEANUP_TEMP_TABLES:
+        _create_cleanup_temp_table(conn, table_name)
     conn.execute("DELETE FROM atlas_cleanup_run_ids")
     conn.execute("DELETE FROM atlas_cleanup_excluded_entities")
     conn.execute("DELETE FROM atlas_cleanup_excluded_findings")

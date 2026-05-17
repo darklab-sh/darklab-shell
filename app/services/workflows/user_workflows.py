@@ -4,12 +4,11 @@ Session-scoped user-created workflows.
 
 from __future__ import annotations
 
-import json
 import secrets
 from datetime import datetime, timezone
 
 from core.database import DB_BACKEND, db_connect
-from core.database_backend import DatabaseBackend, dialect_for_backend
+from core.database_backend import dialect_for_backend
 from services.workflows.catalog import normalize_workflow_entry
 
 
@@ -29,27 +28,13 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _decode_json_list(value):
-    if isinstance(value, list):
-        return value
-    try:
-        parsed = json.loads(value or "[]")
-    except (TypeError, json.JSONDecodeError):
-        return []
-    return parsed if isinstance(parsed, list) else []
-
-
-def _json_param(value):
-    return dialect_for_backend(DB_BACKEND).json_param(value)
-
-
 def _row_to_workflow(row):
     item = {
         "id": row["id"],
         "title": row["title"],
         "description": row["description"] or "",
-        "inputs": _decode_json_list(row["inputs"]),
-        "steps": _decode_json_list(row["steps"]),
+        "inputs": dialect_for_backend(DB_BACKEND).decode_json_list(row["inputs"]),
+        "steps": dialect_for_backend(DB_BACKEND).decode_json_list(row["steps"]),
         "source": "user",
         "created": row["created"],
         "updated": row["updated"],
@@ -145,27 +130,21 @@ def create_user_workflow(session_id, data):
     workflow = _clean_payload(data)
     created = _now()
     with db_connect() as conn:
+        dialect = dialect_for_backend(DB_BACKEND)
         for _ in range(10):
             workflow_id = _new_workflow_id()
             result = conn.execute(
-                (
-                    "INSERT INTO user_workflows "
-                    "(id, session_id, title, description, inputs, steps, created, updated) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
-                    "ON CONFLICT(id) DO NOTHING"
-                    if DB_BACKEND == DatabaseBackend.POSTGRES
-                    else
-                    "INSERT OR IGNORE INTO user_workflows "
-                    "(id, session_id, title, description, inputs, steps, created, updated) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-                ),
+                "INSERT INTO user_workflows "  # nosec B608
+                "(id, session_id, title, description, inputs, steps, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                + dialect.insert_or_ignore_clause(("id",)),
                 (
                     workflow_id,
                     session_id,
                     workflow["title"],
                     workflow["description"],
-                    _json_param(workflow["inputs"]),
-                    _json_param(workflow["steps"]),
+                    dialect.json_param(workflow["inputs"]),
+                    dialect.json_param(workflow["steps"]),
                     created,
                     created,
                 ),
@@ -180,6 +159,7 @@ def update_user_workflow(session_id, workflow_id, data):
     workflow = _clean_payload(data)
     updated = _now()
     with db_connect() as conn:
+        dialect = dialect_for_backend(DB_BACKEND)
         result = conn.execute(
             "UPDATE user_workflows "
             "SET title = ?, description = ?, inputs = ?, steps = ?, updated = ? "
@@ -187,8 +167,8 @@ def update_user_workflow(session_id, workflow_id, data):
             (
                 workflow["title"],
                 workflow["description"],
-                _json_param(workflow["inputs"]),
-                _json_param(workflow["steps"]),
+                dialect.json_param(workflow["inputs"]),
+                dialect.json_param(workflow["steps"]),
                 updated,
                 session_id,
                 workflow_id,

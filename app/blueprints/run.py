@@ -37,7 +37,7 @@ from services.commands.registry import (
 )
 from config import CFG, SCANNER_PREFIX
 from core.database import DB_BACKEND, db_connect
-from core.database_backend import DatabaseBackend
+from core.database_backend import DatabaseBackend, dialect_for_backend
 from extensions import limiter
 from services.commands.builtins import (
     execute_builtin_command,
@@ -186,13 +186,6 @@ CLIENT_SIDE_RUN_ROOTS = {
 }
 
 
-def _db_bool(value: object) -> bool | int:
-    normalized = bool(value)
-    if DB_BACKEND == DatabaseBackend.POSTGRES:
-        return normalized
-    return 1 if normalized else 0
-
-
 def _insert_run_row(
     conn,
     *,
@@ -211,6 +204,7 @@ def _insert_run_row(
     full_output_truncated: object,
     output_search_text: str,
 ) -> None:
+    dialect = dialect_for_backend(DB_BACKEND)
     conn.execute(
         "INSERT INTO runs "
         "("
@@ -229,10 +223,10 @@ def _insert_run_row(
             exit_code,
             None,
             output_preview,
-            _db_bool(preview_truncated),
+            dialect.boolean_param(preview_truncated),
             int(output_line_count or 0),
-            _db_bool(full_output_available),
-            _db_bool(full_output_truncated),
+            dialect.boolean_param(full_output_available),
+            dialect.boolean_param(full_output_truncated),
             output_search_text,
         ),
     )
@@ -249,13 +243,14 @@ def _upsert_run_output_artifact(
     truncated: object,
     created: str,
 ) -> None:
+    dialect = dialect_for_backend(DB_BACKEND)
     params = (
         run_id,
         rel_path,
         compression,
         int(byte_size or 0),
         int(line_count or 0),
-        _db_bool(truncated),
+        dialect.boolean_param(truncated),
         created,
     )
     if DB_BACKEND == DatabaseBackend.POSTGRES:

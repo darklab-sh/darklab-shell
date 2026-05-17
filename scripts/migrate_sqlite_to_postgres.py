@@ -37,6 +37,10 @@ import sys
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "app"))
+
+from core.migrations import MIGRATIONS  # noqa: E402
+from core.database_backend import postgres_jsonb_param  # noqa: E402
 
 FTS_TABLE_PREFIXES = ("runs_fts",)
 BODY_POINTER_KEY = "__darklab_body_store__"
@@ -54,7 +58,7 @@ BODY_POINTER_COLUMNS = frozenset({
     ("snapshots", "content"),
     ("entity_intel_snapshots", "data_json"),
 })
-REQUIRED_APP_MIGRATIONS = ("0001", "0002")
+REQUIRED_APP_MIGRATIONS = tuple(migration.version for migration in MIGRATIONS)
 DEDUPLICATE_COPY_KEYS = {
     "findings_occurrences": ("finding_id", "run_id", "line_number"),
 }
@@ -267,12 +271,11 @@ def _load_psycopg():
     try:
         import psycopg  # type: ignore[reportMissingImports]
         from psycopg.rows import dict_row  # type: ignore[reportMissingImports]
-        from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
     except ImportError as exc:
         raise RuntimeError(
             "Install app requirements first: psycopg[binary,pool] is required for Postgres migration"
         ) from exc
-    return psycopg, dict_row, Jsonb
+    return psycopg, dict_row
 
 
 def _postgres_tables(pg_conn: Any, schema: str) -> list[str]:
@@ -365,23 +368,23 @@ def _build_copy_plans(pg_conn: Any, schema: str, source_tables: list[TableInfo])
     return plans, skipped
 
 
-def _json_value(value: Any, jsonb_type: Any) -> Any:
+def _json_value(value: Any, jsonb_param: Any) -> Any:
     if value is None:
         return None
     if isinstance(value, (dict, list)):
-        return jsonb_type(value)
+        return jsonb_param(value)
     try:
-        return jsonb_type(json.loads(str(value)))
+        return jsonb_param(json.loads(str(value)))
     except (TypeError, json.JSONDecodeError):
-        return jsonb_type(str(value))
+        return jsonb_param(str(value))
 
 
-def _convert_row(plan: CopyTablePlan, row: sqlite3.Row, jsonb_type: Any) -> tuple[Any, ...]:
+def _convert_row(plan: CopyTablePlan, row: sqlite3.Row, jsonb_param: Any) -> tuple[Any, ...]:
     values = []
     for source, destination in zip(plan.source_columns, plan.destination_columns):
         value = row[source.name]
         if (plan.name, source.name) in JSON_COLUMNS or destination.data_type == "jsonb":
-            values.append(_json_value(value, jsonb_type))
+            values.append(_json_value(value, jsonb_param))
         elif destination.data_type == "boolean" and value is not None:
             values.append(bool(value))
         else:
@@ -394,7 +397,7 @@ def _copy_table(
     pg_conn: Any,
     plan: CopyTablePlan,
     *,
-    jsonb_type: Any,
+    jsonb_param: Any,
     batch_size: int,
     resume: bool,
 ) -> int:
@@ -411,7 +414,7 @@ def _copy_table(
     rows: list[tuple[Any, ...]] = []
     with pg_conn.cursor() as cursor:
         for row in sqlite_conn.execute(select_sql):
-            rows.append(_convert_row(plan, row, jsonb_type))
+            rows.append(_convert_row(plan, row, jsonb_param))
             if len(rows) >= batch_size:
                 cursor.executemany(insert_sql, rows)
                 copied += len(rows)
@@ -501,6 +504,24 @@ def _create_search_indexes(pg_conn: Any, schema: str) -> None:
         "CREATE INDEX IF NOT EXISTS idx_runs_output_search_text_trgm "
         "ON runs USING gin (output_search_text gin_trgm_ops)"
     )
+    if "entities" in table_names:
+        pg_conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_entities_canonical_value_trgm "
+            "ON entities USING gin (canonical_value gin_trgm_ops)"
+        )
+    if "findings" in table_names:
+        pg_conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_findings_title_trgm "
+            "ON findings USING gin (title gin_trgm_ops)"
+        )
+        pg_conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_findings_raw_line_trgm "
+            "ON findings USING gin (raw_line gin_trgm_ops)"
+        )
+        pg_conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_findings_tool_root_trgm "
+            "ON findings USING gin (tool_root gin_trgm_ops)"
+        )
 
 
 def _set_migration_triggers(pg_conn: Any, plans: list[CopyTablePlan], *, enabled: bool) -> None:
@@ -538,13 +559,13 @@ def migrate(args: argparse.Namespace) -> MigrationReport:
             raise RuntimeError(
                 "Referenced files are missing; fix the artifact root or restore the files before migrating:\n"
                 + "\n".join(f"  {path}" for path in missing_files[:20])
-        )
+            )
         if args.dry_run:
             return MigrationReport({}, skipped, verified_files, copied_files, [], {})
         if not database_url:
             raise RuntimeError("--database-url or DATABASE_URL is required")
 
-        psycopg, dict_row, jsonb_type = _load_psycopg()
+        psycopg, dict_row = _load_psycopg()
 
         with psycopg.connect(database_url, row_factory=dict_row) as pg_conn:
             _prepare_postgres_schema(pg_conn, schema)
@@ -562,23 +583,19 @@ def migrate(args: argparse.Namespace) -> MigrationReport:
             copied_rows = {}
             deduplicated_rows = {}
             _set_migration_triggers(pg_conn, plans, enabled=False)
-            try:
-                for plan in plans:
-                    copied_rows[plan.name] = _copy_table(
-                        sqlite_conn,
-                        pg_conn,
-                        plan,
-                        jsonb_type=jsonb_type,
-                        batch_size=max(1, int(args.batch_size)),
-                        resume=args.resume,
-                    )
-                    deduplicated = _deduplicated_row_count(sqlite_conn, plan)
-                    if deduplicated:
-                        deduplicated_rows[plan.name] = deduplicated
-            except Exception:
-                raise
-            else:
-                _set_migration_triggers(pg_conn, plans, enabled=True)
+            for plan in plans:
+                copied_rows[plan.name] = _copy_table(
+                    sqlite_conn,
+                    pg_conn,
+                    plan,
+                    jsonb_param=postgres_jsonb_param,
+                    batch_size=max(1, int(args.batch_size)),
+                    resume=args.resume,
+                )
+                deduplicated = _deduplicated_row_count(sqlite_conn, plan)
+                if deduplicated:
+                    deduplicated_rows[plan.name] = deduplicated
+            _set_migration_triggers(pg_conn, plans, enabled=True)
 
             if not args.skip_search_backfill:
                 _create_search_indexes(pg_conn, schema)

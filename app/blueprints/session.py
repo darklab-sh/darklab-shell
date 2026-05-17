@@ -13,7 +13,7 @@ from urllib.parse import urlsplit, urlunsplit
 from flask import Blueprint, jsonify, request
 
 from core.database import DB_BACKEND, db_connect
-from core.database_backend import DatabaseBackend, dialect_for_backend
+from core.database_backend import dialect_for_backend
 from services.commands.registry import load_tour
 from core.helpers import get_client_ip, get_log_session_id, get_session_id, is_valid_anonymous_session_id
 from services.projects.workspace import migrate_project_workspace_session
@@ -138,15 +138,11 @@ def _decode_preferences(value, *, session_id=""):
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _json_param(value):
-    return dialect_for_backend(DB_BACKEND).json_param(value)
-
-
 def _save_session_preferences(conn, session_id, preferences, updated):
     conn.execute(
         "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (?, ?, ?) "
         "ON CONFLICT(session_id) DO UPDATE SET preferences = excluded.preferences, updated = excluded.updated",
-        (session_id, _json_param(preferences), updated),
+        (session_id, dialect_for_backend(DB_BACKEND).json_param(preferences), updated),
     )
 
 
@@ -614,41 +610,25 @@ def session_migrate():
             "UPDATE snapshots SET session_id = ? WHERE session_id = ?",
             (to_session_id, from_session_id),
         )
-        if DB_BACKEND == DatabaseBackend.POSTGRES:
-            stars_insert = conn.execute(
-                "INSERT INTO starred_commands (session_id, command) "
-                "SELECT ?, command FROM starred_commands WHERE session_id = ? "
-                "ON CONFLICT(session_id, command) DO NOTHING",
-                (to_session_id, from_session_id),
-            )
-            prefs_insert = conn.execute(
-                "INSERT INTO session_preferences (session_id, preferences, updated) "
-                "SELECT ?, preferences, updated FROM session_preferences WHERE session_id = ? "
-                "ON CONFLICT(session_id) DO NOTHING",
-                (to_session_id, from_session_id),
-            )
-            vars_insert = conn.execute(
-                "INSERT INTO session_variables (session_id, name, value, updated) "
-                "SELECT ?, name, value, updated FROM session_variables WHERE session_id = ? "
-                "ON CONFLICT(session_id, name) DO NOTHING",
-                (to_session_id, from_session_id),
-            )
-        else:
-            stars_insert = conn.execute(
-                "INSERT OR IGNORE INTO starred_commands (session_id, command) "
-                "SELECT ?, command FROM starred_commands WHERE session_id = ?",
-                (to_session_id, from_session_id),
-            )
-            prefs_insert = conn.execute(
-                "INSERT OR IGNORE INTO session_preferences (session_id, preferences, updated) "
-                "SELECT ?, preferences, updated FROM session_preferences WHERE session_id = ?",
-                (to_session_id, from_session_id),
-            )
-            vars_insert = conn.execute(
-                "INSERT OR IGNORE INTO session_variables (session_id, name, value, updated) "
-                "SELECT ?, name, value, updated FROM session_variables WHERE session_id = ?",
-                (to_session_id, from_session_id),
-            )
+        dialect = dialect_for_backend(DB_BACKEND)
+        stars_insert = conn.execute(
+            "INSERT INTO starred_commands (session_id, command) "  # nosec B608
+            "SELECT ?, command FROM starred_commands WHERE session_id = ? "
+            + dialect.insert_or_ignore_clause(("session_id", "command")),
+            (to_session_id, from_session_id),
+        )
+        prefs_insert = conn.execute(
+            "INSERT INTO session_preferences (session_id, preferences, updated) "  # nosec B608
+            "SELECT ?, preferences, updated FROM session_preferences WHERE session_id = ? "
+            + dialect.insert_or_ignore_clause(("session_id",)),
+            (to_session_id, from_session_id),
+        )
+        vars_insert = conn.execute(
+            "INSERT INTO session_variables (session_id, name, value, updated) "  # nosec B608
+            "SELECT ?, name, value, updated FROM session_variables WHERE session_id = ? "
+            + dialect.insert_or_ignore_clause(("session_id", "name")),
+            (to_session_id, from_session_id),
+        )
         workflows_result = conn.execute(
             "UPDATE user_workflows SET session_id = ? WHERE session_id = ?",
             (to_session_id, from_session_id),
@@ -676,7 +656,7 @@ def session_migrate():
 
     migrated_runs = runs_result.rowcount
     migrated_snapshots = snaps_result.rowcount
-    # Use the INSERT rowcount, not the DELETE rowcount — INSERT OR IGNORE only
+        # Use the INSERT rowcount, not the DELETE rowcount — duplicate rows are ignored.
     # counts rows actually written; DELETE counts all source rows including any
     # that were skipped because the destination already had the same command.
     migrated_stars = stars_insert.rowcount

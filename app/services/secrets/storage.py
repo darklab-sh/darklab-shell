@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from core.database import DB_BACKEND, db_connect
-from core.database_backend import DatabaseBackend
+from core.database_backend import dialect_for_backend
 from services.secrets.vault import decrypt_secret, encrypt_secret
 
 SECRET_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
@@ -181,18 +181,13 @@ def migrate_session_secrets(conn, from_session_id: str, to_session_id: str) -> i
     ).fetchall()
     migrated = 0
     migrated_names = []
+    insert_sql = (
+        "INSERT INTO secrets "  # nosec B608
+        "(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+        + dialect_for_backend(DB_BACKEND).insert_or_ignore_clause(("session_token", "name"))
+    )
     for row in rows:
-        insert_sql = (
-            "INSERT INTO secrets "
-            "(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(session_token, name) DO NOTHING"
-            if DB_BACKEND == DatabaseBackend.POSTGRES
-            else
-            "INSERT OR IGNORE INTO secrets "
-            "(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)"
-        )
         cur = conn.execute(
             insert_sql,
             (

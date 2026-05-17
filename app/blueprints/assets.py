@@ -18,7 +18,6 @@ from core.database import DB_BACKEND, DB_PATH, db_connect
 from core.database_backend import (
     DatabaseBackend,
     postgres_storage_rows,
-    postgres_table_columns,
     postgres_table_names,
     postgres_table_row_count,
     quote_identifier,
@@ -106,7 +105,6 @@ _DIAG_PROJECT_WORKSPACE_COUNT_TABLES = {
     "projects": "projects",
     "project_links": "links",
     "run_file_artifacts": "artifacts",
-    "project_targets": "targets",
     "findings": "findings",
     "entity_labels": "labels",
     "entity_notes": "notes",
@@ -134,7 +132,6 @@ _DIAG_STORAGE_BUCKETS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Projects and workspace", (
         "projects",
         "project_links",
-        "project_targets",
         "run_file_artifacts",
         "evidence_packages",
     )),
@@ -170,7 +167,6 @@ _DIAG_PAYLOAD_COLUMNS = {
     "findings_occurrences": ("finding_id", "run_id", "snippet"),
     "projects": ("name", "slug", "description", "status", "color"),
     "project_links": ("entity_type", "entity_id", "source", "review_state", "source_detail"),
-    "project_targets": ("type", "value", "label", "notes", "source", "status"),
     "evidence_packages": ("name", "description", "redaction_mode", "manifest", "status"),
     "session_tokens": ("token",),
     "session_preferences": ("session_id", "preferences"),
@@ -319,10 +315,18 @@ def _diag_row_value(row, key: str, index: int, default=None):
         return default
 
 
-def _diag_live_table_columns(conn, table_name: str) -> set[str]:
-    if DB_BACKEND == DatabaseBackend.POSTGRES:
-        return postgres_table_columns(conn, table_name)
-    return sqlite_table_columns(conn, table_name)
+def _diag_postgres_table_columns_by_table(conn) -> dict[str, set[str]]:
+    rows = conn.execute(
+        "SELECT table_name, column_name FROM information_schema.columns "
+        "WHERE table_schema = current_schema()"
+    ).fetchall()
+    columns: dict[str, set[str]] = {}
+    for row in rows:
+        table_name = str(_diag_row_value(row, "table_name", 0) or "")
+        column_name = str(_diag_row_value(row, "column_name", 1) or "")
+        if table_name and column_name:
+            columns.setdefault(table_name, set()).add(column_name)
+    return columns
 
 
 def _diag_postgres_table_storage_breakdown(conn, table_counts: dict[str, int]) -> dict:
@@ -383,11 +387,12 @@ def _diag_postgres_table_storage_breakdown(conn, table_counts: dict[str, int]) -
             "shadows": [],
         })
 
+    columns_by_table = _diag_postgres_table_columns_by_table(conn)
     for table_name, columns in _DIAG_PAYLOAD_COLUMNS.items():
         if table_name not in entries:
             continue
         try:
-            live_columns = postgres_table_columns(conn, table_name)
+            live_columns = columns_by_table.get(table_name, set())
             selected_text = tuple(column for column in columns if column in live_columns)
             selected_bytes = tuple(
                 column for column in _DIAG_PAYLOAD_BYTE_COLUMNS.get(table_name, ())
@@ -398,7 +403,7 @@ def _diag_postgres_table_storage_breakdown(conn, table_counts: dict[str, int]) -
                 continue
             expr = _diag_sum_payload_expr(selected_text, selected_bytes, backend=DatabaseBackend.POSTGRES)
             value = conn.execute(
-                "SELECT " + expr + " AS value FROM " + quote_identifier(table_name, DatabaseBackend.POSTGRES),  # nosec B608
+                "SELECT " + expr + " AS value FROM " + quote_identifier(table_name, DatabaseBackend.POSTGRES),  # nosec
             ).fetchone()
             entries[table_name]["logical_payload"] = int(_diag_row_value(value, "value", 0, 0) or 0)
         except Exception as exc:
@@ -471,7 +476,7 @@ def _diag_postgres_table_storage_breakdown(conn, table_counts: dict[str, int]) -
 
     try:
         if "runs" in entries:
-            live_run_columns = postgres_table_columns(conn, "runs")
+            live_run_columns = columns_by_table.get("runs", set())
             required_columns = {"id", "command"}
             if not required_columns.issubset(live_run_columns):
                 raise ValueError("runs table is missing required identity columns")
@@ -648,7 +653,7 @@ def _diag_table_storage_breakdown(conn, table_counts: dict[str, int] | None = No
                 continue
             expr = _diag_sum_payload_expr(selected_text, selected_bytes)
             value = conn.execute(
-        "SELECT " + expr + " FROM " + quote_sqlite_identifier(table_name),  # nosec
+                "SELECT " + expr + " FROM " + quote_sqlite_identifier(table_name),  # nosec
             ).fetchone()[0]
             entries[table_name]["logical_payload"] = int(value or 0)
         except Exception as exc:
@@ -1370,32 +1375,33 @@ def diag():
                 ]
                 activity = []
                 for label, cutoff in cutoffs:
-                    n = conn.execute(
-                        "SELECT COUNT(*) FROM runs WHERE started >= ?",
+                    row = conn.execute(
+                        "SELECT COUNT(*) AS count FROM runs WHERE started >= ?",
                         (cutoff,),
-                    ).fetchone()[0]
+                    ).fetchone()
+                    n = _diag_row_value(row, "count", 0, 0)
                     activity.append({"label": label, "count": n})
                 stats["activity"] = activity
 
                 # Exit-code outcome breakdown
                 row = conn.execute(
                     """SELECT
-                         SUM(CASE WHEN exit_code = 0                             THEN 1 ELSE 0 END),
+                         SUM(CASE WHEN exit_code = 0                             THEN 1 ELSE 0 END) AS success,
                          SUM(
                              CASE
                                  WHEN exit_code IS NOT NULL AND exit_code != 0 AND exit_code != ?
                                  THEN 1
                                  ELSE 0
                              END
-                         ),
-                         SUM(CASE WHEN exit_code IS NULL                         THEN 1 ELSE 0 END)
+                         ) AS failed,
+                         SUM(CASE WHEN exit_code IS NULL                         THEN 1 ELSE 0 END) AS incomplete
                        FROM runs""",
                     (GRACEFUL_TERMINATION_EXIT_CODE,),
                 ).fetchone()
                 stats["outcomes"] = {
-                    "success":    row[0] or 0,
-                    "failed":     row[1] or 0,
-                    "incomplete": row[2] or 0,
+                    "success":    _diag_row_value(row, "success", 0, 0) or 0,
+                    "failed":     _diag_row_value(row, "failed", 1, 0) or 0,
+                    "incomplete": _diag_row_value(row, "incomplete", 2, 0) or 0,
                 }
 
                 # Top 10 commands by run count
@@ -1403,7 +1409,13 @@ def diag():
                     "SELECT command, COUNT(*) AS n FROM runs"
                     " GROUP BY command ORDER BY n DESC LIMIT 10"
                 ).fetchall()
-                stats["top_by_freq"] = [{"command": r[0], "count": r[1]} for r in rows]
+                stats["top_by_freq"] = [
+                    {
+                        "command": _diag_row_value(row, "command", 0, ""),
+                        "count": _diag_row_value(row, "n", 1, 0),
+                    }
+                    for row in rows
+                ]
 
                 # Top 5 longest individual runs
                 if DB_BACKEND == DatabaseBackend.POSTGRES:
@@ -1424,8 +1436,11 @@ def diag():
                                        LIMIT 5"""
                 rows = conn.execute(duration_sql).fetchall()
                 stats["top_by_duration"] = [
-                    {"command": r[0], "elapsed": _fmt_elapsed(r[1])}
-                    for r in rows
+                    {
+                        "command": _diag_row_value(row, "command", 0, ""),
+                        "elapsed": _fmt_elapsed(_diag_row_value(row, "elapsed_s", 1, 0)),
+                    }
+                    for row in rows
                 ]
 
             stats["ok"] = True

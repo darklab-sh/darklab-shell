@@ -7,7 +7,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
-  - [Full Postgres support](#full-postgres-support)
   - [High-volume output handling](#high-volume-output-handling)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
@@ -45,28 +44,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ---
 
 ## Open TODOs
-
-### Full Postgres support
-- **Decision frame**
-  - SQLite stays the default backend for local and single-user installs.
-  - Postgres is the supported production-scaling backend once every app route and background helper can run against it through the normal app query path.
-  - Postgres support is complete only when setting `DATABASE_BACKEND=postgres` starts the app without SQLite gating and the normal backend/route test lane passes against a Compose-network Postgres database.
-  - SQLite-to-Postgres conversion stays an explicit offline operator action through `scripts/migrate_sqlite_to_postgres.py`; the app should never auto-convert a live SQLite database during startup.
-- **Phase 7 — Operator readiness and docs**
-  - Update `CONFIGURATION.md`, `ARCHITECTURE.md`, `README.md`, and `docs/postgres-migration.md` so Postgres is documented as supported, not planning-only.
-  - Document the Compose `.env` path, config precedence, migration workflow, backup/rollback expectations, and the recommended test command for container-only Postgres.
-  - Update `/diag` and `/metrics` wording if any SQLite-only storage labels diverge under Postgres.
-  - Update release drafts and `CHANGELOG.md` as each implementation phase lands.
-- **Completion criteria**
-  - `DATABASE_BACKEND=postgres` starts the app and serves normal browser/API workflows without SQLite gating.
-  - The full targeted backend/route pytest lane passes against SQLite and a Compose-network Postgres database.
-  - History search, reverse-i-search, Projects, Atlas, intel snapshots, secrets metadata, evidence packages, `/diag`, and `/metrics` behave the same on both backends unless docs call out an intentional backend difference.
-  - Offline migration works from SQLite into a migrated Postgres schema, validates data and file pointers, and has an operator rollback story.
-  - Official docs describe Postgres as a supported production backend while still keeping SQLite as the default local/single-user backend.
-- **Non-goals**
-  - No multi-master, no read replicas. The first supported Postgres release targets the same single-writer-with-many-readers shape the app already assumes.
-  - No automatic backend selection by load. The deployment-time config key is the only switch.
-  - No automatic SQLite-to-Postgres conversion during app startup.
 
 ### High-volume output handling
 - Add a high-volume live-output mode for normal brokered commands once a run crosses a large output threshold, such as 100k rendered lines or a configurable byte/event rate. The mode should keep counting, bounded persistence, history metadata, and kill controls working while reducing browser rendering pressure.

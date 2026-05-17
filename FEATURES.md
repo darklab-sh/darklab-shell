@@ -277,7 +277,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 | **SESSION** | Active session identity | `ANON` (muted) for UUID sessions, masked `tok_XXXX••••` (green) for named tokens — see [Session Tokens](#session-tokens) |
 | **UPTIME** | Server process uptime | Returned by `/status` and ticked client-side between polls so the pill never looks frozen |
 | **CLOCK** | Wall clock in `UTC` or browser-local time | Ticks every second in the browser; local mode prefers the browser's short timezone label and falls back to a GMT offset |
-| **DB** | SQLite connection state | `ONLINE` green, `OFFLINE` red |
+| **DB** | Configured database connection state | `ONLINE` green, `OFFLINE` red |
 | **REDIS** | Redis connection state | `ONLINE` green, `OFFLINE` red, `N/A` muted when no Redis is configured |
 
 ---
@@ -451,9 +451,9 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 
 **Configuration:** `max_tabs` in `config.yaml` (default 8; `0` for unlimited).
 
-**Related files:** `app/static/js/tabs.js` (tab lifecycle + drag + rename), `app/static/js/history.js` (history drawer + search UI), `app/blueprints/history.py` (history API + FTS queries), `app/core/database.py` (SQLite schema + FTS5 trigger wiring).
+**Related files:** `app/static/js/tabs.js` (tab lifecycle + drag + rename), `app/static/js/history.js` (history drawer + search UI), `app/blueprints/history.py` (history API + search queries), `app/core/database.py` (database schema, startup migration, and retention pruning).
 
-**Full-text search:** the history surfaces support a shared `type` filter, run-subtype filters, project filters for linked runs, and full-text search across command text and stored run output for run rows, with additional filters for command name, exit status, recent date range, and starred-only. The search field placeholder reads "search history". Search is backed by a SQLite FTS5 virtual table (`runs_fts`) indexed on `command` and `output_search_text`. When full-output persistence is enabled, `output_search_text` is populated from the complete gzip artifact so early lines of long runs stay reachable; otherwise it falls back to the capped preview window. Snapshot search in the first pass matches the snapshot label only, and snapshots remain share/history records rather than project-linked records. On mobile, search, advanced filters, and bulk actions stay behind the dedicated **history tools** toggle to preserve result space; the command-name field uses app-owned autocomplete, and row actions keep the sheet open where that matches the desktop action contract.
+**Full-text search:** the history surfaces support a shared `type` filter, run-subtype filters, project filters for linked runs, and full-text search across command text and stored run output for run rows, with additional filters for command name, exit status, recent date range, and starred-only. The search field placeholder reads "search history". Search is backend-aware: SQLite uses `runs_fts` with a `LIKE` fallback for short terms, while Postgres uses substring `ILIKE` clauses backed by `pg_trgm` indexes. When full-output persistence is enabled, `output_search_text` is populated from the complete gzip artifact so early lines of long runs stay reachable; otherwise it falls back to the capped preview window. Snapshot search in the first pass matches the snapshot label only, and snapshots remain share/history records rather than project-linked records. On mobile, search, advanced filters, and bulk actions stay behind the dedicated **history tools** toggle to preserve result space; the command-name field uses app-owned autocomplete, and row actions keep the sheet open where that matches the desktop action contract.
 
 On mobile, the **☰** menu in the top-right header opens a bottom-sheet that groups session-scoped actions (search, clear, line numbers, timestamps) and overlays (options, history, status, commands, workflows, files, theme, FAQ, diag) — see the Mobile Shell section below for the full layout.
 
@@ -534,13 +534,13 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 ## Permalinks
 
-**Purpose:** stable, shareable URLs for individual runs and full-tab snapshots, persisted in SQLite under the `./data` volume and subject to `permalink_retention_days`.
+**Purpose:** stable, shareable URLs for individual runs and full-tab snapshots, persisted through the configured database and subject to `permalink_retention_days`.
 
 **Behavior:**
 
 - **Tab snapshot** (`/share/<id>`) — **share snapshot** on any tab captures the current output and, when a full saved artifact exists, shares that full output as a snapshot. The resulting URL opens a styled HTML page with ANSI color rendering, a `save ▾` dropdown (txt, html, pdf), a **copy** button, a **view json** option, and a link back to the shell. Honors the browser's saved line-number and timestamp preferences on load. Uses the Web Share API where supported; otherwise copies the URL to the clipboard. Recommended sharing path.
-- **Single run** (`/history/<run_id>`) — the permalink button in the history drawer links to an individual run. Serves the full saved artifact when persistence is enabled; otherwise the capped preview stored in SQLite. Honors saved line-number and timestamp preferences on load.
-- Both permalink types persist across container restarts via the `./data` SQLite volume.
+- **Single run** (`/history/<run_id>`) — the permalink button in the history drawer links to an individual run. Serves the full saved artifact when persistence is enabled; otherwise the capped preview stored in the configured database. Honors saved line-number and timestamp preferences on load.
+- Both permalink types persist across container restarts through the configured database and any file-backed artifacts under `./data`.
 
 **Limits:** retained for `permalink_retention_days` only; the `./data` directory is the only writable path in an otherwise read-only container (created automatically on first run).
 
@@ -1055,29 +1055,29 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Behavior:**
 
-- Run history, preview metadata, full-output artifact metadata, and tab snapshots all live under `./data`.
-- SQLite uses `./data/history.db`; persisted full-output artifacts are written as compressed files under `./data/run-output/`.
+- SQLite stores run history, preview metadata, full-output artifact metadata, and tab snapshots in `./data/history.db`.
+- Postgres stores database rows in Postgres while still using `./data` for full-output artifacts, body-store files, and the app-owned secret key file.
+- Persisted full-output artifacts are written as compressed files under `./data/run-output/`.
 - Optional body-store thresholds can move large run search text, tab snapshot bodies, and Atlas intel payloads into compressed files under `./data/body-store/` while the app keeps reading them normally.
-- The `./data` directory is created automatically on first run and persists across container restarts and recreations.
+- The `./data` directory is created automatically on first run and persists filesystem-backed artifacts across container restarts and recreations.
 - On startup, runs, run-output artifact metadata, artifact files, and snapshots older than `permalink_retention_days` are pruned together.
 
-**Limits:** `./data` is the only writable path in an otherwise read-only container. Setting `permalink_retention_days: 0` disables pruning entirely (unlimited retention). Never write to `./data/history.db` from the host — host/container SQLite version mismatches can corrupt the FTS5 btree.
+**Limits:** `./data` is the only writable path in an otherwise read-only container. Setting `permalink_retention_days: 0` disables pruning entirely (unlimited retention). On SQLite deployments, never write to `./data/history.db` from the host — host/container SQLite version mismatches can corrupt the FTS5 btree.
 
 **Configuration:** `permalink_retention_days` in `config.yaml` (default 365; `0` disables pruning). `runs_search_text_inline_max_bytes`, `snapshots_inline_max_bytes`, and `intel_payload_inline_max_bytes` default to `0`, which keeps those bodies inline.
 
-**Related files:** `app/core/database.py` (schema, migrations, FTS5 wiring, and startup pruning), `app/services/runs/output_store.py` (compressed artifact writer + reader), `app/blueprints/history.py` (reads + writes through the persistence layer). See [ARCHITECTURE.md](ARCHITECTURE.md) for full schema.
+**Related files:** `app/core/database.py` (schema, migrations, backend selection, and startup pruning), `app/services/runs/output_store.py` (compressed artifact writer + reader), `app/blueprints/history.py` (reads + writes through the persistence layer). See [ARCHITECTURE.md](ARCHITECTURE.md) for full schema.
 
 **Useful direct checks:**
 
+Prefer `/diag` for storage and row-count checks because it works on both backends. The commands below are SQLite-only maintenance examples for stopped containers or controlled local copies:
+
 ```bash
-# Row counts
+# Count rows
 sqlite3 data/history.db "SELECT COUNT(*) FROM runs; SELECT COUNT(*) FROM run_output_artifacts; SELECT COUNT(*) FROM snapshots;"
 
-# Delete runs older than 90 days
-sqlite3 data/history.db "DELETE FROM runs WHERE started < datetime('now', '-90 days');"
-
-# Delete all snapshots
-sqlite3 data/history.db "DELETE FROM snapshots;"
+# Inspect page-level storage when dbstat is available
+sqlite3 data/history.db "SELECT name, SUM(pgsize) AS bytes FROM dbstat GROUP BY name ORDER BY bytes DESC LIMIT 10;"
 ```
 
 ---
@@ -1199,8 +1199,8 @@ diagnostics_allowed_cidrs:
 | Section | Content |
 |---------|---------|
 | **App** | App version and configured name |
-| **Database** | Connection status (`online` / `error`), total run and snapshot counts, file/WAL size, reclaimable space, table row counts, and FTS orphan checks |
-| **Storage breakdown** | Table and index storage grouped by runs, snapshots, Atlas/findings, projects, session data, and secrets. Shows allocated bytes when SQLite has `dbstat`, logical payload estimates either way, FTS shadow tables grouped under their parent, and the largest saved runs. |
+| **Database** | Connection status (`online` / `error`), active backend, total run and snapshot counts, SQLite file/WAL size or Postgres relation sizes, reclaimable space where available, table row counts, and backend-specific search-index checks |
+| **Storage breakdown** | Table/index or relation storage grouped by runs, snapshots, Atlas/findings, projects, session data, and secrets. Shows allocated bytes when SQLite has `dbstat`, Postgres relation sizes through catalog functions, logical payload estimates, search-index rollups, and the largest saved runs. |
 | **Redis** | Whether Redis is configured, and connection status when it is |
 | **Vendor Assets** | Whether `ansi_up.js`, `jspdf.umd.min.js`, and the font files are present (`loaded`) or missing (`missing`) from `app/static/` |
 | **Config** | All operational config values: rate limits, timeouts, output caps, retention, proxy CIDRs, log settings |
@@ -1218,7 +1218,7 @@ curl http://localhost:8888/diag?format=json
 
 ### Prometheus metrics
 
-`/metrics` is meant for Prometheus, Grafana, and similar monitoring stacks. It exposes `darklab_` metrics for HTTP volume and latency, active and completed runs, PTY activity, rate-limit pressure, broker mode and subscribers, SQLite and Redis health, selected database hot-path latency, workspace usage, Atlas/finding counts, intel provider results and cache size, evidence package builds, snapshots, client errors, and unhandled server exceptions. Labels are bounded to safe values such as command roots, provider IDs, endpoint names, status classes, and coarse outcomes.
+`/metrics` is meant for Prometheus, Grafana, and similar monitoring stacks. It exposes `darklab_` metrics for HTTP volume and latency, active and completed runs, PTY activity, rate-limit pressure, broker mode and subscribers, database and Redis health, selected database hot-path latency, workspace usage, Atlas/finding counts, intel provider results and cache size, evidence package builds, snapshots, client errors, and unhandled server exceptions. Labels are bounded to safe values such as command roots, provider IDs, endpoint names, status classes, and coarse outcomes.
 
 ```bash
 curl http://localhost:8888/metrics

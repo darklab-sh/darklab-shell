@@ -1,6 +1,6 @@
 # Storage Scaling
 
-darklab_shell keeps SQLite as the default backend because it works well for local and single-user deployments. The numbers below explain when storage pressure starts to matter and what to watch before moving a deployment toward heavier storage options.
+darklab_shell keeps SQLite as the default backend because it works well for local and single-user deployments. Postgres is also supported for heavier deployments. The numbers below explain when storage pressure starts to matter and what to watch when deciding whether SQLite is enough or Postgres is the better fit.
 
 ## Baseline
 
@@ -104,11 +104,11 @@ SQLite is still the right default for local and single-user installs. A heavy si
 
 For small teams, SQLite can still be viable if the deployment is mostly one active operator at a time and the storage path is backed by reliable disk. Watch `/diag` and `/metrics` for growth, especially `runs`, `runs_fts_*`, snapshot size, and artifact bytes.
 
-Postgres becomes the better default for heavy multi-user deployments. The storage numbers alone do not force Postgres at 10 users, but combined write concurrency, backup expectations, query visibility, and operational tooling do. A 30-user heavy deployment should plan for Postgres. A 100-user deployment should not rely on SQLite.
+Postgres becomes the better default for heavy multi-user deployments. The storage numbers alone do not force Postgres at 10 users, but combined write concurrency, backup expectations, query visibility, and operational tooling do. A 30-user heavy deployment should start on Postgres. A 100-user deployment should not rely on SQLite.
 
 ## Body Store Offload
 
-The body store is useful when a SQLite deployment is healthy but wide text rows are making the file grow faster than expected. It reduces SQLite row width immediately and also keeps future Postgres rows narrower if that backend is used later.
+The body store is useful when a deployment is healthy but wide text rows are making database storage grow faster than expected. It reduces SQLite row width immediately and keeps Postgres rows narrower too.
 
 | Setting | Stored body | Good starting point |
 | ------- | ----------- | ------------------- |
@@ -122,13 +122,13 @@ Postgres is still the better answer when the pain is concurrent writes, shared p
 
 `runs.output_preview` stays inline because History and run-detail views read it constantly and it is already bounded by `max_output_lines` and `output_preview_max_mb`. Full run output is already handled separately by compressed run-output artifacts.
 
-FTS deserves separate treatment. The measured FTS shadow tables consume about 197 MB for about 107 MB of `output_search_text`, so search doubles a large part of the run-output footprint. Postgres should not try to reproduce SQLite FTS5 directly; it should use a backend-specific search implementation that preserves the current command/output lookup behavior.
+FTS deserves separate treatment on SQLite. The measured FTS shadow tables consume about 197 MB for about 107 MB of `output_search_text`, so search doubles a large part of the run-output footprint. Postgres does not reproduce SQLite FTS5 directly; it uses trigram indexes that preserve the current command/output lookup behavior.
 
 ## Operating Guidance
 
-Use `/diag` Storage breakdown for point-in-time analysis and `/metrics` for trend graphs. The most useful signals are total SQLite size, `runs` allocation, `runs_fts_*` allocation, snapshot bytes, output artifact bytes, largest run payloads, and freelist bytes.
+Use `/diag` Storage breakdown for point-in-time analysis and `/metrics` for trend graphs. On SQLite, the most useful signals are total database size, `runs` allocation, `runs_fts_*` allocation, snapshot bytes, output artifact bytes, largest run payloads, and freelist bytes. On Postgres, watch relation sizes in `/diag`, table row/size gauges in `/metrics`, largest run payloads, and artifact bytes.
 
-If SQLite grows quickly, first check whether retention is set correctly. Then check whether a few scanner runs are creating very large previews or search text. If growth is normal but the deployment has many active users, move the backend planning toward Postgres instead of trying to tune SQLite indefinitely.
+If SQLite grows quickly, first check whether retention is set correctly. Then check whether a few scanner runs are creating very large previews or search text. If growth is normal but the deployment has many active users, move the deployment to Postgres instead of trying to tune SQLite indefinitely.
 
 ---
 

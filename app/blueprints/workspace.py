@@ -9,7 +9,7 @@ from typing import Any
 from flask import Blueprint, Response, jsonify, request, send_file
 
 from core.database import DB_BACKEND, db_connect
-from core.database_backend import DatabaseBackend
+from core.database_backend import dialect_for_backend
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from services.workspace.files import (
     InvalidWorkspacePath,
@@ -38,15 +38,11 @@ workspace_bp = Blueprint("workspace", __name__)
 
 
 def _workspace_project_names_expr() -> str:
-    if DB_BACKEND == DatabaseBackend.POSTGRES:
-        return "STRING_AGG(DISTINCT p.name, ',')"
-    return "GROUP_CONCAT(DISTINCT p.name)"
+    return dialect_for_backend(DB_BACKEND).string_agg_distinct("p.name")
 
 
 def _workspace_label_order_sql() -> str:
-    if DB_BACKEND == DatabaseBackend.POSTGRES:
-        return "LOWER(label) ASC, created ASC"
-    return "label COLLATE NOCASE ASC, created ASC"
+    return dialect_for_backend(DB_BACKEND).case_insensitive_order("label") + ", created ASC"
 
 
 def _session_or_error() -> tuple[str | None, tuple[Response, int] | None]:

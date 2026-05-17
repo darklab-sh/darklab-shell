@@ -2,13 +2,16 @@ import gzip
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import sqlite3
+import subprocess
 import sys
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import uuid
 
 import pytest
@@ -35,6 +38,15 @@ def _load_migration_module():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _postgres_dsn_with_search_path(dsn: str, schema: str) -> str:
+    parts = urlsplit(dsn)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    existing_options = str(query.get("options") or "").strip()
+    search_path_option = f"-csearch_path={schema}"
+    query["options"] = f"{existing_options} {search_path_option}".strip()
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
 @pytest.fixture
@@ -251,7 +263,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
     conn.commit()
 
-    assert applied == ["0001", "0002"]
+    assert applied == ["0001", "0002", "0003"]
     assert applied_again == []
     table_rows = conn.execute(
         """
@@ -286,7 +298,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         ("secrets", "ciphertext", "bytea"),
         ("runs", "preview_truncated", "boolean"),
     }
-    index_rows = conn.execute(
+    runs_index_rows = conn.execute(
         """
         SELECT indexname
         FROM pg_indexes
@@ -298,7 +310,76 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     assert {
         "idx_runs_command_trgm",
         "idx_runs_output_search_text_trgm",
-    }.issubset({row["indexname"] for row in index_rows})
+    }.issubset({row["indexname"] for row in runs_index_rows})
+    atlas_index_rows = conn.execute(
+        """
+        SELECT indexname
+        FROM pg_indexes
+        WHERE schemaname = %s
+        AND tablename IN ('entities', 'findings')
+        """,
+        (postgres_schema.schema,),
+    ).fetchall()
+    assert {
+        "idx_entities_canonical_value_trgm",
+        "idx_findings_title_trgm",
+        "idx_findings_raw_line_trgm",
+        "idx_findings_tool_root_trgm",
+    }.issubset({row["indexname"] for row in atlas_index_rows})
+
+
+@pytest.mark.postgres
+def test_configured_postgres_app_startup_smoke_uses_real_pool(postgres_dsn, postgres_schema, tmp_path):
+    app_dir = REPO_ROOT / "app"
+    data_dir = tmp_path / "data"
+    code = """
+import json
+from app import app
+from core.database_backend import close_postgres_pool
+
+try:
+    client = app.test_client()
+    status = client.get("/status")
+    token_resp = client.get("/session/token/generate")
+    token = token_resp.get_json()["session_token"]
+    info_resp = client.get("/session/token/info", headers={"X-Session-ID": token})
+    history_resp = client.get("/history", headers={"X-Session-ID": token})
+    print(json.dumps({
+        "status": status.status_code,
+        "db": status.get_json().get("db"),
+        "token_status": token_resp.status_code,
+        "info_status": info_resp.status_code,
+        "info_token": info_resp.get_json().get("token"),
+        "history_status": history_resp.status_code,
+    }))
+finally:
+    close_postgres_pool()
+"""
+    env = os.environ.copy()
+    env.update({
+        "APP_DATA_DIR": str(data_dir),
+        "DATABASE_BACKEND": "postgres",
+        "DATABASE_URL": _postgres_dsn_with_search_path(postgres_dsn, postgres_schema.schema),
+        "PYTHONPATH": str(app_dir),
+    })
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=app_dir,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["status"] == 200
+    assert payload["db"] == "ok"
+    assert payload["token_status"] == 200
+    assert payload["info_status"] == 200
+    assert str(payload["info_token"]).startswith("tok_")
+    assert payload["history_status"] == 200
 
 
 @pytest.mark.postgres
@@ -623,6 +704,151 @@ def test_run_output_artifact_upsert_writes_to_postgres(monkeypatch, postgres_sch
 
 
 @pytest.mark.postgres
+def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypatch, postgres_schema):
+    import blueprints.history as history_blueprint
+    import blueprints.run as run_blueprint
+    from app import app
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+    from services.projects import workspace as project_workspace
+
+    conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(conn, MIGRATIONS)
+    session_id = str(uuid.uuid4())
+    run_id = "run-" + uuid.uuid4().hex
+    project_id = "prj_" + uuid.uuid4().hex[:16]
+    timestamp = "2026-05-17T00:00:00Z"
+    persisted_entries = [{
+        "text": "[high] exposed admin panel at https://darklab.sh/admin",
+        "cls": "output",
+        "line_index": 0,
+        "signals": ["findings"],
+        "entities": [{
+            "type": "domain",
+            "canonical_value": "darklab.sh",
+            "value": "darklab.sh",
+            "confidence": "high",
+        }],
+    }]
+    conn.execute(
+        """
+        INSERT INTO projects (id, session_id, name, slug, description, status, created, updated)
+        VALUES (%s, %s, 'Postgres Active', 'postgres-active', '', 'active', %s, %s)
+        """,
+        (project_id, session_id, timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (%s, %s, %s)",
+        (
+            session_id,
+            Jsonb({
+                "pref_active_project_id": project_id,
+                "pref_project_auto_link_external_runs": "on",
+            }),
+            timestamp,
+        ),
+    )
+    conn.commit()
+
+    @contextmanager
+    def _postgres_db_connect():
+        yield PostgresSqliteCompatConnection(conn)
+
+    class FakeCapture:
+        preview_lines = persisted_entries
+        preview_truncated = False
+        output_line_count = 1
+        full_output_available = True
+        full_output_truncated = False
+        full_output_bytes = 192
+        artifact_rel_path = f"{run_id}.txt.gz"
+
+        def finalize(self):
+            return None
+
+    monkeypatch.setattr(run_blueprint, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(run_blueprint, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(history_blueprint, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(history_blueprint, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(project_workspace, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(run_blueprint, "load_full_output_entries", lambda _rel_path: persisted_entries)
+    monkeypatch.setattr(run_blueprint, "_workspace_artifacts_with_sizes", lambda _session_id, artifacts: artifacts)
+
+    active_project_link = run_blueprint._save_completed_run(
+        run_id,
+        session_id,
+        "nuclei -u https://darklab.sh",
+        timestamp,
+        "2026-05-17T00:00:01Z",
+        0,
+        FakeCapture(),
+        workspace_artifacts=[{
+            "workspace_path": "reports/postgres-result.txt",
+            "display_name": "postgres-result.txt",
+            "kind": "text",
+            "byte_size": 42,
+            "detected_by": "test",
+        }],
+        link_active_project=True,
+        run_kind="external",
+        owner_tab_id="tab-postgres-external",
+    )
+    run_row = conn.execute(
+        "SELECT * FROM runs WHERE id = %s",
+        (run_id,),
+    ).fetchone()
+    artifact_row = conn.execute(
+        "SELECT * FROM run_output_artifacts WHERE run_id = %s",
+        (run_id,),
+    ).fetchone()
+    file_artifact_row = conn.execute(
+        "SELECT * FROM run_file_artifacts WHERE run_id = %s",
+        (run_id,),
+    ).fetchone()
+    project_link_row = conn.execute(
+        "SELECT * FROM project_links WHERE project_id = %s AND entity_type = 'run' AND entity_id = %s",
+        (project_id, run_id),
+    ).fetchone()
+    entity_row = conn.execute(
+        "SELECT e.* FROM entities e JOIN entity_run_links erl ON erl.entity_id = e.id WHERE erl.run_id = %s",
+        (run_id,),
+    ).fetchone()
+    finding_row = conn.execute(
+        "SELECT f.* FROM findings f JOIN findings_occurrences fo ON fo.finding_id = f.id WHERE fo.run_id = %s",
+        (run_id,),
+    ).fetchone()
+    history_resp = app.test_client().get(
+        "/history?q=admin&scope=all&include_total=1",
+        headers={"X-Session-ID": session_id},
+    )
+    history_data = json.loads(history_resp.data)
+
+    assert active_project_link is not None
+    assert active_project_link["project_id"] == project_id
+    assert run_row["session_id"] == session_id
+    assert run_row["run_kind"] == "external"
+    assert run_row["owner_tab_id"] == "tab-postgres-external"
+    assert run_row["full_output_available"] is True
+    assert "exposed admin panel" in run_row["output_search_text"]
+    assert artifact_row["rel_path"] == f"{run_id}.txt.gz"
+    assert artifact_row["byte_size"] == 192
+    assert file_artifact_row["workspace_path"] == "reports/postgres-result.txt"
+    assert project_link_row["source"] == "active_project"
+    assert entity_row["type"] == "domain"
+    assert entity_row["canonical_value"] == "darklab.sh"
+    assert finding_row["run_id"] == run_id
+    assert finding_row["target_id"] == entity_row["id"]
+    assert finding_row["severity"] == "high"
+    assert history_resp.status_code == 200
+    assert history_data["total_count"] == 1
+    assert history_data["runs"][0]["id"] == run_id
+    assert history_data["runs"][0]["artifact_count"] == 1
+    assert history_data["runs"][0]["finding_count"] == 1
+    assert history_data["runs"][0]["project_link_count"] == 1
+
+
+@pytest.mark.postgres
 def test_share_routes_roundtrip_snapshot_on_postgres(monkeypatch, postgres_schema):
     from app import app
     import blueprints.history as history_blueprint
@@ -743,6 +969,173 @@ def test_session_metadata_routes_write_to_postgres(monkeypatch, postgres_schema)
     assert workflows_row["inputs"][0]["id"] == "domain"
     assert workflows_row["steps"][0]["cmd"] == "host {{domain}}"
     assert json.loads(workflow_resp.data)["workflow"]["steps"][0]["cmd"] == "host {{domain}}"
+
+
+@pytest.mark.postgres
+def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, postgres_schema):
+    from app import app
+    import blueprints.session as session_blueprint
+    from core import database as core_database
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+    from services.projects import workspace as project_workspace
+    from services.secrets import storage as secrets_storage
+    from services.workflows import user_workflows
+
+    conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(conn, MIGRATIONS)
+    source_session_id = str(uuid.uuid4())
+    timestamp = "2026-05-17T00:00:00Z"
+    conn.execute(
+        """
+        INSERT INTO runs (id, session_id, command, started, finished, exit_code, output)
+        VALUES (%s, %s, 'host darklab.sh', %s, %s, 0, '[]')
+        """,
+        ("run-session-migrate-pg", source_session_id, timestamp, timestamp),
+    )
+    conn.execute(
+        "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (%s, %s, %s, %s, %s)",
+        ("snap-session-migrate-pg", source_session_id, "session migrate", timestamp, "[]"),
+    )
+    conn.execute(
+        "INSERT INTO starred_commands (session_id, command) VALUES (%s, %s)",
+        (source_session_id, "host darklab.sh"),
+    )
+    conn.execute(
+        "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (%s, %s, %s)",
+        (source_session_id, Jsonb({"pref_theme_name": "darklab_obsidian.yaml"}), timestamp),
+    )
+    conn.execute(
+        "INSERT INTO session_variables (session_id, name, value, updated) VALUES (%s, %s, %s, %s)",
+        (source_session_id, "target", "darklab.sh", timestamp),
+    )
+    conn.execute(
+        """
+        INSERT INTO recent_values (session_id, kind, value, last_used, use_count)
+        VALUES (%s, 'domain', 'darklab.sh', %s, 2)
+        """,
+        (source_session_id, timestamp),
+    )
+    conn.commit()
+
+    @contextmanager
+    def _postgres_db_connect():
+        yield PostgresSqliteCompatConnection(conn)
+
+    monkeypatch.setattr(session_blueprint, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(session_blueprint, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(core_database, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(session_blueprint, "migrate_session_workspace", lambda _from_id, _to_id: SimpleNamespace(
+        migrated_files=0,
+        skipped_files=0,
+        migrated_directories=0,
+        skipped_directories=0,
+    ))
+    monkeypatch.setattr(project_workspace, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(secrets_storage, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(user_workflows, "DB_BACKEND", DatabaseBackend.POSTGRES)
+
+    client = app.test_client()
+    token_resp = client.get("/session/token/generate", headers={"X-Session-ID": source_session_id})
+    destination_token = json.loads(token_resp.data)["session_token"]
+    info_resp = client.get("/session/token/info", headers={"X-Session-ID": destination_token})
+    verify_resp = client.post(
+        "/session/token/verify",
+        headers={"X-Session-ID": source_session_id},
+        json={"token": destination_token},
+    )
+    missing_body_resp = client.post(
+        "/session/migrate",
+        headers={"X-Session-ID": source_session_id},
+        json={},
+    )
+    mismatch_resp = client.post(
+        "/session/migrate",
+        headers={"X-Session-ID": source_session_id},
+        json={"from_session_id": str(uuid.uuid4()), "to_session_id": destination_token},
+    )
+    unknown_token_resp = client.post(
+        "/session/migrate",
+        headers={"X-Session-ID": source_session_id},
+        json={"from_session_id": source_session_id, "to_session_id": "tok_" + uuid.uuid4().hex},
+    )
+    migrate_resp = client.post(
+        "/session/migrate",
+        headers={"X-Session-ID": source_session_id},
+        json={"from_session_id": source_session_id, "to_session_id": destination_token},
+    )
+    revoke_resp = client.post(
+        "/session/token/revoke",
+        headers={"X-Session-ID": destination_token},
+        json={"token": destination_token},
+    )
+    revoked_verify_resp = client.post(
+        "/session/token/verify",
+        headers={"X-Session-ID": str(uuid.uuid4())},
+        json={"token": destination_token},
+    )
+    migrated_run = conn.execute(
+        "SELECT session_id FROM runs WHERE id = %s",
+        ("run-session-migrate-pg",),
+    ).fetchone()
+    migrated_snapshot = conn.execute(
+        "SELECT session_id FROM snapshots WHERE id = %s",
+        ("snap-session-migrate-pg",),
+    ).fetchone()
+    migrated_prefs = conn.execute(
+        "SELECT preferences FROM session_preferences WHERE session_id = %s",
+        (destination_token,),
+    ).fetchone()
+    source_prefs = conn.execute(
+        "SELECT 1 FROM session_preferences WHERE session_id = %s",
+        (source_session_id,),
+    ).fetchone()
+    migrated_recent = conn.execute(
+        "SELECT kind, value, use_count FROM recent_values WHERE session_id = %s",
+        (destination_token,),
+    ).fetchone()
+    source_recent_count = conn.execute(
+        "SELECT COUNT(*) AS count FROM recent_values WHERE session_id = %s",
+        (source_session_id,),
+    ).fetchone()["count"]
+    migrated_stars = conn.execute(
+        "SELECT COUNT(*) AS count FROM starred_commands WHERE session_id = %s",
+        (destination_token,),
+    ).fetchone()["count"]
+    migrated_variables = conn.execute(
+        "SELECT COUNT(*) AS count FROM session_variables WHERE session_id = %s",
+        (destination_token,),
+    ).fetchone()["count"]
+
+    assert token_resp.status_code == 200
+    assert info_resp.status_code == 200
+    assert json.loads(info_resp.data)["token"] == destination_token
+    assert verify_resp.status_code == 200
+    assert json.loads(verify_resp.data)["exists"] is True
+    assert missing_body_resp.status_code == 400
+    assert mismatch_resp.status_code == 403
+    assert unknown_token_resp.status_code == 400
+    assert migrate_resp.status_code == 200
+    assert json.loads(migrate_resp.data)["migrated_runs"] == 1
+    assert json.loads(migrate_resp.data)["migrated_snapshots"] == 1
+    assert json.loads(migrate_resp.data)["migrated_stars"] == 1
+    assert json.loads(migrate_resp.data)["migrated_preferences"] == 1
+    assert json.loads(migrate_resp.data)["migrated_variables"] == 1
+    assert json.loads(migrate_resp.data)["migrated_recent_values"] == 1
+    assert migrated_run["session_id"] == destination_token
+    assert migrated_snapshot["session_id"] == destination_token
+    assert migrated_prefs["preferences"]["pref_theme_name"] == "darklab_obsidian.yaml"
+    assert source_prefs is None
+    assert migrated_recent["kind"] == "domain"
+    assert migrated_recent["value"] == "darklab.sh"
+    assert migrated_recent["use_count"] == 2
+    assert int(source_recent_count) == 0
+    assert int(migrated_stars) == 1
+    assert int(migrated_variables) == 1
+    assert revoke_resp.status_code == 200
+    assert revoked_verify_resp.status_code == 200
+    assert json.loads(revoked_verify_resp.data)["exists"] is False
 
 
 @pytest.mark.postgres
@@ -1087,10 +1480,12 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
 
 
 @pytest.mark.postgres
-def test_atlas_intel_refresh_writes_jsonb_snapshots(monkeypatch, postgres_schema):
+def test_atlas_intel_refresh_writes_jsonb_snapshots(monkeypatch, postgres_schema, tmp_path):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.atlas import lookup as atlas_lookup
     from services.atlas import intel_bridge
+    from services.storage import body_store
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
@@ -1111,6 +1506,13 @@ def test_atlas_intel_refresh_writes_jsonb_snapshots(monkeypatch, postgres_schema
     def _postgres_db_connect():
         yield PostgresSqliteCompatConnection(conn)
 
+    payload = {
+        "summary": {"has_intel": True, "providers_with_data": ["crtsh"]},
+        "observations": ["x" * 128],
+    }
+    monkeypatch.setattr(body_store, "DATA_DIR", str(tmp_path))
+    monkeypatch.setitem(intel_bridge.CFG, "intel_payload_inline_max_bytes", 1)
+    monkeypatch.setattr(atlas_lookup, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(intel_bridge, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(intel_bridge, "db_connect", _postgres_db_connect)
     monkeypatch.setattr(intel_bridge, "lookup_entity", lambda *args, **kwargs: SimpleNamespace(
@@ -1125,7 +1527,7 @@ def test_atlas_intel_refresh_writes_jsonb_snapshots(monkeypatch, postgres_schema
                 message="",
                 result=SimpleNamespace(
                     provider="crtsh",
-                    payload={"summary": {"has_intel": True, "providers_with_data": ["crtsh"]}},
+                    payload=payload,
                 ),
             ),
         ],
@@ -1143,7 +1545,12 @@ def test_atlas_intel_refresh_writes_jsonb_snapshots(monkeypatch, postgres_schema
     assert row["provider"] == "crtsh"
     assert row["status"] == "ok"
     assert row["summary"] == "data available"
-    assert row["data_json"]["summary"]["providers_with_data"] == ["crtsh"]
+    assert row["data_json"]["__darklab_body_store__"] == 1
+
+    detail = atlas_lookup.entity_detail(PostgresSqliteCompatConnection(conn), session_id, entity_id)
+    assert detail is not None
+    assert detail["intel_snapshots"][0]["data"]["summary"]["providers_with_data"] == ["crtsh"]
+    assert detail["intel_snapshots"][0]["data"]["observations"] == ["x" * 128]
 
 
 @pytest.mark.postgres
@@ -1203,6 +1610,11 @@ def test_diag_route_reports_postgres_storage(monkeypatch, postgres_schema):
     assert data["db"]["snapshots"] == 1
     assert data["db"]["storage"]["storage_stats_available"] is True
     assert data["db"]["storage"]["largest_runs"][0]["id"] == "run-diag-pg"
+    assert data["stats"]["ok"] is True
+    assert data["stats"]["activity"][0]["label"] == "today"
+    assert data["stats"]["outcomes"]["success"] >= 1
+    assert data["stats"]["top_by_freq"][0]["command"] == "host darklab.sh"
+    assert data["stats"]["top_by_duration"][0]["elapsed"] == "2s"
     bucket_names = {bucket["name"] for bucket in data["db"]["storage"]["buckets"]}
     assert "Runs and transcripts" in bucket_names
     assert "fts_orphans" not in data["db"]
@@ -1257,6 +1669,82 @@ def _write_body_pointer(root: Path, body: str, rel_path: str) -> str:
         "rel_path": rel_path,
         "sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
     })
+
+
+@pytest.mark.postgres
+def test_postgres_db_init_applies_retention_pruning(monkeypatch, tmp_path, postgres_schema):
+    from core import database
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.runs import output_store
+    from services.storage import body_store
+
+    conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(conn, MIGRATIONS)
+    data_root = tmp_path / "data"
+    run_output_dir = data_root / "run-output"
+    run_output_dir.mkdir(parents=True)
+    artifact_path = run_output_dir / "old-run.txt.gz"
+    artifact_path.write_bytes(b"artifact")
+    search_pointer = _write_body_pointer(
+        data_root,
+        "old search text",
+        "body-store/runs/old-run-search.txt.gz",
+    )
+    snapshot_pointer = _write_body_pointer(
+        data_root,
+        "old snapshot body",
+        "body-store/snapshots/old-snapshot.txt.gz",
+    )
+    search_body_path = data_root / json.loads(search_pointer)["rel_path"]
+    snapshot_body_path = data_root / json.loads(snapshot_pointer)["rel_path"]
+    conn.execute(
+        """
+        INSERT INTO runs (id, session_id, command, started, finished, exit_code, output_search_text)
+        VALUES (%s, %s, %s, %s, %s, 0, %s)
+        """,
+        (
+            "old-run-pg",
+            "sess-retention-pg",
+            "host old.darklab.sh",
+            "2020-01-01T00:00:00Z",
+            "2020-01-01T00:00:01Z",
+            search_pointer,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO run_output_artifacts
+        (run_id, rel_path, compression, byte_size, line_count, truncated, created)
+        VALUES (%s, %s, 'gzip', 8, 1, false, %s)
+        """,
+        ("old-run-pg", "old-run.txt.gz", "2020-01-01T00:00:01Z"),
+    )
+    conn.execute(
+        "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (%s, %s, %s, %s, %s)",
+        ("old-snapshot-pg", "sess-retention-pg", "old snapshot", "2020-01-01T00:00:02Z", snapshot_pointer),
+    )
+    conn.commit()
+
+    @contextmanager
+    def _postgres_db_connect():
+        yield PostgresSqliteCompatConnection(conn)
+
+    monkeypatch.setattr(database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(database, "CFG", {**database.CFG, "permalink_retention_days": 5})
+    monkeypatch.setattr(database, "_postgres_db_init", lambda: None)
+    monkeypatch.setattr(database, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(output_store, "RUN_OUTPUT_DIR", str(run_output_dir))
+    monkeypatch.setattr(body_store, "DATA_DIR", str(data_root))
+
+    database.db_init()
+
+    assert conn.execute("SELECT 1 FROM runs WHERE id = %s", ("old-run-pg",)).fetchone() is None
+    assert conn.execute("SELECT 1 FROM snapshots WHERE id = %s", ("old-snapshot-pg",)).fetchone() is None
+    assert conn.execute("SELECT 1 FROM run_output_artifacts WHERE run_id = %s", ("old-run-pg",)).fetchone() is None
+    assert not artifact_path.exists()
+    assert not search_body_path.exists()
+    assert not snapshot_body_path.exists()
 
 
 def _build_migration_sqlite_fixture(root: Path) -> Path:

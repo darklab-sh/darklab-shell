@@ -32,14 +32,14 @@ For the architectural rationale, tradeoffs, and implementation-history notes beh
 
 ## System Overview
 
-darklab_shell is a web-based shell for running network diagnostics and vulnerability scanning commands against remote targets. It uses Flask + Gunicorn on the backend, a classic-script browser frontend, SQLite for history/share data, Redis for shared live-run state, and SSE for live output.
+darklab_shell is a web-based shell for running network diagnostics and vulnerability scanning commands against remote targets. It uses Flask + Gunicorn on the backend, a classic-script browser frontend, SQLite by default or Postgres for larger deployments, Redis for shared live-run state, and SSE for live output.
 
 At a high level, it works like this:
 
 - The browser loads a Flask-rendered shell page, then fetches focused startup data from routes such as `/config`, `/themes`, `/faq`, `/autocomplete`, and `/welcome*`.
 - Command execution starts with `POST /runs` and streams through replayable `/runs/<run_id>/stream` SSE subscriptions. The backend validates and rewrites commands, handles app-native built-ins, starts isolated scanner subprocesses when needed, and publishes output events.
 - Redis stores shared state that must work across multiple Gunicorn workers: rate limits, active run PID tracking for `/kill`, production run-broker replay, and interactive PTY event/control streams.
-- SQLite stores completed run metadata, preview output, snapshots, and full-output file metadata so history and share links survive restarts.
+- The configured database stores completed run metadata, preview output, snapshots, and full-output file metadata so history and share links survive restarts.
 - The browser client has no build step. Classic scripts share one global runtime, and browser cookies/storage handle local continuity around session identity, preferences, and reload restore.
 - The Docker runtime uses two unprivileged users: Gunicorn runs as `appuser`, while user-submitted commands run as `scanner` with the shared `appuser` group. That group lets validated session workspace files stay group-readable or group-writable without making them world-readable.
 
@@ -71,7 +71,7 @@ flowchart TB
 
   subgraph Runtime["Execution + Persistence Services"]
     Redis["Redis"]
-    SQLite["SQLite"]
+    Database["SQLite/Postgres"]
     Artifacts["Full-output artifacts"]
     Subprocesses["Scanner subprocesses"]
     Config["YAML config + theme files"]
@@ -84,7 +84,7 @@ flowchart TB
   Flask --> Routing
   Routing --> Orchestration
   Flask <--> Redis
-  Flask <--> SQLite
+  Flask <--> Database
   Flask <--> Artifacts
   Flask --> Subprocesses
   Flask <--> Config
@@ -95,7 +95,7 @@ This diagram is intentionally about runtime layers rather than individual module
 - the browser owns rendering, local interaction state, and web APIs such as cookies, `localStorage`, `sessionStorage`, `fetch`, and SSE reads
 - the Python web app owns routing, template rendering, config/theme loading, request validation, built-in command handling, and real command setup
 - Redis owns the cross-worker coordination that cannot safely live inside one Gunicorn worker process
-- SQLite and output files own the run/share state that must survive reloads and restarts
+- The configured database and output files own the run/share state that must survive reloads and restarts
 - scanner subprocesses are a distinct execution boundary rather than an in-process extension of the Flask app
 - YAML config and theme files are shown separately because they shape both backend behavior and frontend presentation, even though they load from the local filesystem rather than over the network
 
@@ -108,7 +108,7 @@ flowchart TB
   Browser["Browser UI"]
   Flask["Flask + Gunicorn"]
   Redis["Redis"]
-  SQLite["SQLite"]
+  Database["SQLite/Postgres"]
   Artifacts["Artifacts"]
   Scanner["Scanner subprocesses"]
 
@@ -118,7 +118,7 @@ flowchart TB
   Browser -->|HTTP history/share/diag reads| Flask
 
   Flask <--> |Redis protocol| Redis
-  Flask <--> |SQL reads/writes| SQLite
+  Flask <--> |SQL reads/writes| Database
   Flask <--> |filesystem artifact I/O| Artifacts
   Flask -->|spawn / signal process groups| Scanner
 ```
@@ -127,7 +127,7 @@ This is the transport and boundary view. It focuses on stable communication path
 
 - browser traffic is plain HTTP plus one-way SSE streaming for live command output
 - Redis is used for shared worker coordination and brokered active-run event replay, not as a general application datastore
-- SQLite and output files are the durable history/share boundary
+- The configured database and output files are the durable history/share boundary
 - command execution remains out-of-process, which keeps the Flask worker lifecycle separate from tool execution
 
 ---
@@ -141,7 +141,7 @@ sequenceDiagram
   participant R as /runs + /kill
   participant X as Redis
   participant P as scanner process
-  participant D as SQLite + artifacts
+  participant D as DB + artifacts
 
   B->>C: GET / + startup content routes
   C-->>B: HTML + config/theme/FAQ/autocomplete/welcome payloads
@@ -706,7 +706,7 @@ This boundary view answers a different question than the dependency graph above:
 
 - Flask + Gunicorn own routing, request hooks, response shaping, and template rendering.
 - Redis owns the shared coordination required across Gunicorn workers: rate limiting, active-run PID tracking for `/kill`, replayable run-broker streams, and PTY event/control streams when those brokered runtimes are enabled.
-- SQLite plus artifact files own durable run, snapshot, token, workflow, workspace metadata, project workspace, package, and search state.
+- The configured database plus artifact files own durable run, snapshot, token, workflow, workspace metadata, project workspace, package, and search state.
 - Scanner subprocesses remain an out-of-process boundary rather than an in-worker extension of the Flask app.
 - Config and theme YAML files are filesystem-backed dependencies that shape both backend behavior and frontend presentation but do not become a general runtime datastore.
 
@@ -950,17 +950,17 @@ That split is what allows the app to keep the interactive shell fast while still
 
 ### Database
 
-`<data_dir>/history.db` — SQLite, WAL mode. Twenty-two persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable. The server also has a `database_backend` selector and a database backend/dialect helper for connection setup, JSON column types and parameters, boolean storage and parameters, timestamps, placeholders, `IN` clauses, limit/offset clauses, upsert clauses, text search expressions, concatenation, SQLite diagnostics, Postgres identifier quoting, advisory-lock IDs, lazy psycopg pool setup, `pg_trgm` availability checks, and storage rows. History search has a backend-aware SQL helper: SQLite keeps its FTS5-first path with `LIKE` fallback for short terms, while Postgres uses substring `ILIKE` clauses backed by trigram indexes. The History list, command recents, stats routes, completed-run inserts, full-output artifact metadata writes, snapshot share routes, session preferences, recent values, starred commands, user workflows, secret session migration path, Projects workspace create/link/target paths, Atlas list/detail/finding paths, `/diag`, and `/metrics` use the normal backend-aware app query path on both SQLite and Postgres. Postgres startup runs app-owned migrations from `app/core/migrations/` behind a transaction-scoped advisory lock; the first migration is a baseline schema for the current app tables, indexes, JSONB columns, booleans, bytea secret payloads, and triggers, and the second adds `pg_trgm` run-history search indexes. When `database_backend` is `postgres`, normal app `db_connect()` calls go through the Postgres pool with an app-compatibility wrapper for the existing `?` placeholder style and a narrow read-only transient-error retry. SQLite remains the default backend, and Postgres is available for larger deployments that need a server database.
+SQLite is the default database backend and stores data in `<data_dir>/history.db` with WAL mode, twenty-two persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable. Postgres is the supported production-scaling backend for deployments that need a server database. The server has a `database_backend` selector and a database backend/dialect helper for connection setup, JSON column types and parameters, boolean storage and parameters, timestamps, placeholders, `IN` clauses, limit/offset clauses, upsert clauses, text search expressions, concatenation, SQLite diagnostics, Postgres identifier quoting, advisory-lock IDs, lazy psycopg pool setup, `pg_trgm` availability checks, and storage rows. History search has a backend-aware SQL helper: SQLite keeps its FTS5-first path with `LIKE` fallback for short terms, while Postgres uses substring `ILIKE` clauses backed by trigram indexes. Atlas entity and finding searches use the same backend-aware substring shape so Postgres can use trigram indexes for entity values and finding text. The History list, command recents, stats routes, terminal `stats` built-in, completed-run inserts, full-output artifact metadata writes, snapshot share routes, session preferences, recent values, starred commands, user workflows, secret session migration path, Projects workspace create/link/target paths, Files metadata paths, Atlas list/detail/finding paths, `/diag`, and `/metrics` use the normal backend-aware app query path on both SQLite and Postgres. Postgres startup runs app-owned migrations from `app/core/migrations/` behind a transaction-scoped advisory lock; the first migration is a baseline schema for the current app tables, indexes, JSONB columns, booleans, bytea secret payloads, and triggers, the second adds `pg_trgm` run-history search indexes, and the third adds Atlas entity/finding search indexes. When `database_backend` is `postgres`, normal app `db_connect()` calls go through the Postgres pool with an app-compatibility wrapper for the existing `?` placeholder style and a narrow read-only transient-error retry.
 
 Logical relationships are owned by the app rather than SQLite foreign-key constraints. Anonymous browser sessions can appear as `session_id` values without a matching `session_tokens` row.
 
 Project workspace tables are the relationship foundation for case-style grouping. Projects link to completed runs and Atlas entities instead of copying them, so source records can remain usable outside any project and can belong to more than one project when that is useful. Snapshots and manually selected workspace files remain in their share/history/files surfaces and are not project-linked. Run-owned artifacts stay attached to their source run and surface in project views through linked runs; findings surface through linked runs or linked Atlas entities.
 
-The schema is shown as one compact topology diagram for the full relationship model, then three field-level diagrams for the clusters where column shapes carry real meaning. Per-table field reference continues in the prose list below.
+The schema is shown as one compact topology diagram for the full relationship model, then three field-level diagrams for the clusters where column shapes carry real meaning. The diagrams use SQLite table names for the default backend. Postgres creates the same app-owned tables through migrations plus `schema_migrations`, but it does not create `runs_fts`; Postgres run search uses `pg_trgm` GIN indexes on `runs.command` and `runs.output_search_text`, and Atlas search uses trigram indexes on entity values plus finding title/raw-line/tool fields. Per-table field reference continues in the prose list below.
 
 #### Schema topology
 
-Every persistent table and its relationships, without field bodies. `LOGICAL_SESSION` is the shared `session_id` value rather than a stored table.
+Every app-owned persistent table in the default SQLite topology and its relationships, without field bodies. `LOGICAL_SESSION` is the shared `session_id` value rather than a stored table.
 
 ```mermaid
 erDiagram
@@ -1068,7 +1068,7 @@ erDiagram
 
 #### Run output and workspace artifacts
 
-Run history with its two artifact families. `RUN_OUTPUT_ARTIFACTS` points at gzip-compressed full transcripts under `<data_dir>/run-output/`; `RUNS_FTS` is the FTS5 content table backing history search; `RUN_FILE_ARTIFACTS` tracks workspace files produced or consumed by a run. `SNAPSHOTS` is a sibling share/permalink record without an FK to `RUNS`.
+Run history with its two artifact families. `RUN_OUTPUT_ARTIFACTS` points at gzip-compressed full transcripts under `<data_dir>/run-output/`; `RUNS_FTS` is the SQLite-only FTS5 content table backing history search; `RUN_FILE_ARTIFACTS` tracks workspace files produced or consumed by a run. Postgres search uses trigram indexes instead of an FTS table. `SNAPSHOTS` is a sibling share/permalink record without an FK to `RUNS`.
 
 ```mermaid
 erDiagram
@@ -1181,8 +1181,9 @@ erDiagram
   PROJECTS ||--o{ EVIDENCE_PACKAGES : "exports"
 ```
 
-- `runs` — one row per completed command. Stores run metadata, including `run_kind` (`builtin` or `external`) so history filters, project links, and finding capture can use a durable classification instead of re-reading the command text. It also stores `owner_tab_id` for completed runs that came from a terminal tab, which lets terminal-native commands such as `project link run last` resolve "last" within the tab that issued the command. It also stores a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews store structured `{text, cls, tsC, tsE}` entries plus optional signal and entity metadata so run permalinks can preserve prompt echo, timestamp metadata, scoped findings, and extracted public IP/domain/hash/CVE hints. The preview is capped by both `max_output_lines` and `output_preview_max_mb`, which protects SQLite from huge single-line outputs while full artifacts retain the larger text when enabled. Also stores `output_search_text` (plain text extracted from the full artifact when available, otherwise the preview) for FTS indexing. When `runs_search_text_inline_max_bytes` is set, oversized search bodies move to `data_dir/body-store` and the column keeps pointer metadata plus a short preview. Persists across restarts. Pruned by `permalink_retention_days`.
-- `runs_fts` — FTS5 virtual table (content table backed by `runs`, `content_rowid=rowid`) indexing the `command` and `output_search_text` columns. Uses the trigram tokenizer when available (SQLite ≥ 3.38), falling back to unicode61. Kept in sync with `runs` via INSERT/DELETE triggers. Enables history drawer full-text search across both command text and stored run output.
+- `runs` — one row per completed command. Stores run metadata, including `run_kind` (`builtin` or `external`) so history filters, project links, and finding capture can use a durable classification instead of re-reading the command text. It also stores `owner_tab_id` for completed runs that came from a terminal tab, which lets terminal-native commands such as `project link run last` resolve "last" within the tab that issued the command. It also stores a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews store structured `{text, cls, tsC, tsE}` entries plus optional signal and entity metadata so run permalinks can preserve prompt echo, timestamp metadata, scoped findings, and extracted public IP/domain/hash/CVE hints. The preview is capped by both `max_output_lines` and `output_preview_max_mb`, which protects the default SQLite database from huge single-line outputs while full artifacts retain the larger text when enabled. Also stores `output_search_text` (plain text extracted from the full artifact when available, otherwise the preview) for backend search indexing. When `runs_search_text_inline_max_bytes` is set, oversized search bodies move to `data_dir/body-store` and the column keeps pointer metadata plus a short preview. Persists across restarts. Pruned by `permalink_retention_days`.
+- `runs_fts` — SQLite-only FTS5 virtual table (content table backed by `runs`, `content_rowid=rowid`) indexing the `command` and `output_search_text` columns. Uses the trigram tokenizer when available (SQLite ≥ 3.38), falling back to unicode61. Kept in sync with `runs` via INSERT/DELETE triggers. Enables history drawer full-text search across both command text and stored run output on SQLite. Postgres does not create this table; its migrations create `pg_trgm` GIN indexes for the same command/output substring search behavior and for Atlas entity/finding substring search.
+- `schema_migrations` — Postgres-only migration bookkeeping table. It records app-owned migration versions so startup and the SQLite-to-Postgres migration helper can verify that a destination schema has the expected baseline before app data is copied.
 - `run_output_artifacts` — metadata rows pointing at compressed full-output artifacts under `<data_dir>/run-output/`. This keeps the `runs` table lean while still allowing the canonical `/history/<id>` permalink to serve full output when it exists.
 - `snapshots` — one row per tab permalink (`/share/<id>`). Contains `{text, cls, tsC, tsE}` objects with raw ANSI codes and timestamp data for accurate HTML export reproduction, and now feeds the `SNAPSHOT` rows in the shared history surfaces. When `snapshots_inline_max_bytes` is set, oversized snapshot bodies move to `data_dir/body-store` while share links still read through the pointer.
 - `session_tokens` — one row per issued named session token `(token TEXT PRIMARY KEY, created TEXT)`. Used to validate `tok_`-prefixed `X-Session-ID` headers and to support `session-token list` and `session-token revoke`.
@@ -1351,7 +1352,7 @@ The current event inventory is:
 
 - `/health` remains the load-balancer contract and reports whether DB and Redis are healthy, with degraded states surfacing through status code.
 - `/status` is intentionally a softer browser-HUD contract and always responds 200 so status-pill polling never causes UI flapping or reconnect churn.
-- `/diag` is the operator-facing structured view that surfaces runtime config, service health, asset presence, SQLite storage breakdowns, tool availability, and activity summaries without opening a shell session.
+- `/diag` is the operator-facing structured view that surfaces runtime config, service health, asset presence, database storage breakdowns, tool availability, and activity summaries without opening a shell session.
 - `/metrics` is the Prometheus scrape contract for trendable operational signals, including HTTP traffic, runs, PTYs, rate limits, broker mode/activity, DB/Redis/workspace gauges, selected database hot-path latency, intel provider outcomes/cache size, evidence package builds, findings, snapshots, and error counters.
 
 These surfaces share the same runtime health model, but they target different consumers: infrastructure checks, browser chrome, operator diagnostics, and time-series monitoring.
@@ -1362,9 +1363,9 @@ The diagnostics page and Prometheus metrics endpoint live behind the same truste
 
 Operationally, `/diag` sits on top of the same underlying sources described earlier in the document:
 
-- Redis and SQLite health come from the same runtime boundary described in **System Structure**
+- Redis and database health come from the same runtime boundary described in **System Structure**
 - run counts, top commands, and stored artifacts come from the persistence layer described in **State And Persistence**
-- table/index storage, logical payload estimates, FTS shadow-table rollups, and largest saved-run hints come from the same SQLite connection as the Database card; allocated byte counts appear when SQLite was built with `SQLITE_ENABLE_DBSTAT_VTAB`, while row counts and logical payload estimates still render without it
+- table/index or relation storage, logical payload estimates, search-index rollups, and largest saved-run hints come from the same database connection as the Database card; SQLite allocated byte counts appear when SQLite was built with `SQLITE_ENABLE_DBSTAT_VTAB`, while Postgres relation sizes come from catalog functions
 - config values reflect the browser/backend config split described in **Configuration Surfaces**
 - access control and denied-access logging reuse the same client-IP trust model described in **Security Model** and **Logging**
 - Prometheus counters, histograms, label normalizers, cardinality policies, and multiprocess registry setup live in `app/services/metrics/__init__.py`; scrape-time collectors for database, Redis, broker mode, workspace, intel cache size, Atlas, findings, snapshots, and provider-secret health live in `app/services/metrics/collectors.py`
@@ -1382,7 +1383,7 @@ The container uses two unprivileged system users:
 
 - `appuser`
   - owns the Flask/Gunicorn web process
-  - owns the configured data directory and can read or write the SQLite database and artifact metadata
+  - owns the configured data directory and can read or write SQLite data files, artifact metadata, and body-store files
 - `scanner`
   - owns all user-submitted command processes
   - does not get write access to `./data`
@@ -1436,12 +1437,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,866
+- behavior tests: 2,871
 - docs/inventory meta-tests: 32
-- `pytest`: 1485 (1453 behavior + 32 meta)
+- `pytest`: 1490 (1458 behavior + 32 meta)
 - `vitest`: 1161
 - `playwright`: 252
-- total: 2,898
+- total: 2,903
 
 ### Testing Architecture
 

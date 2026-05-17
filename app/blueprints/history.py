@@ -18,6 +18,7 @@ from core.database import DB_BACKEND, db_connect, delete_run_artifacts, delete_s
 from core.database_backend import (
     DatabaseBackend,
     SQLiteOperationalError,
+    dialect_for_backend,
     sqlite_table_columns,
     sqlite_table_exists,
 )
@@ -51,6 +52,9 @@ CFG = _config.CFG
 log = logging.getLogger("shell")
 
 history_bp = Blueprint("history", __name__)
+
+_HISTORY_TABLE_EXISTS_CACHE: dict[tuple[DatabaseBackend, str, str], bool] = {}
+_HISTORY_TABLE_COLUMNS_CACHE: dict[tuple[DatabaseBackend, str, str], frozenset[str]] = {}
 
 
 def _normalize_history_filter_text(value):
@@ -95,24 +99,6 @@ def _history_add_filters(sql, params, command_root, exit_code_filter, date_range
         sql += " AND r.started >= ?"
         params.append(cutoff)
     return sql, params
-
-
-def _history_run_root_sql(column):
-    if DB_BACKEND == DatabaseBackend.POSTGRES:
-        trimmed = f"TRIM({column})"
-        space_pos = f"POSITION(' ' IN {trimmed})"
-        return (
-            "LOWER(CASE "
-            f"WHEN {space_pos} > 0 THEN SUBSTRING({trimmed} FROM 1 FOR ({space_pos} - 1)) "
-            f"ELSE {trimmed} "
-            "END)"
-        )
-    return (
-        "LOWER(CASE "
-        f"WHEN instr(trim({column}), ' ') > 0 THEN substr(trim({column}), 1, instr(trim({column}), ' ') - 1) "
-        f"ELSE trim({column}) "
-        "END)"
-    )
 
 
 def _history_command_roots(conn, session_id):
@@ -164,7 +150,25 @@ def _parse_history_int(value, default, *, minimum=1, maximum=None):
     return parsed
 
 
+def _history_schema_cache_key(conn) -> str:
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        row = conn.execute("SELECT current_schema() AS schema_name").fetchone()
+        return "schema:" + str(row["schema_name"] if row else "public")
+    try:
+        rows = conn.execute("PRAGMA database_list").fetchall()
+    except SQLiteOperationalError:
+        return "connection:" + str(id(conn))
+    for row in rows:
+        if str(row["name"] or "") == "main":
+            main_file = str(row["file"] or "").strip()
+            return "file:" + (main_file or str(id(conn)))
+    return "connection:" + str(id(conn))
+
+
 def _history_table_exists(conn, table_name):
+    cache_key = (DB_BACKEND, _history_schema_cache_key(conn), str(table_name))
+    if cache_key in _HISTORY_TABLE_EXISTS_CACHE:
+        return _HISTORY_TABLE_EXISTS_CACHE[cache_key]
     if DB_BACKEND == DatabaseBackend.POSTGRES:
         row = conn.execute(
             "SELECT 1 AS present "
@@ -172,24 +176,36 @@ def _history_table_exists(conn, table_name):
             "WHERE table_schema = current_schema() AND table_name = ?",
             (table_name,),
         ).fetchone()
-        return row is not None
-    return sqlite_table_exists(conn, table_name)
+        exists = row is not None
+    else:
+        exists = sqlite_table_exists(conn, table_name)
+    _HISTORY_TABLE_EXISTS_CACHE[cache_key] = exists
+    return exists
+
+
+def _history_table_columns(conn, table_name):
+    cache_key = (DB_BACKEND, _history_schema_cache_key(conn), str(table_name))
+    if cache_key in _HISTORY_TABLE_COLUMNS_CACHE:
+        return _HISTORY_TABLE_COLUMNS_CACHE[cache_key]
+    if DB_BACKEND == DatabaseBackend.POSTGRES:
+        rows = conn.execute(
+            "SELECT column_name "
+            "FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = ?",
+            (table_name,),
+        ).fetchall()
+        columns = frozenset(str(row["column_name"]) for row in rows)
+    else:
+        try:
+            columns = frozenset(sqlite_table_columns(conn, table_name))
+        except SQLiteOperationalError:
+            columns = frozenset()
+    _HISTORY_TABLE_COLUMNS_CACHE[cache_key] = columns
+    return columns
 
 
 def _history_column_exists(conn, table_name, column_name):
-    if DB_BACKEND == DatabaseBackend.POSTGRES:
-        row = conn.execute(
-            "SELECT 1 AS present "
-            "FROM information_schema.columns "
-            "WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?",
-            (table_name, column_name),
-        ).fetchone()
-        return row is not None
-    try:
-        columns = sqlite_table_columns(conn, table_name)
-    except SQLiteOperationalError:
-        return False
-    return column_name in columns
+    return str(column_name) in _history_table_columns(conn, table_name)
 
 
 def _history_run_kind_sql(column):
@@ -199,7 +215,7 @@ def _history_run_kind_sql(column):
     roots = ", ".join("'" + root.replace("'", "''") + "'" for root in builtin_roots)
     return (
         "CASE WHEN "
-        f"{_history_run_root_sql(column)} IN ({roots}) "
+        f"{dialect_for_backend(DB_BACKEND).command_root_expr(column)} IN ({roots}) "
         f"THEN '{RUN_KIND_BUILTIN}' ELSE '{RUN_KIND_EXTERNAL}' END"
     )
 
@@ -242,9 +258,8 @@ def _history_base_clause(
             "JOIN projects p ON p.id = pl.project_id "
             "WHERE p.session_id = ? AND p.id = ? "
             "AND pl.entity_type = 'run' AND pl.entity_id = r.id) "
-            f"AND {'r.run_kind' if has_run_kind_column else _history_run_kind_sql('r.command')} = ?"
         )
-        params.extend([session_id, project_id, RUN_KIND_EXTERNAL])
+        params.extend([session_id, project_id])
     if starred_only:
         sql += (
             " AND EXISTS (SELECT 1 FROM starred_commands sc "
@@ -758,7 +773,7 @@ def _entity_labels_by_entity_ids(conn, entity_type, entity_ids):
         "SELECT id, session_id, entity_type, entity_id, label, source, created FROM entity_labels "  # nosec
         "WHERE entity_type = ? "
         f"AND entity_id IN ({placeholders}) "
-        "ORDER BY LOWER(label) ASC, created ASC",
+        "ORDER BY " + dialect_for_backend(DB_BACKEND).case_insensitive_order("label") + ", created ASC",
         [entity_type, *ids],
     ).fetchall()
     grouped = {entity_id: [] for entity_id in ids}

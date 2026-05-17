@@ -67,6 +67,17 @@ The rebuild makes sure the `shell` image includes the current Python dependencie
 
 Adjust the username, password, and database name if your `.env` overrides `POSTGRES_USER`, `POSTGRES_PASSWORD`, or `POSTGRES_DB`.
 
+After validation passes, switch the app to Postgres with the same DSN you migrated into. In Compose, that usually means `.env` contains:
+
+```env
+COMPOSE_PROFILES=postgres
+DATABASE_BACKEND=postgres
+POSTGRES_PASSWORD=<redacted>
+DATABASE_URL=postgresql://darklab:<redacted>@postgres:5432/darklab_shell
+```
+
+If you also use `app/conf/config.local.yaml`, keep its `database_backend` and `database_url` values aligned with `.env`. Environment variables win, so a stale `.env` value overrides `config.local.yaml`.
+
 ## Host-Accessible Example
 
 If you're using an external Postgres host or a separately published staging database, you can run the helper directly from the checkout:
@@ -80,7 +91,21 @@ python scripts/migrate_sqlite_to_postgres.py \
   --validate
 ```
 
-Use `--schema <name>` when you want to test the migration in an isolated Postgres schema before touching `public`. Run the app migrations against that schema first; the helper creates the schema if needed, checks `schema_migrations`, and refuses to copy into schemas that are missing the expected app migration versions.
+Use `--schema <name>` when you want to test the migration in an isolated Postgres schema before touching `public`. Run the app migrations against that schema first; the helper creates the schema if needed, checks `schema_migrations`, and refuses to copy into schemas that are missing the expected app migration versions. For a direct host run, that usually looks like:
+
+```bash
+PGOPTIONS="-c search_path=darklab_migration_test" \
+  PYTHONPATH=app DATABASE_BACKEND=postgres DATABASE_URL="$DATABASE_URL" \
+  python -c "from core.database import db_init; db_init()"
+
+python scripts/migrate_sqlite_to_postgres.py \
+  --sqlite-db /data/history.db \
+  --artifact-root /data \
+  --database-url "$DATABASE_URL" \
+  --schema darklab_migration_test \
+  --confirm-secrets-key \
+  --validate
+```
 
 If you want the helper to copy referenced artifact and body-store files into a new data root, add:
 
@@ -96,6 +121,10 @@ If a previous migration was interrupted and you're continuing into the same dest
 
 `--resume` uses `INSERT ... ON CONFLICT DO NOTHING`, then validation compares source and destination row counts.
 
+`--allow-non-empty` only bypasses the destination preflight that stops when app tables already have rows. It does not merge unrelated databases, rewrite IDs, or resolve conflicts for ordinary tables. Use it only when you intentionally prepared the destination, understand which rows are already present, and still expect validation to pass.
+
+`--batch-size` controls how many rows are inserted per batch. The default is `500`, which is a good starting point for normal migrations. Lower it if a staging database or network path struggles with large batches; raise it only after a successful dry run when you want to reduce round trips.
+
 ## Dry Run
 
 Use `--dry-run` to check SQLite table discovery, encrypted-secret preflight, and file references without opening Postgres:
@@ -110,7 +139,7 @@ python scripts/migrate_sqlite_to_postgres.py \
 
 ## Search Indexes
 
-SQLite FTS5 data is not copied. Postgres search uses backend-specific indexes created by the app migrations instead. The helper still accepts `--skip-search-backfill` for older saved commands, but current migrations already create the `pg_trgm` extension and GIN trigram indexes for `runs.command` and `runs.output_search_text`.
+SQLite FTS5 data is not copied. Postgres search uses backend-specific indexes created by the app migrations instead. The helper still accepts `--skip-search-backfill` for older saved commands, but current migrations already create the `pg_trgm` extension and GIN trigram indexes for `runs.command`, `runs.output_search_text`, `entities.canonical_value`, `findings.title`, `findings.raw_line`, and `findings.tool_root`.
 
 ## Rollback
 
@@ -118,20 +147,19 @@ Rollback is the original SQLite snapshot plus the original artifact directory. D
 
 ## Testing the Postgres Path
 
-The Postgres pytest lane is opt-in and uses isolated schemas so it can run against a shared test database:
+The Postgres pytest lane is opt-in and uses isolated schemas. By default, `npm run test:postgres` uses `DARKLAB_TEST_POSTGRES_DSN` when it is set; otherwise it starts a disposable Docker Postgres container on a random localhost port, waits for it to become ready, and removes it when the tests finish.
 
 ```bash
-DARKLAB_TEST_POSTGRES_DSN=postgresql://darklab:darklab_dev_password@localhost:5432/darklab_shell \
-  npm run test:postgres
+npm run test:postgres
 ```
 
-If you use the bundled Compose Postgres service and do not publish port `5432`, run the same lane inside the Compose network:
+To force a specific host-accessible database, set `DARKLAB_TEST_POSTGRES_DSN` or run `bash scripts/run_postgres_tests.sh --host`. If you use the bundled Compose Postgres service and do not publish port `5432`, run the same lane inside the Compose network:
 
 ```bash
 bash scripts/run_postgres_tests.sh --compose
 ```
 
-That command starts the profile-gated `postgres` service, mounts the checkout into a disposable `shell` container, installs dev test dependencies in that one-off container, and runs the Postgres smoke, route, backend-module, output-search, and migration-helper checks without exposing the database to the host OS.
+The `--compose` command starts the profile-gated `postgres` service, mounts the checkout into a disposable `shell` container, installs dev test dependencies in that one-off container, and runs the Postgres smoke, route, backend-module, output-search, and migration-helper checks without exposing the database to the host OS.
 
 ---
 

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 import config as _config
 from core.database import DB_BACKEND, db_connect, validate_project_entity_type
-from core.database_backend import DatabaseBackend
+from core.database_backend import dialect_for_backend
 from services.projects.contracts import (
     ENTITY_METADATA_TYPES,
     MAX_ENTITY_ID_LEN,
@@ -51,7 +51,7 @@ def _now() -> str:
 
 
 def _label_order_sql() -> str:
-    return "LOWER(label) ASC, created ASC" if DB_BACKEND == DatabaseBackend.POSTGRES else "label COLLATE NOCASE ASC, created ASC"
+    return dialect_for_backend(DB_BACKEND).case_insensitive_order("label") + ", created ASC"
 
 
 def _new_entity_label_id() -> str:

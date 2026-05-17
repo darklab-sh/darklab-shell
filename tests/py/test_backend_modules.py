@@ -473,11 +473,8 @@ class TestDatabaseBackend:
             def fetchone(self):
                 return {"ok": True}
 
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, traceback):
-                return False
+            def close(self):
+                calls.append(("cursor_close",))
 
         class FakePostgresConnection:
             def execute(self, sql, params=()):
@@ -514,11 +511,13 @@ class TestDatabaseBackend:
         assert calls == [
             ("execute", "SELECT '?' AS literal, id FROM runs WHERE id = %s", ("run-1",)),
             ("cursor_execute", "SELECT id FROM runs WHERE session_id = %s", ("sess-1",)),
+            ("cursor_close",),
             (
                 "cursor_executemany",
                 "INSERT INTO session_variables (session_id, name) VALUES (%s, %s)",
                 (("sess-1", "ONE"), ("sess-1", "TWO")),
             ),
+            ("cursor_close",),
             ("context_exit", None),
         ]
 
@@ -591,6 +590,29 @@ class TestDatabaseBackend:
         with pytest.raises(database_backend.DatabaseBackendError, match="sqlite, postgres"):
             database_backend.parse_database_backend("oracle")
 
+    def test_database_dialect_exposes_shared_sql_and_json_helpers(self):
+        sqlite_dialect = database_backend.dialect_for_backend(database_backend.DatabaseBackend.SQLITE)
+        postgres_dialect = database_backend.dialect_for_backend(database_backend.DatabaseBackend.POSTGRES)
+
+        assert sqlite_dialect.decode_json_dict('{"ok": true}') == {"ok": True}
+        assert sqlite_dialect.decode_json_dict("[1]") == {}
+        assert sqlite_dialect.decode_json_list("[1, 2]") == [1, 2]
+        assert sqlite_dialect.decode_json_list({"bad": True}) == []
+        assert sqlite_dialect.insert_or_ignore_clause(("session_id", "name")) == (
+            'ON CONFLICT("session_id", "name") DO NOTHING'
+        )
+        assert postgres_dialect.insert_or_ignore_clause(("session_id", "name")) == (
+            'ON CONFLICT("session_id", "name") DO NOTHING'
+        )
+        assert sqlite_dialect.case_insensitive_order("label") == "label COLLATE NOCASE ASC"
+        assert postgres_dialect.case_insensitive_order("label") == "LOWER(label) ASC"
+        assert sqlite_dialect.string_agg_distinct("p.name") == "GROUP_CONCAT(DISTINCT p.name)"
+        assert postgres_dialect.string_agg_distinct("p.name") == "STRING_AGG(DISTINCT p.name, ',')"
+        assert sqlite_dialect.begin_immediate_sql() == "BEGIN IMMEDIATE"
+        assert postgres_dialect.begin_immediate_sql() == "BEGIN"
+        assert "instr(trim(command), ' ')" in sqlite_dialect.command_root_expr("command")
+        assert "POSITION(' ' IN TRIM(command))" in postgres_dialect.command_root_expr("command")
+
 
 class TestPostgresMigrations:
     def test_baseline_migration_covers_current_app_schema(self):
@@ -600,7 +622,7 @@ class TestPostgresMigrations:
         sql = "\n".join(baseline.statements)
 
         assert baseline.version == "0001"
-        assert [migration.version for migration in MIGRATIONS] == ["0001", "0002"]
+        assert [migration.version for migration in MIGRATIONS] == ["0001", "0002", "0003"]
         for table_name in (
             "runs",
             "run_output_artifacts",
@@ -633,14 +655,20 @@ class TestPostgresMigrations:
     def test_postgres_search_migration_adds_trigram_indexes(self):
         from core.migrations import MIGRATIONS
 
-        search_migration = MIGRATIONS[1]
-        sql = "\n".join(search_migration.statements)
+        run_search_migration = MIGRATIONS[1]
+        atlas_search_migration = MIGRATIONS[2]
+        sql = "\n".join([*run_search_migration.statements, *atlas_search_migration.statements])
 
-        assert search_migration.version == "0002"
+        assert run_search_migration.version == "0002"
+        assert atlas_search_migration.version == "0003"
         assert "CREATE EXTENSION IF NOT EXISTS pg_trgm" in sql
         assert "gin_trgm_ops" in sql
         assert "command" in sql
         assert "output_search_text" in sql
+        assert "canonical_value" in sql
+        assert "title" in sql
+        assert "raw_line" in sql
+        assert "tool_root" in sql
 
     def test_migration_runner_serializes_with_advisory_lock_and_records_versions(self):
         from core.migrations.runner import Migration, run_migrations_with_advisory_lock
@@ -692,11 +720,15 @@ class TestPostgresMigrations:
                 self.committed = True
 
         fake_conn = FakePostgresConnection()
+        fake_app_conn = FakePostgresConnection()
         migration_runner = mock.Mock(return_value=["0001"])
+        prune_retention = mock.Mock()
         import core.migrations as migrations
 
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.POSTGRES)
         monkeypatch.setattr(database, "connect_postgres", mock.Mock(return_value=fake_conn))
+        monkeypatch.setattr(database, "db_connect", mock.Mock(return_value=fake_app_conn))
+        monkeypatch.setattr(database, "_prune_retention", prune_retention)
         monkeypatch.setattr(database, "ensure_run_output_dir", mock.Mock())
         monkeypatch.setattr(migrations, "MIGRATIONS", ())
         monkeypatch.setattr("core.migrations.runner.run_migrations_with_advisory_lock", migration_runner)
@@ -705,7 +737,9 @@ class TestPostgresMigrations:
         database.db_init()
 
         assert fake_conn.committed is True
+        assert fake_app_conn.committed is True
         migration_runner.assert_called_once()
+        prune_retention.assert_called_once_with(fake_app_conn)
 
 
 class TestRunHistorySearchClauses:
@@ -1060,7 +1094,7 @@ class TestPostgresMigrationHelper:
                 conn,
                 pg_conn,
                 plan,
-                jsonb_type=lambda value: value,
+                jsonb_param=lambda value: value,
                 batch_size=10,
                 resume=False,
             )

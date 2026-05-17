@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 
 from core.database import DB_BACKEND
@@ -24,14 +23,7 @@ def load_session_preferences(conn, session_id):
     ).fetchone()
     if not row:
         return {}
-    if isinstance(row["preferences"], dict):
-        preferences = row["preferences"]
-    else:
-        try:
-            preferences = json.loads(row["preferences"] or "{}")
-        except (TypeError, ValueError):
-            return {}
-    return preferences if isinstance(preferences, dict) else {}
+    return dialect_for_backend(DB_BACKEND).decode_json_dict(row["preferences"])
 
 
 def save_session_preferences(conn, session_id, preferences):

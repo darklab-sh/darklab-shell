@@ -81,13 +81,25 @@ class DatabaseDialect:
             payload = json.dumps(value, separators=(",", ":"), sort_keys=True)
         if self.backend != DatabaseBackend.POSTGRES:
             return payload
+        return postgres_jsonb_param(json.loads(payload))
+
+    def decode_json_dict(self, value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return value
         try:
-            from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
-        except ImportError as exc:
-            raise PostgresConnectionError(
-                "Postgres JSON parameters require the 'psycopg[binary,pool]' dependency"
-            ) from exc
-        return Jsonb(json.loads(payload))
+            parsed = json.loads(value or "{}")
+        except (TypeError, ValueError):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    def decode_json_list(self, value: Any) -> list[Any]:
+        if isinstance(value, list):
+            return value
+        try:
+            parsed = json.loads(value or "[]")
+        except (TypeError, ValueError):
+            return []
+        return parsed if isinstance(parsed, list) else []
 
     def json_column_definition(self, default: str | None = None, *, nullable: bool = False) -> str:
         parts = [self.json_column]
@@ -139,7 +151,53 @@ class DatabaseDialect:
             f"{self.quote_identifier(column)} = {self.excluded_value(column)}"
             for column in updates
         )
-        return f"ON CONFLICT({conflict_sql}) DO UPDATE SET {update_sql}"  # nosec B608
+        return f"ON CONFLICT({conflict_sql}) DO UPDATE SET {update_sql}"  # nosec
+
+    def insert_or_ignore_clause(self, conflict_columns: Iterable[str]) -> str:
+        conflict = tuple(conflict_columns)
+        if not conflict:
+            raise ValueError("insert-ignore conflict columns are required")
+        conflict_sql = ", ".join(self.quote_identifier(column) for column in conflict)
+        return f"ON CONFLICT({conflict_sql}) DO NOTHING"
+
+    def case_insensitive_order(self, column_sql: str, direction: str = "ASC") -> str:
+        normalized_direction = str(direction or "ASC").strip().upper()
+        if normalized_direction not in {"ASC", "DESC"}:
+            normalized_direction = "ASC"
+        if self.backend == DatabaseBackend.POSTGRES:
+            return f"LOWER({column_sql}) {normalized_direction}"
+        return f"{column_sql} COLLATE NOCASE {normalized_direction}"
+
+    def string_agg_distinct(self, column_sql: str, separator: str = ",") -> str:
+        escaped_separator = str(separator).replace("'", "''")
+        if self.backend == DatabaseBackend.POSTGRES:
+            return f"STRING_AGG(DISTINCT {column_sql}, '{escaped_separator}')"
+        if separator != ",":
+            return f"GROUP_CONCAT(DISTINCT {column_sql})"
+        return f"GROUP_CONCAT(DISTINCT {column_sql})"
+
+    def begin_immediate_sql(self) -> str:
+        if self.backend == DatabaseBackend.POSTGRES:
+            return "BEGIN"
+        return "BEGIN IMMEDIATE"
+
+    def command_root_expr(self, column_sql: str) -> str:
+        if self.backend == DatabaseBackend.POSTGRES:
+            trimmed = f"TRIM({column_sql})"
+            space_pos = f"POSITION(' ' IN {trimmed})"
+            return (
+                "LOWER(CASE "
+                f"WHEN {space_pos} > 0 THEN SUBSTRING({trimmed} FROM 1 FOR ({space_pos} - 1)) "
+                f"ELSE {trimmed} "
+                "END)"
+            )
+        return (
+            "LOWER(CASE "
+            f"WHEN instr(trim({column_sql}), ' ') > 0 "
+            f"THEN substr(trim({column_sql}), 1, instr(trim({column_sql}), ' ') - 1) "
+            f"ELSE trim({column_sql}) "
+            "END)"
+        )
 
 
 SQLITE_DIALECT = DatabaseDialect(
@@ -174,6 +232,16 @@ _POSTGRES_TRANSIENT_SQLSTATES = frozenset({
     "53300",  # too many connections
     "57P03",  # cannot connect now
 })
+
+
+def postgres_jsonb_param(value: Any) -> Any:
+    try:
+        from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+    except ImportError as exc:
+        raise PostgresConnectionError(
+            "Postgres JSON parameters require the 'psycopg[binary,pool]' dependency"
+        ) from exc
+    return Jsonb(value)
 
 
 def parse_database_backend(value: Any) -> DatabaseBackend:
@@ -358,8 +426,8 @@ class PostgresSqliteCompatConnection:
             return self._connection.execute(converted, params_tuple)
 
     def executemany(self, sql: str, params_seq: Iterable[Iterable[Any]]) -> Any:
-        cursor = self.cursor()
-        return cursor.executemany(sql, params_seq)
+        with self.cursor() as cursor:
+            return cursor.executemany(sql, params_seq)
 
     def cursor(self, *args: Any, **kwargs: Any) -> PostgresSqliteCompatCursor:
         return PostgresSqliteCompatCursor(self._connection.cursor(*args, **kwargs), self._connection)

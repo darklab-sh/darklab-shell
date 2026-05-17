@@ -2764,11 +2764,6 @@ commands:
           suggest:
             - value: katana-urls.txt
               description: Save crawled URLs
-      arguments:
-        - placeholder: <target>
-          hint_only: true
-          value_type: url
-          description: Usually provided through -u
   - root: wafw00f
     description: Detects whether a web target is protected by a web application firewall.
     category: Network Reconnaissance

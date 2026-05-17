@@ -84,8 +84,8 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `restricted_command_input_cidrs` | `[]` | IPs / CIDRs that command validation rejects when supplied in metadata-known target slots. Applies to literal IP/CIDR values, URLs with literal IP hosts, host:port values, and inspectable workspace input files passed through declared read flags. Domain names are not DNS-resolved |
 | `history_panel_limit` | `50` | Number of history rows shown per page in the desktop history drawer and mobile recents sheet |
 | `recent_commands_limit` | `50` | Number of distinct recent commands loaded into prompt Up/Down history, desktop rail recents, and the mobile recent peek |
-| `data_dir` | auto | Server-side only. Directory used for SQLite history and compressed full-output artifacts. Leave unset to use `/data` when it is writable, otherwise `/tmp` for local/dev fallback. If set explicitly, the directory must be writable at startup |
-| `database_backend` | `sqlite` | Server-side only. Selects the database backend. SQLite remains the default local/single-user path. When set to `postgres`, startup runs the app-owned Postgres schema migrations and normal `db_connect()` calls use the Postgres pool through a compatibility layer while route portability work continues |
+| `data_dir` | auto | Server-side only. Directory used for the default SQLite history database, compressed full-output artifacts, body-store files, and the app-owned secret key file. Postgres deployments still use it for filesystem-backed artifacts and app-owned files. Leave unset to use `/data` when it is writable, otherwise `/tmp` for local/dev fallback. If set explicitly, the directory must be writable at startup |
+| `database_backend` | `sqlite` | Server-side only. Selects the database backend. SQLite remains the default local/single-user path. When set to `postgres`, startup runs the app-owned Postgres schema migrations and normal `db_connect()` calls use the Postgres pool |
 | `database_url` | _(empty)_ | Server-side only. Postgres DSN used when `database_backend: postgres`. Ignored by SQLite. Can also be set with the `DATABASE_URL` environment variable |
 | `database_pool_min` | `1` | Server-side only. Minimum Postgres pool size. Ignored by SQLite. Can also be set with `DATABASE_POOL_MIN` |
 | `database_pool_max` | `5` | Server-side only. Maximum Postgres pool size. Ignored by SQLite. Can also be set with `DATABASE_POOL_MAX` |
@@ -168,9 +168,9 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `interactive_pty_input_rate_limit_per_minute` | `500` | Max interactive PTY input requests per minute per IP. This is separate from `/runs` because normal terminal typing produces many small input requests |
 | `interactive_pty_input_rate_limit_per_second` | `10` | Max interactive PTY input request burst per second per IP |
 | `max_tabs` | `8` | Maximum number of tabs a user can have open at once. `0` means unlimited |
-| `max_output_lines` | `5000` | Max rows retained in the live tab DOM and in the SQLite run preview. Oldest rendered rows are dropped from the top when exceeded, while visible line numbers continue reflecting emitted output order. `0` means unlimited |
-| `output_preview_max_mb` | `1 MB` | Server-side only. Hard cap on the SQLite run preview payload so huge single-line outputs, such as JSON, cannot make history rows enormous. `0` means unlimited |
-| `persist_full_run_output` | `true` | Server-side only. Persists full output for completed runs as compressed artifacts while the history drawer and normal run permalink keep using the capped SQLite preview |
+| `max_output_lines` | `5000` | Max rows retained in the live tab DOM and in the saved run preview. Oldest rendered rows are dropped from the top when exceeded, while visible line numbers continue reflecting emitted output order. `0` means unlimited |
+| `output_preview_max_mb` | `1 MB` | Server-side only. Hard cap on the saved run preview payload so huge single-line outputs, such as JSON, cannot make history rows enormous. `0` means unlimited |
+| `persist_full_run_output` | `true` | Server-side only. Persists full output for completed runs as compressed artifacts while the history drawer and normal run permalink keep using the capped database preview |
 | `full_output_max_mb` | `5 MB` | Server-side only. Hard cap on the uncompressed UTF-8 payload written into a full-output artifact before gzip compression. `0` means unlimited |
 | `workspace_enabled` | `false` | Server-side only. Enables the app-managed per-session workspace foundation. This does not enable shell navigation or redirection by itself |
 | `workspace_backend` | `tmpfs` | Server-side only. Storage intent label for workspaces: `tmpfs` for short-lived in-memory storage or `volume` for a Docker-mounted location. The label does not mount storage by itself |
@@ -195,7 +195,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `run_broker_enabled` | `true` | Enables the brokered run model for command start, output replay, and live reattachment |
 | `run_broker_require_redis` | `true` | Requires Redis for brokered live reattachment. Keep enabled for Docker/production deployments; set to `false` only for single-process local development where in-memory replay limitations are acceptable |
 | `run_broker_active_stream_ttl_seconds` | `14400` | Safety TTL for active broker streams, refreshed while a run is active |
-| `run_broker_completed_stream_ttl_seconds` | `3600` | How long completed broker streams remain replayable after history finalization before completed-run restore relies on SQLite/history artifacts |
+| `run_broker_completed_stream_ttl_seconds` | `3600` | How long completed broker streams remain replayable after history finalization before completed-run restore relies on saved history rows and artifacts |
 | `run_broker_max_replay_bytes` | `10485760` | Maximum replay payload retained per brokered run stream. Replay is also bounded by `max_output_lines`; there is no separate line-limit setting |
 | `run_broker_subscriber_block_seconds` | `15` | How long broker stream subscribers wait for new events before receiving a heartbeat |
 | `run_broker_heartbeat_seconds` | `20` | How often broker workers emit heartbeat events while a process is idle |
@@ -549,7 +549,7 @@ WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 # WEB_CONCURRENCY=4
 # WEB_THREADS=4
 # COMPOSE_PROFILES=postgres
-# DATABASE_BACKEND=sqlite
+# DATABASE_BACKEND=postgres
 # DATABASE_URL=postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell
 # DATABASE_POOL_MIN=1
 # DATABASE_POOL_MAX=5
@@ -567,8 +567,8 @@ WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 | `WEB_CONCURRENCY` | Gunicorn entrypoint | Number of Gunicorn worker processes |
 | `WEB_THREADS` | Gunicorn entrypoint | Number of threads per Gunicorn worker |
 | `COMPOSE_PROFILES` | Docker Compose | Optional comma-separated Compose profiles to enable. Set to `postgres` when you want the profile-gated Postgres service included without passing `--profile postgres` |
-| `DATABASE_BACKEND` | Flask app | Optional override for `database_backend`. Keep this as `sqlite` for normal use until the Postgres query-portability work is complete |
-| `DATABASE_URL` | Flask app | Optional override for `database_url`, normally a Postgres DSN when testing the backend adapter |
+| `DATABASE_BACKEND` | Flask app | Optional override for `database_backend`. Use `sqlite` for the default local/single-user path or `postgres` for a Postgres-backed deployment |
+| `DATABASE_URL` | Flask app | Optional override for `database_url`, normally a Postgres DSN when `DATABASE_BACKEND=postgres` |
 | `DATABASE_POOL_MIN` / `DATABASE_POOL_MAX` | Flask app | Optional Postgres connection-pool bounds |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Docker Compose | Credentials used by the optional `postgres` Compose profile |
 | `SECRETS_MASTER_KEY` | Flask app | Optional base64-encoded 32-byte master key for the encrypted per-session secrets vault. When unset, the app creates `<data_dir>/.secrets_master_key` with mode `0600` on first use and repairs broader existing key-file permissions to `0600` before use. If both env and file exist, the env value wins and the app logs `MASTER_KEY_FILE_IGNORED` |
@@ -602,7 +602,7 @@ database_backend: postgres
 database_url: postgresql://darklab:<redacted>@postgres:5432/darklab_shell
 ```
 
-Do not set conflicting values in `.env` and `config.local.yaml`: the environment wins, so `.env` will override `config.local.yaml`.
+Do not set conflicting values in `.env` and `config.local.yaml`: the environment wins, so `.env` will override `config.local.yaml`. If you use a Compose override file such as `docker-compose.local.yml` for bind-mounted workspaces, make sure it preserves the base service environment or repeats the database environment values; otherwise the container can start with the profile-gated Postgres service present while the app still sees the SQLite defaults.
 
 Postgres connection notes:
 
@@ -613,13 +613,17 @@ Postgres connection notes:
 
 For an existing SQLite install, run the offline migration before switching the app over. See [docs/postgres-migration.md](docs/postgres-migration.md).
 
+Back up the SQLite data directory before migration and keep that snapshot until the Postgres deployment has been validated under real use. Rollback is switching the app config back to SQLite and restoring the untouched data directory snapshot if anything looks wrong after cutover.
+
 For backend development, Postgres tests are opt-in:
 
 ```bash
 npm run test:postgres
 ```
 
-Host-mode tests use `DARKLAB_TEST_POSTGRES_DSN`, or a pytest `--postgres-dsn` when you call pytest directly. To test against the bundled profile-gated Postgres service without publishing port `5432` to the host, run:
+By default, the helper uses `DARKLAB_TEST_POSTGRES_DSN` when it is set. When it is not set, it starts a disposable Docker Postgres container on a random localhost port, exports the DSN for the test process, waits for readiness, and removes the container whether the tests pass or fail.
+
+Use `bash scripts/run_postgres_tests.sh --host` when you specifically want to require an existing host-accessible DSN, or pass `--postgres-dsn` when you call pytest directly. To test against the bundled profile-gated Postgres service without publishing port `5432` to the host, run:
 
 ```bash
 bash scripts/run_postgres_tests.sh --compose
@@ -637,7 +641,7 @@ The base [docker-compose.yml](docker-compose.yml) is the standalone local/test s
 docker compose --profile postgres up -d postgres
 ```
 
-The app keeps using SQLite by default. The optional Postgres service is useful for adapter testing and production planning. Postgres startup runs the app-owned schema migrations, and the main app connection helper can route through the Postgres pool, but full browser/API portability is still being finished.
+The app keeps using SQLite by default. The optional Postgres service supports production-style deployments and the opt-in Postgres test lane. When `database_backend` is `postgres`, startup runs the app-owned schema migrations and normal app database calls route through the Postgres pool.
 
 The optional production overlay at [examples/docker-compose.prod.yml](examples/docker-compose.prod.yml) is layered on top of the base file:
 

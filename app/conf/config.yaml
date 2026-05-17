@@ -47,7 +47,9 @@
 # Server default if unset: 50
 # recent_commands_limit: 50
 
-# Directory used for SQLite history and compressed full-output artifacts.
+# Directory used for SQLite history, compressed full-output artifacts, body-store
+# files, and the app-owned secret key file. Postgres deployments still use this
+# directory for filesystem artifacts and offloaded body-store files.
 # Leave unset for auto-detect: use /data when it is writable, otherwise fall
 # back to /tmp for local/dev runs. If set explicitly, startup requires the
 # directory to be writable.
@@ -55,9 +57,8 @@
 # data_dir: /data
 #
 # Database backend. SQLite is the default for local and single-user installs.
-# The Postgres pool/dependency/config surface is available for the production
-# backend track, but the main app query path stays SQLite until the migration
-# and query-portability phases are complete.
+# Set this to postgres to use database_url, the Postgres connection pool, and
+# app-owned Postgres migrations at startup.
 # Server default if unset: sqlite
 # database_backend: sqlite
 #
@@ -228,7 +229,7 @@
 
 # ── Operator Diagnostics ─────────────────────────────────────────────────────
 #
-# GET /diag returns a JSON summary of app version, operational config, SQLite
+# GET /diag returns a JSON summary of app version, operational config, database
 # health and row counts, Redis connectivity, vendor-asset source (built-in vs
 # fallback), and per-tool availability derived from the allowlist.
 #
@@ -470,7 +471,7 @@
 # Server default if unset: 5000
 # max_output_lines: 5000
 
-# Hard cap for the SQLite run preview payload, expressed in megabytes.
+# Hard cap for the saved run preview payload, expressed in megabytes.
 # This protects history reads from huge single-line outputs such as JSON.
 # Set to 0 for unlimited.
 # Server default if unset: 1 MB
@@ -478,7 +479,7 @@
 
 # Persist the full output of completed runs as compressed artifact files under /data.
 # The history drawer and normal run permalink continue to use the capped preview stored
-# in SQLite; this enables a separate "view full output" page for completed runs.
+# in the configured database; this enables a separate "view full output" page for completed runs.
 # Server default if unset: true
 # persist_full_run_output: true
 
@@ -517,7 +518,7 @@
 # run_broker_active_stream_ttl_seconds: 14400
 
 # TTL for completed broker streams after history finalization. Completed run
-# restore falls back to SQLite/history artifacts after this window.
+# restore falls back to saved history rows and artifacts after this window.
 # Server default if unset: 3600
 # run_broker_completed_stream_ttl_seconds: 3600
 

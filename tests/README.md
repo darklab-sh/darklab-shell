@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,866
+- behavior tests: 2,871
 - docs/inventory meta-tests: 32
-- `pytest`: 1485 (1453 behavior + 32 meta)
+- `pytest`: 1490 (1458 behavior + 32 meta)
 - `vitest`: 1161
 - `playwright`: 252
-- total: 2,898
+- total: 2,903
 
 This document is organized in two parts:
 
@@ -94,7 +94,7 @@ Notes:
 - keep the Python virtualenv active for lint and backend debugging work
 - `Vitest` and `Playwright` use the repo-local npm dependencies; do not rely on global installs
 - most day-to-day test work does not require Docker
-- Postgres backend tests are opt-in. Use `npm run test:postgres` with `DARKLAB_TEST_POSTGRES_DSN` set, or pass `--postgres-dsn` to pytest, to run the Postgres smoke, route, and migration integration tests against isolated schemas. Use `bash scripts/run_postgres_tests.sh --compose` to run the same lane against the bundled Compose Postgres service without publishing the database port.
+- CI runs the Postgres backend lane automatically. Locally, use `npm run test:postgres` to run the Postgres smoke, route, and migration integration tests against isolated schemas. The helper uses `DARKLAB_TEST_POSTGRES_DSN` when it is set; otherwise it starts a disposable Docker Postgres container and removes it after the run. You can also pass `--postgres-dsn` to pytest directly, or use `bash scripts/run_postgres_tests.sh --compose` to run the same lane against the bundled Compose Postgres service without publishing the database port.
 - the container smoke test is slower and is meant for Dockerfile, dependency, and toolchain validation rather than the normal fast iteration loop
 
 ---
@@ -402,6 +402,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseBackend.test_postgres_identifier_quoting_and_advisory_lock_are_stable` | Verifies Postgres identifier quoting and advisory-lock IDs are deterministic. |
 | `TestDatabaseBackend.test_positional_placeholder_conversion_skips_literals_and_comments` | Verifies legacy SQLite-style positional placeholder conversion leaves string literals and SQL comments unchanged. |
 | `TestDatabaseBackend.test_unknown_backend_is_rejected_with_supported_values` | Verifies unsupported database backend names are rejected with the accepted backend list. |
+| `TestDatabaseBackend.test_database_dialect_exposes_shared_sql_and_json_helpers` | Verifies shared dialect helpers for JSON decoding, insert-ignore clauses, case-insensitive ordering, distinct string aggregation, write transactions, and command-root extraction. |
 | `TestPostgresMigrations.test_baseline_migration_covers_current_app_schema` | Verifies the first app-owned Postgres migration covers the current app tables, JSONB columns, booleans, bytea secrets, and intentionally excludes SQLite FTS internals. |
 | `TestPostgresMigrations.test_postgres_search_migration_adds_trigram_indexes` | Verifies the Postgres run-search migration creates `pg_trgm` and trigram indexes for command and output search. |
 | `TestPostgresMigrations.test_migration_runner_serializes_with_advisory_lock_and_records_versions` | Verifies the Postgres migration runner takes a transaction-scoped advisory lock and records applied migration versions. |
@@ -984,28 +985,32 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 
 #### `test_postgres_backend.py`
 
-Optional backend smoke, route, and migration coverage. SQLite smoke coverage always runs; Postgres integration tests run only when `DARKLAB_TEST_POSTGRES_DSN` or `--postgres-dsn` points at a test Postgres database. Postgres tests create and drop isolated schemas so they do not share tables with the app schema.
+Backend smoke, route, and migration coverage. SQLite smoke coverage always runs. CI runs the Postgres lane automatically. For local runs, Postgres integration tests run when `DARKLAB_TEST_POSTGRES_DSN` or `--postgres-dsn` points at a test Postgres database; `npm run test:postgres` can also create a disposable Docker Postgres container automatically. Postgres tests create and drop isolated schemas so they do not share tables with the app schema.
 
 | Test | Description |
 | --- | --- |
 | `test_sqlite_backend_smoke_exercises_phase6_contract` | Verifies the Phase 6 backend smoke contract on SQLite: run insert/finalize, search, Atlas entity links, project links, intel JSON, and snapshot insert. |
 | `test_postgres_backend_smoke_exercises_phase6_contract` | Verifies the same backend smoke contract on Postgres when an opt-in test DSN is configured. |
 | `test_postgres_baseline_migration_runs_in_isolated_schema` | Runs the app-owned Postgres baseline migration in an isolated schema and verifies key table and column types. |
+| `test_configured_postgres_app_startup_smoke_uses_real_pool` | Starts the configured app in a subprocess against a real Postgres pool and verifies startup, token generation, token lookup, and History access. |
 | `test_history_commands_route_reads_from_postgres` | Verifies the history commands route can read distinct recent commands through the Postgres compatibility query path. |
 | `test_history_route_reads_search_results_from_postgres` | Verifies the History list route can search run output through the Postgres compatibility query path. |
 | `test_history_stats_route_reads_from_postgres` | Verifies the History stats route counts runs, snapshots, starred commands, and elapsed time through Postgres. |
 | `test_builtin_stats_command_reads_elapsed_time_from_postgres` | Verifies the terminal `stats` built-in uses Postgres-safe elapsed-time math while preserving command-root breakdowns. |
 | `test_client_side_run_route_writes_to_postgres` | Verifies the browser-owned client-side run persistence route writes run rows through Postgres. |
 | `test_run_output_artifact_upsert_writes_to_postgres` | Verifies full-output artifact metadata uses a Postgres-safe conflict update. |
+| `test_completed_external_run_persistence_writes_full_postgres_graph` | Verifies completed external runs persist run rows, full-output artifacts, workspace artifacts, active project links, Atlas entities, findings, and History readback through Postgres. |
 | `test_share_routes_roundtrip_snapshot_on_postgres` | Verifies snapshot share create/read/delete routes round-trip through Postgres. |
 | `test_session_metadata_routes_write_to_postgres` | Verifies session preferences, recent values, starred commands, and user workflows write through Postgres using JSONB-safe parameters and native conflict handling. |
+| `test_session_token_lifecycle_and_migration_routes_use_postgres` | Verifies session token generation, lookup, verification, revocation, guarded session migration, and migrated session data through Postgres. |
 | `test_secret_session_migration_uses_postgres_conflict_handling` | Verifies encrypted secret session migration keeps an existing destination secret when Postgres conflict handling skips a duplicate source secret. |
 | `test_project_routes_use_postgres_query_path` | Verifies project create/list/active, target linking, run linking, metadata ordering, and JSON source details through the Postgres query path. |
 | `test_workspace_files_route_uses_postgres_metadata_query_path` | Verifies the Files list route can attach workspace artifact, project, label, and note metadata through the Postgres query path. |
 | `test_atlas_routes_use_postgres_query_path` | Verifies Atlas summary, entity list/detail/export, finding search, finding review, cleanup preview, JSONB intel snapshots, and label ordering through the Postgres query path. |
-| `test_atlas_intel_refresh_writes_jsonb_snapshots` | Verifies Atlas intel refresh stores provider payloads as Postgres JSONB snapshots while keeping replacement cleanup compatible with body-store pointers. |
-| `test_diag_route_reports_postgres_storage` | Verifies `/diag` reports Postgres table counts, storage buckets, largest saved runs, and backend-specific database metadata without SQLite-only FTS probes. |
+| `test_atlas_intel_refresh_writes_jsonb_snapshots` | Verifies Atlas intel refresh stores provider payloads as Postgres JSONB snapshots and entity detail loads offloaded body-store payloads instead of pointer metadata. |
+| `test_diag_route_reports_postgres_storage` | Verifies `/diag` reports Postgres table counts, storage buckets, largest saved runs, backend-specific database metadata, and usage stats without SQLite-only FTS probes or tuple-only row access. |
 | `test_metrics_route_scrapes_postgres_runtime_gauges` | Verifies `/metrics` scrapes Postgres runtime gauges, backend markers, table rows, allocated bytes, and a harmless zero FTS-orphan value through the app query path. |
+| `test_postgres_db_init_applies_retention_pruning` | Verifies Postgres `db_init()` applies retention pruning after migrations and removes expired run, snapshot, artifact, and body-store metadata/files. |
 | `test_migration_helper_copies_fixture_into_isolated_postgres_schema` | Builds a SQLite fixture with runs, artifacts, body-store pointers, secrets metadata, JSON columns, and search text, migrates it into an isolated Postgres schema, then verifies row counts, JSON values, file pointers, and search parity. |
 
 #### `test_request_kill_and_commands.py`

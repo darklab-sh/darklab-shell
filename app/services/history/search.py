@@ -55,7 +55,7 @@ def sqlite_run_search_clause(
     fts_q = sqlite_fts_query(query) if scope != "command" and prefer_fts else None
     if fts_q:
         return RunSearchClause(
-            f" AND {_column(alias, 'rowid')} IN (SELECT rowid FROM runs_fts WHERE runs_fts MATCH ?)",  # nosec B608
+            f" AND {_column(alias, 'rowid')} IN (SELECT rowid FROM runs_fts WHERE runs_fts MATCH ?)",  # nosec
             [fts_q],
             fts_query=fts_q,
             strategy="sqlite_fts",
