@@ -31,7 +31,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 
 ## Features
 
-- **Terminal workflow** — live output streaming, killable long-running commands, optional line numbers and timestamps, output search, findings/warnings/errors review, `Ctrl+R` history search, bash-like `Tab` completion, built-in pipe helpers such as `grep` and `tail`, keyboard shortcuts, quiet-stream warnings, and automatic recovery when a stalled stream starts moving again
+- **Terminal workflow** — live output streaming, killable long-running commands, optional line numbers and timestamps, output search, findings/warnings/errors review, `Ctrl+R` history search, bash-like `Tab` completion, built-in pipe helpers such as `grep` and `tail`, keyboard shortcuts, quiet-stream warnings, and same-tab recovery when an active stream detaches or starts moving again
 - **Status Monitor** — a desktop modal and mobile sheet for DB/Redis health, workspace quota, session stats, CPU-driven heartbeat visuals, activity heatmaps, command mix, recent-run constellation popovers, active-run CPU/RSS meters, Attach/Kill actions, and safe close-tab prompts that can leave a backend run running in the background
 - **Mobile shell** — dedicated mobile composer, keyboard helper row, character and word-level cursor movement, stable Firefox-friendly layout, shared desktop/mobile Run-button state, output-follow behavior when the keyboard opens, and a mobile History panel with collapsible search, filter, and bulk-action tools
 - **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy, `save ▾` exports (txt / html / pdf), jump-to-live / jump-to-bottom controls, and exports that keep permalink pages, saved HTML, and PDF output visually aligned where the PDF renderer allows
@@ -40,9 +40,9 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Session command variables** — `var set HOST ip.darklab.sh`, `var list`, and `var unset HOST` define per-session values you can reuse as `$HOST` or `${HOST}`. Expansion happens before command validation, typed history stays readable, and the transcript shows the expanded command that actually ran
 - **Encrypted secrets** — per-session API keys for approved tools can be added, replaced, and deleted from the Options **Secrets** tab or with `secret set NAME`. Options suggests the known tool keys from `commands.yaml` first, `providers` shows which intel providers are ready or need setup, stored values are encrypted, and saved secrets are never revealed after save, printed in transcripts, or injected outside matching command environments
 - **External intel lookups** — `intel ip`, `intel domain`, `intel url`, `intel hash`, and `intel cve` query app-native providers such as Shodan, Censys, GreyNoise, VirusTotal, AlienVault OTX, AbuseIPDB, IPinfo, Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, URLhaus, ThreatFox, Vulners, urlscan.io, SecurityTrails, and RouteViews, then show normalized results in the terminal with cache-hit, quota, rate-limit, and setup status per provider
-- **Session Entity Atlas** — saved external-run output feeds an entity-first browser surface for findings, IPs, domains, URLs, hashes, and CVEs. Atlas opens from the rail, mobile menu, History, Run Details, Projects, keyboard shortcut, or transcript entity tokens, then lets you review source runs, cached intel, labels, notes, findings, and project links around the entity instead of a single command. Its Findings tab also acts as the cross-run triage queue with review-state filters, bulk updates, and visible-page delete actions
+- **Session Entity Atlas** — saved external-run output feeds an entity-first browser surface for findings, IPs, domains, URLs, hashes, and CVEs. Atlas opens from the rail, mobile menu, History, Run Details, Projects, keyboard shortcut, or transcript entity tokens, then lets you review source runs, cached intel, labels, notes, findings, and project links around the entity instead of a single command. Large entity details page through older source runs and findings, saved views restore repeat filter sets, and the Findings tab acts as the cross-run triage queue with review-state filters, suppression filters, bulk updates, visible-page suppression, and visible-page delete actions
 - **Session files** — optional per-session Files support for tools that need small input/output files. Users can create, view, edit, move/rename, download, delete, label, and note files; drag files into folders; preview JSON, JSONL/NDJSON, CSV/TSV, XML, HTTP responses, and large text; see quota/usage; use cwd-aware `ls`, `cat`, `mv`, and confirmed `rm`; use simple `*` patterns for list/move/delete flows; and let selected command flags safely read/write session files without opening shell navigation or redirection
-- **Project workspaces** — lightweight case folders group related runs, Atlas entities, targets, findings, labels, notes, run-owned workspace artifacts, and draft evidence packages without copying the source records. Active projects can auto-link completed runs and the Atlas entities those runs produce, manual run-link actions can include the entities found in the same run, run-unlink actions can clean up same-run non-curated entity links from the project, terminal `project link run last` stays scoped to the current tab, project views expose paged finding review, artifact review, cached entity intel context, metadata editing, and project-scoped Atlas exports, and package exports preserve the selected project evidence with raw/redacted modes
+- **Project workspaces** — lightweight case folders group related runs, Atlas entities, targets, findings, labels, notes, run-owned workspace artifacts, and draft evidence packages without copying the source records. Active projects can auto-link completed runs and the Atlas entities those runs produce, manual run-link actions can include the entities found in the same run, run-unlink actions can clean up same-run non-curated entity links from the project, terminal `project link run last` stays scoped to the current tab, project views hide suppressed Atlas noise by default, expose paged, filterable, and bulk finding review, artifact review, cached entity intel context, metadata editing, and project-scoped Atlas exports, and package exports preserve the selected project evidence with raw/redacted modes
 - **Interactive PTY mode** — optional live terminal windows for registry-approved interactive tools such as `nc --interactive`, `telnet --interactive`, `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`, with guarded input/resize routes, bounded runtime/concurrency, Redis-backed reattach in multi-worker deployments, and completed transcripts saved back into normal history
 - **Session tokens** — persistent `tok_` session tokens carry history, shell identity, command variables, workspace files, project workspace records, active-project context, user workflows, recent target autocomplete, and saved options across browsers and devices. A phone or second browser using the same token can attach to a live command, replay earlier output, follow new output, and kill the run from the terminal or Status Monitor. `session-token generate/set/copy/clear/rotate/list/revoke` manage the token lifecycle with migration, rollback-safe rotate, confirmations, cross-tab sync, revocation, masked token history, and Options-panel shortcuts
 - **Safer sharing** — a built-in basic redaction baseline can mask common secrets or infrastructure details on snapshot permalinks, with optional operator regex rules appended on top. Permalink creation can choose raw vs redacted sharing per snapshot without changing the stored run history; app-native intel response bodies are omitted from share/styled export surfaces, while local text exports remain raw
@@ -472,7 +472,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0002_postgres_run_search.py # Trigram-backed Postgres run-history search indexes
 │   │   │   ├── v0003_postgres_atlas_search.py # Trigram-backed Postgres Atlas search indexes
 │   │   │   ├── v0004_postgres_atlas_detail_indexes.py # Postgres Atlas detail lookup indexes
-│   │   │   └── v0005_postgres_project_findings_indexes.py # Postgres Project Findings paging indexes
+│   │   │   ├── v0005_postgres_project_findings_indexes.py # Postgres Project Findings paging indexes
+│   │   │   └── v0006_postgres_atlas_suppression.py # Postgres Atlas suppression columns and indexes
 │   │   ├── output_signals.py   # Server-side output signal and entity classifier
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and in-process fallback
 │   │   └── redaction.py        # Snapshot-share redaction helpers and built-in rule application
@@ -550,10 +551,25 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── collectors.py   # Scrape-time DB, Redis, workspace, Atlas, findings, and provider gauges
 │   │   ├── projects/
 │   │   │   ├── __init__.py     # Project service package marker
+│   │   │   ├── active.py       # Active project preference and lookup helpers
+│   │   │   ├── artifacts.py    # Project run-file artifact ingestion, row, checksum, and availability helpers
+│   │   │   ├── comparisons.py  # Project run comparison selection and summary helpers
 │   │   │   ├── contracts.py    # Shared project workspace limits, allowed values, and exception classes
+│   │   │   ├── crud.py         # Project create, update, delete, and cleanup helpers
+│   │   │   ├── findings.py     # Project/run finding ingestion, row shaping, paging, and review helpers
+│   │   │   ├── links.py        # Project link, active-run link, and run-entity link helpers
 │   │   │   ├── metadata.py     # Entity label/note helpers and project metadata attachment helpers
+│   │   │   ├── migration.py    # Project workspace session migration helpers
+│   │   │   ├── models.py       # Project row, target row, link row, and payload shaping helpers
+│   │   │   ├── package_archive.py # Evidence package create, delete, and ZIP archive helpers
+│   │   │   ├── package_rendering.py # Evidence package HTML, Markdown, JSON, and transcript export helpers
+│   │   │   ├── packages.py     # Evidence package payload, manifest, redaction, and archive-name helpers
 │   │   │   ├── preferences.py  # Project-related session preference helpers
-│   │   │   └── workspace.py    # Session-scoped project helpers, targets, findings, artifacts, packages, and links
+│   │   │   ├── queries.py      # Project list, summary, run, entity, and artifact query helpers
+│   │   │   ├── slugs.py        # Project slug normalization and allocation helpers
+│   │   │   ├── targets.py      # Project target validation, discovery, and mutation helpers
+│   │   │   ├── utils.py        # Shared project IDs, timestamps, quotas, and text helpers
+│   │   │   └── workspace.py    # Compatibility exports for project workspace helpers
 │   │   ├── pty/
 │   │   │   ├── __init__.py     # PTY service package marker
 │   │   │   ├── capture.py      # Interactive PTY terminal capture and ANSI snapshot helpers
@@ -688,7 +704,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── project_workspace_events.js # Project workspace modal event routing and action handling
 │   │       │   │   ├── project_workspace_lifecycle.js # Project workspace loading, summaries, and selected-project lifecycle
 │   │       │   │   ├── project_workspace_renderer.js # Project workspace explorer, mobile/list composition, and tab cycling
-│   │       │   │   └── project_workspace_shell.js # Project workspace modal shell, messages, request, and refresh broadcast helpers
+│   │       │   │   ├── project_workspace_shell.js # Project workspace modal shell, messages, request, and refresh broadcast helpers
+│   │       │   │   └── project_workspace_state.js # Project workspace browser state holder
 │   │       │   ├── run-comparison/
 │   │       │   │   ├── history_compare_controls.js # Run Comparison view/context controls and actions menu
 │   │       │   │   ├── history_compare_core.js # Pure Run Comparison formatting, preference, and anchor-map helpers

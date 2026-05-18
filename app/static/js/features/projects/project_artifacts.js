@@ -186,15 +186,31 @@
       return allArtifacts.slice(state.offset, state.offset + pageLimit);
     }
 
-    function artifactFilterParams(projectId, summary) {
-      const params = typeof ctx.projectArtifactServerFilterParams === 'function'
-        ? ctx.projectArtifactServerFilterParams(projectId, summary)
-        : new URLSearchParams();
+    function serverFilterParams(projectId, summary) {
+      const params = new URLSearchParams();
+      const runFilters = typeof ctx.projectRunFilterSet === 'function'
+        ? ctx.projectRunFilterSet(projectId)
+        : new Set();
+      runFilters.forEach((runId) => {
+        if (runId) params.append('run_id', runId);
+      });
+      const targetFilters = typeof ctx.projectTargetFilterSet === 'function'
+        ? ctx.projectTargetFilterSet(projectId)
+        : new Set();
+      const targets = typeof ctx.projectTargetItems === 'function' ? ctx.projectTargetItems(summary) : [];
+      const availableTargets = new Set(
+        (Array.isArray(targets) ? targets : [])
+          .map(target => String(target && target.id || ''))
+          .filter(Boolean),
+      );
+      targetFilters.forEach((targetId) => {
+        if (targetId && availableTargets.has(targetId)) params.append('target_id', targetId);
+      });
       return params instanceof URLSearchParams ? params : new URLSearchParams();
     }
 
-    function artifactFilterKey(projectId, summary) {
-      const params = artifactFilterParams(projectId, summary);
+    function serverFilterKey(projectId, summary) {
+      const params = serverFilterParams(projectId, summary);
       params.sort?.();
       return params.toString();
     }
@@ -207,10 +223,10 @@
         state.offset = Math.max(0, Number(options.offset || 0));
       }
       state.limit = Math.max(1, Math.min(Number(options.limit || pageLimit), 200));
-      const params = artifactFilterParams(normalizedProjectId, summary);
+      const params = serverFilterParams(normalizedProjectId, summary);
       params.set('limit', String(state.limit));
       params.set('offset', String(state.offset));
-      state.filterKey = artifactFilterKey(normalizedProjectId, summary);
+      state.filterKey = serverFilterKey(normalizedProjectId, summary);
       state.loading = true;
       state.error = '';
       try {
@@ -360,7 +376,7 @@
         return;
       }
       const state = page(projectId);
-      const filterKey = artifactFilterKey(projectId, summary);
+      const filterKey = serverFilterKey(projectId, summary);
       if ((!state.loaded || state.filterKey !== filterKey) && !state.loading) {
         load(projectId, summary, { offset: state.filterKey === filterKey ? state.offset : 0 }).catch(() => {});
       }
@@ -441,6 +457,8 @@
       invalidate,
       groupKey,
       groupCollapsed,
+      serverFilterParams,
+      serverFilterKey,
       items,
       pagedItems,
       load,

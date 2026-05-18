@@ -35,7 +35,7 @@ import services.secrets.vault as secrets_vault
 from services.commands.builtins import execute_builtin_command
 from core.database import DB_PATH, db_connect, db_init
 from core.database_backend import quote_sqlite_identifier
-from services.projects.workspace import record_run_findings
+from services.projects.findings import record_run_findings
 from services.atlas.materializer import materialize_run_entities
 from services.workspace.files import resolve_workspace_path
 
@@ -1250,6 +1250,7 @@ class TestProjectRoutes:
         assert notes_resp.status_code == 200
         run_id = "run-" + uuid.uuid4().hex
         baseline_run_id = "run-" + uuid.uuid4().hex
+        outside_run_id = "run-" + uuid.uuid4().hex
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
@@ -1273,6 +1274,17 @@ class TestProjectRoutes:
                     session_id,
                     "nmap darklab.sh",
                     json.dumps([{"text": "80/tcp open http", "cls": "", "line_index": 0}]),
+                    1,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, ?, datetime('now'), ?, ?)",
+                (
+                    outside_run_id,
+                    session_id,
+                    "httpx https://outside.darklab.sh",
+                    json.dumps([{"text": "outside project", "cls": "", "line_index": 0}]),
                     1,
                 ),
             )
@@ -1377,8 +1389,8 @@ class TestProjectRoutes:
             )
             conn.execute(
                 "INSERT INTO findings "
-                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
-                "VALUES (?, ?, ?, 'finding', '[click](javascript:alert(1))', "
+                "(id, session_id, run_id, scope, severity, title, raw_line, line_number, fingerprint, created) "
+                "VALUES (?, ?, ?, 'finding', 'high', '[click](javascript:alert(1))', "
                 "'443/tcp open https', 0, ?, datetime('now'))",
                 (f"fnd_{run_id}", session_id, run_id, f"fp-{run_id}"),
             )
@@ -1412,6 +1424,12 @@ class TestProjectRoutes:
                 "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
                 "VALUES (?, ?, ?, 'finding', 'direct run finding', '8080/tcp open http-proxy', 1, ?, datetime('now'))",
                 (f"fnd_direct_{run_id}", session_id, run_id, f"fp-direct-{run_id}"),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "VALUES (?, ?, ?, 'finding', 'outside project finding', 'outside project', 0, ?, datetime('now'))",
+                (f"fnd_{outside_run_id}", session_id, outside_run_id, f"fp-{outside_run_id}"),
             )
             conn.execute(
                 "DELETE FROM findings_occurrences WHERE finding_id = ?",
@@ -1514,14 +1532,34 @@ class TestProjectRoutes:
         assert {"finding_count", "artifact_count"}.issubset(paged_runs["runs"][0])
         project_findings = json.loads(client.get(
             f"/projects/{project['id']}/findings?review_state=new&command_root=nmap&run_id={run_id}"
-            "&label=important&note_state=noted",
+            "&label=important&note_state=noted&severity=high&scope=finding",
             headers={"X-Session-ID": session_id},
         ).data)
         assert [item["run_id"] for item in project_findings["findings"]] == [run_id]
         assert project_findings["findings"][0]["command_root"] == "nmap"
+        bulk_review_resp = client.post(
+            f"/projects/{project['id']}/findings/review",
+            json={
+                "finding_ids": [f"fnd_{run_id}", f"fnd_{outside_run_id}", "missing-finding"],
+                "review_state": "important",
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        assert bulk_review_resp.status_code == 200
+        assert json.loads(bulk_review_resp.data)["counts"] == {"updated": 1, "not_found": 2}
+        with sqlite3.connect(DB_PATH) as conn:
+            review_rows = {
+                row[0]: row[1]
+                for row in conn.execute(
+                    "SELECT id, status FROM findings WHERE id IN (?, ?)",
+                    (f"fnd_{run_id}", f"fnd_{outside_run_id}"),
+                ).fetchall()
+            }
+        assert review_rows[f"fnd_{run_id}"] == "important"
+        assert review_rows[f"fnd_{outside_run_id}"] == "new"
         multi_value_findings = json.loads(client.get(
             f"/projects/{project['id']}/findings?run_id={run_id}&run_id={baseline_run_id}"
-            f"&review_state=new&review_state=reviewed&label=important&label=missing",
+            f"&review_state=new&review_state=reviewed&review_state=important&label=important&label=missing",
             headers={"X-Session-ID": session_id},
         ).data)
         assert [item["run_id"] for item in multi_value_findings["findings"]] == [run_id]
@@ -2571,7 +2609,7 @@ class TestProjectRoutes:
                 json={"name": "Oversize", "include_artifacts": True},
                 headers={"X-Session-ID": session_id},
             ).data)["package"]
-            with mock.patch("services.projects.workspace.tempfile.NamedTemporaryFile") as named_temp:
+            with mock.patch("services.projects.package_archive.tempfile.NamedTemporaryFile") as named_temp:
                 resp = client.get(
                     f"/projects/{project['id']}/packages/{package['id']}/download",
                     headers={"X-Session-ID": session_id},
@@ -4716,8 +4754,43 @@ class TestAtlasRoutes:
         detail = resp.get_json()
         assert len(detail["runs"]) == 50
         assert len(detail["findings"]) == 50
-        assert detail["detail_limits"]["runs"] == {"limit": 50, "shown": 50, "has_more": True}
-        assert detail["detail_limits"]["findings"] == {"limit": 50, "shown": 50, "has_more": True}
+        assert detail["detail_limits"]["runs"] == {
+            "limit": 50,
+            "offset": 0,
+            "shown": 50,
+            "total": 56,
+            "has_more": True,
+        }
+        assert detail["detail_limits"]["findings"] == {
+            "limit": 50,
+            "offset": 0,
+            "shown": 50,
+            "total": 56,
+            "has_more": True,
+        }
+
+        paged_resp = client.get(
+            f"/atlas/entities/{domain_id}?runs_offset=50&findings_offset=50",
+            headers={"X-Session-ID": session_id},
+        )
+        paged_detail = paged_resp.get_json()
+        assert paged_resp.status_code == 200
+        assert len(paged_detail["runs"]) == 6
+        assert len(paged_detail["findings"]) == 6
+        assert paged_detail["detail_limits"]["runs"] == {
+            "limit": 50,
+            "offset": 50,
+            "shown": 6,
+            "total": 56,
+            "has_more": False,
+        }
+        assert paged_detail["detail_limits"]["findings"] == {
+            "limit": 50,
+            "offset": 50,
+            "shown": 6,
+            "total": 56,
+            "has_more": False,
+        }
 
     def test_orphan_filter_surfaces_atlas_rows_after_source_run_delete(self):
         client = get_client()
@@ -5012,6 +5085,16 @@ class TestAtlasRoutes:
                 json={"finding_ids": [finding_id]},
                 headers={"X-Session-ID": wrong_session_id},
             )
+            finding_suppression_resp = client.put(
+                f"/atlas/findings/{finding_id}/suppression",
+                json={"suppressed": True},
+                headers={"X-Session-ID": wrong_session_id},
+            )
+            entity_suppression_resp = client.put(
+                f"/atlas/entities/{domain_id}/suppression",
+                json={"suppressed": True},
+                headers={"X-Session-ID": wrong_session_id},
+            )
             finding_delete_resp = client.delete(
                 f"/atlas/findings/{finding_id}",
                 json={"prune_source_run": True},
@@ -5040,6 +5123,8 @@ class TestAtlasRoutes:
         assert entity_delete_resp.status_code == 404
         assert bulk_finding_resp.status_code == 200
         assert json.loads(bulk_finding_resp.data)["counts"] == {"deleted": 0, "not_found": 1}
+        assert finding_suppression_resp.status_code == 404
+        assert entity_suppression_resp.status_code == 404
         assert finding_delete_resp.status_code == 404
         assert refresh_resp.status_code == 404
         assert link_resp.status_code == 404
@@ -5189,6 +5274,140 @@ class TestAtlasRoutes:
                 (session_id, finding_id),
             ).fetchone()
         assert row["status"] == "important"
+
+    def test_atlas_suppression_hides_rows_until_requested_and_preserves_project_links(self):
+        client = get_client()
+        session_id = self._session_id()
+        _, recorded = self._seed_entity_run(session_id)
+        domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
+        finding_id = json.loads(client.get("/atlas/findings", headers={"X-Session-ID": session_id}).data)["findings"][0]["id"]
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Suppression Case"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        client.post(
+            f"/projects/{project['id']}/links",
+            json={"entity_type": "atlas_entity", "entity_id": domain_id},
+            headers={"X-Session-ID": session_id},
+        )
+
+        entity_suppress_resp = client.put(
+            f"/atlas/entities/{domain_id}/suppression",
+            json={"suppressed": True, "reason": "too noisy"},
+            headers={"X-Session-ID": session_id},
+        )
+        finding_suppress_resp = client.put(
+            f"/atlas/findings/{finding_id}/suppression",
+            json={"suppressed": True},
+            headers={"X-Session-ID": session_id},
+        )
+        default_summary = client.get("/atlas", headers={"X-Session-ID": session_id})
+        suppressed_entities = client.get(
+            "/atlas/entities?type=domain&suppression_filter=only",
+            headers={"X-Session-ID": session_id},
+        )
+        suppressed_findings = client.get(
+            "/atlas/findings?suppression_filter=only",
+            headers={"X-Session-ID": session_id},
+        )
+        default_export = client.get(
+            "/atlas/entities/export?format=jsonl&type=domain",
+            headers={"X-Session-ID": session_id},
+        )
+        suppressed_export = client.get(
+            "/atlas/entities/export?format=jsonl&type=domain&suppression_filter=only",
+            headers={"X-Session-ID": session_id},
+        )
+        project_summary = client.get(f"/projects/{project['id']}/summary", headers={"X-Session-ID": session_id})
+        restore_resp = client.post(
+            "/atlas/findings/suppression",
+            json={"finding_ids": [finding_id], "suppressed": False},
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert entity_suppress_resp.status_code == 200
+        assert finding_suppress_resp.status_code == 200
+        assert json.loads(default_summary.data)["counts"]["domain"] == 0
+        assert json.loads(default_summary.data)["findings"] == 0
+        entity_data = json.loads(suppressed_entities.data)
+        assert entity_data["total"] == 1
+        assert entity_data["entities"][0]["suppressed"] is True
+        assert entity_data["entities"][0]["suppressed_reason"] == "too noisy"
+        finding_data = json.loads(suppressed_findings.data)
+        assert finding_data["total"] == 1
+        assert finding_data["findings"][0]["suppressed"] is True
+        assert default_export.data.decode("utf-8") == ""
+        exported = [json.loads(line) for line in suppressed_export.data.decode("utf-8").splitlines()]
+        assert exported[0]["suppressed"] is True
+        assert json.loads(project_summary.data)["counts"]["entities"] == 0
+        assert restore_resp.status_code == 200
+        assert json.loads(restore_resp.data)["counts"] == {"updated": 1, "not_found": 0}
+
+    def test_atlas_saved_views_roundtrip_and_stay_session_scoped(self):
+        client = get_client()
+        session_id = self._session_id()
+        other_session_id = self._session_id()
+
+        create_resp = client.post(
+            "/atlas/views",
+            json={
+                "name": "High signal",
+                "tab": "findings",
+                "filters": {
+                    "query": "ssl",
+                    "orphan_filter": "only",
+                    "suppression_filter": "only",
+                    "finding_status": "important",
+                    "project_id": "prj_0123456789abcdef",
+                    "project_name": "External Test",
+                },
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        view = json.loads(create_resp.data)["view"]
+        list_resp = client.get("/atlas/views", headers={"X-Session-ID": session_id})
+        isolated_resp = client.get("/atlas/views", headers={"X-Session-ID": other_session_id})
+        preferences_resp = client.post(
+            "/session/preferences",
+            json={"preferences": {"pref_timestamps": "on"}},
+            headers={"X-Session-ID": session_id},
+        )
+        after_preferences_resp = client.get("/atlas/views", headers={"X-Session-ID": session_id})
+        update_resp = client.put(
+            f"/atlas/views/{view['id']}",
+            json={
+                "name": "Reviewed SSL",
+                "tab": "domain",
+                "filters": {
+                    "query": "darklab",
+                    "orphan_filter": "hide",
+                    "suppression_filter": "all",
+                    "finding_status": "reviewed",
+                },
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        delete_resp = client.delete(f"/atlas/views/{view['id']}", headers={"X-Session-ID": session_id})
+        after_delete_resp = client.get("/atlas/views", headers={"X-Session-ID": session_id})
+
+        assert create_resp.status_code == 201
+        assert view["name"] == "High signal"
+        assert view["tab"] == "findings"
+        assert view["filters"]["query"] == "ssl"
+        assert view["filters"]["finding_status"] == "important"
+        assert json.loads(list_resp.data)["views"][0]["id"] == view["id"]
+        assert json.loads(isolated_resp.data)["views"] == []
+        assert preferences_resp.status_code == 200
+        assert json.loads(after_preferences_resp.data)["views"][0]["id"] == view["id"]
+        assert update_resp.status_code == 200
+        updated = json.loads(update_resp.data)["view"]
+        assert updated["name"] == "Reviewed SSL"
+        assert updated["tab"] == "domain"
+        assert updated["filters"]["suppression_filter"] == "all"
+        assert delete_resp.status_code == 200
+        assert json.loads(after_delete_resp.data)["views"] == []
 
     def test_unscoped_findings_flow_through_atlas_projects_and_run_routes(self):
         client = get_client()

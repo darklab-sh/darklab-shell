@@ -7,21 +7,16 @@ from typing import cast
 from core.database import db_connect
 from services.commands.builtins_format import format_native_record, output_line
 from services.commands.registry import split_command_argv
-from services.projects.workspace import (
-    ProjectWorkspaceError,
+from services.projects.active import clear_active_project, get_active_project, set_active_project
+from services.projects.contracts import ProjectWorkspaceError
+from services.projects.crud import create_project, delete_project, update_project
+from services.projects.links import link_project_entity, unlink_project_entity
+from services.projects.queries import list_projects
+from services.projects.targets import (
     add_project_target,
-    clear_active_project,
-    create_project,
-    delete_project,
     delete_project_target,
-    get_active_project,
     infer_project_target_payload,
-    link_project_entity,
     list_project_targets,
-    list_projects,
-    set_active_project,
-    unlink_project_entity,
-    update_project,
 )
 
 

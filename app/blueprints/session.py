@@ -16,7 +16,7 @@ from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
 from services.commands.registry import load_tour
 from core.helpers import get_client_ip, get_log_session_id, get_session_id, is_valid_anonymous_session_id
-from services.projects.workspace import migrate_project_workspace_session
+from services.projects.migration import migrate_project_workspace_session
 from services.secrets.storage import migrate_session_secrets
 from services.session.variables import list_session_variables
 from services.workflows.user_workflows import (
@@ -49,12 +49,16 @@ _SESSION_PREFERENCE_KEYS = {
     "pref_compare_context",
     "pref_options_modal_last_tab",
     "pref_tour_seen_version",
+    "pref_atlas_saved_views",
 }
 
 _PROMPT_USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
 _COMPARE_VIEW_MODES = {"auto", "side_by_side", "unified", "changes_only", "findings_only"}
 _COMPARE_CONTEXT_MODES = {"3", "10", "all"}
 _OPTIONS_MODAL_TABS = {"preferences", "secrets"}
+_ATLAS_SAVED_VIEW_TABS = {"findings", "ip", "domain", "hash", "cve", "url"}
+_ATLAS_SAVED_VIEW_FILTER_VALUES = {"hide", "all", "only"}
+_ATLAS_SAVED_VIEW_ID_RE = re.compile(r"^atv_[0-9a-f]{16,32}$")
 
 _RECENT_VALUE_LIMIT = 10
 _RECENT_VALUE_KINDS = ("domain", "ip", "url", "port_set")
@@ -86,6 +90,9 @@ def _normalize_session_preferences(raw):
                 continue
             prefs[key] = tour_seen_version
             continue
+        if key == "pref_atlas_saved_views":
+            prefs[key] = _normalize_atlas_saved_views(value)
+            continue
         if not isinstance(value, str):
             value = str(value or "")
         value = value.strip()
@@ -111,6 +118,54 @@ def _normalize_session_preferences(raw):
                 continue
         prefs[key] = value
     return prefs
+
+
+def _normalize_atlas_saved_views(value):
+    if not isinstance(value, list):
+        return []
+    views = []
+    seen_ids = set()
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        item_data: dict[str, object] = dict(item)
+        view_id = str(item_data.get("id") or "").strip().lower()
+        name = str(item_data.get("name") or "").strip()[:60]
+        tab = str(item_data.get("tab") or "findings").strip().lower()
+        raw_filters = item_data.get("filters")
+        filters: dict[str, object] = dict(raw_filters) if isinstance(raw_filters, dict) else {}
+        if not name or not _ATLAS_SAVED_VIEW_ID_RE.fullmatch(view_id) or view_id in seen_ids:
+            continue
+        if tab not in _ATLAS_SAVED_VIEW_TABS:
+            tab = "findings"
+        orphan_filter = str(filters.get("orphan_filter") or "hide").strip().lower()
+        suppression_filter = str(filters.get("suppression_filter") or "hide").strip().lower()
+        if orphan_filter not in _ATLAS_SAVED_VIEW_FILTER_VALUES:
+            orphan_filter = "hide"
+        if suppression_filter not in _ATLAS_SAVED_VIEW_FILTER_VALUES:
+            suppression_filter = "hide"
+        finding_status = str(filters.get("finding_status") or "").strip().lower()
+        if finding_status not in {"", "new", "reviewed", "important", "false_positive", "needs_followup"}:
+            finding_status = ""
+        views.append({
+            "id": view_id,
+            "name": name,
+            "tab": tab,
+            "filters": {
+                "query": str(filters.get("query") or "").strip()[:500],
+                "orphan_filter": orphan_filter,
+                "suppression_filter": suppression_filter,
+                "finding_status": finding_status,
+                "project_id": str(filters.get("project_id") or "").strip()[:80],
+                "project_name": str(filters.get("project_name") or "").strip()[:120],
+                "sort": str(filters.get("sort") or "").strip()[:80],
+            },
+            "updated_at": str(item_data.get("updated_at") or "")[:40],
+        })
+        seen_ids.add(view_id)
+        if len(views) >= 30:
+            break
+    return views
 
 
 def _load_session_preferences(conn, session_id):
@@ -720,11 +775,20 @@ def session_preferences_get():
 @session_bp.route("/session/preferences", methods=["POST"])
 def session_preferences_save():
     """Persist the current session's full preference snapshot."""
-    data = request.get_json(silent=True) or {}
-    prefs = _normalize_session_preferences(data.get("preferences"))
+    raw_data = request.get_json(silent=True)
+    data: dict[str, object] = dict(raw_data) if isinstance(raw_data, dict) else {}
+    raw_preferences_value = data.get("preferences")
+    raw_preferences: dict[str, object] = (
+        dict(raw_preferences_value) if isinstance(raw_preferences_value, dict) else {}
+    )
+    prefs = _normalize_session_preferences(raw_preferences)
     updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     session_id = get_session_id()
     with db_connect() as conn:
+        if "pref_atlas_saved_views" not in raw_preferences:
+            existing_views = _load_session_preferences(conn, session_id).get("pref_atlas_saved_views")
+            if existing_views:
+                prefs["pref_atlas_saved_views"] = existing_views
         _save_session_preferences(conn, session_id, prefs, updated)
         conn.commit()
     log.info("SESSION_PREFERENCES_SAVED", extra={

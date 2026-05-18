@@ -1239,6 +1239,108 @@ describe('runner helpers', () => {
     expect(appendLine).toHaveBeenCalledWith('ping darklab.sh', 'prompt-echo', 'tab-1')
   })
 
+  it('restoreActiveRunsAfterReload reuses the restored original tab for the same active run', () => {
+    const appendLine = vi.fn()
+    const createTab = vi.fn(() => 'tab-2')
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/runs/run-1/stream')) {
+        return Promise.resolve(pendingBrokerStreamResponse())
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
+    const { restoreActiveRunsAfterReload, tabs } = loadRunnerFns({
+      tabs: [
+        {
+          id: 'tab-1',
+          st: 'idle',
+          runId: 'run-1',
+          historyRunId: 'run-1',
+          lastEventId: '1-5',
+          command: 'ping darklab.sh',
+          rawLines: [{ text: 'ping darklab.sh', cls: 'prompt-echo' }],
+          pendingKill: false,
+          killed: false,
+        },
+      ],
+      appendLine,
+      createTab,
+      apiFetch,
+    })
+
+    const restored = restoreActiveRunsAfterReload([
+      {
+        run_id: 'run-1',
+        command: 'ping darklab.sh',
+        started: '2026-01-01T00:00:00Z',
+        owned_by_this_client: true,
+        has_live_owner: false,
+        owner_stale: false,
+      },
+    ])
+
+    expect(restored).toBe(true)
+    expect(createTab).not.toHaveBeenCalled()
+    expect(tabs[0].st).toBe('running')
+    expect(tabs[0].runStart).toBe(Date.parse('2026-01-01T00:00:00Z'))
+    expect(apiFetch).toHaveBeenCalledWith('/runs/run-1/stream?tab_id=tab-1&after=1-5')
+    expect(appendLine).not.toHaveBeenCalledWith('ping darklab.sh', 'prompt-echo', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('[reattached to active run after reload]', 'notice', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('[live output will continue here]', 'notice', 'tab-1')
+  })
+
+  it('reattaches a detached normal stream in the original running tab', async () => {
+    const appendLine = vi.fn()
+    const firstStream = brokerStreamResponse([
+      'id: 1-5',
+      'data: {"type":"output","text":"before disconnect","event_id":"1-5"}',
+      '',
+    ].join('\n') + '\n')
+    const secondStream = pendingBrokerStreamResponse()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/runs/run-1/stream?tab_id=tab-1') return Promise.resolve(firstStream)
+      if (url === '/history/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            runs: [{
+              run_id: 'run-1',
+              command: 'ping darklab.sh',
+              started: '2026-01-01T00:00:00Z',
+              owned_by_this_client: true,
+              has_live_owner: false,
+              owner_stale: false,
+            }],
+          }),
+        })
+      }
+      if (url === '/runs/run-1/stream?tab_id=tab-1&after=1-5') return Promise.resolve(secondStream)
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
+    const { _subscribeRunStream, tabs } = loadRunnerFns({
+      tabs: [{
+        id: 'tab-1',
+        st: 'running',
+        runId: 'run-1',
+        historyRunId: 'run-1',
+        command: 'ping darklab.sh',
+        rawLines: [{ text: 'ping darklab.sh', cls: 'prompt-echo' }],
+        pendingKill: false,
+        killed: false,
+      }],
+      appendLine,
+      apiFetch,
+    })
+
+    await expect(_subscribeRunStream('run-1', 'tab-1')).resolves.toBe(true)
+    await flushPromises()
+
+    expect(tabs[0].st).toBe('running')
+    expect(tabs[0].runStart).toBe(Date.parse('2026-01-01T00:00:00Z'))
+    expect(apiFetch).toHaveBeenCalledWith('/runs/run-1/stream?tab_id=tab-1&after=1-5')
+    expect(appendLine).toHaveBeenCalledWith('before disconnect', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('[reattached to active run after stream recovery]', 'notice', 'tab-1')
+  })
+
   it('pauses background run streams for Status Monitor API calls and resumes from the last event id', async () => {
     const activeStream = controllableBrokerStreamResponse()
     const backgroundStream = controllableBrokerStreamResponse()

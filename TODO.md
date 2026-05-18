@@ -13,7 +13,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Atlas Enhancements](#atlas-enhancements)
   - [Future Project Workspace enhancements](#future-project-workspace-enhancements)
   - [Future interactive PTY enhancements](#future-interactive-pty-enhancements)
-  - [Active run reattachment improvements](#active-run-reattachment-improvements)
 - [Research](#research)
 - [Ideas](#ideas)
   - [Tool-specific guidance](#tool-specific-guidance)
@@ -30,7 +29,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Headless API and CLI client](#headless-api-and-cli-client)
   - [PWA install and service-worker push](#pwa-install-and-service-worker-push)
   - [Engagement report builder](#engagement-report-builder)
-  - [Session Entity Atlas (entity-first triage surface)](#session-entity-atlas-entity-first-triage-surface)
 - [Architecture](#architecture)
   - [Structured output model](#structured-output-model)
   - [Unified terminal built-in lifecycle](#unified-terminal-built-in-lifecycle)
@@ -52,7 +50,11 @@ No known issues are currently tracked.
 
 ## Technical Debt
 
-No technical debt items are currently tracked.
+- Add regression coverage for active-project entity-link failures during run finalization. If linking generated entities into the active project raises, the run should still finalize cleanly and persist its transcript, findings, and Atlas entities.
+- Improve high-volume output transcript clarity after skipped live rendering. Keep the resume notice, and add a final post-exit summary that makes it clear how many lines were not rendered live in the tab.
+- Make `pref_project_auto_link_run_entities` discoverable through the terminal `config` command path, or document why this Options preference is intentionally UI-only.
+- Clean up remaining output/project pagination button styling so pager and output controls use shared button modifiers instead of feature-specific height or menu styling overrides.
+- Deduplicate repeated pagination payload helpers across Project query services, including limit/offset normalization, `has_more` calculation, and page metadata shaping.
 
 ---
 
@@ -61,10 +63,8 @@ No technical debt items are currently tracked.
 ### Atlas Enhancements
 - **Future**
   - Entity graph view (visual link map across hosts, domains, hashes, CVEs).
-  - Saved Atlas views (named filter combinations).
   - Atlas FTS search across entity values, labels, and notes.
   - Run-retaining Atlas cleanup controls for noisy runs: detach a run's entities from Atlas without deleting the run transcript and recalculate affected entity/finding counts.
-  - Atlas suppression controls for known-noisy entities or patterns, with a separate reviewable suppressed view so cleanup is reversible.
   - Auto-promote rules — entities matching saved patterns auto-promote into a project.
   - Time-travel view: "what did the Atlas look like a week ago?" using retained snapshots.
   - Side-by-side entity comparison (their runs, findings, intel snapshots).
@@ -77,8 +77,6 @@ No technical debt items are currently tracked.
   - Add a terminal-native `project rename <name-or-id> <new-name>` command so CLI users can rename projects without opening the modal.
   - Add parallel PATCH routes for partial project and target updates if the project workspace API ever becomes more than a trusted browser-only surface.
 - **Code organization**
-  - Split `project_workspace.py` into focused modules once the surface settles. Natural boundaries are core project CRUD, entity metadata, findings, packages, and session migration.
-  - Continue moving Projects modal rendering and event wiring out of `shell_chrome.js` into focused project workspace browser modules.
   - Reduce repeated `projects.py` route boilerplate with small serialization/404 helpers.
 - **Capture, tagging, and navigation**
   - Add a compact project switcher near the prompt with recently used projects and a Create New action.
@@ -86,8 +84,6 @@ No technical debt items are currently tracked.
 - **Future-state mobile polish**
   - Consider swipe gestures for target and finding rows only after overflow-menu interactions are shipped and tested.
 - **Findings and comparison**
-  - Extend the Findings tab filters beyond target/run/review state to command root, severity, scope, labels, and note state.
-  - Add multi-select plus bulk review actions for high-volume finding review.
   - Prefetch finding counts and severity distribution so tab labels can show useful state such as unreviewed/high counts without opening the tab.
   - Extend comparison beyond run-to-run finding/artifact diffs to snapshots and package artifacts.
 - **Evidence packages**
@@ -125,12 +121,6 @@ No technical debt items are currently tracked.
   - Surface snapshot age on the reattach payload. `_load_pty_snapshot` strips `created_at` before returning, so the frontend cannot tell whether the snapshot is fresh or 20+ seconds stale. Return the age and let the frontend show `[reattached - snapshot was Ns old]` when it crosses a threshold, so users know the screen they see may not match what the PTY is currently rendering.
   - Skip the unconditional `_store_pty_snapshot(run, force=True)` in `pty_run_snapshot` when the request hits the worker that owns the PTY. The route already returns the live in-memory payload to the caller, and the next reader-loop tick will publish to Redis naturally; the extra Redis SET costs one round-trip per attach for cross-worker freshness that is rarely consumed.
   - Consider pausing xterm rendering for hidden-tab PTYs. xterm.js running in a `display: none` panel still processes writes and grows scrollback (capped at 1000 lines, but still wasted CPU). Either drop incoming `output` chunks into the modal only when visible (queue and replay on tab focus) or accept the cost as small enough to ignore — worth measuring under a long-running ffuf in a backgrounded tab before spending engineering on it.
-
-### Active run reattachment improvements
-- Prefer reusing the original browser tab when a normal command stream reconnects or reattaches to an active `run_id`, as long as that tab still exists. Creating a new tab should be the fallback for reload recovery, missing original tab state, or an explicit attach action from Status Monitor.
-- Add a clearer transcript notice for normal-command reattach events, such as `[reattached to active run after stream recovery]`, so background-tab throttling and SSE recovery do not look like a new command was launched.
-- Keep the existing "same run, same timer" behavior by preserving the server `started` timestamp on reattach; the change is only where the recovered stream lands and how the recovery is explained.
-- Add unit or browser coverage for the normal-command recovery path: start a run, simulate stream detachment while the run remains active, confirm the original tab is reused, and confirm a missing original tab still creates a recovery tab.
 
 ## Research
 
@@ -286,64 +276,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Adds `GET/POST /projects/<id>/report` to `app/blueprints/projects.py`.
   - Browser surface: a "Report" tab inside the existing Projects modal; renderer reuses `export_html.js` and `export_pdf.js`.
   - Honors share-redaction defaults; the draft is always previewed before download so this stays additive to evidence packages, not a replacement.
-
-### Session Entity Atlas (entity-first triage surface)
-- Reframe darklab_shell's exploration model so entities (findings, hosts/IPs, domains, hashes, CVEs, URLs) become the primary navigation primitive — not runs, not projects. Runs become the *source* of entities. Projects become a *curated subset* of entities for engagement work. The active session token owns the entity graph.
-- **The gap it closes:**
-  - Every run already produces classified findings, but the rich exploration UI lives inside Projects. Runs not linked to a project surface findings only inside Run Details with no aggregation, triage state, or cross-run pivot.
-  - The proposed `intel` built-in widens the gap because intel data is inherently entity-shaped — a Shodan record is about an IP, not the nmap run that produced it. Without an entity-first surface, Findings, Intel, and Projects each grow parallel triage modals that show fragments of the same picture.
-  - Project membership stops being a gate on tooling. Users can recon casually and curate later without losing the engagement-grade Projects surface.
-- **UI shape:**
-  - New top-level **Atlas** surface with the same prominence as History — desktop left-rail entry, mobile menu item, keyboard shortcut. Not a stacked modal.
-  - Atlas tabs across the top: Findings, Hosts/IPs, Domains, Hashes, CVEs, URLs. Each tab is a filterable, sortable list of distinct entities extracted across every saved run for the active session token.
-  - Entity Detail side sheet opens from any row or from a tagged transcript token:
-    - Identity strip — type, canonical value, first/last seen, run count.
-    - Intel snapshot card — Shodan / VT / GreyNoise / IPinfo / etc., with explicit refresh so cache state is visible.
-    - Source runs list — every run that mentioned the entity, with command, tool, finding count, jump-to-line link.
-    - Findings extracted on the entity across all runs.
-    - Labels and notes via the existing `ui_entity_metadata.js` helper.
-    - Promote-to-project action.
-  - Transcript ↔ Atlas wiring:
-    - Tagged tokens become click targets; click opens entity detail; long-press / right-click exposes the full action menu (label, note, promote, copy, lookup intel).
-    - Hover popover on tagged tokens shows the high-signal summary (GreyNoise verdict, Shodan port count, VT positives) without leaving the transcript.
-    - "See in run" inside entity detail jumps back to the source line in the original run.
-- **Phased rollout:**
-  - Phase 1 — Read-only Atlas: render Findings, Hosts, Domains, Hashes, CVEs tabs from data already classified by `app/core/output_signals.py`. Rows click into their source run; no new metadata yet. Ships value alone.
-  - Phase 2 — Entity Detail: aggregate across runs, attach labels/notes, dedupe via stable signature, "see in run" navigation.
-  - Phase 3 — Intel attachment: explicit `intel` results, sidecar enrichment, and pipe-helper enrichment all write into entity-keyed intel rows; entity detail renders them.
-  - Phase 4 — Findings triage state: keep finding review actions (`new`, `reviewed`, `important`, `false_positive`, `needs_followup`) on the Findings tab. The standalone Findings triage inbox idea folds in here instead of shipping as its own surface.
-  - Phase 5 — Project linking: adding to a project becomes a tag on the entity row; project workspace, evidence packages, and engagement report builder all read from the same entity store.
-- **Architecture:**
-  - Storage:
-    - New `entities` table keyed by (session_token, type, canonical_value, signature_hash) for stable dedupe across runs.
-    - `entity_run_links` (entity_id, run_id, first_seen, last_seen, occurrence_count) so cross-run aggregation is a single join.
-    - `entity_intel_snapshots` (entity_id, provider, payload_json, fetched_at, ttl) keyed by provider so refresh and quota stories stay tractable.
-    - Existing `project_links` rows with `entity_type='atlas_entity'` replace per-project copies of entity rows; no standalone `entity_project_links` table.
-  - Services:
-    - New `app/services/atlas/` service with materialization helpers that run at run-finalize time, consuming entity events surfaced by the entity-aware output classifier hooks called out under the intel integrations idea.
-    - Entities are extracted lazily and deduped via stable signature so long sessions do not balloon SQLite. Materialization is idempotent so re-finalizing a run does not double-count.
-    - Reuses the existing label/note helpers, run-comparison structured-finding model, and intel provider modules.
-  - Routes:
-    - New `app/blueprints/atlas.py` for list, filter, detail, and entity-mutation routes (labels, notes, project links, intel refresh).
-    - Existing Findings, Run Details, and Projects routes read from the same entity store rather than maintaining parallel finding queues.
-  - Browser surface:
-    - New `app/static/js/features/atlas/` for the Atlas surface, tab list rendering, entity detail side sheet, transcript hover popover, and tagged-token action menu.
-    - New `app/static/css/features/atlas.css`.
-    - Run Details, Projects, and the `intel` result card all link into entity detail rather than re-rendering entity data locally.
-  - Sharing and exports:
-    - Entity rows themselves never appear in snapshot permalinks; only the source run transcript does. The existing share-redaction path already covers raw transcript content and raw-only intel omissions.
-    - Engagement report builder (separate idea) reads from the entity store for "targets", "findings", and "intel observations" sections, replacing per-project ad-hoc aggregation.
-- **Anti-patterns to avoid:**
-  - Do not build the Atlas as yet-another-modal stacked over History. It needs first-class chrome treatment (rail entry, shortcut, mobile menu item) or it will be invisible.
-  - Do not duplicate entity metadata between Atlas and Projects. Project membership is a tag on the entity row; labels, notes, and intel live on the entity.
-  - Do not materialize entities eagerly for every line of output. Extract lazily from classifier events at finalization and dedupe with stable signatures so SQLite cost scales with distinct entities, not output volume.
-  - Do not gate intel data on the user calling `intel` explicitly. Sidecar enrichment, pipe-helper enrichment, and explicit `intel` calls must all write through the same per-entity intel rows so a user who never types `intel` still sees enriched data.
-  - Do not break runs that have no findings. Utility commands and failed commands produce zero entities; the Atlas must treat that as the normal case, not an empty state worth surfacing.
-- **Relationships to other ideas:**
-  - Folds finding triage into the Atlas Findings lens instead of adding a separate inbox surface.
-  - Provides the natural home for **External intel provider enhancements** — entity detail is where intel snapshots live; sidecar enrichment, the `intel` built-in, and pipe-helper enrichment all write here.
-  - Consumes the entity-aware output classifier hooks called out under intel integrations and the **structured output model** under Architecture.
-  - Reframes **Project workspaces** as a curation layer over the entity store rather than the only triage surface; project linking is a tag, not a copy.
 
 ---
 

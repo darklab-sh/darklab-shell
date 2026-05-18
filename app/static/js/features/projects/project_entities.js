@@ -85,6 +85,7 @@
         loading: false,
         loaded: false,
         error: '',
+        loadSeq: 0,
       });
       return pages.get(key);
     }
@@ -190,6 +191,14 @@
       state.limit = pageLimit;
       state.loading = true;
       state.error = '';
+      const requestKey = pageKey(normalizedProjectId);
+      const requestId = Number(state.loadSeq || 0) + 1;
+      state.loadSeq = requestId;
+      const isStale = () => (
+        pageKey(normalizedProjectId) !== requestKey
+        || page(normalizedProjectId) !== state
+        || state.loadSeq !== requestId
+      );
       const params = new URLSearchParams({
         limit: String(state.limit),
         offset: String(state.offset),
@@ -202,6 +211,7 @@
         });
         if (!resp.ok) throw await ctx.projectResponseError(resp, 'Could not load project entities.');
         const data = await resp.json();
+        if (isStale()) return state;
         state.entities = Array.isArray(data.entities) ? data.entities : [];
         state.total = Number(data.total || 0);
         state.limit = Number(data.limit || pageLimit);
@@ -218,13 +228,14 @@
         state.loaded = true;
         return state;
       } catch (err) {
+        if (isStale()) return state;
         state.error = err && err.message ? err.message : 'Could not load project entities.';
         ctx.setProjectWorkspaceMessage?.(state.error, { error: true });
         if (typeof ctx.logClientError === 'function') ctx.logClientError('failed to load project entities', err);
         return state;
       } finally {
-        state.loading = false;
-        if (!options.skipFinalRender) {
+        if (state.loadSeq === requestId) state.loading = false;
+        if (!isStale() && !options.skipFinalRender) {
           ctx.renderProjectExplorer?.();
           if (ctx.mobileView?.() === 'detail') ctx.renderProjectMobileDetail?.();
         }

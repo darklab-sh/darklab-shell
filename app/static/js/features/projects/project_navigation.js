@@ -6,6 +6,7 @@
 
   function createProjectNavigationController(context) {
     const ctx = context || {};
+    const mobileTabEdgeOptions = { wrapSelector: '.project-mobile-tabs-wrap' };
 
     function tabCountText(projectId, summary, tabId, total) {
       const totalCount = Number(total || 0);
@@ -186,7 +187,19 @@
         ctx.bindProjectRuntimePressable(tab);
         ctx.projectMobileTabs.appendChild(tab);
       });
-      ctx.syncProjectMobileActiveTabScroll();
+      syncMobileActiveTabScroll();
+    }
+
+    function syncMobileActiveTabScroll() {
+      if (typeof global.syncActiveTabStripScroll === 'function') {
+        global.syncActiveTabStripScroll(ctx.projectMobileTabs, mobileTabEdgeOptions);
+      }
+    }
+
+    function syncMobileTabEdges() {
+      if (typeof global.syncTabStripEdges === 'function') {
+        global.syncTabStripEdges(ctx.projectMobileTabs, mobileTabEdgeOptions);
+      }
     }
 
     function focusWorkspaceTab(tabId) {
@@ -197,7 +210,7 @@
           String(button.dataset.projectTab || button.dataset.projectMobileDetailTab || '') === nextTab
         ));
         target?.focus({ preventScroll: true });
-        ctx.syncProjectMobileActiveTabScroll();
+        syncMobileActiveTabScroll();
       }, 0);
     }
 
@@ -207,6 +220,8 @@
       renderProjectHeader,
       renderMobileDetailTopbar,
       renderMobileTabs,
+      syncMobileActiveTabScroll,
+      syncMobileTabEdges,
       focusWorkspaceTab,
     };
   }

@@ -38,8 +38,13 @@ from services.atlas.cleanup import (
     delete_atlas_cleanup_preview,
     public_cleanup_preview,
 )
-from services.projects.contracts import BULK_AUDIT_FAILURE_LIMIT, MAX_BULK_RUN_ACTION_ITEMS, MAX_ENTITY_ID_LEN
-from services.projects.workspace import ProjectWorkspaceError, compare_project_runs
+from services.projects.comparisons import compare_project_runs
+from services.projects.contracts import (
+    BULK_AUDIT_FAILURE_LIMIT,
+    MAX_BULK_RUN_ACTION_ITEMS,
+    MAX_ENTITY_ID_LEN,
+    ProjectWorkspaceError,
+)
 from core.redaction import omit_raw_only_line_entries, redact_line_entries
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, builtin_command_roots_for_storage
 from services.runs.output_store import load_full_output_entries

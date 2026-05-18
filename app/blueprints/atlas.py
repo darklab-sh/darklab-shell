@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import uuid
 from datetime import datetime, timezone
 
 from flask import Blueprint, Response, jsonify, request
@@ -10,6 +12,7 @@ from extensions import limiter
 from config import CFG
 from core.database import db_connect
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
+from services.projects import preferences as project_preferences
 from services.atlas.intel_bridge import refresh_entity_intel
 from services.atlas.cleanup import (
     atlas_entity_delete_preview,
@@ -28,9 +31,13 @@ from services.atlas.lookup import (
     list_entities,
     list_findings,
 )
-from services.projects.contracts import FINDING_REVIEW_STATES, MAX_BULK_RUN_ACTION_ITEMS, MAX_ENTITY_ID_LEN
-from services.projects.workspace import (
+from services.projects.contracts import (
+    FINDING_REVIEW_STATES,
+    MAX_BULK_RUN_ACTION_ITEMS,
+    MAX_ENTITY_ID_LEN,
     ProjectWorkspaceError,
+)
+from services.projects.links import (
     link_project_entity,
     unlink_project_entity,
 )
@@ -40,6 +47,13 @@ import logging
 log = logging.getLogger("shell")
 
 atlas_bp = Blueprint("atlas", __name__)
+
+ATLAS_SAVED_VIEWS_PREF_KEY = "pref_atlas_saved_views"
+ATLAS_SAVED_VIEW_FILTER_TABS = {"findings", "ip", "domain", "hash", "cve", "url"}
+ATLAS_SAVED_VIEW_FILTER_VALUES = {"hide", "all", "only"}
+ATLAS_SAVED_VIEW_MAX_COUNT = 30
+ATLAS_SAVED_VIEW_NAME_MAX_LEN = 60
+ATLAS_SAVED_VIEW_ID_RE = re.compile(r"^atv_[0-9a-f]{16,32}$")
 
 
 def _atlas_write_limit():
@@ -76,15 +90,223 @@ def _normalize_review_state(value):
     return review_state
 
 
+def _normalize_suppression_reason(value):
+    return str(value or "").strip()[:500]
+
+
+def _normalize_suppressed(value):
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _now_for_review():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _suppression_timestamp(suppressed):
+    return _now_for_review() if suppressed else ""
+
+
+def _suppression_payload(data):
+    payload = data if isinstance(data, dict) else {}
+    suppressed = _normalize_suppressed(payload.get("suppressed"))
+    return suppressed, _normalize_suppression_reason(payload.get("reason")) if suppressed else ""
+
+
+def _normalize_saved_view_name(value):
+    return str(value or "").strip()[:ATLAS_SAVED_VIEW_NAME_MAX_LEN]
+
+
+def _normalize_saved_view_id(value):
+    view_id = str(value or "").strip().lower()
+    return view_id if ATLAS_SAVED_VIEW_ID_RE.fullmatch(view_id) else ""
+
+
+def _normalize_saved_view_filter(value, default="hide"):
+    normalized = str(value or default).strip().lower()
+    return normalized if normalized in ATLAS_SAVED_VIEW_FILTER_VALUES else default
+
+
+def _normalize_saved_view_payload(data, *, view_id=""):
+    payload: dict[str, object] = dict(data) if isinstance(data, dict) else {}
+    name = _normalize_saved_view_name(payload.get("name"))
+    tab = str(payload.get("tab") or "findings").strip().lower()
+    if tab not in ATLAS_SAVED_VIEW_FILTER_TABS:
+        tab = "findings"
+    normalized_view_id = _normalize_saved_view_id(view_id or payload.get("id"))
+    if not normalized_view_id:
+        normalized_view_id = "atv_" + uuid.uuid4().hex[:20]
+    raw_filters = payload.get("filters")
+    filters: dict[str, object] = dict(raw_filters) if isinstance(raw_filters, dict) else {}
+
+    def filter_or_payload(key):
+        return filters.get(key) if key in filters else payload.get(key)
+
+    finding_status = _normalize_review_state(filter_or_payload("finding_status"))
+    return {
+        "id": normalized_view_id,
+        "name": name,
+        "tab": tab,
+        "query": str(filter_or_payload("query") or "").strip()[:500],
+        "orphan_filter": _normalize_saved_view_filter(filter_or_payload("orphan_filter")),
+        "suppression_filter": _normalize_saved_view_filter(filter_or_payload("suppression_filter")),
+        "finding_status": finding_status,
+        "project_id": str(filter_or_payload("project_id") or "").strip()[:80],
+        "project_name": str(filter_or_payload("project_name") or "").strip()[:120],
+        "sort": str(filter_or_payload("sort") or "").strip()[:80],
+    }
+
+
+def _stored_saved_view(view, *, updated):
+    return {
+        "id": view["id"],
+        "name": view["name"],
+        "tab": view["tab"],
+        "filters": {
+            "query": view["query"],
+            "orphan_filter": view["orphan_filter"],
+            "suppression_filter": view["suppression_filter"],
+            "finding_status": view["finding_status"],
+            "project_id": view["project_id"],
+            "project_name": view["project_name"],
+            "sort": view["sort"],
+        },
+        "updated_at": updated,
+    }
+
+
+def _normalize_saved_views(value):
+    if not isinstance(value, list):
+        return []
+    views = []
+    seen_ids = set()
+    for item in value:
+        view = _normalize_saved_view_payload(item if isinstance(item, dict) else {})
+        if not view["name"] or view["id"] in seen_ids:
+            continue
+        seen_ids.add(view["id"])
+        updated_at = str(item.get("updated_at") or "")[:40] if isinstance(item, dict) else ""
+        views.append(_stored_saved_view(view, updated=updated_at))
+        if len(views) >= ATLAS_SAVED_VIEW_MAX_COUNT:
+            break
+    return views
+
+
+def _load_saved_views(conn, session_id):
+    preferences = project_preferences.load_session_preferences(conn, session_id)
+    return preferences, _normalize_saved_views(preferences.get(ATLAS_SAVED_VIEWS_PREF_KEY))
+
+
+def _save_saved_views(conn, session_id, preferences, views):
+    preferences[ATLAS_SAVED_VIEWS_PREF_KEY] = _normalize_saved_views(views)
+    project_preferences.save_session_preferences(conn, session_id, preferences)
 
 
 @atlas_bp.route("/atlas")
 def atlas_index():
     session_id = get_session_id()
     with db_connect() as conn:
-        return jsonify(atlas_summary(conn, session_id, orphan_filter=request.args.get("orphan_filter") or "hide"))
+        return jsonify(atlas_summary(
+            conn,
+            session_id,
+            orphan_filter=request.args.get("orphan_filter") or "hide",
+            suppression_filter=request.args.get("suppression_filter") or "hide",
+        ))
+
+
+@atlas_bp.route("/atlas/views")
+def atlas_saved_views_list():
+    session_id = get_session_id()
+    with db_connect() as conn:
+        _, views = _load_saved_views(conn, session_id)
+    return jsonify({"views": views})
+
+
+@atlas_bp.route("/atlas/views", methods=["POST"])
+@limiter.limit(_atlas_write_limit)
+def atlas_saved_view_create():
+    session_id = get_session_id()
+    view = _normalize_saved_view_payload(request.get_json(silent=True) or {})
+    if not view["name"]:
+        return jsonify({"error": "name is required"}), 400
+    updated = datetime.now(timezone.utc).isoformat()
+    with db_connect() as conn:
+        preferences, views = _load_saved_views(conn, session_id)
+        if len(views) >= ATLAS_SAVED_VIEW_MAX_COUNT:
+            return jsonify({"error": "too_many", "limit": ATLAS_SAVED_VIEW_MAX_COUNT}), 400
+        existing_names = {str(item.get("name") or "").strip().lower() for item in views}
+        if view["name"].lower() in existing_names:
+            return jsonify({"error": "name already exists"}), 409
+        stored = _stored_saved_view(view, updated=updated)
+        views.append(stored)
+        _save_saved_views(conn, session_id, preferences, views)
+        conn.commit()
+    log.info("ATLAS_SAVED_VIEW_CREATED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "view_id": stored["id"],
+        "tab": stored["tab"],
+    })
+    return jsonify({"ok": True, "view": stored, "views": views}), 201
+
+
+@atlas_bp.route("/atlas/views/<view_id>", methods=["PUT"])
+@limiter.limit(_atlas_write_limit)
+def atlas_saved_view_update(view_id):
+    session_id = get_session_id()
+    normalized_id = _normalize_saved_view_id(view_id)
+    if not normalized_id:
+        return jsonify({"error": "view not found"}), 404
+    view = _normalize_saved_view_payload(request.get_json(silent=True) or {}, view_id=normalized_id)
+    if not view["name"]:
+        return jsonify({"error": "name is required"}), 400
+    updated = datetime.now(timezone.utc).isoformat()
+    with db_connect() as conn:
+        preferences, views = _load_saved_views(conn, session_id)
+        index = next((idx for idx, item in enumerate(views) if str(item.get("id") or "") == normalized_id), -1)
+        if index < 0:
+            return jsonify({"error": "view not found"}), 404
+        duplicate = next((
+            item for item in views
+            if str(item.get("id") or "") != normalized_id
+            and str(item.get("name") or "").strip().lower() == view["name"].lower()
+        ), None)
+        if duplicate:
+            return jsonify({"error": "name already exists"}), 409
+        stored = _stored_saved_view(view, updated=updated)
+        views[index] = stored
+        _save_saved_views(conn, session_id, preferences, views)
+        conn.commit()
+    log.info("ATLAS_SAVED_VIEW_UPDATED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "view_id": stored["id"],
+        "tab": stored["tab"],
+    })
+    return jsonify({"ok": True, "view": stored, "views": views})
+
+
+@atlas_bp.route("/atlas/views/<view_id>", methods=["DELETE"])
+@limiter.limit(_atlas_write_limit)
+def atlas_saved_view_delete(view_id):
+    session_id = get_session_id()
+    normalized_id = _normalize_saved_view_id(view_id)
+    if not normalized_id:
+        return jsonify({"error": "view not found"}), 404
+    with db_connect() as conn:
+        preferences, views = _load_saved_views(conn, session_id)
+        kept = [item for item in views if str(item.get("id") or "") != normalized_id]
+        if len(kept) == len(views):
+            return jsonify({"error": "view not found"}), 404
+        _save_saved_views(conn, session_id, preferences, kept)
+        conn.commit()
+    log.info("ATLAS_SAVED_VIEW_DELETED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "view_id": normalized_id,
+    })
+    return jsonify({"ok": True, "views": kept})
 
 
 @atlas_bp.route("/atlas/entities")
@@ -100,6 +322,7 @@ def atlas_entities_list():
             query=request.args.get("q") or "",
             project_id=request.args.get("project_id") or "",
             orphan_filter=request.args.get("orphan_filter") or "hide",
+            suppression_filter=request.args.get("suppression_filter") or "hide",
             limit=limit,
             offset=offset,
         ))
@@ -120,6 +343,7 @@ def atlas_entities_export_download():
             query=request.args.get("q") or "",
             project_id=request.args.get("project_id") or "",
             orphan_filter=request.args.get("orphan_filter") or "hide",
+            suppression_filter=request.args.get("suppression_filter") or "hide",
             limit=limit,
         )
     if export_format == "jsonl":
@@ -158,6 +382,7 @@ def atlas_findings_list():
             project_id=request.args.get("project_id") or "",
             review_states=request.args.getlist("review_state"),
             orphan_filter=request.args.get("orphan_filter") or "hide",
+            suppression_filter=request.args.get("suppression_filter") or "hide",
             limit=limit,
             offset=offset,
         ))
@@ -217,11 +442,87 @@ def atlas_findings_bulk_review_update():
 @atlas_bp.route("/atlas/entities/<entity_id>")
 def atlas_entity_detail(entity_id):
     session_id = get_session_id()
+    runs_offset = _parse_int(request.args.get("runs_offset"), 0, minimum=0, maximum=100000)
+    findings_offset = _parse_int(request.args.get("findings_offset"), 0, minimum=0, maximum=100000)
     with db_connect() as conn:
-        detail = entity_detail(conn, session_id, entity_id)
+        detail = entity_detail(
+            conn,
+            session_id,
+            entity_id,
+            runs_offset=runs_offset,
+            findings_offset=findings_offset,
+        )
     if detail is None:
         return jsonify({"error": "entity not found"}), 404
     return jsonify(detail)
+
+
+@atlas_bp.route("/atlas/entities/<entity_id>/suppression", methods=["PUT"])
+@limiter.limit(_atlas_write_limit)
+def atlas_entity_suppression_update(entity_id):
+    session_id = get_session_id()
+    suppressed, reason = _suppression_payload(request.get_json(silent=True) or {})
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM entities WHERE session_id = ? AND id = ?",
+            (session_id, entity_id),
+        ).fetchone()
+        if not row:
+            return jsonify({"error": "entity not found"}), 404
+        conn.execute(
+            "UPDATE entities SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
+            "WHERE session_id = ? AND id = ?",
+            (suppressed, reason, _suppression_timestamp(suppressed), session_id, entity_id),
+        )
+        conn.commit()
+    log.info("ATLAS_ENTITY_SUPPRESSION_UPDATED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "entity_id": entity_id,
+        "suppressed": suppressed,
+    })
+    return jsonify({"ok": True, "entity_id": entity_id, "suppressed": suppressed})
+
+
+@atlas_bp.route("/atlas/entities/suppression", methods=["POST"])
+@limiter.limit(_atlas_write_limit)
+def atlas_entities_bulk_suppression_update():
+    session_id = get_session_id()
+    data = request.get_json(silent=True) or {}
+    entity_ids = _normalize_entity_ids(data.get("entity_ids"))
+    suppressed, reason = _suppression_payload(data)
+    if not entity_ids:
+        return jsonify({"error": "entity_ids are required"}), 400
+    if len(entity_ids) > MAX_BULK_RUN_ACTION_ITEMS:
+        return jsonify({"error": "too_many", "limit": MAX_BULK_RUN_ACTION_ITEMS}), 400
+    with db_connect() as conn:
+        placeholders = ",".join("?" for _ in entity_ids)
+        rows = conn.execute(
+            "SELECT id FROM entities WHERE session_id = ? "  # nosec
+            f"AND id IN ({placeholders})",
+            [session_id, *entity_ids],
+        ).fetchall()
+        found_ids = {str(row["id"] or "") for row in rows}
+        if found_ids:
+            conn.executemany(
+                "UPDATE entities SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
+                "WHERE session_id = ? AND id = ?",
+                [
+                    (suppressed, reason, _suppression_timestamp(suppressed), session_id, item_id)
+                    for item_id in sorted(found_ids)
+                ],
+            )
+            conn.commit()
+    results = [
+        {"entity_id": item_id, "status": "updated" if item_id in found_ids else "not_found"}
+        for item_id in entity_ids
+    ]
+    return jsonify({
+        "ok": True,
+        "suppressed": suppressed,
+        "counts": {"updated": len(found_ids), "not_found": len(entity_ids) - len(found_ids)},
+        "results": results,
+    })
 
 
 @atlas_bp.route("/atlas/entities/bulk-delete", methods=["POST"])
@@ -346,6 +647,74 @@ def atlas_findings_bulk_delete():
             "deleted": deleted_findings,
             "not_found": len(finding_ids) - len(found_ids),
         },
+        "results": results,
+    })
+
+
+@atlas_bp.route("/atlas/findings/<finding_id>/suppression", methods=["PUT"])
+@limiter.limit(_atlas_write_limit)
+def atlas_finding_suppression_update(finding_id):
+    session_id = get_session_id()
+    suppressed, reason = _suppression_payload(request.get_json(silent=True) or {})
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM findings WHERE session_id = ? AND id = ?",
+            (session_id, finding_id),
+        ).fetchone()
+        if not row:
+            return jsonify({"error": "finding not found"}), 404
+        conn.execute(
+            "UPDATE findings SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
+            "WHERE session_id = ? AND id = ?",
+            (suppressed, reason, _suppression_timestamp(suppressed), session_id, finding_id),
+        )
+        conn.commit()
+    log.info("ATLAS_FINDING_SUPPRESSION_UPDATED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "finding_id": finding_id,
+        "suppressed": suppressed,
+    })
+    return jsonify({"ok": True, "finding_id": finding_id, "suppressed": suppressed})
+
+
+@atlas_bp.route("/atlas/findings/suppression", methods=["POST"])
+@limiter.limit(_atlas_write_limit)
+def atlas_findings_bulk_suppression_update():
+    session_id = get_session_id()
+    data = request.get_json(silent=True) or {}
+    finding_ids = _normalize_finding_ids(data.get("finding_ids"))
+    suppressed, reason = _suppression_payload(data)
+    if not finding_ids:
+        return jsonify({"error": "finding_ids are required"}), 400
+    if len(finding_ids) > MAX_BULK_RUN_ACTION_ITEMS:
+        return jsonify({"error": "too_many", "limit": MAX_BULK_RUN_ACTION_ITEMS}), 400
+    with db_connect() as conn:
+        placeholders = ",".join("?" for _ in finding_ids)
+        rows = conn.execute(
+            "SELECT id FROM findings WHERE session_id = ? "  # nosec
+            f"AND id IN ({placeholders})",
+            [session_id, *finding_ids],
+        ).fetchall()
+        found_ids = {str(row["id"] or "") for row in rows}
+        if found_ids:
+            conn.executemany(
+                "UPDATE findings SET suppressed = ?, suppressed_reason = ?, suppressed_at = ? "
+                "WHERE session_id = ? AND id = ?",
+                [
+                    (suppressed, reason, _suppression_timestamp(suppressed), session_id, item_id)
+                    for item_id in sorted(found_ids)
+                ],
+            )
+            conn.commit()
+    results = [
+        {"finding_id": item_id, "status": "updated" if item_id in found_ids else "not_found"}
+        for item_id in finding_ids
+    ]
+    return jsonify({
+        "ok": True,
+        "suppressed": suppressed,
+        "counts": {"updated": len(found_ids), "not_found": len(finding_ids) - len(found_ids)},
         "results": results,
     })
 

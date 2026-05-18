@@ -263,6 +263,9 @@ def _create_project_workspace_schema(conn):
             first_seen_at    TEXT NOT NULL,
             last_seen_at     TEXT NOT NULL,
             occurrence_count INTEGER NOT NULL DEFAULT 0,
+            suppressed       INTEGER NOT NULL DEFAULT 0,
+            suppressed_reason TEXT NOT NULL DEFAULT '',
+            suppressed_at    TEXT NOT NULL DEFAULT '',
             created          TEXT NOT NULL,
             UNIQUE (session_id, type, signature_hash)
         )
@@ -329,6 +332,9 @@ def _create_project_workspace_schema(conn):
             occurrence_count  INTEGER NOT NULL DEFAULT 0,
             status            TEXT NOT NULL DEFAULT 'new',
             status_updated_at TEXT NOT NULL DEFAULT '',
+            suppressed        INTEGER NOT NULL DEFAULT 0,
+            suppressed_reason TEXT NOT NULL DEFAULT '',
+            suppressed_at     TEXT NOT NULL DEFAULT '',
             fingerprint       TEXT NOT NULL DEFAULT '',
             title             TEXT NOT NULL DEFAULT '',
             raw_line          TEXT NOT NULL DEFAULT '',
@@ -439,6 +445,10 @@ def _create_indexes(conn):
         "ON entities (session_id, type, last_seen_at DESC)"
     )
     conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entities_session_suppressed "
+        "ON entities (session_id, suppressed)"
+    )
+    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_entities_session_value "
         "ON entities (session_id, canonical_value)"
     )
@@ -471,6 +481,10 @@ def _create_indexes(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_findings_session_status "
         "ON findings (session_id, status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_findings_session_suppressed "
+        "ON findings (session_id, suppressed)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_findings_session_entity_seen "
@@ -838,6 +852,12 @@ def _migrate_schema(conn):
         "ALTER TABLE project_links ADD COLUMN review_state TEXT NOT NULL DEFAULT 'confirmed'",
         f"ALTER TABLE project_links ADD COLUMN source_detail {_json_column_sql('{}')}",
         "ALTER TABLE project_links ADD COLUMN updated TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE entities ADD COLUMN suppressed INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE entities ADD COLUMN suppressed_reason TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE entities ADD COLUMN suppressed_at TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE findings ADD COLUMN suppressed INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE findings ADD COLUMN suppressed_reason TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE findings ADD COLUMN suppressed_at TEXT NOT NULL DEFAULT ''",
     ):
         try:
             conn.execute(stmt)

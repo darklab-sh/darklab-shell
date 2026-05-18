@@ -5,6 +5,9 @@
     const ctx = context || {};
     const targetFilters = new Map();
     const runFilters = new Map();
+    const commandFilters = new Map();
+    const severityFilters = new Map();
+    const scopeFilters = new Map();
     const statusFilters = new Map();
     const labelFilters = new Map();
     const noteStateFilters = new Map();
@@ -88,6 +91,129 @@
       const command = String(run.command || '').trim() || 'Run';
       if (command.length <= 16) return command;
       return `${command.slice(0, 14).trimEnd()} ...`;
+    }
+
+    function findingCommandRoot(value) {
+      const root = String(value || '').trim().split(/\s+/, 1)[0] || '';
+      return root.toLowerCase();
+    }
+
+    function findingCommandFilterSet(projectId = '') {
+      const normalized = normalizedProjectId(projectId);
+      if (!normalized) return new Set();
+      if (!commandFilters.has(normalized)) {
+        commandFilters.set(normalized, new Set());
+      }
+      return commandFilters.get(normalized);
+    }
+
+    function findingCommandOptions(projectId = '', summary = ctx.projectSummary?.(projectId)) {
+      const roots = new Set();
+      ctx.projectRunItems(summary).forEach(run => {
+        const root = findingCommandRoot(run && run.command);
+        if (root) roots.add(root);
+      });
+      ctx.projectFindingItems(projectId).forEach(finding => {
+        const root = String(finding && finding.command_root || '').trim().toLowerCase()
+          || findingCommandRoot(finding && finding.run_command);
+        if (root) roots.add(root);
+      });
+      return [...roots].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }));
+    }
+
+    function findingCommandFilterValues(projectId = '', summary = ctx.projectSummary?.(projectId)) {
+      const available = new Set(findingCommandOptions(projectId, summary));
+      const filters = findingCommandFilterSet(projectId);
+      [...filters].forEach((commandRoot) => {
+        if (!available.has(commandRoot)) filters.delete(commandRoot);
+      });
+      return [...filters];
+    }
+
+    function findingCommandFilterActive(projectId = '', summary = ctx.projectSummary?.(projectId)) {
+      return findingCommandFilterValues(projectId, summary).length > 0;
+    }
+
+    function findingSeverityFilterSet(projectId = '') {
+      const normalized = normalizedProjectId(projectId);
+      if (!normalized) return new Set();
+      if (!severityFilters.has(normalized)) {
+        severityFilters.set(normalized, new Set());
+      }
+      return severityFilters.get(normalized);
+    }
+
+    function findingSeverityOptions(projectId = '') {
+      const configured = Array.isArray(ctx.projectFindingSeverityOptions) ? ctx.projectFindingSeverityOptions : [];
+      const seen = new Set();
+      const options = [];
+      configured.forEach((option) => {
+        const value = String(option && option.value || '').trim().toLowerCase();
+        if (!value || seen.has(value)) return;
+        seen.add(value);
+        options.push({ value, label: String(option.label || value) });
+      });
+      ctx.projectFindingItems(projectId).forEach((finding) => {
+        const value = String(finding && finding.severity || '').trim().toLowerCase();
+        if (!value || seen.has(value)) return;
+        seen.add(value);
+        options.push({ value, label: value });
+      });
+      return options;
+    }
+
+    function findingSeverityFilterValues(projectId = '') {
+      const available = new Set(findingSeverityOptions(projectId).map(option => option.value));
+      const filters = findingSeverityFilterSet(projectId);
+      [...filters].forEach((severity) => {
+        if (!available.has(severity)) filters.delete(severity);
+      });
+      return [...filters];
+    }
+
+    function findingSeverityFilterActive(projectId = '') {
+      return findingSeverityFilterValues(projectId).length > 0;
+    }
+
+    function findingScopeFilterSet(projectId = '') {
+      const normalized = normalizedProjectId(projectId);
+      if (!normalized) return new Set();
+      if (!scopeFilters.has(normalized)) {
+        scopeFilters.set(normalized, new Set());
+      }
+      return scopeFilters.get(normalized);
+    }
+
+    function findingScopeOptions(projectId = '') {
+      const configured = Array.isArray(ctx.projectFindingScopeOptions) ? ctx.projectFindingScopeOptions : [];
+      const seen = new Set();
+      const options = [];
+      configured.forEach((option) => {
+        const value = String(option && option.value || '').trim().toLowerCase();
+        if (!value || seen.has(value)) return;
+        seen.add(value);
+        options.push({ value, label: String(option.label || value) });
+      });
+      ctx.projectFindingItems(projectId).forEach((finding) => {
+        const value = String(finding && (finding.scope || finding.kind) || '').trim().toLowerCase();
+        if (!value || seen.has(value)) return;
+        seen.add(value);
+        options.push({ value, label: value });
+      });
+      return options;
+    }
+
+    function findingScopeFilterValues(projectId = '') {
+      const available = new Set(findingScopeOptions(projectId).map(option => option.value));
+      const filters = findingScopeFilterSet(projectId);
+      [...filters].forEach((scope) => {
+        if (!available.has(scope)) filters.delete(scope);
+      });
+      return [...filters];
+    }
+
+    function findingScopeFilterActive(projectId = '') {
+      return findingScopeFilterValues(projectId).length > 0;
     }
 
     function findingStatusFilterSet(projectId = '') {
@@ -235,6 +361,9 @@
       const params = new URLSearchParams();
       targetFilterIds(projectId, summary).forEach(targetId => params.append('target_id', targetId));
       runFilterIds(projectId, summary).forEach(runId => params.append('run_id', runId));
+      findingCommandFilterValues(projectId, summary).forEach(commandRoot => params.append('command_root', commandRoot));
+      findingSeverityFilterValues(projectId).forEach(severity => params.append('severity', severity));
+      findingScopeFilterValues(projectId).forEach(scope => params.append('scope', scope));
       findingStatusFilterValues(projectId).forEach(status => params.append('review_state', status));
       findingLabelFilterValues(projectId).forEach(label => params.append('label', label));
       const noteState = findingNoteStateValue(projectId);
@@ -337,6 +466,22 @@
         if (runFilters.size) {
           findings = findings.filter(finding => runFilters.has(String(finding && finding.run_id || '')));
         }
+        const commandFilterValues = new Set(findingCommandFilterValues(projectId, summary));
+        if (commandFilterValues.size) {
+          findings = findings.filter((finding) => {
+            const root = String(finding && finding.command_root || '').trim().toLowerCase()
+              || findingCommandRoot(finding && finding.run_command);
+            return commandFilterValues.has(root);
+          });
+        }
+        const severityFilterValues = new Set(findingSeverityFilterValues(projectId));
+        if (severityFilterValues.size) {
+          findings = findings.filter(finding => severityFilterValues.has(String(finding && finding.severity || '').toLowerCase()));
+        }
+        const scopeFilterValues = new Set(findingScopeFilterValues(projectId));
+        if (scopeFilterValues.size) {
+          findings = findings.filter(finding => scopeFilterValues.has(String(finding && (finding.scope || finding.kind) || '').toLowerCase()));
+        }
         const statusFilterValues = new Set(findingStatusFilterValues(projectId));
         if (statusFilterValues.size) {
           findings = findings.filter(finding => statusFilterValues.has(String(finding && finding.review_state || 'new')));
@@ -382,6 +527,9 @@
       const normalized = normalizedProjectId(projectId);
       targetFilterSet(normalized).clear();
       runFilterSet(normalized).clear();
+      findingCommandFilterSet(normalized).clear();
+      findingSeverityFilterSet(normalized).clear();
+      findingScopeFilterSet(normalized).clear();
       findingStatusFilterSet(normalized).clear();
       findingLabelFilterSet(normalized).clear();
       noteStateFilters.delete(normalized);
@@ -506,9 +654,36 @@
       controls.appendChild(filterDropdown('Filter by run', selectedRuns.size, runOptions));
 
       const selectedStatuses = new Set(findingStatusFilterValues(projectId));
+      const selectedCommands = new Set(findingCommandFilterValues(projectId, summary));
+      const selectedSeverities = new Set(findingSeverityFilterValues(projectId));
+      const selectedScopes = new Set(findingScopeFilterValues(projectId));
       const selectedLabels = new Set(findingLabelFilterValues(projectId));
       let sortControl = null;
       if (ctx.projectWorkspaceTab() === 'findings') {
+        const commandOptions = findingCommandOptions(projectId, summary).map(commandRoot => filterOption({
+          labelText: commandRoot,
+          value: commandRoot,
+          checked: selectedCommands.has(commandRoot),
+          dataset: { projectFindingCommandFilterOption: '1', projectId },
+        }));
+        controls.appendChild(filterDropdown('Filter by command', selectedCommands.size, commandOptions));
+
+        const severityOptions = findingSeverityOptions(projectId).map(({ value, label: labelText }) => filterOption({
+          labelText,
+          value,
+          checked: selectedSeverities.has(value),
+          dataset: { projectFindingSeverityFilterOption: '1', projectId },
+        }));
+        controls.appendChild(filterDropdown('Filter by severity', selectedSeverities.size, severityOptions));
+
+        const scopeOptions = findingScopeOptions(projectId).map(({ value, label: labelText }) => filterOption({
+          labelText,
+          value,
+          checked: selectedScopes.has(value),
+          dataset: { projectFindingScopeFilterOption: '1', projectId },
+        }));
+        controls.appendChild(filterDropdown('Filter by scope', selectedScopes.size, scopeOptions));
+
         const statusOptions = ctx.findingReviewStates.map(({ value, label: labelText }) => filterOption({
           labelText,
           value,
@@ -609,6 +784,32 @@
           clearAttr: 'projectFindingStatusFilterClear',
         }));
       });
+      selectedCommands.forEach((commandRoot) => {
+        chips.appendChild(filterChip({
+          projectId,
+          label: `command: ${commandRoot}`,
+          value: commandRoot,
+          clearAttr: 'projectFindingCommandFilterClear',
+        }));
+      });
+      selectedSeverities.forEach((severity) => {
+        const option = findingSeverityOptions(projectId).find(item => item.value === severity);
+        chips.appendChild(filterChip({
+          projectId,
+          label: `severity: ${option ? option.label : severity}`,
+          value: severity,
+          clearAttr: 'projectFindingSeverityFilterClear',
+        }));
+      });
+      selectedScopes.forEach((scope) => {
+        const option = findingScopeOptions(projectId).find(item => item.value === scope);
+        chips.appendChild(filterChip({
+          projectId,
+          label: `scope: ${option ? option.label : scope}`,
+          value: scope,
+          clearAttr: 'projectFindingScopeFilterClear',
+        }));
+      });
       selectedLabels.forEach((labelValue) => {
         chips.appendChild(filterChip({
           projectId,
@@ -638,6 +839,7 @@
         }));
       }
       const hasFilters = selectedTargets.size || selectedRuns.size || selectedStatuses.size
+        || selectedCommands.size || selectedSeverities.size || selectedScopes.size
         || selectedLabels.size || noteState !== 'all' || orphanState !== 'hide';
       if (hasFilters) {
         const clearAll = document.createElement('button');
@@ -704,6 +906,10 @@
       filteredFindings,
       filteredRuns,
       findingFilteredKey,
+      findingCommandFilterActive,
+      findingCommandFilterSet,
+      findingCommandFilterValues,
+      findingCommandOptions,
       findingLabelFilterActive,
       findingLabelFilterSet,
       findingLabelFilterValues,
@@ -714,10 +920,18 @@
       findingOrphanFilterValue,
       findingServerFilterParams,
       findingServerFiltersActive,
+      findingSeverityFilterActive,
+      findingSeverityFilterSet,
+      findingSeverityFilterValues,
+      findingSeverityOptions,
       findingSortValue,
       findingStatusFilterActive,
       findingStatusFilterSet,
       findingStatusFilterValues,
+      findingScopeFilterActive,
+      findingScopeFilterSet,
+      findingScopeFilterValues,
+      findingScopeOptions,
       runDirectTargetIds,
       runFilterActive,
       runFilterChipLabel,

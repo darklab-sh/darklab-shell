@@ -418,11 +418,11 @@ test.describe('tab command recall', () => {
     await expect(page.locator('.welcome-banner')).toHaveCount(0)
     await expect(page.locator('.status-pill')).toHaveText('RUNNING')
     await expect(page.locator('.tab-panel.active .output')).toContainText(
-      '[reconnected to active run started at',
+      '[reattached to active run after reload]',
     )
     await expect(page.locator('.tab-panel.active .output')).toContainText(activeCmd)
 
-    await page.locator('.tab').nth(1).click()
+    await page.locator('.tab').nth(2).click()
     await expect(page.locator('#cmd')).toHaveValue('ffuf -u https://target/FUZZ')
 
     await page.locator('.tab').first().click()

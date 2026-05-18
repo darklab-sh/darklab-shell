@@ -7,6 +7,7 @@
 const _stalledTimeouts = new Map();
 const _stalledRuns = new Set();
 const _runStreamStateByTabId = new Map();
+const _streamRecoveryTimers = new Map();
 const _runnerCore = typeof DarklabRunnerCore !== 'undefined' ? DarklabRunnerCore : null;
 let _runnerPersistence = null;
 let _activeRunPollTimer = null;
@@ -59,6 +60,11 @@ function _clearStalledTimeout(tabId) {
   _stalledRuns.delete(tabId);
 }
 
+function _clearStreamRecoveryTimer(tabId) {
+  clearTimeout(_streamRecoveryTimers.get(tabId));
+  _streamRecoveryTimers.delete(tabId);
+}
+
 function _recoverStalledRun(tabId) {
   if (!_stalledRuns.has(tabId)) return;
   _stalledRuns.delete(tabId);
@@ -74,12 +80,6 @@ function _recoverStalledRun(tabId) {
   showTabKillBtn(tabId);
 }
 
-function _activeRunIdsFromPayload(data) {
-  return new Set((Array.isArray(data && data.runs) ? data.runs : [])
-    .map(run => run && run.run_id)
-    .filter(Boolean));
-}
-
 function _tabRunGeneration(tabId) {
   const t = getTab(tabId);
   return t && (t.runId || t.historyRunId) || '';
@@ -87,17 +87,22 @@ function _tabRunGeneration(tabId) {
 
 function _isRunStillActive(runId) {
   if (!runId || typeof apiFetch !== 'function') return Promise.resolve(false);
-  return apiFetch('/history/active')
-    .then(r => (r && r.ok !== false && typeof r.json === 'function') ? r.json() : null)
-    .then(data => _activeRunIdsFromPayload(data).has(runId))
-    .catch(err => {
-      _logRunnerError('active run stall check failed', err);
-      return false;
-    });
+  return _fetchActiveRun(runId).then(Boolean);
 }
 
-function _isTabRunStillActive(tabId) {
-  return _isRunStillActive(_tabRunGeneration(tabId));
+function _fetchActiveRun(runId) {
+  if (!runId || typeof apiFetch !== 'function') return Promise.resolve(null);
+  return apiFetch('/history/active')
+    .then(r => (r && r.ok !== false && typeof r.json === 'function') ? r.json() : null)
+    .then(data => {
+      const normalized = String(runId || '');
+      return (Array.isArray(data && data.runs) ? data.runs : [])
+        .find(run => String(run && run.run_id || '') === normalized) || null;
+    })
+    .catch(err => {
+      _logRunnerError('active run stall check failed', err);
+      return null;
+    });
 }
 
 function _markStalledButRunning(tabId) {
@@ -131,26 +136,56 @@ function _markStalledAndInactive(tabId) {
 
 function _handleStreamEndedWithoutExit(tabId) {
   _clearStalledTimeout(tabId);
-  return _isTabRunStillActive(tabId).then(active => {
+  const runId = _tabRunGeneration(tabId);
+  return _fetchActiveRun(runId).then(activeRun => {
     const t = getTab(tabId);
     if (!t || t.killed) return;
-    if (active) {
-      appendLine('[live stream detached — process is still running]', 'notice', tabId);
-      appendLine('[this tab will restore the saved result automatically when the run completes]', 'notice', tabId);
-      t.reconnectedRun = true;
-      t.historyRunId = t.historyRunId || t.runId;
-      setTabStatus(tabId, 'running');
-      if (tabId === activeTabId) {
-        setStatus('running');
-        syncActiveRunTimer(tabId);
+    if (activeRun) {
+      if (_activeRunIsInteractivePty(activeRun)) {
+        if (typeof attachInteractivePtyCommand === 'function') {
+          attachInteractivePtyCommand(activeRun, tabId).catch(err => {
+            appendLine(`[server error] ${err.message || 'Interactive PTY reattach failed'}`, 'exit-fail', tabId);
+            setTabStatus(tabId, 'fail');
+          });
+        }
+        return;
       }
-      _setRunButtonDisabled(true);
-      showTabKillBtn(tabId);
-      startPollingActiveRunsAfterReload();
+      _scheduleActiveRunStreamRecovery(activeRun, tabId, {
+        after: t.lastEventId || activeRun.last_event_id || '',
+        mode: t.attachMode || 'reconnected',
+      });
       return;
     }
+    _clearStreamRecoveryTimer(tabId);
+    t.streamRecoveryAttempts = 0;
     stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
   });
+}
+
+function _scheduleActiveRunStreamRecovery(run, tabId, { after = '', mode = 'reconnected' } = {}) {
+  const t = getTab(tabId);
+  if (!t || !run || !run.run_id) return false;
+  if (_streamRecoveryTimers.has(tabId)) return true;
+  const attempts = Number(t.streamRecoveryAttempts || 0) + 1;
+  t.streamRecoveryAttempts = attempts;
+  const recover = () => {
+    _streamRecoveryTimers.delete(tabId);
+    const latest = getTab(tabId);
+    if (!latest || latest.killed || _tabRunGeneration(tabId) !== String(run.run_id || '')) return;
+    _reattachActiveRunToTab(run, tabId, {
+      after: latest.lastEventId || after || run.last_event_id || '',
+      afterStreamRecovery: true,
+      mode,
+      preserveTranscript: true,
+    });
+  };
+  if (attempts <= 1) {
+    recover();
+    return true;
+  }
+  const delayMs = Math.min(1000 * (2 ** Math.max(0, attempts - 2)), 5000);
+  _streamRecoveryTimers.set(tabId, setTimeout(recover, delayMs));
+  return true;
 }
 
 function _shouldSuppressStreamOutputLine(tab, line) {
@@ -231,24 +266,18 @@ function _activeReconnectTabs() {
   return tabs.filter(t => t && t.st === 'running' && t.reconnectedRun && t.historyRunId);
 }
 
-function _activeRunReconnectNotice(run) {
-  const startedAt = new Date(run.started);
-  const startedLabel = Number.isNaN(startedAt.getTime())
-    ? 'unknown start time'
-    : startedAt.toLocaleString();
-  return [
-    `[reconnected to active run started at ${startedLabel}]`,
-    '[restored available output; live output will continue here]',
-  ];
-}
-
 function _shouldAutoRestoreActiveRun(run) {
   if (!run || typeof run !== 'object') return false;
   if (_isActiveRunDetachedForRestore(run.run_id)) return false;
-  if (run.run_type === 'pty' && typeof attachInteractivePtyCommand !== 'function') return false;
+  if (_activeRunIsInteractivePty(run) && typeof attachInteractivePtyCommand !== 'function') return false;
   if (run.owned_by_this_client) return true;
   if (run.owner_stale) return true;
   return !run.has_live_owner;
+}
+
+function _activeRunIsInteractivePty(run) {
+  if (!run || typeof run !== 'object') return false;
+  return run.run_type === 'pty' || run.interactive === true;
 }
 
 function _startedAtLabel(started) {
@@ -256,6 +285,86 @@ function _startedAtLabel(started) {
   return Number.isNaN(startedAt.getTime())
     ? 'unknown start time'
     : startedAt.toLocaleString();
+}
+
+function _activeRunTabForRestore(run) {
+  const runId = String(run && run.run_id || '');
+  if (!runId || !Array.isArray(tabs)) return null;
+  const byRunId = _tabForActiveRunId(runId);
+  if (byRunId) return byRunId;
+  const ownerTabId = String(run && run.owner_tab_id || '');
+  if (run && run.owned_by_this_client && ownerTabId) {
+    return tabs.find(tab => tab && tab.id === ownerTabId) || null;
+  }
+  return null;
+}
+
+function _activeRunReattachNotice(run, { afterStreamRecovery = false } = {}) {
+  const startedLabel = _startedAtLabel(run && run.started);
+  return [
+    afterStreamRecovery
+      ? '[reattached to active run after stream recovery]'
+      : '[reattached to active run after reload]',
+    `[active run started at ${startedLabel}]`,
+    '[live output will continue here]',
+  ];
+}
+
+function _reattachActiveRunToTab(
+  run,
+  tabId,
+  {
+    after = '',
+    afterStreamRecovery = false,
+    mode = 'reconnected',
+    preserveTranscript = false,
+  } = {},
+) {
+  if (!run || !tabId) return false;
+  if (!preserveTranscript) clearTab(tabId);
+  const t = getTab(tabId);
+  if (!t) return false;
+  if (typeof setTabRunningCommand === 'function') {
+    setTabRunningCommand(tabId, run.command);
+  } else {
+    if (!t.renamed) setTabLabel(tabId, run.command);
+    t.command = run.command;
+  }
+  const runId = String(run.run_id || '');
+  t.runId = runId;
+  t.historyRunId = runId;
+  t.reconnectedRun = true;
+  t.attachMode = mode;
+  t.killed = false;
+  t.pendingKill = false;
+  t.previewTruncated = false;
+  t.fullOutputAvailable = false;
+  t.fullOutputLoaded = false;
+  t.runStart = Number.isNaN(Date.parse(run.started)) ? Date.now() : Date.parse(run.started);
+  t.currentRunStartIndex = Number.isFinite(Number(t.currentRunStartIndex))
+    ? Number(t.currentRunStartIndex)
+    : (Array.isArray(t.rawLines) ? t.rawLines.length : 0);
+  t.followOutput = true;
+  const resumeAfter = String(after || t.lastEventId || run.last_event_id || '');
+  if (!resumeAfter) t.lastEventId = '';
+  if (!preserveTranscript || !Array.isArray(t.rawLines) || t.rawLines.length === 0) {
+    appendCommandEcho(run.command, tabId);
+  }
+  const streamRecoveryNoticeShown = afterStreamRecovery && t.streamRecoveryNoticeRunId === runId;
+  if (!streamRecoveryNoticeShown) {
+    _activeRunReattachNotice(run, { afterStreamRecovery }).forEach(line => appendLine(line, 'notice', tabId));
+  }
+  if (afterStreamRecovery) t.streamRecoveryNoticeRunId = runId;
+  setTabStatus(tabId, 'running');
+  if (tabId === activeTabId) {
+    setStatus('running');
+    syncActiveRunTimer(tabId);
+  }
+  showTabKillBtn(tabId);
+  _setRunButtonDisabled(true);
+  _subscribeRunStream(runId, tabId, { after: resumeAfter });
+  startPollingActiveRunsAfterReload();
+  return true;
 }
 
 function restoreActiveRunsAfterReload(runs) {
@@ -270,6 +379,23 @@ function restoreActiveRunsAfterReload(runs) {
 
   let firstRestoredTabId = null;
   items.forEach((run, index) => {
+    const originalTab = _activeRunTabForRestore(run);
+    if (originalTab) {
+      if (!firstRestoredTabId) firstRestoredTabId = originalTab.id;
+      if (_activeRunIsInteractivePty(run) && typeof attachInteractivePtyCommand === 'function') {
+        attachInteractivePtyCommand(run, originalTab.id).catch(err => {
+          appendLine(`[server error] ${err.message || 'Interactive PTY reattach failed'}`, 'exit-fail', originalTab.id);
+          setTabStatus(originalTab.id, 'fail');
+        });
+        return;
+      }
+      _reattachActiveRunToTab(run, originalTab.id, {
+        after: originalTab.lastEventId || run.last_event_id || '',
+        mode: originalTab.attachMode || 'reconnected',
+        preserveTranscript: true,
+      });
+      return;
+    }
     const bootstrapTab = index === 0 && tabs.length === 1 ? tabs[0] : null;
     const canReuseBootstrapTab = !!(bootstrapTab
       && bootstrapTab.st === 'idle'
@@ -282,39 +408,18 @@ function restoreActiveRunsAfterReload(runs) {
     const tabId = canReuseBootstrapTab ? bootstrapTab.id : createTab();
     if (!tabId) return;
     if (!firstRestoredTabId) firstRestoredTabId = tabId;
-    if (run.run_type === 'pty' && typeof attachInteractivePtyCommand === 'function') {
+    if (_activeRunIsInteractivePty(run) && typeof attachInteractivePtyCommand === 'function') {
       attachInteractivePtyCommand(run, tabId).catch(err => {
         appendLine(`[server error] ${err.message || 'Interactive PTY reattach failed'}`, 'exit-fail', tabId);
         setTabStatus(tabId, 'fail');
       });
       return;
     }
-    clearTab(tabId);
-    const t = getTab(tabId);
-    if (!t) return;
-    if (typeof setTabRunningCommand === 'function') {
-      setTabRunningCommand(tabId, run.command);
-    } else {
-      if (!t.renamed) setTabLabel(tabId, run.command);
-      t.command = run.command;
-    }
-    t.runId = run.run_id;
-    t.historyRunId = run.run_id;
-    t.reconnectedRun = true;
-    t.lastEventId = '';
-    t.killed = false;
-    t.pendingKill = false;
-    t.previewTruncated = false;
-    t.fullOutputAvailable = false;
-    t.fullOutputLoaded = false;
-    t.runStart = Number.isNaN(Date.parse(run.started)) ? Date.now() : Date.parse(run.started);
-    t.currentRunStartIndex = 0;
-    t.followOutput = true;
-    appendCommandEcho(run.command, tabId);
-    _activeRunReconnectNotice(run).forEach(line => appendLine(line, 'notice', tabId));
-    setTabStatus(tabId, 'running');
-    showTabKillBtn(tabId);
-    _subscribeRunStream(run.run_id, tabId, { after: run.last_event_id || '' });
+    _reattachActiveRunToTab(run, tabId, {
+      after: run.last_event_id || '',
+      mode: 'reconnected',
+      preserveTranscript: false,
+    });
   });
 
   if (firstRestoredTabId) activateTab(firstRestoredTabId);
@@ -594,10 +699,13 @@ function _handleRunKilled(msg, tabId) {
 function _markTabKilledByUser(tabId, secs, { suppressTranscript = false } = {}) {
   const t = getTab(tabId);
   if (!t) return;
+  _clearStreamRecoveryTimer(tabId);
   t.killed = true;
   t.reconnectedRun = false;
   t.lastEventId = '';
   t.attachMode = '';
+  t.streamRecoveryAttempts = 0;
+  t.streamRecoveryNoticeRunId = '';
   stopTimer();
   if (!t.closing && !suppressTranscript) {
     appendLine(`[killed by user${secs != null ? ' after ' + _formatElapsed(secs) : ''}]`, 'exit-fail', tabId);
@@ -712,7 +820,12 @@ function _markTabRunStarted(tabId, runId) {
   const sameRun = t.runId === runId || t.historyRunId === runId;
   t.runId = runId;
   t.historyRunId = runId;
-  if (!sameRun) t.lastEventId = '';
+  if (!sameRun) {
+    t.lastEventId = '';
+    t.streamRecoveryAttempts = 0;
+    t.streamRecoveryNoticeRunId = '';
+    _clearStreamRecoveryTimer(tabId);
+  }
   if (!sameRun && typeof resetHighVolumeOutputState === 'function') {
     resetHighVolumeOutputState(tabId);
   }
@@ -780,6 +893,7 @@ function _handleRunStreamMessage(msg, tabId) {
     });
   } else if (msg.type === 'exit') {
     _clearStalledTimeout(tabId);
+    _clearStreamRecoveryTimer(tabId);
     const t = getTab(tabId);
     if (t) {
       t.exitCode = msg.code;
@@ -787,6 +901,8 @@ function _handleRunStreamMessage(msg, tabId) {
       t.reconnectedRun = false;
       t.lastEventId = '';
       t.attachMode = '';
+      t.streamRecoveryAttempts = 0;
+      t.streamRecoveryNoticeRunId = '';
       t.deferPromptMount = true;
       t.previewTruncated = !!msg.preview_truncated;
       t.fullOutputAvailable = !!msg.full_output_available;

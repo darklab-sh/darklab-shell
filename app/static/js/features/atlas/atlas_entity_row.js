@@ -48,6 +48,7 @@
     countLabel = defaultCountLabel,
     badge = defaultBadge,
     appendSelectionControl = null,
+    rowAction = null,
     onActivate = null,
   }) {
     const entityId = String(entity && entity.id || '');
@@ -56,6 +57,8 @@
     row.className = `chrome-row chrome-row-clickable atlas-entity-row${mobile ? ' atlas-mobile-row' : ''}`;
     row.classList.toggle('is-selecting', !!selecting);
     row.classList.toggle('is-selected', !!selected);
+    row.classList.toggle('is-suppressed', !!(entity && entity.suppressed));
+    row.classList.toggle('has-row-action', !!rowAction);
     row.dataset[mobile ? 'atlasMobileEntityId' : 'entityId'] = entityId;
     row.tabIndex = 0;
     row.setAttribute('role', selectMode ? 'checkbox' : 'button');
@@ -78,7 +81,10 @@
     meta.textContent = `${countLabel(occurrenceCount, 'hit', 'hits')} · ${countLabel(runCount, 'run', 'runs')}`;
     main.append(value, meta);
 
-    row.append(main, atlasBadges(entity || {}, { badge, text: textFn }));
+    const badges = atlasBadges(entity || {}, { badge, text: textFn });
+    if (entity && entity.suppressed) badges.prepend(badge('suppressed', 'muted'));
+    row.append(main, badges);
+    if (rowAction) row.appendChild(rowAction);
     if (mobile) {
       const chev = document.createElement('span');
       chev.className = 'atlas-mobile-row-chev drill-chev';

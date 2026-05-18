@@ -147,7 +147,9 @@
   let filtersToggleLabel = null;
   let filtersPanel = null;
   let mobileOrphanFilter = null;
+  let mobileSuppressionFilter = null;
   let mobileFindingStatusFilter = null;
+  let mobileSavedViewSelect = null;
   let orphanChipHost = null;
   let bulkStatusSelect = null;
   let searchTimer = null;
@@ -173,6 +175,7 @@
     let count = 0;
     if (String(state.findingStatus || '')) count += 1;
     if (String(state.orphanFilter || 'hide') !== 'hide') count += 1;
+    if (String(state.suppressionFilter || 'hide') !== 'hide') count += 1;
     return count;
   }
 
@@ -248,6 +251,32 @@
     panel.className = 'atlas-mobile-filters-panel is-hidden';
     panel.hidden = true;
 
+    const savedViewRow = document.createElement('div');
+    savedViewRow.className = 'atlas-mobile-saved-view-row';
+    const savedViewSelect = document.createElement('select');
+    savedViewSelect.className = 'form-select form-control-compact atlas-mobile-saved-view-select';
+    savedViewSelect.setAttribute('aria-label', 'Saved Atlas views');
+    savedViewSelect.dataset.portalMenu = 'true';
+    savedViewSelect.appendChild(option('Saved views', ''));
+    savedViewSelect.addEventListener('change', () => controller.applySavedView(savedViewSelect.value));
+    mobileSavedViewSelect = savedViewSelect;
+    const saveView = document.createElement('button');
+    saveView.type = 'button';
+    saveView.className = 'btn btn-secondary btn-compact';
+    saveView.textContent = 'Save';
+    saveView.addEventListener('click', () => controller.saveCurrentView());
+    const updateView = document.createElement('button');
+    updateView.type = 'button';
+    updateView.className = 'btn btn-ghost btn-compact atlas-mobile-saved-view-update';
+    updateView.textContent = 'Update';
+    updateView.addEventListener('click', () => controller.updateCurrentSavedView());
+    const deleteView = document.createElement('button');
+    deleteView.type = 'button';
+    deleteView.className = 'btn btn-ghost btn-compact atlas-mobile-saved-view-delete';
+    deleteView.textContent = 'Delete';
+    deleteView.addEventListener('click', () => controller.deleteCurrentSavedView());
+    savedViewRow.append(savedViewSelect, saveView, updateView, deleteView);
+
     const orphanSelect = document.createElement('select');
     orphanSelect.className = 'form-select form-control-compact atlas-mobile-orphan-filter';
     orphanSelect.setAttribute('aria-label', 'Filter Atlas rows by source run');
@@ -264,6 +293,22 @@
     });
     mobileOrphanFilter = orphanSelect;
 
+    const suppressionSelect = document.createElement('select');
+    suppressionSelect.className = 'form-select form-control-compact atlas-mobile-suppression-filter';
+    suppressionSelect.setAttribute('aria-label', 'Filter Atlas rows by suppression state');
+    suppressionSelect.dataset.portalMenu = 'true';
+    suppressionSelect.append(
+      option('Visible rows', 'hide'),
+      option('Show all', 'all'),
+      option('Only suppressed', 'only'),
+    );
+    suppressionSelect.addEventListener('change', () => {
+      controller.state.suppressionFilter = String(suppressionSelect.value || 'hide') || 'hide';
+      resetMobileFilterSelections(controller.state);
+      controller.refreshAtlas({ resetOffset: true });
+    });
+    mobileSuppressionFilter = suppressionSelect;
+
     const findingSelect = document.createElement('select');
     findingSelect.className = 'form-select form-control-compact atlas-mobile-finding-status-filter';
     findingSelect.setAttribute('aria-label', 'Filter Atlas findings by status');
@@ -277,7 +322,7 @@
     });
     mobileFindingStatusFilter = findingSelect;
 
-    panel.append(orphanSelect, findingSelect);
+    panel.append(savedViewRow, orphanSelect, suppressionSelect, findingSelect);
     filtersPanel = panel;
     filterRow.append(filterToggle, panel);
 
@@ -318,6 +363,10 @@
       mobileOrphanFilter.value = state.orphanFilter || 'hide';
       if (typeof global.syncAppSelect === 'function') global.syncAppSelect(mobileOrphanFilter);
     }
+    if (mobileSuppressionFilter && mobileSuppressionFilter.value !== state.suppressionFilter) {
+      mobileSuppressionFilter.value = state.suppressionFilter || 'hide';
+      if (typeof global.syncAppSelect === 'function') global.syncAppSelect(mobileSuppressionFilter);
+    }
     if (mobileFindingStatusFilter) {
       const findingsActive = controller.currentTab().id === 'findings';
       mobileFindingStatusFilter.classList.toggle('u-hidden', !findingsActive);
@@ -328,6 +377,27 @@
         if (typeof global.syncAppSelect === 'function') global.syncAppSelect(mobileFindingStatusFilter);
       }
     }
+    if (mobileSavedViewSelect) {
+      const selectedId = controller.state.selectedSavedViewId || '';
+      const values = ['', ...(controller.state.savedViews || []).map(view => String(view.id || ''))].join('\n');
+      const currentValues = Array.from(mobileSavedViewSelect.options || []).map(option => option.value).join('\n');
+      if (values !== currentValues) {
+        mobileSavedViewSelect.replaceChildren();
+        mobileSavedViewSelect.appendChild(option(controller.state.savedViewsLoading ? 'Loading views...' : 'Saved views', ''));
+        (controller.state.savedViews || []).forEach((view) => {
+          mobileSavedViewSelect.appendChild(option(view.name || 'Saved view', view.id || ''));
+        });
+      } else if (mobileSavedViewSelect.options[0]) {
+        mobileSavedViewSelect.options[0].textContent = controller.state.savedViewsLoading ? 'Loading views...' : 'Saved views';
+      }
+      mobileSavedViewSelect.value = selectedId;
+      mobileSavedViewSelect.disabled = !!controller.state.savedViewsLoading;
+      const updateBtn = filtersPanel?.querySelector?.('.atlas-mobile-saved-view-update');
+      const deleteBtn = filtersPanel?.querySelector?.('.atlas-mobile-saved-view-delete');
+      if (updateBtn) updateBtn.disabled = !selectedId || !!controller.state.savedViewsLoading;
+      if (deleteBtn) deleteBtn.disabled = !selectedId || !!controller.state.savedViewsLoading;
+      if (typeof global.syncAppSelect === 'function') global.syncAppSelect(mobileSavedViewSelect);
+    }
     renderOrphanChip(state);
     if (toolsOverflowBtn) toolsOverflowBtn.disabled = !!state.loading;
   }
@@ -335,19 +405,26 @@
   function renderOrphanChip(state) {
     if (!orphanChipHost) return;
     orphanChipHost.replaceChildren();
-    const show = String(state.orphanFilter || 'hide') === 'only';
-    orphanChipHost.classList.toggle('u-hidden', !show);
-    if (!show) return;
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'chip chip-removable atlas-mobile-orphan-chip';
-    chip.textContent = 'orphans only · clear';
-    chip.addEventListener('click', () => {
-      controller.state.orphanFilter = 'hide';
-      resetMobileFilterSelections(controller.state);
-      controller.refreshAtlas({ resetOffset: true });
+    const chips = [];
+    if (String(state.orphanFilter || 'hide') === 'only') {
+      chips.push(['orphans only · clear', () => { controller.state.orphanFilter = 'hide'; }]);
+    }
+    if (String(state.suppressionFilter || 'hide') === 'only') {
+      chips.push(['suppressed only · clear', () => { controller.state.suppressionFilter = 'hide'; }]);
+    }
+    orphanChipHost.classList.toggle('u-hidden', !chips.length);
+    chips.forEach(([label, action]) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip chip-removable atlas-mobile-orphan-chip';
+      chip.textContent = label;
+      chip.addEventListener('click', () => {
+        action();
+        resetMobileFilterSelections(controller.state);
+        controller.refreshAtlas({ resetOffset: true });
+      });
+      orphanChipHost.appendChild(chip);
     });
-    orphanChipHost.appendChild(chip);
   }
 
   function copyText(value, label = 'Copied') {
@@ -437,6 +514,7 @@
       { label: 'See source run', disabled: !firstSourceRun(entity), action: () => openSourceRunFromItem(entity) },
       { label: 'Add label', action: () => openMetadataEditorForEntity(entity) },
       { label: 'Edit note', action: () => openMetadataEditorForEntity(entity) },
+      { label: entity.suppressed ? 'Restore' : 'Suppress', action: () => controller.updateSuppression(entity, !entity.suppressed) },
       { divider: true },
       {
         label: 'Delete',
@@ -465,6 +543,7 @@
         },
       },
       { label: 'See source run', disabled: !firstSourceRun(finding), action: () => openSourceRunFromItem(finding) },
+      { label: finding.suppressed ? 'Restore' : 'Suppress', action: () => controller.updateSuppression(finding, !finding.suppressed) },
       { divider: true },
       {
         label: 'Delete',
@@ -578,6 +657,14 @@
       bulkBar.append(review, apply);
     }
 
+    const suppress = document.createElement('button');
+    suppress.type = 'button';
+    suppress.className = 'btn btn-secondary btn-compact';
+    suppress.textContent = state.suppressionFilter === 'only' ? 'Restore' : 'Suppress';
+    suppress.disabled = !selectedCount || state.loading || state.bulkInFlight;
+    suppress.addEventListener('click', () => controller.bulkUpdateSuppression(state.suppressionFilter === 'only' ? false : true));
+    bulkBar.appendChild(suppress);
+
     const del = document.createElement('button');
     del.type = 'button';
     del.className = 'btn btn-secondary btn-danger btn-compact';
@@ -643,6 +730,7 @@
     const severity = finding.severity ? String(finding.severity).toLowerCase() : '';
     const reviewState = finding.review_state ? String(finding.review_state).toLowerCase() : 'new';
     const metaParts = [];
+    if (finding.suppressed) metaParts.push('suppressed');
     if (severity) metaParts.push(severity);
     metaParts.push(reviewState);
     const occurrences = Number(finding.occurrence_count || 0);
@@ -652,6 +740,7 @@
 
     const badges = document.createElement('span');
     badges.className = 'atlas-entity-badges';
+    if (finding.suppressed) badges.appendChild(controller.badge('suppressed', 'muted'));
     if (severity) badges.appendChild(controller.badge(severity, severity === 'high' || severity === 'critical' ? 'green' : 'muted'));
 
     const chev = document.createElement('span');
@@ -872,6 +961,9 @@
         onSaveMetadata: (payload) => controller.saveMetadata(payload),
         onSeeRun: (run) => controller.openSourceRun(run),
         onDeleteEntity: () => controller.confirmDeleteEntity(),
+        onSuppressEntity: (entity) => controller.updateSuppression(entity, !entity.suppressed),
+        onPageRuns: (offset) => controller.pageEntityDetail?.('runs', offset),
+        onPageFindings: (offset) => controller.pageEntityDetail?.('findings', offset),
       });
     } else {
       entityBody.replaceChildren(rowMessage('Entity detail renderer unavailable.'));
@@ -912,6 +1004,13 @@
       }
       entityFooter.appendChild(link);
     }
+
+    const suppression = document.createElement('button');
+    suppression.type = 'button';
+    suppression.className = 'btn btn-secondary btn-compact';
+    suppression.textContent = entity.suppressed ? 'Restore' : 'Suppress';
+    suppression.addEventListener('click', () => controller.updateSuppression(entity, !entity.suppressed));
+    entityFooter.appendChild(suppression);
 
     const del = document.createElement('button');
     del.type = 'button';
@@ -981,6 +1080,7 @@
           setView('entity');
         },
         onDeleteFinding: (item) => controller.confirmDeleteFinding(item),
+        onSuppressFinding: (item) => controller.updateSuppression(item, !item.suppressed),
       });
     } else {
       findingBody.replaceChildren(rowMessage('Finding renderer unavailable.'));
@@ -1026,6 +1126,13 @@
       run_kind: finding.run_kind,
     }));
     findingFooter.appendChild(seeRun);
+
+    const suppression = document.createElement('button');
+    suppression.type = 'button';
+    suppression.className = 'btn btn-secondary btn-compact';
+    suppression.textContent = finding.suppressed ? 'Restore' : 'Suppress';
+    suppression.addEventListener('click', () => controller.updateSuppression(finding, !finding.suppressed));
+    findingFooter.appendChild(suppression);
 
     const del = document.createElement('button');
     del.type = 'button';

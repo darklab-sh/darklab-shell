@@ -94,6 +94,27 @@
       }
     }
 
+    function projectPageOffset(pagination, direction) {
+      const limit = Math.max(1, Number(pagination?.limit || 50));
+      const offset = Math.max(0, Number(pagination?.offset || 0));
+      const total = Math.max(0, Number(pagination?.total || 0));
+      return String(direction || '') === 'prev'
+        ? Math.max(0, offset - limit)
+        : Math.min(offset + limit, Math.max(0, total - 1));
+    }
+
+    function renderProjectViews() {
+      ctx.renderProjectExplorer();
+      if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
+    }
+
+    async function runProjectPager(button, loadPage) {
+      if (!button || button.disabled || typeof loadPage !== 'function') return;
+      preservePagerPosition(button, renderProjectViews);
+      await loadPage();
+      preservePagerPosition(button, renderProjectViews);
+    }
+
     async function handleInput(event) {
       ctx.packagesController?.().handleInput(event);
     }
@@ -162,6 +183,42 @@
         ctx.renderProjectExplorer();
         return;
       }
+      const commandFilterControl = event.target.closest?.('[data-project-finding-command-filter-option]');
+      if (commandFilterControl) {
+        event.stopPropagation();
+        const projectId = String(commandFilterControl.dataset.projectId || selectedProjectId() || '');
+        const commandRoot = String(commandFilterControl.value || '').trim();
+        if (!projectId || !commandRoot) return;
+        const filters = ctx.projectFindingCommandFilterSet(projectId);
+        if (commandFilterControl.checked) filters.add(commandRoot);
+        else filters.delete(commandRoot);
+        ctx.renderProjectExplorer();
+        return;
+      }
+      const severityFilterControl = event.target.closest?.('[data-project-finding-severity-filter-option]');
+      if (severityFilterControl) {
+        event.stopPropagation();
+        const projectId = String(severityFilterControl.dataset.projectId || selectedProjectId() || '');
+        const severity = String(severityFilterControl.value || '').trim();
+        if (!projectId || !severity) return;
+        const filters = ctx.projectFindingSeverityFilterSet(projectId);
+        if (severityFilterControl.checked) filters.add(severity);
+        else filters.delete(severity);
+        ctx.renderProjectExplorer();
+        return;
+      }
+      const scopeFilterControl = event.target.closest?.('[data-project-finding-scope-filter-option]');
+      if (scopeFilterControl) {
+        event.stopPropagation();
+        const projectId = String(scopeFilterControl.dataset.projectId || selectedProjectId() || '');
+        const scope = String(scopeFilterControl.value || '').trim();
+        if (!projectId || !scope) return;
+        const filters = ctx.projectFindingScopeFilterSet(projectId);
+        if (scopeFilterControl.checked) filters.add(scope);
+        else filters.delete(scope);
+        ctx.renderProjectExplorer();
+        return;
+      }
       const labelFilterControl = event.target.closest?.('[data-project-finding-label-filter-option]');
       if (labelFilterControl) {
         event.stopPropagation();
@@ -200,15 +257,25 @@
         if (!projectId || !reviewState || !selectedFindingIds().size) return;
         const findingIds = [...selectedFindingIds()];
         try {
-          await ctx.projectWorkspaceRequest('/atlas/findings/review', {
+          const resp = await ctx.projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/findings/review`, {
             method: 'POST',
             body: JSON.stringify({ finding_ids: findingIds, review_state: reviewState }),
           });
-          findingIds.forEach(findingId => ctx.setCachedFindingReviewState(projectId, findingId, reviewState));
+          const result = await resp.json();
+          const updatedIds = Array.isArray(result?.results)
+            ? result.results
+              .filter(item => item && item.status === 'updated')
+              .map(item => String(item.finding_id || ''))
+            : findingIds;
+          updatedIds.forEach(findingId => ctx.setCachedFindingReviewState(projectId, findingId, reviewState));
           selectedFindingIds().clear();
           ctx.setFindingSelectMode(false);
           ctx.renderProjectExplorer();
-          ctx.setProjectWorkspaceMessage('Finding review states updated.');
+          const notFound = Number(result?.counts?.not_found || 0);
+          ctx.setProjectWorkspaceMessage(
+            notFound ? `Finding review states updated; ${notFound} stale ${notFound === 1 ? 'selection was' : 'selections were'} skipped.`
+              : 'Finding review states updated.',
+          );
         } catch (err) {
           ctx.setProjectWorkspaceMessage(err.message || 'Could not update finding review states.', { error: true });
         }
@@ -393,24 +460,12 @@
         if (artifactPageBtn.disabled) return;
         const projectId = String(artifactPageBtn.dataset.projectId || selectedProjectId() || '');
         const page = ctx.projectArtifactPagination?.(projectId) || { limit: 50, offset: 0 };
-        const limit = Math.max(1, Number(page.limit || 50));
-        const offset = Math.max(0, Number(page.offset || 0));
-        const total = Math.max(0, Number(page.total || 0));
-        const direction = String(artifactPageBtn.dataset.projectArtifactsPage || '');
-        const nextOffset = direction === 'prev'
-          ? Math.max(0, offset - limit)
-          : Math.min(offset + limit, Math.max(0, total - 1));
+        const nextOffset = projectPageOffset(page, artifactPageBtn.dataset.projectArtifactsPage);
         const summary = ctx.projectSummary?.(projectId);
         ctx.setProjectArtifactPageOffset?.(projectId, nextOffset);
-        preservePagerPosition(artifactPageBtn, () => {
-          if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
-          else ctx.renderProjectExplorer();
-        });
-        await ctx.loadProjectArtifacts?.(projectId, summary, { offset: nextOffset, skipFinalRender: true });
-        preservePagerPosition(artifactPageBtn, () => {
-          if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
-          else ctx.renderProjectExplorer();
-        });
+        await runProjectPager(artifactPageBtn, () => (
+          ctx.loadProjectArtifacts?.(projectId, summary, { offset: nextOffset, skipFinalRender: true })
+        ));
         return;
       }
       const targetFilterClear = event.target.closest?.('[data-project-target-filter-clear]');
@@ -458,6 +513,42 @@
         const filters = ctx.projectFindingLabelFilterSet(projectId);
         if (labelValue === 'all') filters.clear();
         else if (labelValue) filters.delete(labelValue);
+        ctx.renderProjectExplorer();
+        return;
+      }
+      const commandFilterClear = event.target.closest?.('[data-project-finding-command-filter-clear]');
+      if (commandFilterClear) {
+        event.preventDefault();
+        event.stopPropagation();
+        const projectId = String(commandFilterClear.dataset.projectId || selectedProjectId() || '');
+        const commandRoot = String(commandFilterClear.dataset.projectFindingCommandFilterClear || '');
+        const filters = ctx.projectFindingCommandFilterSet(projectId);
+        if (commandRoot === 'all') filters.clear();
+        else if (commandRoot) filters.delete(commandRoot);
+        ctx.renderProjectExplorer();
+        return;
+      }
+      const severityFilterClear = event.target.closest?.('[data-project-finding-severity-filter-clear]');
+      if (severityFilterClear) {
+        event.preventDefault();
+        event.stopPropagation();
+        const projectId = String(severityFilterClear.dataset.projectId || selectedProjectId() || '');
+        const severity = String(severityFilterClear.dataset.projectFindingSeverityFilterClear || '');
+        const filters = ctx.projectFindingSeverityFilterSet(projectId);
+        if (severity === 'all') filters.clear();
+        else if (severity) filters.delete(severity);
+        ctx.renderProjectExplorer();
+        return;
+      }
+      const scopeFilterClear = event.target.closest?.('[data-project-finding-scope-filter-clear]');
+      if (scopeFilterClear) {
+        event.preventDefault();
+        event.stopPropagation();
+        const projectId = String(scopeFilterClear.dataset.projectId || selectedProjectId() || '');
+        const scope = String(scopeFilterClear.dataset.projectFindingScopeFilterClear || '');
+        const filters = ctx.projectFindingScopeFilterSet(projectId);
+        if (scope === 'all') filters.clear();
+        else if (scope) filters.delete(scope);
         ctx.renderProjectExplorer();
         return;
       }
@@ -525,24 +616,12 @@
         if (entityPageBtn.disabled) return;
         const projectId = String(entityPageBtn.dataset.projectId || selectedProjectId() || '');
         const page = ctx.entitiesController?.().page(projectId) || { limit: 50, offset: 0 };
-        const limit = Math.max(1, Number(page.limit || 50));
-        const offset = Math.max(0, Number(page.offset || 0));
-        const total = Math.max(0, Number(page.total || 0));
-        const direction = String(entityPageBtn.dataset.projectEntitiesPage || '');
-        const nextOffset = direction === 'prev'
-          ? Math.max(0, offset - limit)
-          : Math.min(offset + limit, Math.max(0, total - 1));
+        const nextOffset = projectPageOffset(page, entityPageBtn.dataset.projectEntitiesPage);
         ctx.entitiesController?.().setPageOffset(projectId, nextOffset);
         ctx.entitiesController?.().clearSelection();
-        preservePagerPosition(entityPageBtn, () => {
-          ctx.renderProjectExplorer();
-          if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
-        });
-        await ctx.entitiesController?.().load(projectId, { offset: nextOffset, skipFinalRender: true });
-        preservePagerPosition(entityPageBtn, () => {
-          ctx.renderProjectExplorer();
-          if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
-        });
+        await runProjectPager(entityPageBtn, () => (
+          ctx.entitiesController?.().load(projectId, { offset: nextOffset, skipFinalRender: true })
+        ));
         return;
       }
       const entityCheckbox = event.target.closest?.('[data-project-entity-select]');
@@ -571,26 +650,16 @@
         const projectId = String(findingPagerButton.dataset.projectId || selectedProjectId() || '');
         const summary = ctx.projectSummary?.(projectId);
         const pagination = ctx.projectFindingPagination?.(projectId, summary) || {};
-        const limit = Math.max(1, Number(pagination.limit || 50));
-        const offset = Math.max(0, Number(pagination.offset || 0));
-        const total = Math.max(0, Number(pagination.total || 0));
-        const nextOffset = findingPagerButton.dataset.projectFindingsPage === 'next'
-          ? Math.min(offset + limit, Math.max(0, total - 1))
-          : Math.max(0, offset - limit);
+        const nextOffset = projectPageOffset(
+          pagination,
+          findingPagerButton.dataset.projectFindingsPage === 'next' ? 'next' : 'prev',
+        );
         ctx.setProjectFindingPageOffset?.(projectId, summary, nextOffset);
-        preservePagerPosition(findingPagerButton, () => {
-          ctx.renderProjectExplorer();
-          if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
-        });
-        if (ctx.projectFindingServerFiltersActive?.(projectId, summary)) {
-          await ctx.loadProjectFilteredFindings?.(projectId, summary, { offset: nextOffset, skipInitialRender: true });
-        } else {
-          await ctx.loadProjectFindings?.(projectId, { offset: nextOffset, skipInitialRender: true });
-        }
-        preservePagerPosition(findingPagerButton, () => {
-          ctx.renderProjectExplorer();
-          if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
-        });
+        await runProjectPager(findingPagerButton, () => (
+          ctx.projectFindingServerFiltersActive?.(projectId, summary)
+            ? ctx.loadProjectFilteredFindings?.(projectId, summary, { offset: nextOffset, skipInitialRender: true })
+            : ctx.loadProjectFindings?.(projectId, { offset: nextOffset, skipInitialRender: true })
+        ));
         return;
       }
       const runPagerButton = event.target.closest?.('[data-project-runs-page]');
@@ -599,22 +668,14 @@
         if (runPagerButton.disabled) return;
         const projectId = String(runPagerButton.dataset.projectId || selectedProjectId() || '');
         const pagination = ctx.projectRunPagination?.(projectId) || {};
-        const limit = Math.max(1, Number(pagination.limit || 50));
-        const offset = Math.max(0, Number(pagination.offset || 0));
-        const total = Math.max(0, Number(pagination.total || 0));
-        const nextOffset = runPagerButton.dataset.projectRunsPage === 'next'
-          ? Math.min(offset + limit, Math.max(0, total - 1))
-          : Math.max(0, offset - limit);
+        const nextOffset = projectPageOffset(
+          pagination,
+          runPagerButton.dataset.projectRunsPage === 'next' ? 'next' : 'prev',
+        );
         ctx.setProjectRunPageOffset?.(projectId, nextOffset);
-        preservePagerPosition(runPagerButton, () => {
-          ctx.renderProjectExplorer();
-          if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
-        });
-        await ctx.loadProjectRuns?.(projectId, { offset: nextOffset, skipFinalRender: true });
-        preservePagerPosition(runPagerButton, () => {
-          ctx.renderProjectExplorer();
-          if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
-        });
+        await runProjectPager(runPagerButton, () => (
+          ctx.loadProjectRuns?.(projectId, { offset: nextOffset, skipFinalRender: true })
+        ));
         return;
       }
       const pagerButton = event.target.closest?.('[data-project-page]');
@@ -622,12 +683,10 @@
         event.preventDefault();
         if (pagerButton.disabled) return;
         const pagination = ctx.projectPagination?.() || {};
-        const limit = Math.max(1, Number(pagination.limit || 50));
-        const offset = Math.max(0, Number(pagination.offset || 0));
-        const total = Math.max(0, Number(pagination.total || 0));
-        const nextOffset = pagerButton.dataset.projectPage === 'next'
-          ? Math.min(offset + limit, Math.max(0, total - 1))
-          : Math.max(0, offset - limit);
+        const nextOffset = projectPageOffset(
+          pagination,
+          pagerButton.dataset.projectPage === 'next' ? 'next' : 'prev',
+        );
         ctx.setProjectPaginationOffset?.(nextOffset);
         await ctx.refreshProjectWorkspace();
         return;

@@ -116,6 +116,15 @@
       });
     }
 
+    async function responseError(resp, fallback) {
+      let message = fallback;
+      try {
+        const data = await resp.json();
+        if (data && data.error) message = data.error;
+      } catch (_) {}
+      return new Error(message || fallback);
+    }
+
     async function createProjectFromName(name, input) {
       const normalizedName = String(name || '').trim();
       if (!normalizedName) {
@@ -172,6 +181,7 @@
       notifyChanged,
       open,
       request,
+      responseError,
       scheduleExternalRefresh,
       setMessage,
       showOverlay,

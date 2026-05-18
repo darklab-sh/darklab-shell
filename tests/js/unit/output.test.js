@@ -524,6 +524,31 @@ describe('appendLine', () => {
     expect(rawLines).toContain('line 4')
   })
 
+  it('binds high-volume resume controls through the shared pressable helper', () => {
+    const bindPressable = vi.fn((button, options = {}) => {
+      button.dataset.pressableBound = '1'
+      button.addEventListener('click', (event) => {
+        event.preventDefault()
+        options.onActivate?.()
+      })
+    })
+    const { appendLine } = loadOutputFns({
+      appConfig: {
+        high_volume_output_line_threshold: 1,
+        high_volume_output_status_interval_lines: 1,
+        max_output_lines: 20,
+      },
+      extraGlobals: { bindPressable },
+    })
+
+    appendLine('line 1', '', 'tab-1', { live_output: true })
+    appendLine('line 2', '', 'tab-1', { live_output: true })
+
+    const button = document.querySelector('[data-high-volume-resume-tab="tab-1"]')
+    expect(button.dataset.pressableBound).toBe('1')
+    expect(bindPressable).toHaveBeenCalledWith(button, expect.objectContaining({ refocusComposer: false }))
+  })
+
   it('resumes live rendering for new high-volume output when requested', () => {
     const { appendLine } = loadOutputFns({
       appConfig: {

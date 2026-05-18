@@ -38,6 +38,21 @@
       return acc;
     }, {}),
     findingReviewStates,
+    findingScopeOptions: [
+      { value: 'finding', label: 'Finding' },
+      { value: 'http', label: 'HTTP' },
+      { value: 'port', label: 'Port' },
+      { value: 'warnings', label: 'Warnings' },
+      { value: 'errors', label: 'Errors' },
+      { value: 'summaries', label: 'Summaries' },
+    ],
+    findingSeverityOptions: [
+      { value: 'critical', label: 'Critical' },
+      { value: 'high', label: 'High' },
+      { value: 'medium', label: 'Medium' },
+      { value: 'low', label: 'Low' },
+      { value: 'info', label: 'Info' },
+    ],
     findingSeverityRank,
     findingSortOptions: [
       { value: 'source', label: 'Source order' },

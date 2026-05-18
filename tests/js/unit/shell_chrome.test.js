@@ -19,6 +19,10 @@ const PROJECT_WORKSPACE_CONSTANTS_SRC = readFileSync(
   resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_constants.js'),
   'utf8',
 )
+const PROJECT_WORKSPACE_STATE_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/features/projects/project_workspace_state.js'),
+  'utf8',
+)
 const PROJECT_SHARED_UI_SRC = readFileSync(
   resolve(REPO_ROOT, 'app/static/js/features/projects/project_shared_ui.js'),
   'utf8',
@@ -391,6 +395,7 @@ function loadShellChrome({
       global.closeActionSheet = window.closeActionSheet;
       ${PROJECT_TARGET_VALIDATION_SRC}
       ${PROJECT_WORKSPACE_CONSTANTS_SRC}
+      ${PROJECT_WORKSPACE_STATE_SRC}
       ${PROJECT_ACTIVE_CONTEXT_SRC}
       ${PROJECT_SHARED_UI_SRC}
       ${PROJECT_DETAILS_SRC}
@@ -2350,6 +2355,18 @@ describe('shell chrome project workspace', () => {
           json: () => Promise.resolve({ ok: true }),
         })
       }
+      if (url === '/projects/project-1/findings/review' && options.method === 'POST') {
+        const payload = JSON.parse(options.body)
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            review_state: payload.review_state,
+            counts: { updated: payload.finding_ids.length, not_found: 0 },
+            results: payload.finding_ids.map(findingId => ({ finding_id: findingId, status: 'updated' })),
+          }),
+        })
+      }
       if (String(url).startsWith('/projects/project-1/findings')) {
         const params = new URL(`https://example.test${url}`).searchParams
         const matchesAny = (itemValue, values) => !values.length || values.includes(String(itemValue || ''))
@@ -2368,6 +2385,7 @@ describe('shell chrome project workspace', () => {
           const noted = !!(entityNotes.get(`finding:${finding.id}`) || '')
           return noteState === 'noted' ? noted : !noted
         }
+        const commandRoot = command => String(command || '').trim().split(/\s+/, 1)[0].toLowerCase()
         return Promise.resolve({
           ok: true,
           json: () => {
@@ -2381,6 +2399,7 @@ describe('shell chrome project workspace', () => {
                 raw_line: '[http-missing-security-headers] https://darklab.sh',
                 line_number: 42,
                 target_id: 'target-1',
+                severity: 'high',
                 review_state: 'new',
               },
               {
@@ -2393,6 +2412,7 @@ describe('shell chrome project workspace', () => {
                 line_number: 7,
                 target_id: 'target-2',
                 target_ids: ['target-2'],
+                severity: 'medium',
                 review_state: 'reviewed',
               },
               {
@@ -2405,9 +2425,13 @@ describe('shell chrome project workspace', () => {
                 line_number: 13,
                 target_id: 'target-1',
                 target_ids: ['target-1', 'target-3'],
+                severity: 'info',
                 review_state: 'important',
               },
             ].filter(finding => matchesAny(finding.run_id, params.getAll('run_id')))
+              .filter(finding => matchesAny(commandRoot(finding.run_command), params.getAll('command_root')))
+              .filter(finding => matchesAny(finding.severity, params.getAll('severity')))
+              .filter(finding => matchesAny(finding.scope, params.getAll('scope')))
               .filter(finding => matchesAny(finding.review_state, params.getAll('review_state')))
               .filter((finding) => {
                 const targetIds = [finding.target_id, ...(finding.target_ids || [])].filter(Boolean).map(String)
@@ -2837,6 +2861,53 @@ describe('shell chrome project workspace', () => {
     ))).toBe(true)
 
     document.querySelector('[data-project-finding-status-filter-clear="important"]').click()
+    await tick()
+    const httpxFilter = document.querySelector('[data-project-finding-command-filter-option][value="httpx"]')
+    expect(httpxFilter).not.toBeNull()
+    httpxFilter.checked = true
+    httpxFilter.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    await tick()
+    expect(apiFetch.mock.calls.some(([url]) => (
+      String(url).startsWith('/projects/project-1/findings?')
+      && String(url).includes('command_root=httpx')
+    ))).toBe(true)
+    expect(document.querySelector('.project-explorer-filter-chips')?.textContent).toContain('command: httpx')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('api host responded')
+    expect(document.getElementById('project-explorer-body').textContent).not.toContain('web port responded')
+
+    const mediumFilter = document.querySelector('[data-project-finding-severity-filter-option][value="medium"]')
+    expect(mediumFilter).not.toBeNull()
+    mediumFilter.checked = true
+    mediumFilter.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    await tick()
+    expect(apiFetch.mock.calls.some(([url]) => (
+      String(url).startsWith('/projects/project-1/findings?')
+      && String(url).includes('command_root=httpx')
+      && String(url).includes('severity=medium')
+    ))).toBe(true)
+    expect(document.querySelector('.project-explorer-filter-chips')?.textContent).toContain('severity: Medium')
+
+    const httpScopeFilter = document.querySelector('[data-project-finding-scope-filter-option][value="http"]')
+    expect(httpScopeFilter).not.toBeNull()
+    httpScopeFilter.checked = true
+    httpScopeFilter.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    await tick()
+    expect(apiFetch.mock.calls.some(([url]) => (
+      String(url).startsWith('/projects/project-1/findings?')
+      && String(url).includes('command_root=httpx')
+      && String(url).includes('severity=medium')
+      && String(url).includes('scope=http')
+    ))).toBe(true)
+    expect(document.querySelector('.project-explorer-filter-chips')?.textContent).toContain('scope: HTTP')
+
+    document.querySelector('[data-project-finding-command-filter-clear="httpx"]').click()
+    await tick()
+    document.querySelector('[data-project-finding-severity-filter-clear="medium"]').click()
+    await tick()
+    document.querySelector('[data-project-finding-scope-filter-clear="http"]').click()
     await tick()
     const apiTargetFilter = document.querySelector('[data-project-target-filter-option][value="target-2"]')
     expect(apiTargetFilter).not.toBeNull()
@@ -3343,6 +3414,28 @@ describe('shell chrome project workspace', () => {
     }))
     expect(restoreHistoryRunIntoTab).not.toHaveBeenCalled()
     expect(document.querySelector('.project-finding-review')?.value).toBe('important')
+
+    document.querySelector('[data-project-action="toggle-project-finding-select"]').click()
+    await tick()
+    const findingSelect = document.querySelector('[data-project-finding-select="finding-1"]')
+    expect(findingSelect).not.toBeNull()
+    expect(document.querySelector('.project-finding-selection-count')?.textContent).toBe('0 selected')
+    findingSelect.checked = true
+    findingSelect.dispatchEvent(new Event('click', { bubbles: true }))
+    await tick()
+    expect(document.querySelector('.project-finding-selection-count')?.textContent).toBe('1 selected')
+    const bulkReview = document.querySelector('[data-project-finding-bulk-review]')
+    expect(bulkReview).not.toBeNull()
+    bulkReview.value = 'reviewed'
+    bulkReview.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/findings/review', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ finding_ids: ['finding-1'], review_state: 'reviewed' }),
+    }))
+    expect(document.querySelector('.project-finding-bulk-review')).toBeNull()
+    expect(document.querySelector('.project-finding-review')?.value).toBe('reviewed')
 
     document.querySelector('[data-project-action="open-finding"]').click()
     await tick()

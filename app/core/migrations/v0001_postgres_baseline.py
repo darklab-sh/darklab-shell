@@ -147,6 +147,9 @@ MIGRATION = Migration(
             first_seen_at TEXT NOT NULL,
             last_seen_at TEXT NOT NULL,
             occurrence_count BIGINT NOT NULL DEFAULT 0,
+            suppressed BOOLEAN NOT NULL DEFAULT FALSE,
+            suppressed_reason TEXT NOT NULL DEFAULT '',
+            suppressed_at TEXT NOT NULL DEFAULT '',
             created TEXT NOT NULL,
             UNIQUE (session_id, type, signature_hash)
         )
@@ -213,6 +216,9 @@ MIGRATION = Migration(
             occurrence_count BIGINT NOT NULL DEFAULT 0,
             status TEXT NOT NULL DEFAULT 'new',
             status_updated_at TEXT NOT NULL DEFAULT '',
+            suppressed BOOLEAN NOT NULL DEFAULT FALSE,
+            suppressed_reason TEXT NOT NULL DEFAULT '',
+            suppressed_at TEXT NOT NULL DEFAULT '',
             fingerprint TEXT NOT NULL DEFAULT '',
             title TEXT NOT NULL DEFAULT '',
             raw_line TEXT NOT NULL DEFAULT '',

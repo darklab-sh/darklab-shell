@@ -785,21 +785,22 @@ function _resumeHighVolumeLiveOutput(tabId) {
   );
 }
 
-function _bindHighVolumeOutputControls() {
-  if (typeof document === 'undefined' || document._darklabHighVolumeOutputBound) return;
-  document._darklabHighVolumeOutputBound = true;
-  document.addEventListener('click', (event) => {
-    const button = event.target && event.target.closest
-      ? event.target.closest('[data-high-volume-resume-tab]')
-      : null;
-    if (!button) return;
+function _bindHighVolumeOutputResumeButton(button) {
+  if (!button) return;
+  const onActivate = () => _resumeHighVolumeLiveOutput(String(button.dataset.highVolumeResumeTab || ''));
+  const bind = typeof bindPressable === 'function'
+    ? bindPressable
+    : (typeof globalThis.bindPressable === 'function' ? globalThis.bindPressable : null);
+  if (typeof bind === 'function') {
+    bind(button, { onActivate, refocusComposer: false });
+    return;
+  }
+  button.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
-    _resumeHighVolumeLiveOutput(String(button.dataset.highVolumeResumeTab || ''));
+    onActivate();
   });
 }
-
-_bindHighVolumeOutputControls();
 
 function _activateOutputCommandChip(command) {
   const activate = typeof globalThis.activateFaqCommandChip === 'function'
@@ -857,6 +858,7 @@ function _buildOutputLine(text, cls, tabId, now, runStart, metadata = null) {
     button.dataset.highVolumeResumeTab = String(tabId || '');
     button.textContent = 'Resume live rendering';
     button.title = 'Render new output lines live again';
+    _bindHighVolumeOutputResumeButton(button);
     content.appendChild(button);
   } else if (cls === 'exit-ok' || cls === 'exit-fail' || cls === 'denied' || cls === 'notice') {
     content.textContent = text;

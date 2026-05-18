@@ -12,53 +12,63 @@ from config import CFG
 from extensions import limiter
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from services import metrics as app_metrics
-from services.projects.contracts import BULK_AUDIT_FAILURE_LIMIT, MAX_BULK_RUN_ACTION_ITEMS
-from services.projects.workspace import (
+from services.projects.contracts import (
+    BULK_AUDIT_FAILURE_LIMIT,
     EvidencePackageTooLarge,
+    MAX_BULK_RUN_ACTION_ITEMS,
     ProjectWorkspaceError,
     ProjectWorkspaceNotFound,
     ProjectWorkspaceQuotaExceeded,
-    add_entity_label,
-    add_project_target,
-    build_evidence_package_archive,
-    clear_active_project,
-    create_evidence_package,
-    create_project,
-    delete_evidence_package,
-    delete_entity_label,
-    delete_entity_note,
-    delete_project,
-    delete_project_target,
-    entity_metadata_target_exists,
-    get_active_project,
-    get_evidence_package,
-    get_entity_note,
-    get_project,
-    get_project_run_file_artifact,
-    get_project_summary,
-    link_project_run_entities,
+)
+from services.projects.active import clear_active_project, get_active_project, set_active_project
+from services.projects.crud import create_project, delete_project, update_project
+from services.projects.findings import (
+    bulk_update_project_finding_review_states,
+    list_project_findings,
+    list_run_findings,
+    update_finding_review_state,
+)
+from services.projects.links import (
     link_project_entities,
     link_project_entity,
-    list_entity_labels,
-    list_evidence_packages,
-    list_project_artifacts,
-    list_project_entities,
-    list_project_findings,
+    link_project_run_entities,
     list_project_links,
-    list_project_runs,
-    list_project_targets,
-    list_run_findings,
-    list_projects_page,
-    list_projects,
     preview_project_run_entity_links,
     preview_project_run_entity_unlinks,
     unlink_project_entities,
-    unlink_project_run_entities,
-    set_active_project,
     unlink_project_entity,
-    update_finding_review_state,
+    unlink_project_run_entities,
+)
+from services.projects.metadata import (
+    add_entity_label,
+    delete_entity_label,
+    delete_entity_note,
+    entity_metadata_target_exists,
+    get_entity_note,
+    list_entity_labels,
     upsert_entity_note,
-    update_project,
+)
+from services.projects.package_archive import (
+    build_evidence_package_archive,
+    create_evidence_package,
+    delete_evidence_package,
+)
+from services.projects.queries import (
+    get_evidence_package,
+    get_project,
+    get_project_run_file_artifact,
+    get_project_summary,
+    list_evidence_packages,
+    list_project_artifacts,
+    list_project_entities,
+    list_project_runs,
+    list_projects_page,
+    list_projects,
+)
+from services.projects.targets import (
+    add_project_target,
+    delete_project_target,
+    list_project_targets,
     update_project_target,
 )
 from services.workspace.files import (
@@ -728,9 +738,9 @@ def projects_findings_list(project_id):
         "run_id": request.args.getlist("run_id"),
         "target_id": request.args.getlist("target_id"),
         "review_state": request.args.getlist("review_state"),
-        "scope": request.args.get("scope"),
-        "severity": request.args.get("severity"),
-        "command_root": request.args.get("command_root"),
+        "scope": request.args.getlist("scope"),
+        "severity": request.args.getlist("severity"),
+        "command_root": request.args.getlist("command_root"),
         "label": request.args.getlist("label"),
         "note_state": request.args.get("note_state"),
         "orphan_filter": request.args.get("orphan_filter"),
@@ -759,6 +769,33 @@ def projects_findings_list(project_id):
     if paginated:
         return jsonify(findings)
     return jsonify({"findings": findings})
+
+
+@projects_bp.route("/projects/<project_id>/findings/review", methods=["POST"])
+@limiter.limit(_project_write_limit)
+def projects_findings_bulk_review_update(project_id):
+    session_id = get_session_id()
+    try:
+        result = bulk_update_project_finding_review_states(
+            session_id,
+            project_id,
+            request.get_json(silent=True) or {},
+        )
+    except ProjectWorkspaceError as exc:
+        if str(exc) == "too_many":
+            return _project_bulk_too_many_response()
+        return _project_error_response(exc)
+    if result is None:
+        return jsonify({"error": "project not found"}), 404
+    log.info("PROJECT_FINDINGS_BULK_REVIEW_UPDATED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "project_id": project_id,
+        "review_state": result["review_state"],
+        "updated": result["counts"]["updated"],
+        "not_found": result["counts"]["not_found"],
+    })
+    return jsonify(result)
 
 
 @projects_bp.route("/entities/run/<run_id>/findings")

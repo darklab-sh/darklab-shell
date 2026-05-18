@@ -1983,9 +1983,16 @@ describe('app helpers', () => {
     persistTabSessionStateNow()
 
     const saved = JSON.parse(sessionStorage.getItem(_getTabSessionStateKey()))
-    expect(saved.tabs).toHaveLength(1)
+    expect(saved.tabs).toHaveLength(2)
     expect(saved.tabs[0].label).toBe('tab 1')
     expect(saved.tabs[0].draftInput).toBe('')
+    expect(saved.tabs[1]).toMatchObject({
+      label: 'ping',
+      command: 'ping darklab.sh',
+      st: 'running',
+      runId: '',
+      historyRunId: 'run-1',
+    })
   })
 
   it('persists output signal metadata for session restore', async () => {

@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,885
+- behavior tests: 2,892
 - docs/inventory meta-tests: 32
-- `pytest`: 1497 (1465 behavior + 32 meta)
-- `vitest`: 1168
+- `pytest`: 1499 (1467 behavior + 32 meta)
+- `vitest`: 1173
 - `playwright`: 252
-- total: 2,917
+- total: 2,924
 
 This document is organized in two parts:
 
@@ -1242,7 +1242,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestMobileWelcomeHintsRoute.test_items_key_present` | Checks items key present handling. |
 | `TestAtlasRoutes.test_lists_session_entities_and_detail` | Verifies Atlas summary, list, and detail routes return session-owned materialized entities and source runs. |
 | `TestAtlasRoutes.test_entity_list_batches_metadata_for_current_page` | Verifies Atlas entity lists batch visible-page labels and project-link counts without loading full notes or project links per row. |
-| `TestAtlasRoutes.test_entity_detail_caps_large_linked_collections` | Verifies Atlas entity detail responses cap large linked source-run and finding collections while reporting that more rows exist. |
+| `TestAtlasRoutes.test_entity_detail_caps_large_linked_collections` | Verifies Atlas entity detail responses page large linked source-run and finding collections while reporting totals and more-row state. |
 | `TestAtlasRoutes.test_orphan_filter_surfaces_atlas_rows_after_source_run_delete` | Verifies Atlas hides rows without source runs by default while the orphan filter can surface them. |
 | `TestAtlasRoutes.test_stale_run_links_do_not_hide_atlas_orphans_or_block_cleanup` | Verifies stale Atlas source links from deleted runs do not hide orphaned rows or block source-run cleanup. |
 | `TestAtlasRoutes.test_run_delete_can_prune_non_curated_atlas_orphans_and_keep_curated_entities` | Verifies run deletion can prune non-curated Atlas rows from the deleted run while preserving curated entities. |
@@ -1252,6 +1252,8 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestAtlasRoutes.test_refresh_intel_persists_provider_snapshot` | Verifies Atlas intel refresh stores provider snapshots for the selected session-owned entity. |
 | `TestAtlasRoutes.test_refresh_intel_can_offload_provider_payload_and_restore_detail` | Verifies oversized Atlas intel payloads can be offloaded, restored in entity detail, and cleaned up with the entity. |
 | `TestAtlasRoutes.test_findings_tab_lists_and_bulk_updates_review_state` | Verifies the Atlas Findings queue lists deduped findings and bulk-updates review state for selected findings. |
+| `TestAtlasRoutes.test_atlas_suppression_hides_rows_until_requested_and_preserves_project_links` | Verifies Atlas suppression hides entities and findings by default while preserving review, project-link, and export access through the suppressed view. |
+| `TestAtlasRoutes.test_atlas_saved_views_roundtrip_and_stay_session_scoped` | Verifies saved Atlas views can be created, listed, updated, deleted, and kept isolated to the owning session. |
 | `TestAtlasRoutes.test_unscoped_findings_flow_through_atlas_projects_and_run_routes` | Verifies unscoped findings share one review state across Atlas, Projects, and source-run finding routes. |
 | `TestAtlasRoutes.test_run_findings_route_returns_deduped_findings_with_occurrence_count` | Verifies source-run finding routes return deduped findings plus occurrence totals for large repeated findings. |
 | `TestAtlasRoutes.test_project_links_curate_atlas_entities_into_project_targets` | Verifies Atlas project links surface as Project Targets and can be unlinked without copying entity records. |
@@ -1908,6 +1910,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | Test | Description |
 | --- | --- |
 | `opens to the Findings tab by default` | Verifies that opening Atlas without a target starts on the Findings tab. |
+| `saves and applies named Atlas views` | Verifies that Atlas saves the current tab/filter state as a named view and applies it back to the surface. |
 | `syncs populated filter selects and enhances dynamic detail selects` | Verifies that Atlas syncs populated Findings filters and enhances the finding review-state picker after it renders. |
 | `opens as a first-class surface and renders entity detail` | Verifies that the Atlas overlay opens, loads entity rows, and renders entity detail content. |
 | `cycles Atlas tabs forward and backward for modal keyboard shortcuts` | Verifies that the Atlas tab cycler moves forward and backward through the modal tab row. |
@@ -1919,6 +1922,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `clears entity pagination when switching from a large tab to a single-page tab` | Verifies that Atlas clears hidden pagination text and disables controls after moving to a tab that fits on one page. |
 | `ignores stale entity list responses after switching tabs` | Verifies that a late response from a previous Atlas tab cannot overwrite the active tab's list or pagination state. |
 | `renders the Findings tab and updates review state` | Verifies that the Atlas Findings tab renders finding detail and can update a finding review state. |
+| `suppresses selected Atlas findings without deleting them` | Verifies that select mode can suppress visible-page Atlas findings through the suppression route without deleting source data. |
 | `bulk-updates selected Atlas findings` | Verifies that selected Atlas findings can be bulk-updated from the Findings tab. |
 | `bulk-deletes selected Atlas entities from entity tabs` | Verifies that select mode can bulk-delete visible-page Atlas entities and reports attached finding removal. |
 | `bulk-deletes selected Atlas findings from the Findings tab` | Verifies that select mode can bulk-delete selected Atlas findings from the Findings tab. |
@@ -2269,6 +2273,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `re-sticks restored output to the tail after delayed layout growth` | Verifies that restored transcripts keep the prompt tail visible after delayed layout growth. |
 | `batches large bursts of output and finishes rendering on the next tick` | Verifies that batches large bursts of output and finishes rendering on the next tick. |
 | `pauses live rendering for high-volume brokered output while keeping raw lines` | Verifies that high-volume brokered output pauses live row rendering while keeping bounded raw transcript data. |
+| `binds high-volume resume controls through the shared pressable helper` | Verifies that high-volume resume controls use the shared pressable interaction helper. |
 | `resumes live rendering for new high-volume output when requested` | Verifies that the high-volume output resume action renders later live output again. |
 | `disables high-volume resume controls once the run is no longer active` | Verifies that stale high-volume resume controls are disabled after a run leaves the running state. |
 | `resets high-volume counters for a new run` | Verifies that high-volume output counters reset before a fresh brokered run starts in the same tab. |
@@ -2393,6 +2398,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `restoreActiveRunsAfterReload skips runs explicitly detached by this browser` | Verifies that Keep running suppresses automatic reload reattachment for that active run in the same browser. |
 | `attachActiveRunFromMonitor clears explicit detach suppression for the run` | Verifies that manually attaching from Status Monitor opts a detached run back into normal reload continuity. |
 | `restoreActiveRunsAfterReload restores stale-owner runs` | Verifies that reload continuity can recover active runs once the previous owner is stale. |
+| `restoreActiveRunsAfterReload reuses the restored original tab for the same active run` | Verifies that active-run reload recovery reuses the restored original tab, resumes after the last seen broker event, and avoids duplicating the command echo. |
+| `reattaches a detached normal stream in the original running tab` | Verifies that a normal command stream that ends without an exit while the backend run remains active reattaches in the same tab with a stream-recovery notice. |
 | `pauses background run streams for Status Monitor API calls and resumes from the last event id` | Verifies that Status Monitor connection relief pauses only background live streams and resubscribes them from the last broker event id. |
 | `restoreActiveRunsAfterReload does not overwrite a restored non-running tab` | Verifies that active-run reconnect creates a separate tab instead of clobbering an already-restored idle tab. |
 | `attachActiveRunFromMonitor opens an attached subscribed tab with kill controls` | Verifies that Status Monitor Attach opens a live subscribed tab with normal kill controls. |

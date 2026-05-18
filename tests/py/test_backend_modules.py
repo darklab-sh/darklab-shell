@@ -635,7 +635,7 @@ class TestPostgresMigrations:
         sql = "\n".join(baseline.statements)
 
         assert baseline.version == "0001"
-        assert [migration.version for migration in MIGRATIONS] == ["0001", "0002", "0003", "0004", "0005"]
+        assert [migration.version for migration in MIGRATIONS] == ["0001", "0002", "0003", "0004", "0005", "0006"]
         for table_name in (
             "runs",
             "run_output_artifacts",
@@ -663,6 +663,9 @@ class TestPostgresMigrations:
         assert "JSONB NOT NULL DEFAULT" in sql
         assert "BOOLEAN NOT NULL DEFAULT" in sql
         assert "BYTEA NOT NULL" in sql
+        assert "suppressed BOOLEAN NOT NULL DEFAULT FALSE" in sql
+        assert "suppressed_reason TEXT NOT NULL DEFAULT ''" in sql
+        assert "suppressed_at TEXT NOT NULL DEFAULT ''" in sql
         assert "runs_fts" not in sql
 
     def test_postgres_search_migration_adds_trigram_indexes(self):
@@ -672,12 +675,14 @@ class TestPostgresMigrations:
         atlas_search_migration = MIGRATIONS[2]
         atlas_detail_migration = MIGRATIONS[3]
         project_findings_migration = MIGRATIONS[4]
+        atlas_suppression_migration = MIGRATIONS[5]
         sql = "\n".join([*run_search_migration.statements, *atlas_search_migration.statements])
 
         assert run_search_migration.version == "0002"
         assert atlas_search_migration.version == "0003"
         assert atlas_detail_migration.version == "0004"
         assert project_findings_migration.version == "0005"
+        assert atlas_suppression_migration.version == "0006"
         assert "CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public" in sql
         assert "public.gin_trgm_ops" in sql
         assert "command" in sql
@@ -689,6 +694,11 @@ class TestPostgresMigrations:
         assert "idx_entity_run_links_entity_seen" in "\n".join(atlas_detail_migration.statements)
         assert "idx_findings_session_run_seen" in "\n".join(project_findings_migration.statements)
         assert "idx_findings_occurrences_finding_seen" in "\n".join(project_findings_migration.statements)
+        suppression_sql = "\n".join(atlas_suppression_migration.statements)
+        assert "ALTER TABLE entities ADD COLUMN IF NOT EXISTS suppressed" in suppression_sql
+        assert "ALTER TABLE findings ADD COLUMN IF NOT EXISTS suppressed" in suppression_sql
+        assert "idx_entities_session_suppressed" in suppression_sql
+        assert "idx_findings_session_suppressed" in suppression_sql
 
     def test_migration_runner_serializes_with_advisory_lock_and_records_versions(self):
         from core.migrations.runner import Migration, run_migrations_with_advisory_lock

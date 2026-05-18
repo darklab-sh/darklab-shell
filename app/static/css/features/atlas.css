@@ -94,7 +94,9 @@
 .atlas-filter-row,
 .atlas-filter-controls,
 .atlas-toolbar-actions,
-.atlas-bulk-action-row {
+.atlas-saved-view-row,
+.atlas-bulk-selection-controls,
+.atlas-bulk-mutation-controls {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -115,14 +117,72 @@
   min-width: 0;
 }
 
-.atlas-toolbar-actions,
-.atlas-bulk-action-row {
+.atlas-toolbar-actions {
   flex: 0 1 auto;
   justify-content: flex-end;
 }
 
+.atlas-saved-view-row {
+  min-width: 0;
+}
+
+.atlas-saved-view-select {
+  width: auto;
+  min-width: 180px;
+  max-width: 100%;
+}
+
+.atlas-saved-view-select + .app-select {
+  flex: 0 1 240px;
+  min-width: 180px;
+  max-width: 100%;
+}
+
+.atlas-saved-view-select + .app-select .app-select-trigger {
+  width: 100%;
+}
+
 .atlas-bulk-action-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, max-content);
+  align-items: center;
+  gap: 8px;
+}
+
+.atlas-bulk-selection-controls,
+.atlas-bulk-mutation-controls {
+  min-width: 0;
   justify-content: flex-start;
+}
+
+.atlas-bulk-mutation-controls {
+  padding-left: 30px;
+}
+
+.atlas-bulk-action-row > .history-bulk-toggle,
+.atlas-bulk-action-row > #atlas-finding-select-all,
+.atlas-bulk-action-row > #atlas-finding-clear-selection,
+.atlas-bulk-action-row > #atlas-finding-selection-summary {
+  grid-row: 1;
+}
+
+.atlas-bulk-action-row > #atlas-finding-bulk-status,
+.atlas-bulk-action-row > .app-select,
+.atlas-bulk-action-row > #atlas-finding-bulk-apply,
+.atlas-bulk-action-row > #atlas-bulk-suppression,
+.atlas-bulk-action-row > #atlas-bulk-delete {
+  grid-row: 2;
+}
+
+#atlas-finding-bulk-status,
+#atlas-finding-bulk-status + .app-select {
+  width: 132px;
+  min-width: 132px;
+}
+
+#atlas-finding-bulk-status + .app-select .app-select-trigger {
+  width: 132px;
+  min-width: 132px;
 }
 
 .atlas-export-wrap {
@@ -223,9 +283,23 @@
   text-align: left;
 }
 
+.atlas-entity-row.has-row-action,
+.atlas-finding-queue-row.has-row-action {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
 .atlas-entity-row.is-selecting,
 .atlas-finding-queue-row.is-selecting {
   grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.atlas-entity-row.is-selecting.has-row-action,
+.atlas-finding-queue-row.is-selecting.has-row-action {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+
+.atlas-row-suppression-action {
+  align-self: center;
 }
 
 .atlas-entity-row.is-selected {
@@ -236,6 +310,11 @@
 .atlas-finding-queue-row.is-selected {
   background: var(--green-glow);
   box-shadow: inset 3px 0 0 var(--green-dim);
+}
+
+.atlas-entity-row.is-suppressed,
+.atlas-finding-queue-row.is-suppressed {
+  opacity: 0.68;
 }
 
 .atlas-row-select,
@@ -352,6 +431,10 @@
   padding: 12px 0;
 }
 
+.atlas-detail-action-menu-list .is-destructive {
+  color: var(--danger);
+}
+
 .atlas-detail-meta,
 .atlas-detail-section {
   display: grid;
@@ -394,6 +477,15 @@
 .atlas-metadata-editor {
   display: grid;
   gap: 8px;
+}
+
+.atlas-detail-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 2px;
 }
 
 .atlas-intel-highlight-row {

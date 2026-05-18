@@ -36,7 +36,7 @@ function _tabSessionSnapshot() {
   _flushActiveTabDraftForSessionState();
   const allTabs = Array.isArray(tabs) ? tabs : [];
   const persisted = allTabs
-    .filter(tab => tab && tab.st !== 'running' && !tab.closing)
+    .filter(tab => tab && !tab.closing)
     .map(tab => ({
       label: String(tab.label || ''),
       command: String(tab.command || ''),
@@ -48,7 +48,13 @@ function _tabSessionSnapshot() {
         : [],
       st: String(tab.st || 'idle'),
       exitCode: tab.exitCode == null ? null : Number(tab.exitCode),
+      runId: String(tab.runId || ''),
       historyRunId: String(tab.historyRunId || ''),
+      lastEventId: String(tab.lastEventId || ''),
+      attachMode: String(tab.attachMode || ''),
+      reconnectedRun: !!tab.reconnectedRun,
+      runStart: Number.isFinite(Number(tab.runStart)) ? Number(tab.runStart) : null,
+      currentRunStartIndex: Number.isFinite(Number(tab.currentRunStartIndex)) ? Number(tab.currentRunStartIndex) : null,
       previewTruncated: !!tab.previewTruncated,
       fullOutputAvailable: !!tab.fullOutputAvailable,
       fullOutputLoaded: !!tab.fullOutputLoaded,
@@ -56,7 +62,7 @@ function _tabSessionSnapshot() {
     }));
   if (!persisted.length) return null;
   const activeIndex = persisted.findIndex((_, idx) => {
-    const sourceTabs = allTabs.filter(tab => tab && tab.st !== 'running' && !tab.closing);
+    const sourceTabs = allTabs.filter(tab => tab && !tab.closing);
     return sourceTabs[idx] && sourceTabs[idx].id === activeTabId;
   });
   return {
@@ -149,7 +155,15 @@ function restoreTabSessionState() {
       tab.historyNavIndex = -1;
       tab.historyNavDraft = '';
       tab.exitCode = item && item.exitCode == null ? null : Number(item.exitCode);
+      tab.runId = String(item && item.runId || '');
       tab.historyRunId = String(item && item.historyRunId || '');
+      tab.lastEventId = String(item && item.lastEventId || '');
+      tab.attachMode = String(item && item.attachMode || '');
+      tab.reconnectedRun = !!(item && item.reconnectedRun);
+      tab.runStart = Number.isFinite(Number(item && item.runStart)) ? Number(item.runStart) : null;
+      tab.currentRunStartIndex = Number.isFinite(Number(item && item.currentRunStartIndex))
+        ? Number(item.currentRunStartIndex)
+        : null;
       tab.previewTruncated = !!(item && item.previewTruncated);
       tab.fullOutputAvailable = !!(item && item.fullOutputAvailable);
       tab.fullOutputLoaded = !!(item && item.fullOutputLoaded);
@@ -178,7 +192,15 @@ function restoreTabSessionState() {
       tab.historyNavIndex = -1;
       tab.historyNavDraft = '';
       tab.exitCode = item && item.exitCode == null ? null : Number(item.exitCode);
+      tab.runId = String(item && item.runId || '');
       tab.historyRunId = String(item && item.historyRunId || '');
+      tab.lastEventId = String(item && item.lastEventId || '');
+      tab.attachMode = String(item && item.attachMode || '');
+      tab.reconnectedRun = !!(item && item.reconnectedRun);
+      tab.runStart = Number.isFinite(Number(item && item.runStart)) ? Number(item.runStart) : null;
+      tab.currentRunStartIndex = Number.isFinite(Number(item && item.currentRunStartIndex))
+        ? Number(item.currentRunStartIndex)
+        : null;
       tab.previewTruncated = !!(item && item.previewTruncated);
       tab.fullOutputAvailable = !!(item && item.fullOutputAvailable);
       tab.fullOutputLoaded = !!(item && item.fullOutputLoaded);

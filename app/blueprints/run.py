@@ -84,12 +84,14 @@ from services.runs.workspace_artifacts import (
     workspace_artifacts_with_sizes as _workspace_artifacts_with_sizes,
 )
 from core.output_signals import OutputSignalClassifier
-from services.projects.workspace import (
+from services.projects.artifacts import record_run_file_artifacts
+from services.projects.findings import record_run_findings
+from services.projects.links import (
     link_active_project_run_entities,
     link_run_to_active_project,
+)
+from services.projects.targets import (
     record_project_target_discoveries,
-    record_run_file_artifacts,
-    record_run_findings,
 )
 from services import metrics as app_metrics
 from services.session.variables import SessionVariableError, expand_session_variables
@@ -1593,6 +1595,20 @@ def _brokered_real_run_worker(
                     "project_name": project_name,
                     "project_entities_linked": True,
                     "entity_count": linked_entity_count,
+                })
+            rejected_entity_count = int(active_project_link.get("rejected_entity_count") or 0)
+            if rejected_entity_count:
+                entity_label = "Atlas entity" if rejected_entity_count == 1 else "Atlas entities"
+                publish_run_event(run_id, "notice", {
+                    "text": (
+                        f"[project] skipped {rejected_entity_count} {entity_label} for {project_name} "
+                        "because the project link limit was reached"
+                    ),
+                    "project_id": active_project_link.get("project_id"),
+                    "project_name": project_name,
+                    "project_entities_rejected": True,
+                    "entity_count": rejected_entity_count,
+                    "reason": "project_link_limit",
                 })
         publish_run_event(run_id, "exit", {
             "code": exit_code,

@@ -249,6 +249,17 @@ body.mobile-terminal-mode.atlas-mobile-ready #atlas-mobile-root.atlas-mobile-roo
   width: 100%;
 }
 
+.atlas-mobile-saved-view-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(3, auto);
+  gap: 6px;
+  align-items: center;
+}
+
+.atlas-mobile-saved-view-select {
+  min-width: 0;
+}
+
 .atlas-mobile-orphan-chip-host {
   display: flex;
 }

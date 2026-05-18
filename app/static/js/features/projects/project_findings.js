@@ -21,6 +21,16 @@
       return ctx.collapsedFindingGroups().has(groupKey(projectId, runLabel));
     }
 
+    function collapsedGroupLabels(projectId = '') {
+      const normalized = String(projectId || '');
+      if (!normalized) return [];
+      const prefix = `${normalized}\x1f`;
+      return [...ctx.collapsedFindingGroups()]
+        .filter(key => String(key || '').startsWith(prefix))
+        .map(key => String(key).slice(prefix.length))
+        .filter(Boolean);
+    }
+
     function reviewControl(finding, projectId) {
       const control = document.createElement('select');
       const reviewState = String(finding.review_state || 'new');
@@ -72,7 +82,7 @@
         count.className = 'project-finding-selection-count';
         count.setAttribute('aria-live', 'polite');
         count.textContent = `${selectedFindingIds.size} selected`;
-        const selectAll = ctx.makeProjectButton('Select page', 'select-all-project-findings', projectId);
+        const selectAll = ctx.makeProjectButton('Select all', 'select-all-project-findings', projectId);
         selectAll.disabled = !findings.length;
         const clear = ctx.makeProjectButton('Clear', 'clear-project-findings', projectId);
         clear.disabled = !selectedFindingIds.size;
@@ -213,6 +223,7 @@
       reviewStateLabel,
       groupKey,
       groupCollapsed,
+      collapsedGroupLabels,
       reviewControl,
       rowAccessory,
       renderFindings,

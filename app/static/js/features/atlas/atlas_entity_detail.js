@@ -260,13 +260,41 @@
     return wrap;
   }
 
-  function renderLimitNotice(meta, noun) {
-    if (!meta || !meta.has_more) return null;
-    const limit = Number(meta.limit || meta.shown || 0);
-    return node('div', 'atlas-muted', `Showing latest ${limit.toLocaleString()} ${noun}.`);
+  function renderCollectionPager(meta, noun, onPage) {
+    if (!meta) return null;
+    const limit = Math.max(1, Number(meta.limit || meta.shown || 50));
+    const offset = Math.max(0, Number(meta.offset || 0));
+    const shown = Math.max(0, Number(meta.shown || 0));
+    const total = Math.max(0, Number(meta.total || 0));
+    const hasPager = total > limit || offset > 0 || !!meta.has_more;
+    if (!hasPager) return null;
+    const wrap = node('div', 'atlas-detail-pager');
+    const start = total && shown ? offset + 1 : 0;
+    const end = total ? Math.min(offset + shown, total) : offset + shown;
+    wrap.appendChild(node(
+      'span',
+      'atlas-muted',
+      total ? `${start.toLocaleString()}-${end.toLocaleString()} of ${total.toLocaleString()} ${noun}` : `Showing ${shown.toLocaleString()} ${noun}`,
+    ));
+    if (typeof onPage === 'function') {
+      const prev = document.createElement('button');
+      prev.type = 'button';
+      prev.className = 'btn btn-ghost btn-compact';
+      prev.textContent = 'Previous';
+      prev.disabled = offset <= 0;
+      prev.addEventListener('click', () => onPage(Math.max(0, offset - limit)));
+      const next = document.createElement('button');
+      next.type = 'button';
+      next.className = 'btn btn-ghost btn-compact';
+      next.textContent = 'Next';
+      next.disabled = !meta.has_more;
+      next.addEventListener('click', () => onPage(offset + limit));
+      wrap.append(prev, next);
+    }
+    return wrap;
   }
 
-  function renderRuns(runs, onSeeRun, meta = null) {
+  function renderRuns(runs, onSeeRun, meta = null, onPage = null) {
     const wrap = node('div', 'atlas-source-list');
     const rows = Array.isArray(runs) ? runs : [];
     if (!rows.length) {
@@ -292,12 +320,12 @@
       }
       wrap.appendChild(row);
     });
-    const notice = renderLimitNotice(meta, 'source runs');
-    if (notice) wrap.appendChild(notice);
+    const pager = renderCollectionPager(meta, 'source runs', onPage);
+    if (pager) wrap.appendChild(pager);
     return wrap;
   }
 
-  function renderFindings(findings, meta = null) {
+  function renderFindings(findings, meta = null, onPage = null) {
     const wrap = node('div', 'atlas-finding-list');
     const rows = Array.isArray(findings) ? findings : [];
     if (!rows.length) {
@@ -315,8 +343,8 @@
       row.append(title, meta);
       wrap.appendChild(row);
     });
-    const notice = renderLimitNotice(meta, 'findings');
-    if (notice) wrap.appendChild(notice);
+    const pager = renderCollectionPager(meta, 'findings', onPage);
+    if (pager) wrap.appendChild(pager);
     return wrap;
   }
 
@@ -341,6 +369,42 @@
     return select;
   }
 
+  function detailActionMenu(items = []) {
+    const activeItems = items.filter(item => item && item.label && typeof item.onSelect === 'function');
+    if (!activeItems.length) return null;
+    const wrap = node('div', 'atlas-detail-action-menu save-menu-wrap save-menu-down');
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'btn btn-secondary btn-compact atlas-detail-action-menu-trigger';
+    trigger.textContent = 'Actions';
+    trigger.setAttribute('aria-haspopup', 'menu');
+    trigger.setAttribute('aria-expanded', 'false');
+    const menu = node('div', 'atlas-detail-action-menu-list save-menu dropdown-surface');
+    menu.setAttribute('role', 'menu');
+    activeItems.forEach(item => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `dropdown-item dropdown-item-compact${item.destructive ? ' is-destructive' : ''}`;
+      button.setAttribute('role', 'menuitem');
+      button.textContent = item.label;
+      button.addEventListener('click', () => {
+        wrap.classList.remove('open');
+        trigger.setAttribute('aria-expanded', 'false');
+        item.onSelect();
+      });
+      menu.appendChild(button);
+    });
+    trigger.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const open = !wrap.classList.contains('open');
+      wrap.classList.toggle('open', open);
+      trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    wrap.append(trigger, menu);
+    return wrap;
+  }
+
   function renderFindingDetail(container, finding, handlers = {}) {
     clear(container);
     if (!container) return;
@@ -356,6 +420,7 @@
     const meta = node('div', 'atlas-detail-meta');
     meta.append(
       metaRow('Status', text(finding.review_state || finding.status, 'new')),
+      metaRow('Suppression', finding.suppressed ? text(finding.suppressed_reason, 'suppressed') : 'visible'),
       metaRow('Severity', text(finding.severity, '—')),
       metaRow('Tool', text(finding.tool_root, '—')),
       metaRow('Entity', text(finding.entity_value, finding.subject_key || '—')),
@@ -377,20 +442,26 @@
         run.addEventListener('click', () => handlers.onSeeRun?.(finding));
         actions.appendChild(run);
       }
+      const menuItems = [];
       if (finding.entity_id) {
-        const entity = document.createElement('button');
-        entity.type = 'button';
-        entity.className = 'btn btn-secondary btn-compact';
-        entity.textContent = 'Open entity';
-        entity.addEventListener('click', () => handlers.onOpenEntity?.(finding));
-        actions.appendChild(entity);
+        menuItems.push({
+          label: 'Open entity',
+          onSelect: () => handlers.onOpenEntity?.(finding),
+        });
       }
-      const deleteBtn = document.createElement('button');
-      deleteBtn.type = 'button';
-      deleteBtn.className = 'btn btn-secondary btn-danger btn-compact';
-      deleteBtn.textContent = 'Delete';
-      deleteBtn.addEventListener('click', () => handlers.onDeleteFinding?.(finding));
-      actions.appendChild(deleteBtn);
+      menuItems.push(
+        {
+          label: finding.suppressed ? 'Restore finding' : 'Suppress finding',
+          onSelect: () => handlers.onSuppressFinding?.(finding),
+        },
+        {
+          label: 'Delete finding',
+          destructive: true,
+          onSelect: () => handlers.onDeleteFinding?.(finding),
+        },
+      );
+      const menu = detailActionMenu(menuItems);
+      if (menu) actions.appendChild(menu);
       container.append(actions);
       if (typeof global.enhanceAppSelects === 'function') {
         global.enhanceAppSelects(actions);
@@ -448,6 +519,7 @@
 
     const meta = node('div', 'atlas-detail-meta');
     meta.append(
+      metaRow('Suppression', entity.suppressed ? text(entity.suppressed_reason, 'suppressed') : 'visible'),
       metaRow('Occurrences', Number(entity.occurrence_count || 0).toLocaleString()),
       metaRow('First seen', formatDate(entity.first_seen_at)),
       metaRow('Last seen', formatDate(entity.last_seen_at)),
@@ -470,12 +542,18 @@
         promote.addEventListener('click', () => handlers.onAddToActiveProject?.(entity));
         actions.appendChild(promote);
       }
-      const deleteBtn = document.createElement('button');
-      deleteBtn.type = 'button';
-      deleteBtn.className = 'btn btn-secondary btn-danger btn-compact';
-      deleteBtn.textContent = 'Delete';
-      deleteBtn.addEventListener('click', () => handlers.onDeleteEntity?.(entity));
-      actions.appendChild(deleteBtn);
+      const menu = detailActionMenu([
+        {
+          label: entity.suppressed ? 'Restore entity' : 'Suppress entity',
+          onSelect: () => handlers.onSuppressEntity?.(entity),
+        },
+        {
+          label: 'Delete entity',
+          destructive: true,
+          onSelect: () => handlers.onDeleteEntity?.(entity),
+        },
+      ]);
+      if (menu) actions.appendChild(menu);
       container.append(actions);
     }
     container.append(meta);
@@ -485,8 +563,17 @@
     container.append(section('Labels', renderLabels(entity.labels)));
     container.append(section('Metadata', renderMetadataEditor(entity, handlers)));
     container.append(section('Intel', renderIntelSnapshots(detail.intel_snapshots)));
-    container.append(section('Source runs', renderRuns(detail.runs, handlers.onSeeRun, detail.detail_limits?.runs)));
-    container.append(section('Findings', renderFindings(detail.findings, detail.detail_limits?.findings)));
+    container.append(section('Source runs', renderRuns(
+      detail.runs,
+      handlers.onSeeRun,
+      detail.detail_limits?.runs,
+      handlers.onPageRuns,
+    )));
+    container.append(section('Findings', renderFindings(
+      detail.findings,
+      detail.detail_limits?.findings,
+      handlers.onPageFindings,
+    )));
   }
 
   function section(title, content) {

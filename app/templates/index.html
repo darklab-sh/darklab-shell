@@ -483,6 +483,7 @@
             <div class="atlas-filter-controls">
               <select id="atlas-finding-status-filter" class="form-select form-control-compact u-hidden" aria-label="Filter Atlas findings by status"></select>
               <select id="atlas-orphan-filter" class="form-select form-control-compact atlas-orphan-filter" aria-label="Filter Atlas rows by source run"></select>
+              <select id="atlas-suppression-filter" class="form-select form-control-compact atlas-suppression-filter" aria-label="Filter Atlas rows by suppression state"></select>
             </div>
             <div class="atlas-toolbar-actions">
               <div id="atlas-export-wrap" class="atlas-export-wrap save-menu-wrap save-menu-down">
@@ -495,19 +496,30 @@
               <button id="atlas-refresh-btn" class="btn btn-secondary btn-compact" type="button">Refresh</button>
             </div>
           </div>
+          <div class="atlas-saved-view-row">
+            <select id="atlas-saved-view-select" class="form-select form-control-compact atlas-saved-view-select" aria-label="Saved Atlas views"></select>
+            <button id="atlas-saved-view-save" class="btn btn-secondary btn-compact" type="button">Save view</button>
+            <button id="atlas-saved-view-update" class="btn btn-ghost btn-compact" type="button">Update</button>
+            <button id="atlas-saved-view-delete" class="btn btn-ghost btn-compact" type="button">Delete</button>
+          </div>
           <div id="atlas-finding-bulk-row" class="atlas-finding-bulk-row u-hidden">
             <div class="atlas-bulk-action-row">
-              <label class="history-bulk-toggle control-row">
-                <input id="atlas-select-toggle" type="checkbox">
-                <span>select</span>
-              </label>
-              <button id="atlas-finding-select-all" class="btn btn-secondary btn-compact" type="button">Select all</button>
-              <button id="atlas-finding-clear-selection" class="btn btn-ghost btn-compact" type="button">Clear</button>
-              <select id="atlas-finding-bulk-status" class="form-select form-control-compact" aria-label="Bulk finding review state"></select>
-              <button id="atlas-finding-bulk-apply" class="btn btn-secondary btn-compact" type="button">Apply</button>
-              <button id="atlas-bulk-delete" class="btn btn-secondary btn-danger btn-compact" type="button">Delete</button>
+              <div class="atlas-bulk-selection-controls">
+                <label class="history-bulk-toggle control-row">
+                  <input id="atlas-select-toggle" type="checkbox">
+                  <span>select</span>
+                </label>
+                <button id="atlas-finding-select-all" class="btn btn-secondary btn-compact" type="button">Select all</button>
+                <button id="atlas-finding-clear-selection" class="btn btn-ghost btn-compact" type="button">Clear</button>
+                <span id="atlas-finding-selection-summary" class="atlas-muted atlas-bulk-selection-summary">0 selected</span>
+              </div>
+              <div class="atlas-bulk-mutation-controls">
+                <select id="atlas-finding-bulk-status" class="form-select form-control-compact" aria-label="Bulk finding review state"></select>
+                <button id="atlas-finding-bulk-apply" class="btn btn-secondary btn-compact" type="button">Apply</button>
+                <button id="atlas-bulk-suppression" class="btn btn-secondary btn-compact" type="button">Suppress</button>
+                <button id="atlas-bulk-delete" class="btn btn-secondary btn-danger btn-compact" type="button">Delete</button>
+              </div>
             </div>
-            <span id="atlas-finding-selection-summary" class="atlas-muted atlas-bulk-selection-summary">0 selected</span>
           </div>
         </div>
         <div id="atlas-list" class="atlas-list nice-scroll" aria-live="polite"></div>
@@ -1228,6 +1240,7 @@
 <script src="/static/js/features/shortcuts/shortcuts_key_handler.js"></script>
 <script src="/static/js/features/projects/project_target_validation.js"></script>
 <script src="/static/js/features/projects/project_workspace_constants.js"></script>
+<script src="/static/js/features/projects/project_workspace_state.js"></script>
 <script src="/static/js/features/projects/project_active_context.js"></script>
 <script src="/static/js/features/projects/project_shared_ui.js"></script>
 <script src="/static/js/features/projects/project_details.js"></script>

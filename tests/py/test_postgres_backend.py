@@ -263,7 +263,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
     conn.commit()
 
-    assert applied == ["0001", "0002", "0003", "0004", "0005"]
+    assert applied == ["0001", "0002", "0003", "0004", "0005", "0006"]
     assert applied_again == []
     table_rows = conn.execute(
         """
@@ -712,7 +712,6 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
-    from services.projects import workspace as project_workspace
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
@@ -773,7 +772,6 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
     monkeypatch.setattr(run_blueprint, "db_connect", _postgres_db_connect)
     monkeypatch.setattr(history_blueprint, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(history_blueprint, "db_connect", _postgres_db_connect)
-    monkeypatch.setattr(project_workspace, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(run_blueprint, "load_full_output_entries", lambda _rel_path: persisted_entries)
     monkeypatch.setattr(run_blueprint, "_workspace_artifacts_with_sizes", lambda _session_id, artifacts: artifacts)
 
@@ -994,7 +992,6 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
-    from services.projects import workspace as project_workspace
     from services.secrets import storage as secrets_storage
     from services.workflows import user_workflows
 
@@ -1047,7 +1044,6 @@ def test_session_token_lifecycle_and_migration_routes_use_postgres(monkeypatch, 
         migrated_directories=0,
         skipped_directories=0,
     ))
-    monkeypatch.setattr(project_workspace, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(secrets_storage, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(user_workflows, "DB_BACKEND", DatabaseBackend.POSTGRES)
 
@@ -1203,9 +1199,15 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
     from services.atlas.materializer import materialize_run_entities
+    from services.projects import active as project_active
+    from services.projects import crud as project_crud
+    from services.projects import findings as project_findings
+    from services.projects import links as project_links
     from services.projects import metadata as project_metadata
+    from services.projects import models as project_models
     from services.projects import preferences as project_preferences
-    from services.projects import workspace as project_workspace
+    from services.projects import queries as project_queries
+    from services.projects import targets as project_targets
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
@@ -1215,8 +1217,10 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     def _postgres_db_connect():
         yield PostgresSqliteCompatConnection(conn)
 
-    monkeypatch.setattr(project_workspace, "DB_BACKEND", DatabaseBackend.POSTGRES)
-    monkeypatch.setattr(project_workspace, "db_connect", _postgres_db_connect)
+    for module in (project_links, project_models, project_queries, project_targets):
+        monkeypatch.setattr(module, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    for module in (project_active, project_crud, project_findings, project_links, project_queries, project_targets):
+        monkeypatch.setattr(module, "db_connect", _postgres_db_connect)
     monkeypatch.setattr(project_metadata, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(project_preferences, "DB_BACKEND", DatabaseBackend.POSTGRES)
 
@@ -1265,6 +1269,17 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
             }],
             seen_at="2026-05-17T00:00:01Z",
         )
+        recorded_findings = project_findings.record_run_findings(
+            compat_conn,
+            session_id,
+            run_id,
+            [{
+                "text": "[high] darklab.sh missing security headers",
+                "line_index": 1,
+                "signals": ["findings"],
+                "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
+            }],
+        )
     conn.commit()
     run_entity_preview_resp = client.post(
         f"/projects/{project['id']}/links/run-entities/preview",
@@ -1274,6 +1289,15 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     list_resp = client.get("/projects", headers={"X-Session-ID": session_id})
     targets_resp = client.get(f"/projects/{project['id']}/targets", headers={"X-Session-ID": session_id})
     links_resp = client.get(f"/projects/{project['id']}/links", headers={"X-Session-ID": session_id})
+    findings_resp = client.get(
+        f"/projects/{project['id']}/findings?command_root=host&severity=high&scope=finding",
+        headers={"X-Session-ID": session_id},
+    )
+    findings_review_resp = client.post(
+        f"/projects/{project['id']}/findings/review",
+        headers={"X-Session-ID": session_id},
+        json={"finding_ids": [recorded_findings[0]["id"], "missing-finding"], "review_state": "important"},
+    )
     prefs_row = conn.execute(
         "SELECT preferences FROM session_preferences WHERE session_id = %s",
         (session_id,),
@@ -1288,6 +1312,11 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert [item["id"] for item in json.loads(list_resp.data)["projects"]] == [project["id"]]
     assert json.loads(targets_resp.data)["targets"][0]["source_detail"] == {"source": "manual"}
     assert json.loads(links_resp.data)["links"][0]["entity_id"] == run_id
+    assert findings_review_resp.status_code == 200
+    assert [item["id"] for item in json.loads(findings_resp.data)["findings"]] == [
+        recorded_findings[0]["id"]
+    ]
+    assert json.loads(findings_review_resp.data)["counts"] == {"updated": 1, "not_found": 1}
     assert prefs_row["preferences"]["pref_active_project_id"] == project["id"]
 
 
@@ -1395,6 +1424,7 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
     from services.atlas import cleanup as atlas_cleanup
     from services.atlas import lookup as atlas_lookup
+    from services.projects import preferences as project_preferences
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
@@ -1484,6 +1514,7 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     monkeypatch.setattr(atlas_blueprint, "db_connect", _postgres_db_connect)
     monkeypatch.setattr(atlas_lookup, "DB_BACKEND", DatabaseBackend.POSTGRES)
     monkeypatch.setattr(atlas_cleanup, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(project_preferences, "DB_BACKEND", DatabaseBackend.POSTGRES)
 
     client = app.test_client()
     summary_resp = client.get("/atlas", headers={"X-Session-ID": session_id})
@@ -1491,10 +1522,29 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     detail_resp = client.get(f"/atlas/entities/{entity_id}", headers={"X-Session-ID": session_id})
     export_resp = client.get("/atlas/entities/export?format=jsonl", headers={"X-Session-ID": session_id})
     findings_resp = client.get("/atlas/findings?q=https", headers={"X-Session-ID": session_id})
+    saved_view_resp = client.post(
+        "/atlas/views",
+        headers={"X-Session-ID": session_id},
+        json={
+            "name": "Postgres Atlas",
+            "tab": "findings",
+            "filters": {"query": "https", "finding_status": "new"},
+        },
+    )
+    saved_views_resp = client.get("/atlas/views", headers={"X-Session-ID": session_id})
     review_resp = client.post(
         "/atlas/findings/review",
         headers={"X-Session-ID": session_id},
         json={"finding_ids": [finding_id], "review_state": "reviewed"},
+    )
+    suppression_resp = client.put(
+        f"/atlas/findings/{finding_id}/suppression",
+        headers={"X-Session-ID": session_id},
+        json={"suppressed": True},
+    )
+    suppressed_findings_resp = client.get(
+        "/atlas/findings?suppression_filter=only",
+        headers={"X-Session-ID": session_id},
     )
     delete_preview_resp = client.get(
         f"/atlas/findings/{finding_id}/delete-preview",
@@ -1511,8 +1561,12 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     exported = [json.loads(line) for line in export_resp.data.decode("utf-8").splitlines()]
     assert exported[0]["intel_providers_with_data"] == ["crtsh"]
     assert json.loads(findings_resp.data)["findings"][0]["id"] == finding_id
+    assert saved_view_resp.status_code == 201
+    assert json.loads(saved_views_resp.data)["views"][0]["name"] == "Postgres Atlas"
     assert review_resp.status_code == 200
     assert json.loads(review_resp.data)["counts"] == {"updated": 1, "not_found": 0}
+    assert suppression_resp.status_code == 200
+    assert json.loads(suppressed_findings_resp.data)["findings"][0]["suppressed"] is True
     assert delete_preview_resp.status_code == 200
     assert json.loads(delete_preview_resp.data)["preview"]["source_run_id"] == run_id
 

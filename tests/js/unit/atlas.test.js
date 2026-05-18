@@ -61,18 +61,30 @@ function setupAtlasDom() {
         <input id="atlas-search" />
         <select id="atlas-finding-status-filter" class="form-select form-control-compact u-hidden"></select>
         <select id="atlas-orphan-filter" class="form-select form-control-compact"></select>
+        <select id="atlas-suppression-filter" class="form-select form-control-compact"></select>
+        <select id="atlas-saved-view-select" class="form-select form-control-compact"></select>
+        <button id="atlas-saved-view-save" type="button">save</button>
+        <button id="atlas-saved-view-update" type="button">update</button>
+        <button id="atlas-saved-view-delete" type="button">delete</button>
         <button id="atlas-export-csv-btn" type="button">csv</button>
         <button id="atlas-export-jsonl-btn" type="button">jsonl</button>
         <button id="atlas-refresh-btn" type="button">refresh</button>
         <div class="atlas-shell">
           <div id="atlas-finding-bulk-row" class="u-hidden">
-            <label><input id="atlas-select-toggle" type="checkbox">select</label>
-            <span id="atlas-finding-selection-summary"></span>
-            <button id="atlas-finding-select-all" type="button">select all</button>
-            <button id="atlas-finding-clear-selection" type="button">clear</button>
-            <select id="atlas-finding-bulk-status" class="form-select form-control-compact"></select>
-            <button id="atlas-finding-bulk-apply" type="button">apply</button>
-            <button id="atlas-bulk-delete" type="button">delete</button>
+            <div class="atlas-bulk-action-row">
+              <div class="atlas-bulk-selection-controls">
+                <label><input id="atlas-select-toggle" type="checkbox">select</label>
+                <button id="atlas-finding-select-all" type="button">select all</button>
+                <button id="atlas-finding-clear-selection" type="button">clear</button>
+                <span id="atlas-finding-selection-summary"></span>
+              </div>
+              <div class="atlas-bulk-mutation-controls">
+                <select id="atlas-finding-bulk-status" class="form-select form-control-compact"></select>
+                <button id="atlas-finding-bulk-apply" type="button">apply</button>
+                <button id="atlas-bulk-suppression" type="button">suppress</button>
+                <button id="atlas-bulk-delete" type="button">delete</button>
+              </div>
+            </div>
           </div>
           <div id="atlas-list"></div>
           <div id="atlas-pagination" class="u-hidden">
@@ -108,6 +120,9 @@ function loadAtlas({
         findings: 1,
       }))
     }
+    if (target === '/atlas/views') {
+      return Promise.resolve(jsonResponse({ views: [] }))
+    }
     if (target.startsWith('/atlas/findings?')) {
       return Promise.resolve(jsonResponse({
         findings: [FINDING],
@@ -122,6 +137,15 @@ function loadAtlas({
     }
     if (target === '/atlas/findings/review' && options.method === 'POST') {
       return Promise.resolve(jsonResponse({ ok: true, counts: { updated: 1, not_found: 0 }, results: [] }))
+    }
+    if (target === '/atlas/findings/suppression' && options.method === 'POST') {
+      return Promise.resolve(jsonResponse({ ok: true, suppressed: true, counts: { updated: 1, not_found: 0 }, results: [] }))
+    }
+    if (target === '/atlas/findings/fnd_1/suppression' && options.method === 'PUT') {
+      return Promise.resolve(jsonResponse({ ok: true, finding_id: 'fnd_1', suppressed: true }))
+    }
+    if (target === '/atlas/entities/ent_ip/suppression' && options.method === 'PUT') {
+      return Promise.resolve(jsonResponse({ ok: true, entity_id: 'ent_ip', suppressed: true }))
     }
     if (target.startsWith('/atlas/entities?')) {
       return Promise.resolve(jsonResponse({
@@ -197,8 +221,8 @@ function loadAtlas({
         }],
         findings: [],
         detail_limits: {
-          runs: { limit: 50, shown: 1, has_more: true },
-          findings: { limit: 50, shown: 0, has_more: false },
+          runs: { limit: 50, offset: 0, shown: 1, total: 55, has_more: true },
+          findings: { limit: 50, offset: 0, shown: 0, total: 0, has_more: false },
         },
       }))
     }
@@ -292,6 +316,75 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-list')?.textContent).toContain('443/tcp open https')
   })
 
+  it('saves and applies named Atlas views', async () => {
+    let views = []
+    const apiFetch = vi.fn((url, options = {}) => {
+      const target = String(url)
+      if (target === '/atlas/views' && options.method === 'POST') {
+        const payload = JSON.parse(options.body)
+        views = [{ id: 'atv_1111111111111111', updated_at: '2026-05-18T00:00:00Z', ...payload }]
+        return Promise.resolve(jsonResponse({ ok: true, view: views[0], views }))
+      }
+      if (target === '/atlas/views') return Promise.resolve(jsonResponse({ views }))
+      if (target === '/atlas' || target.startsWith('/atlas?')) {
+        return Promise.resolve(jsonResponse({
+          total: 1,
+          counts: { ip: 1, domain: 0, hash: 0, cve: 0, url: 0 },
+          findings: 1,
+        }))
+      }
+      if (target.startsWith('/atlas/findings?')) {
+        return Promise.resolve(jsonResponse({
+          findings: [FINDING],
+          total: 1,
+          limit: 50,
+          offset: 0,
+          counts: { new: 1, reviewed: 0, important: 0, false_positive: 0, needs_followup: 0 },
+        }))
+      }
+      if (target === '/atlas/entities/ent_ip') {
+        return Promise.resolve(jsonResponse({ entity: ENTITY, runs: [], findings: [], detail_limits: {} }))
+      }
+      return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({ error: 'not found' }) })
+    })
+    const showConfirm = vi.fn((options = {}) => {
+      const input = options.content?.querySelector?.('input')
+      if (input) input.value = 'High signal'
+      return Promise.resolve('save')
+    })
+    const { openAtlas } = loadAtlas({ apiFetchImpl: apiFetch, showConfirmImpl: showConfirm })
+
+    await openAtlas({ source: 'test' })
+    window.DarklabAtlasOverlay.state.query = 'ssl'
+    window.DarklabAtlasOverlay.state.findingStatus = 'important'
+    window.DarklabAtlasOverlay.state.orphanFilter = 'only'
+    window.DarklabAtlasOverlay.state.suppressionFilter = 'only'
+    document.getElementById('atlas-saved-view-save').click()
+
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/atlas/views', expect.objectContaining({ method: 'POST' })))
+    const savedBody = JSON.parse(apiFetch.mock.calls.find(([url, options]) => url === '/atlas/views' && options.method === 'POST')[1].body)
+    expect(savedBody).toMatchObject({
+      name: 'High signal',
+      tab: 'findings',
+      filters: {
+        query: 'ssl',
+        orphan_filter: 'only',
+        suppression_filter: 'only',
+        finding_status: 'important',
+      },
+    })
+
+    const select = document.getElementById('atlas-saved-view-select')
+    select.value = 'atv_1111111111111111'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+
+    await vi.waitFor(() => expect(document.getElementById('atlas-search').value).toBe('ssl'))
+    expect(window.DarklabAtlasOverlay.state.findingStatus).toBe('important')
+    await vi.waitFor(() => {
+      expect(apiFetch.mock.calls.some(([url]) => String(url).includes('review_state=important'))).toBe(true)
+    })
+  })
+
   it('syncs populated filter selects and enhances dynamic detail selects', async () => {
     const { openAtlas } = loadAtlas({ useRealSelectEnhancer: true })
 
@@ -326,6 +419,9 @@ describe('Atlas overlay', () => {
     expect(document.querySelector('[data-atlas-tab="ip"]')?.getAttribute('aria-pressed')).toBe('true')
     expect(document.getElementById('atlas-list')?.textContent).toContain('107.178.109.44')
     expect(document.getElementById('atlas-list')?.textContent).toContain('2 hits · 1 run')
+    const rowSuppression = document.querySelector('.atlas-row-suppression-action')
+    expect(rowSuppression?.classList.contains('btn-icon-only')).toBe(true)
+    expect(rowSuppression?.getAttribute('aria-label')).toBe('Suppress entity')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('Shodan')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('Intel summary')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('Open ports')
@@ -344,11 +440,16 @@ describe('Atlas overlay', () => {
     expect(document.querySelector('.atlas-intel-card-body')?.textContent).toContain('ports')
     expect(document.querySelector('.atlas-intel-card-body')?.textContent).toContain('nginx')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('shodan host 107.178.109.44')
-    expect(document.getElementById('atlas-detail')?.textContent).toContain('Showing latest 50 source runs.')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('1-1 of 55 source runs')
     expect(document.querySelector('.atlas-shell')?.dataset.atlasMode).toBe('entity')
+    expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-trigger')?.textContent).toBe('Actions')
+    expect(document.querySelector('#atlas-detail .atlas-detail-action-menu-list')?.textContent).toContain('Suppress entity')
     expect(document.getElementById('atlas-finding-status-filter')?.classList.contains('u-hidden')).toBe(true)
     expect(document.getElementById('atlas-finding-bulk-row')?.classList.contains('u-hidden')).toBe(false)
-    expect(apiFetch).toHaveBeenCalledWith('/atlas?orphan_filter=hide', expect.objectContaining({ cache: 'no-store' }))
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/atlas?orphan_filter=hide&suppression_filter=hide',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
     expect(apiFetch).toHaveBeenCalledWith('/atlas/entities/ent_ip', expect.objectContaining({ cache: 'no-store' }))
   })
 
@@ -377,6 +478,9 @@ describe('Atlas overlay', () => {
           counts: { ip: 0, domain: 0, hash: 0, cve: 0, url: 0 },
           findings: 0,
         }))
+      }
+      if (target === '/atlas/views') {
+        return Promise.resolve(jsonResponse({ views: [] }))
       }
       if (target.startsWith('/atlas/entities?')) {
         return Promise.resolve(jsonResponse({ entities: [], total: 0, limit: 50, offset: 0 }))
@@ -474,8 +578,12 @@ describe('Atlas overlay', () => {
     const { openAtlas } = loadAtlas({ apiFetchImpl: apiFetch, showConfirmImpl: showConfirm })
 
     await openAtlas({ source: 'test', tab: 'ip' })
-    const deleteBtn = () => [...document.querySelectorAll('#atlas-detail .atlas-detail-actions button')]
-      .find(button => button.textContent === 'Delete')
+    const deleteBtn = () => {
+      document.querySelector('#atlas-detail .atlas-detail-action-menu-trigger')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      return [...document.querySelectorAll('#atlas-detail .atlas-detail-action-menu-list button')]
+        .find(button => button.textContent === 'Delete entity')
+    }
 
     deleteBtn()?.click()
     await Promise.resolve()
@@ -505,7 +613,7 @@ describe('Atlas overlay', () => {
 
     expect(document.getElementById('atlas-subtitle')?.textContent).toBe('1 entity · 1 finding · Case Alpha')
     expect(apiFetch).toHaveBeenCalledWith(
-      '/atlas/findings?limit=50&offset=0&project_id=prj_1&orphan_filter=hide',
+      '/atlas/findings?limit=50&offset=0&project_id=prj_1&orphan_filter=hide&suppression_filter=hide',
       expect.objectContaining({ cache: 'no-store' }),
     )
   })
@@ -637,7 +745,7 @@ describe('Atlas overlay', () => {
     void openAtlas({ source: 'test', tab: 'hash' })
     await vi.waitFor(() => {
       expect(apiFetch).toHaveBeenCalledWith(
-        '/atlas/entities?type=hash&limit=50&offset=0&orphan_filter=hide',
+        '/atlas/entities?type=hash&limit=50&offset=0&orphan_filter=hide&suppression_filter=hide',
         expect.objectContaining({ cache: 'no-store' }),
       )
     })
@@ -670,6 +778,7 @@ describe('Atlas overlay', () => {
     await openAtlas({ source: 'test', tab: 'findings' })
 
     expect(document.getElementById('atlas-list')?.textContent).toContain('443/tcp open https')
+    expect(document.querySelector('.atlas-row-suppression-action')?.getAttribute('aria-label')).toBe('Suppress finding')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('Evidence')
     expect(document.querySelector('.atlas-shell')?.dataset.atlasMode).toBe('findings')
     expect([...document.getElementById('atlas-finding-status-filter').options].map(option => option.textContent)).toEqual([
@@ -687,6 +796,11 @@ describe('Atlas overlay', () => {
       'False positive',
       'Follow-up',
     ])
+    expect([...document.getElementById('atlas-suppression-filter').options].map(option => option.textContent)).toEqual([
+      'Visible rows',
+      'Show all',
+      'Only suppressed',
+    ])
     expect(syncAppSelect).toHaveBeenCalledWith(document.getElementById('atlas-finding-status-filter'))
     expect(syncAppSelect).toHaveBeenCalledWith(document.getElementById('atlas-finding-bulk-status'))
     document.querySelector('#atlas-detail .atlas-finding-review').value = 'reviewed'
@@ -700,6 +814,37 @@ describe('Atlas overlay', () => {
       body: JSON.stringify({ review_state: 'reviewed' }),
     }))
     expect(showToast).toHaveBeenCalledWith('Finding updated', 'success')
+
+    document.querySelector('#atlas-detail .atlas-detail-action-menu-trigger')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    const suppressFindingItem = [...document.querySelectorAll('#atlas-detail .atlas-detail-action-menu-list [role="menuitem"]')]
+      .find(button => button.textContent === 'Suppress finding')
+    suppressFindingItem?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(apiFetch).toHaveBeenCalledWith('/atlas/findings/fnd_1/suppression', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ suppressed: true }),
+    }))
+  })
+
+  it('suppresses selected Atlas findings without deleting them', async () => {
+    const { openAtlas, apiFetch, showToast } = loadAtlas()
+
+    await openAtlas({ source: 'test', tab: 'findings' })
+    document.getElementById('atlas-select-toggle').checked = true
+    document.getElementById('atlas-select-toggle').dispatchEvent(new Event('change', { bubbles: true }))
+    document.querySelector('.atlas-finding-select')?.click()
+    document.getElementById('atlas-bulk-suppression')?.click()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(apiFetch).toHaveBeenCalledWith('/atlas/findings/suppression', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ finding_ids: ['fnd_1'], suppressed: true }),
+    }))
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Suppressed 1 rows', 'success'))
   })
 
   it('bulk-updates selected Atlas findings', async () => {
@@ -858,7 +1003,7 @@ describe('Atlas overlay', () => {
 
     await vi.waitFor(() => expect(downloadBlobAsAttachment).toHaveBeenCalled())
     expect(apiFetch).toHaveBeenCalledWith(
-      '/atlas/entities/export?format=csv&type=ip&q=107.178&project_id=prj_1&orphan_filter=hide',
+      '/atlas/entities/export?format=csv&type=ip&q=107.178&project_id=prj_1&orphan_filter=hide&suppression_filter=hide',
       expect.objectContaining({ cache: 'no-store' }),
     )
     expect(downloadBlobAsAttachment).toHaveBeenCalledWith(

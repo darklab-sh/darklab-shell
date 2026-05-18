@@ -2,7 +2,7 @@
 // Owns the desktop rail (Recent, Workflows, nav) and the bottom HUD.
 // Loaded after dom.js, state.js, ui_helpers.js, history.js, tabs.js, app.js,
 // project_details.js, project_list.js, project_navigation.js, project_entity_editor.js,
-// project_active_context.js, project_workspace_constants.js, project_workspace_lifecycle.js, project_workspace_renderer.js, project_workspace_bootstrap.js, project_shared_ui.js, project_nested_sheets.js, project_mobile_compare.js, project_mobile_shell.js, project_mobile_detail.js,
+// project_active_context.js, project_workspace_constants.js, project_workspace_state.js, project_workspace_lifecycle.js, project_workspace_renderer.js, project_workspace_bootstrap.js, project_shared_ui.js, project_nested_sheets.js, project_mobile_compare.js, project_mobile_shell.js, project_mobile_detail.js,
 // project_entities.js, project_findings.js, project_artifacts.js, project_packages.js, and controller.js
 // so the helpers and overlays it delegates to are already defined.
 
@@ -132,22 +132,10 @@
   };
 
   let allWorkflows = [];
-  let projectWorkspaceRows = [];
-  let projectWorkspaceSummaries = new Map();
-  let projectWorkspacePaginationState = { limit: 50, offset: 0, total: 0 };
-  let projectWorkspaceLoading = false;
-  let projectWorkspaceSelectedId = '';
-  let projectWorkspaceTab = 'details';
-  let projectWorkspaceEditingTargetId = '';
-  let projectWorkspaceLastTargetType = 'domain';
-  let projectWorkspaceCollapsedFindingGroups = new Set();
-  let projectWorkspaceCollapsedArtifactGroups = new Set();
-  let projectWorkspaceEntityTab = 'ip';
-  let projectWorkspaceEntitySelectMode = false;
-  let projectWorkspaceSelectedEntityIds = new Set();
-  let projectWorkspaceFindingSelectMode = false;
-  let projectWorkspaceSelectedFindingIds = new Set();
-  let projectWorkspaceEntityPicker = null;
+  const projectWorkspaceStateFactory = global.DarklabProjectWorkspaceState
+    && global.DarklabProjectWorkspaceState.createProjectWorkspaceState;
+  if (typeof projectWorkspaceStateFactory !== 'function') throw new Error('DarklabProjectWorkspaceState is unavailable');
+  const projectWorkspaceState = projectWorkspaceStateFactory();
   // ── Layout application ──────────────────────────────────────────
   function applyCollapsed() {
     rail.classList.toggle('rail-collapsed', ui.collapsed);
@@ -813,11 +801,11 @@
         if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction(options);
       },
       refreshProjectWorkspace,
-      selectedProjectId: () => projectWorkspaceSelectedId,
+      selectedProjectId: () => projectWorkspaceState.selectedId(),
       setProjectMobileCreateOpen: _setProjectMobileCreateOpen,
       setProjectPaginationOffset: _setProjectPaginationOffset,
-      setProjectWorkspaceTab: (tab) => { projectWorkspaceTab = tab; },
-      setSelectedProjectId: (projectId) => { projectWorkspaceSelectedId = String(projectId || ''); },
+      setProjectWorkspaceTab: projectWorkspaceState.setTab,
+      setSelectedProjectId: projectWorkspaceState.setSelectedId,
       showToast: typeof showToast === 'function' ? showToast : null,
     });
     return projectWorkspaceShellController;
@@ -836,7 +824,7 @@
       projectRunItems: _projectRunItems,
       projectWorkspaceRequest: _projectWorkspaceRequest,
       refreshProjectWorkspace,
-      selectedProjectId: () => projectWorkspaceSelectedId,
+      selectedProjectId: () => projectWorkspaceState.selectedId(),
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
       showConfirm: typeof showConfirm === 'function' ? showConfirm : null,
     });
@@ -852,19 +840,14 @@
   }
 
   async function _projectResponseError(resp, fallback) {
-    let message = fallback;
-    try {
-      const data = await resp.json();
-      if (data && data.error) message = data.error;
-    } catch (_) {}
-    return new Error(message || fallback);
+    return _projectWorkspaceShellController().responseError(resp, fallback);
   }
 
   function _selectedProject() {
     return _projectWorkspaceLifecycleController().selectedProject();
   }
 
-  function _projectSummary(projectId = projectWorkspaceSelectedId) {
+  function _projectSummary(projectId = projectWorkspaceState.selectedId()) {
     return _projectWorkspaceLifecycleController().projectSummary(projectId);
   }
 
@@ -892,15 +875,15 @@
     if (typeof factory !== 'function') throw new Error('DarklabProjectEntities is unavailable');
     projectEntitiesController = factory({
       apiFetch,
-      getSummary: projectId => projectWorkspaceSummaries.get(String(projectId || '')) || null,
-      getActiveTab: () => projectWorkspaceEntityTab,
-      setActiveTab: (tabId) => { projectWorkspaceEntityTab = tabId; },
-      getSelectMode: () => projectWorkspaceEntitySelectMode,
-      setSelectMode: (enabled) => { projectWorkspaceEntitySelectMode = !!enabled; },
-      getSelectedIds: () => projectWorkspaceSelectedEntityIds,
-      getPicker: () => projectWorkspaceEntityPicker,
-      setPicker: (picker) => { projectWorkspaceEntityPicker = picker; },
-      getSelectedProjectId: () => projectWorkspaceSelectedId,
+      getSummary: projectId => projectWorkspaceState.summary(projectId),
+      getActiveTab: projectWorkspaceState.entityTab,
+      setActiveTab: projectWorkspaceState.setEntityTab,
+      getSelectMode: projectWorkspaceState.entitySelectMode,
+      setSelectMode: projectWorkspaceState.setEntitySelectMode,
+      getSelectedIds: projectWorkspaceState.selectedEntityIds,
+      getPicker: projectWorkspaceState.entityPicker,
+      setPicker: projectWorkspaceState.setEntityPicker,
+      getSelectedProjectId: projectWorkspaceState.selectedId,
       formatDate: _formatProjectDate,
       shortProjectRunId: _shortProjectRunId,
       makeProjectButton: _makeProjectButton,
@@ -925,7 +908,7 @@
       closeProjectWorkspace,
       openAtlas: global.openAtlas,
       projectDisplayName: _projectDisplayName,
-      setWorkspaceTab: (tabId) => { projectWorkspaceTab = tabId; },
+      setWorkspaceTab: projectWorkspaceState.setTab,
     });
     return projectEntitiesController;
   }
@@ -944,7 +927,7 @@
       manifestJson: projectPackageManifestJson,
       wizardOverlay: projectPackageWizardOverlay,
       wizardBody: projectPackageWizardBody,
-      getSelectedProjectId: () => projectWorkspaceSelectedId,
+      getSelectedProjectId: projectWorkspaceState.selectedId,
       selectedProject: _selectedProject,
       projectSummary: _projectSummary,
       projectRunItems: _projectRunItems,
@@ -975,7 +958,7 @@
       renderProjectExplorer: _renderProjectExplorer,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
       downloadBlobAsAttachment: _downloadBlobAsAttachment,
-      setWorkspaceTab: (tabId) => { projectWorkspaceTab = tabId; },
+      setWorkspaceTab: projectWorkspaceState.setTab,
       syncProjectWorkspaceNestedSuppression: _syncProjectWorkspaceNestedSuppression,
       focusProjectNestedSheet: _focusProjectNestedSheet,
       installProjectMobileKeyboardGuards: _installProjectMobileKeyboardGuards,
@@ -990,10 +973,10 @@
     const factory = global.DarklabProjectFilters && global.DarklabProjectFilters.createProjectFiltersController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectFilters is unavailable');
     projectFiltersController = factory({
-      getSelectedProjectId: () => projectWorkspaceSelectedId,
+      getSelectedProjectId: projectWorkspaceState.selectedId,
       projectWorkspaceModal: () => projectWorkspaceModal,
       projectExplorerBody: () => projectExplorerBody,
-      projectWorkspaceTab: () => projectWorkspaceTab,
+      projectWorkspaceTab: projectWorkspaceState.tab,
       projectSummary: _projectSummary,
       findingReviewStates: PROJECT_WORKSPACE_CONSTANTS.findingReviewStates,
       findingSeverityRank: PROJECT_WORKSPACE_CONSTANTS.findingSeverityRank,
@@ -1001,6 +984,8 @@
       projectFindingSortOptions: PROJECT_WORKSPACE_CONSTANTS.findingSortOptions,
       projectFindingNoteStateOptions: PROJECT_WORKSPACE_CONSTANTS.findingNoteStateOptions,
       projectFindingOrphanOptions: PROJECT_WORKSPACE_CONSTANTS.findingOrphanOptions,
+      projectFindingScopeOptions: PROJECT_WORKSPACE_CONSTANTS.findingScopeOptions,
+      projectFindingSeverityOptions: PROJECT_WORKSPACE_CONSTANTS.findingSeverityOptions,
       projectTargetItems: _projectTargetItems,
       projectTargetLabel: _projectTargetLabel,
       projectRunItems: _projectRunItems,
@@ -1026,7 +1011,7 @@
     if (typeof factory !== 'function') throw new Error('DarklabProjectFindingsData is unavailable');
     projectFindingsDataController = factory({
       apiFetch,
-      selectedProjectId: () => projectWorkspaceSelectedId,
+      selectedProjectId: projectWorkspaceState.selectedId,
       mobileView: () => _projectMobileShellController().currentView(),
       projectSummary: _projectSummary,
       findingFilteredKey: _projectFindingFilteredKey,
@@ -1055,12 +1040,12 @@
     if (typeof factory !== 'function') throw new Error('DarklabProjectFindings is unavailable');
     projectFindingsController = factory({
       findingReviewStates: PROJECT_WORKSPACE_CONSTANTS.findingReviewStates,
-      collapsedFindingGroups: () => projectWorkspaceCollapsedFindingGroups,
+      collapsedFindingGroups: projectWorkspaceState.collapsedFindingGroups,
       collapsedFindingGroupLabels: _projectCollapsedFindingGroupLabels,
       findingsLoadingId: () => _projectFindingsDataController().loadingId(),
       hasFindings: projectId => _projectFindingsDataController().loaded(projectId),
-      findingSelectMode: () => projectWorkspaceFindingSelectMode,
-      selectedFindingIds: () => projectWorkspaceSelectedFindingIds,
+      findingSelectMode: projectWorkspaceState.findingSelectMode,
+      selectedFindingIds: projectWorkspaceState.selectedFindingIds,
       projectFindingPagination: (projectId, summary) => _projectFindingsDataController().page(projectId, summary),
       projectFindingItems: _projectFindingItems,
       filteredProjectFindings: _filteredProjectFindings,
@@ -1088,13 +1073,15 @@
     projectArtifactsController = factory({
       apiFetch,
       projectResponseError: _projectResponseError,
-      collapsedArtifactGroups: () => projectWorkspaceCollapsedArtifactGroups,
+      collapsedArtifactGroups: projectWorkspaceState.collapsedArtifactGroups,
       filesEnabled: () => !!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true),
-      selectedProjectId: () => projectWorkspaceSelectedId,
+      selectedProjectId: projectWorkspaceState.selectedId,
       projectTargetFilterActive: _projectTargetFilterActive,
       projectFindingsLoaded: _projectFindingsLoaded,
       filteredProjectArtifacts: _filteredProjectArtifacts,
-      projectArtifactServerFilterParams: _projectArtifactServerFilterParams,
+      projectRunFilterSet: _projectRunFilterSet,
+      projectTargetFilterSet: _projectTargetFilterSet,
+      projectTargetItems: _projectTargetItems,
       projectRunById: _projectRunById,
       shortProjectRunId: _shortProjectRunId,
       entityMetadataChips: _entityMetadataChips,
@@ -1134,13 +1121,13 @@
       projectLabelsInput,
       projectLabelsSaveButton,
       projectLabelsSaveStatus,
-      projectWorkspaceTab: () => projectWorkspaceTab,
+      projectWorkspaceTab: projectWorkspaceState.tab,
       selectedProject: _selectedProject,
-      selectedProjectId: () => projectWorkspaceSelectedId,
-      projectRows: () => projectWorkspaceRows,
-      setProjectRows: (rows) => { projectWorkspaceRows = Array.isArray(rows) ? rows : []; },
+      selectedProjectId: projectWorkspaceState.selectedId,
+      projectRows: projectWorkspaceState.rows,
+      setProjectRows: projectWorkspaceState.setRows,
       projectSummary: _projectSummary,
-      setProjectSummary: (projectId, summary) => { projectWorkspaceSummaries.set(String(projectId || ''), summary); },
+      setProjectSummary: projectWorkspaceState.setSummary,
       activeProject: _activeProject,
       setActiveProject: _setActiveProject,
       projectDisplayName: _projectDisplayName,
@@ -1174,9 +1161,9 @@
     if (typeof factory !== 'function') throw new Error('DarklabProjectList is unavailable');
     projectListController = factory({
       projectWorkspaceBody,
-      projectWorkspaceLoading: () => projectWorkspaceLoading,
-      projectRows: () => projectWorkspaceRows,
-      selectedProjectId: () => projectWorkspaceSelectedId,
+      projectWorkspaceLoading: projectWorkspaceState.loading,
+      projectRows: projectWorkspaceState.rows,
+      selectedProjectId: projectWorkspaceState.selectedId,
       activeProject: _activeProject,
       projectSummary: _projectSummary,
       projectCountEntries: _projectCountEntries,
@@ -1188,7 +1175,7 @@
       emptyProjectPanel: _emptyProjectPanel,
       mobileMenuText: '☰',
       mobileChevronText: '›',
-      projectPagination: () => projectWorkspacePaginationState,
+      projectPagination: projectWorkspaceState.pagination,
       projectWorkspacePagination,
     });
     return projectListController;
@@ -1205,8 +1192,8 @@
       projectMobileDetailTopbar,
       projectMobileTabs,
       activeProject: _activeProject,
-      projectWorkspaceTab: () => projectWorkspaceTab,
-      setProjectWorkspaceTab: (tab) => { projectWorkspaceTab = tab; },
+      projectWorkspaceTab: projectWorkspaceState.tab,
+      setProjectWorkspaceTab: projectWorkspaceState.setTab,
       projectCounts: _projectCounts,
       projectDisplayName: _projectDisplayName,
       projectIsArchived: _projectIsArchived,
@@ -1222,7 +1209,6 @@
       appendProjectLabelChips: _appendProjectLabelChips,
       makeProjectButton: _makeProjectButton,
       bindProjectRuntimePressable: _bindProjectRuntimePressable,
-      syncProjectMobileActiveTabScroll: _syncProjectMobileActiveTabScroll,
       metaSeparator: ' · ',
       mobileBackText: '‹ Back',
     });
@@ -1275,11 +1261,11 @@
       projectMobileDetailBody,
       projectMobileTabItems: _projectMobileTabItems,
       projectPackageWizardActive: _projectPackageWizardActive,
-      projectPagination: () => projectWorkspacePaginationState,
-      projectRows: () => projectWorkspaceRows,
+      projectPagination: projectWorkspaceState.pagination,
+      projectRows: projectWorkspaceState.rows,
       projectSummary: _projectSummary,
       projectTargetFilterActive: _projectTargetFilterActive,
-      projectWorkspaceLoading: () => projectWorkspaceLoading,
+      projectWorkspaceLoading: projectWorkspaceState.loading,
       projectWorkspaceSubtitle,
       renderProjectArtifacts: _renderProjectArtifacts,
       renderProjectDetails: _renderProjectDetails,
@@ -1295,10 +1281,10 @@
       scheduleProjectFilterSortDividerSync: _scheduleProjectFilterSortDividerSync,
       selectedProject: _selectedProject,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
-      setWorkspaceTab: (tabId) => { projectWorkspaceTab = tabId; },
+      setWorkspaceTab: projectWorkspaceState.setTab,
       syncProjectFilterSortDivider: _syncProjectFilterSortDivider,
       syncProjectForms: _syncProjectForms,
-      workspaceTab: () => projectWorkspaceTab,
+      workspaceTab: projectWorkspaceState.tab,
     });
     return projectWorkspaceRendererController;
   }
@@ -1364,10 +1350,10 @@
       notesInput: projectTargetNotesInput,
       title: projectTargetEditorTitle,
       submitButton: projectTargetSubmitButton,
-      getLastTargetType: () => projectWorkspaceLastTargetType,
-      setLastTargetType: (targetType) => { projectWorkspaceLastTargetType = String(targetType || projectWorkspaceLastTargetType || 'domain'); },
-      setEditingTargetId: (targetId) => { projectWorkspaceEditingTargetId = String(targetId || ''); },
-      selectedProjectId: () => projectWorkspaceSelectedId,
+      getLastTargetType: projectWorkspaceState.lastTargetType,
+      setLastTargetType: projectWorkspaceState.setLastTargetType,
+      setEditingTargetId: projectWorkspaceState.setEditingTargetId,
+      selectedProjectId: projectWorkspaceState.selectedId,
       activeProject: _activeProject,
       entityLabelValues: _entityLabelValues,
       entityNoteBody: _entityNoteBody,
@@ -1437,7 +1423,7 @@
     if (typeof factory !== 'function') throw new Error('DarklabProjectMobileCompare is unavailable');
     projectMobileCompareController = factory({
       projectWorkspaceModal,
-      projectSummary: (projectId) => projectWorkspaceSummaries.get(String(projectId || '')),
+      projectSummary: projectWorkspaceState.summary,
       projectComparableRuns: _projectComparableRuns,
       projectRunBaselineLabelOptions: _projectRunBaselineLabelOptions,
       projectRunCompareOptionText: _projectRunCompareOptionText,
@@ -1472,19 +1458,19 @@
       projectMobilePagination,
       projectMobileRoot,
       projectMobileSummary,
-      projectPagination: () => projectWorkspacePaginationState,
-      projectRows: () => projectWorkspaceRows,
-      projectPagination: () => projectWorkspacePaginationState,
-      projectWorkspaceLoading: () => projectWorkspaceLoading,
+      projectPagination: projectWorkspaceState.pagination,
+      projectRows: projectWorkspaceState.rows,
+      projectPagination: projectWorkspaceState.pagination,
+      projectWorkspaceLoading: projectWorkspaceState.loading,
       renderMobileListRow: _renderProjectMobileListRow,
       renderProjectPagination: _renderProjectPagination,
       renderProjectMobileDetail: _renderProjectMobileDetail,
       renderProjectWorkspace: _renderProjectWorkspace,
-      selectedProjectId: () => projectWorkspaceSelectedId,
+      selectedProjectId: projectWorkspaceState.selectedId,
       ensureProjectSummary: _ensureProjectSummary,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
-      setSelectedProjectId: (projectId) => { projectWorkspaceSelectedId = String(projectId || ''); },
-      setWorkspaceTab: (tabId) => { projectWorkspaceTab = tabId; },
+      setSelectedProjectId: projectWorkspaceState.setSelectedId,
+      setWorkspaceTab: projectWorkspaceState.setTab,
     });
     return projectMobileShellController;
   }
@@ -1501,12 +1487,12 @@
       projectMobileDetailBody,
       projectMobileTabs,
       notePreviewLimit: PROJECT_WORKSPACE_CONSTANTS.mobileNotePreviewLimit,
-      selectedProjectId: () => projectWorkspaceSelectedId,
-      setSelectedProjectId: (projectId) => { projectWorkspaceSelectedId = String(projectId || ''); },
-      projectWorkspaceTab: () => projectWorkspaceTab,
-      projectWorkspaceLoading: () => projectWorkspaceLoading,
+      selectedProjectId: projectWorkspaceState.selectedId,
+      setSelectedProjectId: projectWorkspaceState.setSelectedId,
+      projectWorkspaceTab: projectWorkspaceState.tab,
+      projectWorkspaceLoading: projectWorkspaceState.loading,
       activeProject: _activeProject,
-      projectRows: () => projectWorkspaceRows,
+      projectRows: projectWorkspaceState.rows,
       projectSummary: _projectSummary,
       projectCounts: _projectCounts,
       projectDisplayName: _projectDisplayName,
@@ -1611,23 +1597,17 @@
     projectWorkspaceLifecycleController = factory({
       apiFetch,
       projectWorkspaceBody,
-      selectedProjectId: () => projectWorkspaceSelectedId,
-      setSelectedProjectId: (projectId) => { projectWorkspaceSelectedId = String(projectId || ''); },
-      projectRows: () => projectWorkspaceRows,
-      setProjectRows: (rows) => { projectWorkspaceRows = Array.isArray(rows) ? rows : []; },
-      projectPagination: () => projectWorkspacePaginationState,
-      setProjectPagination: (pagination) => {
-        projectWorkspacePaginationState = {
-          limit: Number(pagination && pagination.limit || 50),
-          offset: Number(pagination && pagination.offset || 0),
-          total: Number(pagination && pagination.total || 0),
-        };
-      },
-      projectSummaries: () => projectWorkspaceSummaries,
-      setProjectSummary: (projectId, summary) => { projectWorkspaceSummaries.set(String(projectId || ''), summary); },
-      setProjectSummaries: (summaries) => { projectWorkspaceSummaries = summaries instanceof Map ? summaries : new Map(); },
-      projectWorkspaceLoading: () => projectWorkspaceLoading,
-      setProjectWorkspaceLoading: (loading) => { projectWorkspaceLoading = !!loading; },
+      selectedProjectId: projectWorkspaceState.selectedId,
+      setSelectedProjectId: projectWorkspaceState.setSelectedId,
+      projectRows: projectWorkspaceState.rows,
+      setProjectRows: projectWorkspaceState.setRows,
+      projectPagination: projectWorkspaceState.pagination,
+      setProjectPagination: projectWorkspaceState.setPagination,
+      projectSummaries: projectWorkspaceState.summaries,
+      setProjectSummary: projectWorkspaceState.setSummary,
+      setProjectSummaries: projectWorkspaceState.setSummaries,
+      projectWorkspaceLoading: projectWorkspaceState.loading,
+      setProjectWorkspaceLoading: projectWorkspaceState.setLoading,
       activeProject: _activeProject,
       loadActiveProjectContext,
       invalidateProjectFindings: _invalidateProjectFindings,
@@ -1655,9 +1635,7 @@
       activeProject: _activeProject,
       artifactGroupKey: _projectArtifactGroupKey,
       avoidProjectRunCompareLabelSelfTarget: _avoidProjectRunCompareLabelSelfTarget,
-      clearEditingTargetIf: (targetId) => {
-        if (projectWorkspaceEditingTargetId === String(targetId || '')) projectWorkspaceEditingTargetId = '';
-      },
+      clearEditingTargetIf: projectWorkspaceState.clearEditingTargetIf,
       closeProjectEntityEditor: _closeProjectEntityEditor,
       closeProjectFilterMenus: _closeProjectFilterMenus,
       closeProjectPackageManifest: _closeProjectPackageManifest,
@@ -1672,11 +1650,11 @@
       downloadProjectArtifact: _downloadProjectArtifact,
       downloadProjectPackage: _downloadProjectPackage,
       entitiesController: _projectEntitiesController,
-      entitySelectMode: () => projectWorkspaceEntitySelectMode,
+      entitySelectMode: projectWorkspaceState.entitySelectMode,
       filteredProjectFindings: _filteredProjectFindings,
       filtersController: _projectFiltersController,
       findingGroupKey: _projectFindingGroupKey,
-      findingSelectMode: () => projectWorkspaceFindingSelectMode,
+      findingSelectMode: projectWorkspaceState.findingSelectMode,
       flushProjectNotesAutosave: _flushProjectNotesAutosave,
       invalidateProjectFindings: _invalidateProjectFindings,
       isProjectWorkspaceOpen,
@@ -1707,15 +1685,18 @@
       projectExplorerBody,
       projectFindingPagination: _projectFindingPagination,
       projectFindingItems: _projectFindingItems,
+      projectFindingCommandFilterSet: _projectFindingCommandFilterSet,
       projectFindingLabelFilterSet: _projectFindingLabelFilterSet,
       projectFindingServerFiltersActive: _projectFindingServerFiltersActive,
+      projectFindingSeverityFilterSet: _projectFindingSeverityFilterSet,
+      projectFindingScopeFilterSet: _projectFindingScopeFilterSet,
       projectFindingStatusFilterSet: _projectFindingStatusFilterSet,
       projectMobileDetailBody,
       projectMobileListView,
       projectMobileProjectActions: _projectMobileProjectActions,
       projectPackageById: _projectPackageById,
-      projectPagination: () => projectWorkspacePaginationState,
-      projectRows: () => projectWorkspaceRows,
+      projectPagination: projectWorkspaceState.pagination,
+      projectRows: projectWorkspaceState.rows,
       projectRunPagination: _projectRunPagination,
       projectRunFilterSet: _projectRunFilterSet,
       projectRunItems: _projectRunItems,
@@ -1729,38 +1710,30 @@
       renderProjectMobile: _renderProjectMobile,
       renderProjectMobileDetail: _renderProjectMobileDetail,
       renderProjectWorkspace: _renderProjectWorkspace,
-      selectedEntityIds: () => projectWorkspaceSelectedEntityIds,
-      selectedFindingIds: () => projectWorkspaceSelectedFindingIds,
-      selectedProjectId: () => projectWorkspaceSelectedId,
+      selectedEntityIds: projectWorkspaceState.selectedEntityIds,
+      selectedFindingIds: projectWorkspaceState.selectedFindingIds,
+      selectedProjectId: projectWorkspaceState.selectedId,
       selectProjectFromMobile: _selectProjectFromMobile,
       setProjectFindingPageOffset: _setProjectFindingPageOffset,
       setProjectArtifactPageOffset: _setProjectArtifactPageOffset,
       setProjectRunPageOffset: _setProjectRunPageOffset,
       setProjectPaginationOffset: _setProjectPaginationOffset,
       setCachedFindingReviewState: _setCachedFindingReviewState,
-      setFindingSelectMode: (enabled) => { projectWorkspaceFindingSelectMode = !!enabled; },
+      setFindingSelectMode: projectWorkspaceState.setFindingSelectMode,
       setProjectMobileCreateOpen: _setProjectMobileCreateOpen,
       setProjectMobileView: _setProjectMobileView,
       setProjectPackageDownloadBusy: _setProjectPackageDownloadBusy,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
       setProjectRunCompareMode: _setProjectRunCompareMode,
-      setSelectedProjectId: (projectId) => { projectWorkspaceSelectedId = String(projectId || ''); },
-      setWorkspaceTab: (tabId) => { projectWorkspaceTab = tabId; },
+      setSelectedProjectId: projectWorkspaceState.setSelectedId,
+      setWorkspaceTab: projectWorkspaceState.setTab,
       syncProjectRunCompareMode: _syncProjectRunCompareMode,
-      toggleArtifactGroup: (projectId, runId) => {
-        const key = _projectArtifactGroupKey(projectId, runId);
-        if (projectWorkspaceCollapsedArtifactGroups.has(key)) projectWorkspaceCollapsedArtifactGroups.delete(key);
-        else projectWorkspaceCollapsedArtifactGroups.add(key);
-      },
-      toggleFindingGroup: (projectId, runLabel) => {
-        const key = _projectFindingGroupKey(projectId, runLabel);
-        if (projectWorkspaceCollapsedFindingGroups.has(key)) projectWorkspaceCollapsedFindingGroups.delete(key);
-        else projectWorkspaceCollapsedFindingGroups.add(key);
-      },
+      toggleArtifactGroup: projectWorkspaceState.toggleArtifactGroup,
+      toggleFindingGroup: projectWorkspaceState.toggleFindingGroup,
       toggleMobileArchivedOpen: () => {
         _projectMobileShellController().setArchivedOpen(!_projectMobileShellController().isArchivedOpen());
       },
-      workspaceTab: () => projectWorkspaceTab,
+      workspaceTab: projectWorkspaceState.tab,
     });
     return projectWorkspaceEventsController;
   }
@@ -1774,30 +1747,30 @@
   }
 
   function _targetFilterableProjectTab() {
-    return _projectFiltersController().targetFilterableProjectTab(projectWorkspaceTab);
+    return _projectFiltersController().targetFilterableProjectTab(projectWorkspaceState.tab());
   }
 
-  function _projectTargetFilterSet(projectId = projectWorkspaceSelectedId) {
+  function _projectTargetFilterSet(projectId = projectWorkspaceState.selectedId()) {
     return _projectFiltersController().targetFilterSet(projectId);
   }
 
-  function _projectTargetFilterIds(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId)) {
+  function _projectTargetFilterIds(projectId = projectWorkspaceState.selectedId(), summary = _projectSummary(projectId)) {
     return _projectFiltersController().targetFilterIds(projectId, summary);
   }
 
-  function _projectTargetFilterActive(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId)) {
+  function _projectTargetFilterActive(projectId = projectWorkspaceState.selectedId(), summary = _projectSummary(projectId)) {
     return _projectFiltersController().targetFilterActive(projectId, summary);
   }
 
-  function _projectRunFilterSet(projectId = projectWorkspaceSelectedId) {
+  function _projectRunFilterSet(projectId = projectWorkspaceState.selectedId()) {
     return _projectFiltersController().runFilterSet(projectId);
   }
 
-  function _projectRunFilterIds(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId)) {
+  function _projectRunFilterIds(projectId = projectWorkspaceState.selectedId(), summary = _projectSummary(projectId)) {
     return _projectFiltersController().runFilterIds(projectId, summary);
   }
 
-  function _projectRunFilterActive(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId)) {
+  function _projectRunFilterActive(projectId = projectWorkspaceState.selectedId(), summary = _projectSummary(projectId)) {
     return _projectFiltersController().runFilterActive(projectId, summary);
   }
 
@@ -1809,51 +1782,63 @@
     return _projectFiltersController().runFilterChipLabel(run);
   }
 
-  function _projectFindingStatusFilterSet(projectId = projectWorkspaceSelectedId) {
+  function _projectFindingStatusFilterSet(projectId = projectWorkspaceState.selectedId()) {
     return _projectFiltersController().findingStatusFilterSet(projectId);
   }
 
-  function _projectFindingStatusFilterValues(projectId = projectWorkspaceSelectedId) {
+  function _projectFindingCommandFilterSet(projectId = projectWorkspaceState.selectedId()) {
+    return _projectFiltersController().findingCommandFilterSet(projectId);
+  }
+
+  function _projectFindingSeverityFilterSet(projectId = projectWorkspaceState.selectedId()) {
+    return _projectFiltersController().findingSeverityFilterSet(projectId);
+  }
+
+  function _projectFindingScopeFilterSet(projectId = projectWorkspaceState.selectedId()) {
+    return _projectFiltersController().findingScopeFilterSet(projectId);
+  }
+
+  function _projectFindingStatusFilterValues(projectId = projectWorkspaceState.selectedId()) {
     return _projectFiltersController().findingStatusFilterValues(projectId);
   }
 
-  function _projectFindingStatusFilterActive(projectId = projectWorkspaceSelectedId) {
+  function _projectFindingStatusFilterActive(projectId = projectWorkspaceState.selectedId()) {
     return _projectFiltersController().findingStatusFilterActive(projectId);
   }
 
-  function _projectFindingLabelFilterSet(projectId = projectWorkspaceSelectedId) {
+  function _projectFindingLabelFilterSet(projectId = projectWorkspaceState.selectedId()) {
     return _projectFiltersController().findingLabelFilterSet(projectId);
   }
 
-  function _projectFindingLabelOptions(projectId = projectWorkspaceSelectedId) {
+  function _projectFindingLabelOptions(projectId = projectWorkspaceState.selectedId()) {
     return _projectFiltersController().findingLabelOptions(projectId);
   }
 
-  function _projectFindingLabelFilterValues(projectId = projectWorkspaceSelectedId) {
+  function _projectFindingLabelFilterValues(projectId = projectWorkspaceState.selectedId()) {
     return _projectFiltersController().findingLabelFilterValues(projectId);
   }
 
-  function _projectFindingLabelFilterActive(projectId = projectWorkspaceSelectedId) {
+  function _projectFindingLabelFilterActive(projectId = projectWorkspaceState.selectedId()) {
     return _projectFiltersController().findingLabelFilterActive(projectId);
   }
 
-  function _projectFindingNoteStateValue(projectId = projectWorkspaceSelectedId) {
+  function _projectFindingNoteStateValue(projectId = projectWorkspaceState.selectedId()) {
     return _projectFiltersController().findingNoteStateValue(projectId);
   }
 
-  function _projectFindingNoteStateFilterActive(projectId = projectWorkspaceSelectedId) {
+  function _projectFindingNoteStateFilterActive(projectId = projectWorkspaceState.selectedId()) {
     return _projectFiltersController().findingNoteStateFilterActive(projectId);
   }
 
-  function _projectFindingOrphanFilterValue(projectId = projectWorkspaceSelectedId) {
+  function _projectFindingOrphanFilterValue(projectId = projectWorkspaceState.selectedId()) {
     return _projectFiltersController().findingOrphanFilterValue(projectId);
   }
 
-  function _projectFindingOrphanFilterActive(projectId = projectWorkspaceSelectedId) {
+  function _projectFindingOrphanFilterActive(projectId = projectWorkspaceState.selectedId()) {
     return _projectFiltersController().findingOrphanFilterActive(projectId);
   }
 
-  function _projectFindingSortValue(projectId = projectWorkspaceSelectedId) {
+  function _projectFindingSortValue(projectId = projectWorkspaceState.selectedId()) {
     return _projectFiltersController().findingSortValue(projectId);
   }
 
@@ -1877,14 +1862,8 @@
     return _projectFindingsController().groupCollapsed(projectId, runLabel);
   }
 
-  function _projectCollapsedFindingGroupLabels(projectId = projectWorkspaceSelectedId) {
-    const normalized = String(projectId || '');
-    if (!normalized) return [];
-    const prefix = `${normalized}\x1f`;
-    return [...projectWorkspaceCollapsedFindingGroups]
-      .filter(key => String(key || '').startsWith(prefix))
-      .map(key => String(key).slice(prefix.length))
-      .filter(Boolean);
+  function _projectCollapsedFindingGroupLabels(projectId = projectWorkspaceState.selectedId()) {
+    return _projectFindingsController().collapsedGroupLabels(projectId);
   }
 
   function _projectArtifactGroupKey(projectId, runId) {
@@ -1899,15 +1878,15 @@
     return _projectSharedUiController().runItems(summary);
   }
 
-  function _projectRunPagination(projectId = projectWorkspaceSelectedId) {
+  function _projectRunPagination(projectId = projectWorkspaceState.selectedId()) {
     return _projectRunsController().page(projectId);
   }
 
-  function _setProjectRunPageOffset(projectId = projectWorkspaceSelectedId, offset = 0) {
+  function _setProjectRunPageOffset(projectId = projectWorkspaceState.selectedId(), offset = 0) {
     _projectRunsController().setPageOffset(projectId, offset);
   }
 
-  async function _loadProjectRuns(projectId = projectWorkspaceSelectedId, options = {}) {
+  async function _loadProjectRuns(projectId = projectWorkspaceState.selectedId(), options = {}) {
     await _projectRunsController().load(projectId, options);
   }
 
@@ -1931,23 +1910,23 @@
     return _projectArtifactsController().items(summary);
   }
 
-  function _projectArtifactPagination(projectId = projectWorkspaceSelectedId) {
+  function _projectArtifactPagination(projectId = projectWorkspaceState.selectedId()) {
     return _projectArtifactsController().page(projectId);
   }
 
-  function _setProjectArtifactPageOffset(projectId = projectWorkspaceSelectedId, offset = 0) {
+  function _setProjectArtifactPageOffset(projectId = projectWorkspaceState.selectedId(), offset = 0) {
     _projectArtifactsController().setPageOffset(projectId, offset);
   }
 
-  function _pagedProjectArtifactItems(projectId = projectWorkspaceSelectedId, artifacts = []) {
+  function _pagedProjectArtifactItems(projectId = projectWorkspaceState.selectedId(), artifacts = []) {
     return _projectArtifactsController().pagedItems(projectId, artifacts);
   }
 
-  async function _loadProjectArtifacts(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId), options = {}) {
+  async function _loadProjectArtifacts(projectId = projectWorkspaceState.selectedId(), summary = _projectSummary(projectId), options = {}) {
     return _projectArtifactsController().load(projectId, summary, options);
   }
 
-  async function _loadAllProjectArtifacts(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId)) {
+  async function _loadAllProjectArtifacts(projectId = projectWorkspaceState.selectedId(), summary = _projectSummary(projectId)) {
     return _projectArtifactsController().loadAll(projectId, summary);
   }
 
@@ -2059,7 +2038,7 @@
     return _projectPackagesController().items(summary);
   }
 
-  function _projectPackageWizardActive(projectId = projectWorkspaceSelectedId) {
+  function _projectPackageWizardActive(projectId = projectWorkspaceState.selectedId()) {
     return _projectPackagesController().isWizardActive(projectId);
   }
 
@@ -2114,19 +2093,19 @@
     await _projectPackagesController().downloadPackage(projectId, pkg);
   }
 
-  function _projectFindingItems(projectId = projectWorkspaceSelectedId) {
+  function _projectFindingItems(projectId = projectWorkspaceState.selectedId()) {
     return _projectFindingsDataController().items(projectId);
   }
 
-  function _projectFindingsLoaded(projectId = projectWorkspaceSelectedId) {
+  function _projectFindingsLoaded(projectId = projectWorkspaceState.selectedId()) {
     return _projectFindingsDataController().loaded(projectId);
   }
 
-  function _projectFindingPagination(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId)) {
+  function _projectFindingPagination(projectId = projectWorkspaceState.selectedId(), summary = _projectSummary(projectId)) {
     return _projectFindingsDataController().page(projectId, summary);
   }
 
-  function _setProjectFindingPageOffset(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId), offset = 0) {
+  function _setProjectFindingPageOffset(projectId = projectWorkspaceState.selectedId(), summary = _projectSummary(projectId), offset = 0) {
     _projectFindingsDataController().setPageOffset(projectId, summary, offset);
   }
 
@@ -2135,34 +2114,22 @@
   }
 
   function _projectArtifactServerFilterParams(projectId, summary = _projectSummary(projectId)) {
-    const params = new URLSearchParams();
-    const runFilters = _projectRunFilterSet(projectId);
-    runFilters.forEach((runId) => {
-      if (runId) params.append('run_id', runId);
-    });
-    const targetFilters = _projectTargetFilterSet(projectId);
-    const availableTargets = new Set(_projectTargetItems(summary).map(target => String(target && target.id || '')).filter(Boolean));
-    targetFilters.forEach((targetId) => {
-      if (targetId && availableTargets.has(targetId)) params.append('target_id', targetId);
-    });
-    return params;
+    return _projectArtifactsController().serverFilterParams(projectId, summary);
   }
 
-  function _projectArtifactServerFilterKey(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId)) {
-    const params = _projectArtifactServerFilterParams(projectId, summary);
-    params.sort?.();
-    return params.toString();
+  function _projectArtifactServerFilterKey(projectId = projectWorkspaceState.selectedId(), summary = _projectSummary(projectId)) {
+    return _projectArtifactsController().serverFilterKey(projectId, summary);
   }
 
-  function _projectFindingServerFiltersActive(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId)) {
+  function _projectFindingServerFiltersActive(projectId = projectWorkspaceState.selectedId(), summary = _projectSummary(projectId)) {
     return _projectFiltersController().findingServerFiltersActive(projectId, summary);
   }
 
-  function _projectFindingFilteredKey(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId)) {
+  function _projectFindingFilteredKey(projectId = projectWorkspaceState.selectedId(), summary = _projectSummary(projectId)) {
     return _projectFiltersController().findingFilteredKey(projectId, summary);
   }
 
-  function _projectFilteredFindingItems(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId)) {
+  function _projectFilteredFindingItems(projectId = projectWorkspaceState.selectedId(), summary = _projectSummary(projectId)) {
     return _projectFiltersController().filteredFindingItems(projectId, summary);
   }
 
@@ -2350,7 +2317,7 @@
     return _projectListController().isArchived(project);
   }
 
-  function _orderedProjectRows(activeId, rows = projectWorkspaceRows) {
+  function _orderedProjectRows(activeId, rows = projectWorkspaceState.rows()) {
     return _projectListController().orderedRows(activeId, rows);
   }
 
@@ -2362,18 +2329,12 @@
     return _projectNavigationController().mobileTabItems(projectId, summary);
   }
 
-  const _PROJECT_MOBILE_TAB_EDGE_OPTS = { wrapSelector: '.project-mobile-tabs-wrap' };
-
   function _syncProjectMobileActiveTabScroll() {
-    if (typeof window.syncActiveTabStripScroll === 'function') {
-      window.syncActiveTabStripScroll(projectMobileTabs, _PROJECT_MOBILE_TAB_EDGE_OPTS);
-    }
+    _projectNavigationController().syncMobileActiveTabScroll();
   }
 
   function _syncProjectMobileTabEdges() {
-    if (typeof window.syncTabStripEdges === 'function') {
-      window.syncTabStripEdges(projectMobileTabs, _PROJECT_MOBILE_TAB_EDGE_OPTS);
-    }
+    _projectNavigationController().syncMobileTabEdges();
   }
 
   function _renderProjectMobileListRow(project, activeId) {
@@ -2522,15 +2483,12 @@
     await _projectWorkspaceLifecycleController().loadProjectSummaries(projects);
   }
 
-  async function _ensureProjectSummary(projectId = projectWorkspaceSelectedId) {
+  async function _ensureProjectSummary(projectId = projectWorkspaceState.selectedId()) {
     return _projectWorkspaceLifecycleController().ensureProjectSummary(projectId);
   }
 
   function _setProjectPaginationOffset(offset) {
-    projectWorkspacePaginationState = {
-      ...projectWorkspacePaginationState,
-      offset: Math.max(0, Number(offset || 0)),
-    };
+    projectWorkspaceState.setPaginationOffset(offset);
   }
 
   async function refreshProjectWorkspace() {
