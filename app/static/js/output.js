@@ -682,7 +682,11 @@ function _ensureHighVolumeOutputState(tab) {
       lastNoticeLine: 0,
       resumeRequested: false,
       resumeDisabled: false,
+      finalSummaryShown: false,
     };
+  }
+  if (typeof tab.highVolumeOutput.finalSummaryShown !== 'boolean') {
+    tab.highVolumeOutput.finalSummaryShown = false;
   }
   return tab.highVolumeOutput;
 }
@@ -748,7 +752,23 @@ function resetHighVolumeOutputState(tabId) {
     lastNoticeLine: 0,
     resumeRequested: false,
     resumeDisabled: false,
+    finalSummaryShown: false,
   };
+}
+
+function appendHighVolumeOutputFinalSummary(tabId) {
+  const tab = getTab(tabId);
+  const state = _ensureHighVolumeOutputState(tab);
+  if (!tab || !state || state.finalSummaryShown || !state.skippedLines) return false;
+  state.finalSummaryShown = true;
+  const count = _formatHighVolumeCount(state.skippedLines);
+  const lineWord = Number(state.skippedLines) === 1 ? 'line was' : 'lines were';
+  appendLine(
+    `[high-volume output summary: ${count} ${lineWord} not rendered live in this tab; retained output follows the normal saved preview and full-output settings]`,
+    'notice',
+    tabId,
+  );
+  return true;
 }
 
 function disableHighVolumeOutputResumeControls(tabId) {

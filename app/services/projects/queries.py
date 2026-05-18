@@ -27,7 +27,11 @@ from services.projects.models import (
     row_to_target as _row_to_target,
 )
 from services.projects.packages import row_to_evidence_package as _row_to_evidence_package
-from services.projects.utils import trim_text as _trim_text
+from services.projects.utils import (
+    normalize_page_window as _normalize_page_window,
+    page_payload as _page_payload,
+    trim_text as _trim_text,
+)
 from services.runs.kinds import RUN_KIND_EXTERNAL
 
 
@@ -266,8 +270,7 @@ def list_projects(session_id, *, include_archived=False):
 
 
 def list_projects_page(session_id, *, include_archived=False, limit=50, offset=0, include_counts=False):
-    safe_limit = max(1, min(int(limit or 50), 100))
-    safe_offset = max(0, int(offset or 0))
+    safe_limit, safe_offset = _normalize_page_window(limit, offset, maximum=100)
     with db_connect() as conn:
         where_sql = _project_list_where_sql(include_archived=include_archived)
         active_project_id = _active_project_id_from_preferences(conn, session_id)
@@ -286,13 +289,7 @@ def list_projects_page(session_id, *, include_archived=False, limit=50, offset=0
             (session_id, active_project_id, safe_limit, safe_offset),
         ).fetchall()
         projects = _project_rows_to_list_projects(conn, session_id, rows, include_counts=include_counts)
-    return {
-        "projects": projects,
-        "total": total,
-        "limit": safe_limit,
-        "offset": safe_offset,
-        "has_more": safe_offset + len(projects) < total,
-    }
+    return _page_payload("projects", projects, total, safe_limit, safe_offset)
 
 
 def get_project(session_id, project_id):
@@ -627,19 +624,18 @@ def get_project_summary(session_id, project_id):
 
 
 def _project_entity_page_payload(entities, total, limit, offset, counts_by_type=None):
-    return {
-        "entities": entities,
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-        "has_more": offset + len(entities) < total,
-        "counts_by_type": counts_by_type if isinstance(counts_by_type, dict) else {},
-    }
+    return _page_payload(
+        "entities",
+        entities,
+        total,
+        limit,
+        offset,
+        extra={"counts_by_type": counts_by_type if isinstance(counts_by_type, dict) else {}},
+    )
 
 
 def list_project_entities(session_id, project_id, *, entity_type="", limit=50, offset=0):
-    safe_limit = max(1, min(int(limit or 50), 200))
-    safe_offset = max(0, int(offset or 0))
+    safe_limit, safe_offset = _normalize_page_window(limit, offset)
     normalized_type = _trim_text(entity_type, 32).lower()
     with db_connect() as conn:
         project_row = conn.execute(
@@ -663,14 +659,14 @@ def list_project_entities(session_id, project_id, *, entity_type="", limit=50, o
 
 
 def _project_artifact_page_payload(artifacts, total, limit, offset, run_counts=None):
-    return {
-        "artifacts": artifacts,
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-        "has_more": offset + len(artifacts) < total,
-        "run_counts": run_counts if isinstance(run_counts, dict) else {},
-    }
+    return _page_payload(
+        "artifacts",
+        artifacts,
+        total,
+        limit,
+        offset,
+        extra={"run_counts": run_counts if isinstance(run_counts, dict) else {}},
+    )
 
 
 def _project_target_filter_run_ids(conn, session_id, project_id, target_ids):
@@ -732,8 +728,7 @@ def _project_target_filter_run_ids(conn, session_id, project_id, target_ids):
 
 def list_project_artifacts(session_id, project_id, filters=None, *, limit=50, offset=0):
     filters = filters if isinstance(filters, dict) else {}
-    safe_limit = max(1, min(int(limit or 50), 200))
-    safe_offset = max(0, int(offset or 0))
+    safe_limit, safe_offset = _normalize_page_window(limit, offset)
     with db_connect() as conn:
         project_row = conn.execute(
             "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
@@ -802,8 +797,7 @@ def _list_all_project_artifacts(session_id, project_id):
 
 
 def list_project_runs(session_id, project_id, *, limit=50, offset=0):
-    safe_limit = max(1, min(int(limit or 50), 200))
-    safe_offset = max(0, int(offset or 0))
+    safe_limit, safe_offset = _normalize_page_window(limit, offset)
     with db_connect() as conn:
         project_row = conn.execute(
             "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
@@ -830,13 +824,7 @@ def list_project_runs(session_id, project_id, *, limit=50, offset=0):
             (project_id, session_id, RUN_KIND_EXTERNAL, safe_limit, safe_offset),
         ).fetchall()
         runs = _project_run_rows_to_items(conn, session_id, rows)
-    return {
-        "runs": runs,
-        "total": total,
-        "limit": safe_limit,
-        "offset": safe_offset,
-        "has_more": safe_offset + len(runs) < total,
-    }
+    return _page_payload("runs", runs, total, safe_limit, safe_offset)
 
 
 def get_project_run_file_artifact(session_id, project_id, artifact_id):

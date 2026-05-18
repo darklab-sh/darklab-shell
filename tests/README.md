@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,892
+- behavior tests: 2,894
 - docs/inventory meta-tests: 32
-- `pytest`: 1499 (1467 behavior + 32 meta)
-- `vitest`: 1173
+- `pytest`: 1500 (1468 behavior + 32 meta)
+- `vitest`: 1174
 - `playwright`: 252
-- total: 2,924
+- total: 2,926
 
 This document is organized in two parts:
 
@@ -1444,6 +1444,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestRunStreaming.test_run_returns_500_when_spawn_fails` | Checks that run returns 500 when spawn fails. |
 | `TestRunStreaming.test_run_persists_completed_run_to_history` | Checks that run persists completed run to history. |
 | `TestRunStreaming.test_completed_run_links_to_active_project` | Verifies completed server-owned runs link to the current active project. |
+| `TestRunStreaming.test_active_project_entity_link_failure_keeps_run_finalization` | Verifies active-project Atlas entity link failures roll back partial project links without losing the completed run transcript, findings, or Atlas entities. |
 | `TestRunStreaming.test_completed_run_skips_active_project_when_auto_link_disabled` | Verifies completed external runs stay out of the active project when automatic project capture is disabled. |
 | `TestRunStreaming.test_run_filters_output_through_synthetic_grep` | Checks that a synthetic grep run streams and persists only matching lines. |
 | `TestRunStreaming.test_run_supports_invert_match_synthetic_grep` | Checks that synthetic grep supports `-v` invert matching. |
@@ -2276,6 +2277,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `binds high-volume resume controls through the shared pressable helper` | Verifies that high-volume resume controls use the shared pressable interaction helper. |
 | `resumes live rendering for new high-volume output when requested` | Verifies that the high-volume output resume action renders later live output again. |
 | `disables high-volume resume controls once the run is no longer active` | Verifies that stale high-volume resume controls are disabled after a run leaves the running state. |
+| `adds a final high-volume summary for skipped live-rendered lines` | Verifies that completed high-volume runs print a one-time summary of lines that were retained but not rendered live. |
 | `resets high-volume counters for a new run` | Verifies that high-volume output counters reset before a fresh brokered run starts in the same tab. |
 | `queues multi-line appends in chunks and updates raw lines once flushed` | Verifies that bulk output replay queues multi-line output through the batch flusher and syncs raw lines after flush. |
 | `uses delayed tail restore for large mobile output bursts` | Verifies that large mobile output bursts keep the transcript pinned to the prompt after delayed layout growth. |

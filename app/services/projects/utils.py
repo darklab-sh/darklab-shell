@@ -30,6 +30,49 @@ def quota_exceeded(count, key, default):
     return limit > 0 and count >= limit
 
 
+def normalize_page_limit(value, default=50, maximum=200):
+    try:
+        parsed = int(value or default)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(1, min(parsed, maximum))
+
+
+def normalize_page_offset(value):
+    try:
+        parsed = int(value or 0)
+    except (TypeError, ValueError):
+        parsed = 0
+    return max(0, parsed)
+
+
+def normalize_page_window(limit=None, offset=0, *, default=50, maximum=200, enabled=True):
+    if not enabled:
+        return None, 0
+    return normalize_page_limit(limit, default, maximum), normalize_page_offset(offset)
+
+
+def page_metadata(total, limit, offset, item_count, *, has_more=None):
+    safe_total = max(0, int(total or 0))
+    safe_limit = max(0, int(limit or 0))
+    safe_offset = normalize_page_offset(offset)
+    safe_item_count = max(0, int(item_count or 0))
+    return {
+        "total": safe_total,
+        "limit": safe_limit,
+        "offset": safe_offset,
+        "has_more": bool(has_more) if has_more is not None else safe_offset + safe_item_count < safe_total,
+    }
+
+
+def page_payload(items_key, items, total, limit, offset, *, has_more=None, extra=None):
+    payload = {items_key: items}
+    payload.update(page_metadata(total, limit, offset, len(items), has_more=has_more))
+    if isinstance(extra, dict):
+        payload.update(extra)
+    return payload
+
+
 def raise_quota(message):
     raise ProjectWorkspaceQuotaExceeded(message)
 

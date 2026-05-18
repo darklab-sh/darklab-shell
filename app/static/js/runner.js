@@ -737,6 +737,12 @@ function _handleRunTransportFailure(err, tabId) {
   stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
 }
 
+function _appendHighVolumeOutputFinalSummary(tabId) {
+  if (typeof appendHighVolumeOutputFinalSummary === 'function') {
+    appendHighVolumeOutputFinalSummary(tabId);
+  }
+}
+
 async function _readRunErrorMessage(res) {
   const contentType = (res.headers && typeof res.headers.get === 'function' && res.headers.get('content-type')) || '';
   try {
@@ -911,6 +917,7 @@ function _handleRunStreamMessage(msg, tabId) {
     // If already killed by user, ignore the subsequent -15 exit code.
     if (t && t.killed) {
       t.killed = false;
+      _appendHighVolumeOutputFinalSummary(tabId);
       stopTimer();
       _setRunButtonDisabled(false); hideTabKillBtn(tabId);
       if (typeof disableHighVolumeOutputResumeControls === 'function') {
@@ -933,6 +940,7 @@ function _handleRunStreamMessage(msg, tabId) {
     }
     if (msg.code === 0) {
       if (!(t && t.syntheticClear)) appendLine(`[process exited with code 0${dur}]`, 'exit-ok', tabId);
+      _appendHighVolumeOutputFinalSummary(tabId);
       if (tabId === activeTabId) setStatus('ok');
       setTabStatus(tabId, 'ok');
       if (typeof disableHighVolumeOutputResumeControls === 'function') {
@@ -940,6 +948,7 @@ function _handleRunStreamMessage(msg, tabId) {
       }
     } else {
       appendLine(`[process exited with code ${msg.code}${dur}]`, 'exit-fail', tabId);
+      _appendHighVolumeOutputFinalSummary(tabId);
       if (tabId === activeTabId) setStatus('fail');
       setTabStatus(tabId, 'fail');
       if (typeof disableHighVolumeOutputResumeControls === 'function') {

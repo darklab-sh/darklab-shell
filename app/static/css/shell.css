@@ -485,22 +485,12 @@ body.ts-clock .output .shell-prompt-wrap {
   left: 50%;
   bottom: 66px;
   z-index: 15;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 30px;
-  padding: 4px 10px;
   border-radius: 999px;
-  border: 1px solid var(--green-dim);
+  border-color: var(--green-dim);
   background: color-mix(in srgb, var(--surface) 46%, transparent);
   color: var(--green);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1;
   text-transform: lowercase;
-  letter-spacing: 0.2px;
   box-shadow: 0 4px 10px color-mix(in srgb, var(--theme-panel-shadow) 58%, transparent);
-  cursor: pointer;
   transition: opacity 0.2s, transform 0.2s, border-color 0.2s, color 0.2s, background 0.2s;
   transform: translateX(-50%);
 }
@@ -533,8 +523,6 @@ body.ts-clock .output .shell-prompt-wrap {
 body.mobile-terminal-mode .output-follow-btn {
   left: 50%;
   bottom: 70px;
-  font-size: 10px;
-  padding: 5px 11px;
 }
 
 /* ── Save menu dropdown ── */
@@ -557,14 +545,10 @@ body.mobile-terminal-mode .output-follow-btn {
   display: block;
 }
 
-.save-menu button {
+.save-menu .dropdown-item {
   display: block;
   width: 100%;
   white-space: nowrap;
-}
-
-.save-menu button:hover {
-  color: var(--text);
 }
 
 /* Dropdown indicator arrow on the save trigger button (direct child of the

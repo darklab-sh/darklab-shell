@@ -50,11 +50,7 @@ No known issues are currently tracked.
 
 ## Technical Debt
 
-- Add regression coverage for active-project entity-link failures during run finalization. If linking generated entities into the active project raises, the run should still finalize cleanly and persist its transcript, findings, and Atlas entities.
-- Improve high-volume output transcript clarity after skipped live rendering. Keep the resume notice, and add a final post-exit summary that makes it clear how many lines were not rendered live in the tab.
-- Make `pref_project_auto_link_run_entities` discoverable through the terminal `config` command path, or document why this Options preference is intentionally UI-only.
-- Clean up remaining output/project pagination button styling so pager and output controls use shared button modifiers instead of feature-specific height or menu styling overrides.
-- Deduplicate repeated pagination payload helpers across Project query services, including limit/offset normalization, `has_more` calculation, and page metadata shaping.
+No technical debt items are currently tracked.
 
 ---
 

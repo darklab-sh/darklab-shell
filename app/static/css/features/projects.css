@@ -1261,19 +1261,6 @@
   white-space: nowrap;
 }
 
-.project-workspace-pagination-controls > .btn {
-  min-height: 24px;
-  padding-top: 3px;
-  padding-bottom: 3px;
-}
-
-.project-workspace-pagination-controls > .btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-
-
 .project-workspace-section-label {
   margin-top: 4px;
   padding: 8px 2px 2px;

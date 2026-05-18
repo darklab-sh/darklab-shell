@@ -977,6 +977,8 @@ describe('app helpers', () => {
           pref_line_numbers: 'off',
           pref_timestamps: 'off',
           pref_welcome_intro: 'animated',
+          pref_project_auto_link_external_runs: 'on',
+          pref_project_auto_link_run_entities: 'on',
           pref_prompt_username: '',
           pref_compare_view_mode: 'auto',
           pref_compare_context: '3',
@@ -986,9 +988,12 @@ describe('app helpers', () => {
 
     await handleConfigCommand('config set line-numbers on', 'tab-1')
     await handleConfigCommand('config set welcome static', 'tab-1')
+    await handleConfigCommand('config set project-auto-link-runs off', 'tab-1')
+    await handleConfigCommand('config set project-auto-link-run-entities off', 'tab-1')
     await handleConfigCommand('config set prompt-username nona', 'tab-1')
     await handleConfigCommand('config set compare-view changes-only', 'tab-1')
     await handleConfigCommand('config set compare-context all', 'tab-1')
+    await handleConfigCommand('config get project-auto-link-run-entities', 'tab-1')
     await handleConfigCommand('config get prompt-username', 'tab-1')
     await handleConfigCommand('config list', 'tab-1')
 
@@ -996,15 +1001,20 @@ describe('app helpers', () => {
     expect(document.body.classList.contains('ln-on')).toBe(true)
     expect(document.cookie).toContain('pref_line_numbers=on')
     expect(document.cookie).toContain('pref_welcome_intro=disable_animation')
+    expect(document.cookie).toContain('pref_project_auto_link_external_runs=off')
+    expect(document.cookie).toContain('pref_project_auto_link_run_entities=off')
     expect(document.cookie).toContain('pref_prompt_username=nona')
     expect(document.cookie).toContain('pref_compare_view_mode=changes_only')
     expect(document.cookie).toContain('pref_compare_context=all')
     expect(document.querySelector('#shell-prompt-wrap .prompt-prefix').textContent).toBe('nona@darklab.sh:~ $')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set line-numbers on')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set welcome static')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set project-auto-link-runs off')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set project-auto-link-run-entities off')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set prompt-username nona')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set compare-view changes-only')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set compare-context all')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config get project-auto-link-run-entities')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config get prompt-username')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config list')
     expect(setStatus).toHaveBeenCalledWith('ok')

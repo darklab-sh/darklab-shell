@@ -1293,6 +1293,101 @@ class TestRunStreaming:
         assert entity_link_row["source"] == "active_project"
         assert entity_link_row["canonical_value"] in {"darklab.sh", "https://darklab.sh/admin"}
 
+    def test_active_project_entity_link_failure_keeps_run_finalization(self):
+        client = get_client()
+        session_id = "sess-active-project-entity-link-fails"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Run Entity Link Failure"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        active_resp = client.post(
+            "/projects/active",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        assert active_resp.status_code == 200
+
+        def failing_entity_link(conn, _session_id, project_id, run_id):
+            row = conn.execute(
+                "SELECT entity_id FROM entity_run_links WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            assert row is not None
+            conn.execute(
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                "VALUES (?, ?, 'atlas_entity', ?, 'active_project', datetime('now'))",
+                (f"pl_test_{uuid.uuid4().hex[:16]}", project_id, row["entity_id"]),
+            )
+            raise RuntimeError("entity link boom")
+
+        fake_proc = _FakeProc(lines=[
+            "Nmap scan report for darklab.sh\n",
+            "80/tcp open http\n",
+            "",
+        ])
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]), \
+             mock.patch("blueprints.run.command_project_target_inputs", return_value=[]), \
+             mock.patch("blueprints.run.link_active_project_run_entities", side_effect=failing_entity_link):
+            resp = _post_run(
+                client,
+                json={"command": "nmap -p 80 darklab.sh"},
+                headers={"X-Session-ID": session_id},
+            )
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert any(
+            event.get("type") == "exit" and event.get("code") == 0
+            for event in _sse_events(body)
+        )
+        with db_connect() as conn:
+            run_row = conn.execute(
+                "SELECT id, output_preview FROM runs WHERE session_id = ? AND command = ?",
+                (session_id, "nmap -p 80 darklab.sh"),
+            ).fetchone()
+            assert run_row is not None
+            run_id = run_row["id"]
+            preview_lines = json.loads(run_row["output_preview"])
+            finding_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM findings_occurrences WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()["count"]
+            entity_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM entity_run_links WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()["count"]
+            run_project_link_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM project_links "
+                "WHERE project_id = ? AND entity_type = 'run' AND entity_id = ?",
+                (project["id"], run_id),
+            ).fetchone()["count"]
+            entity_project_link_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM project_links "
+                "WHERE project_id = ? AND entity_type = 'atlas_entity'",
+                (project["id"],),
+            ).fetchone()["count"]
+
+        assert any(entry["text"] == "80/tcp open http" for entry in preview_lines)
+        assert finding_count >= 1
+        assert entity_count >= 1
+        assert run_project_link_count == 1
+        assert entity_project_link_count == 0
+
+        preview_resp = client.get(
+            f"/history/{run_id}?json&preview=1",
+            headers={"X-Session-ID": session_id},
+        )
+        preview = json.loads(preview_resp.data)
+        assert preview_resp.status_code == 200
+        assert any(entry["text"] == "80/tcp open http" for entry in preview["output_entries"])
+
     def test_completed_run_skips_active_project_when_auto_link_disabled(self):
         client = get_client()
         session_id = "sess-active-project-auto-link-off"

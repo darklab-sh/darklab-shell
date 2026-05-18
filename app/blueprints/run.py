@@ -357,6 +357,25 @@ def _extract_output_search_text(preview_lines):
     )
 
 
+def _link_active_project_run_entities_for_finalize(conn, session_id, project_id, run_id):
+    conn.execute("SAVEPOINT active_project_entity_link")
+    try:
+        linked_entities = link_active_project_run_entities(
+            conn,
+            session_id,
+            project_id,
+            run_id,
+        )
+    except Exception:
+        try:
+            conn.execute("ROLLBACK TO SAVEPOINT active_project_entity_link")
+        finally:
+            conn.execute("RELEASE SAVEPOINT active_project_entity_link")
+        raise
+    conn.execute("RELEASE SAVEPOINT active_project_entity_link")
+    return linked_entities
+
+
 def _save_completed_run(
     run_id,
     session_id,
@@ -497,7 +516,7 @@ def _save_completed_run(
                 })
             if active_project_link and recorded_entities:
                 try:
-                    linked_entities = link_active_project_run_entities(
+                    linked_entities = _link_active_project_run_entities_for_finalize(
                         conn,
                         session_id,
                         active_project_link["project_id"],

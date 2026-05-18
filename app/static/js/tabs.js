@@ -303,7 +303,7 @@ function _createTabPanel(id) {
 
   const followBtn = document.createElement('button');
   followBtn.type = 'button';
-  followBtn.className = 'output-follow-btn';
+  followBtn.className = 'btn btn-ghost btn-compact output-follow-btn';
   followBtn.hidden = true;
   followBtn.textContent = 'jump to live';
   followBtn.title = 'Jump to the live output tail';

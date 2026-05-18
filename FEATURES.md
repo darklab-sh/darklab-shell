@@ -1030,6 +1030,7 @@ wget -q -O /dev/null --server-response https://example.com
 - The HUD clock setting chooses whether the desktop `CLOCK` pill renders in `UTC` or browser-local time. This control is intentionally hidden from the mobile Options sheet because the HUD itself is desktop-only.
 - The welcome-intro setting controls whether the welcome animation plays on first tab: full animated sequence, instant settle, or no welcome tab at all.
 - The share-snapshot redaction setting selects the default redaction choice (prompt / redacted / raw) so the share prompt is skipped once a preference is saved.
+- The project capture settings control whether completed external command runs are added to the active project and whether generated Atlas entities are added with those auto-linked runs.
 - Run notifications fire a browser desktop notification each time a run exits or is killed; the title shows only the command root (`$ curl`) and the body shows exit code and elapsed time. Enabling triggers the native permission prompt; if notifications are blocked, the toggle reverts with a toast. This toggle is intentionally hidden from the mobile Options sheet because the feature is treated as desktop-oriented chrome behavior.
 - Preferences are stored server-side per session and mirrored into browser cookies/local storage for reload continuity, so a named session token restores the same option set across browsers and devices.
 - The **Secrets** tab includes Provider Status, Add secret, Refresh, and the stored secret list so a long list of saved keys does not push the preference controls out of view.
@@ -1045,11 +1046,13 @@ wget -q -O /dev/null --server-response https://example.com
 | **HUD Clock** | UTC / Local Time | Timezone mode for the desktop HUD `CLOCK` pill; shown on desktop, hidden from the mobile Options sheet |
 | **Welcome Intro** | Animated / Disable Animation / Remove Completely | Welcome animation behavior on first tab |
 | **Share Snapshot Redaction** | Prompt Until Set / Default To Redacted / Default To Raw | Default redaction choice for snapshot sharing |
+| **Project Run Capture** | on / off | Add completed external command runs to the active project |
+| **Project Entity Capture** | on / off | Add generated Atlas entities when an auto-linked run is added to the active project |
 | **Run Notifications** | on / off | Browser desktop notification on run exit or kill; title is command root, body is exit code + elapsed time; shown on desktop, hidden from the mobile Options sheet |
 
-**Terminal option keys:** `line-numbers`, `timestamps`, `welcome`, `share-redaction`, `run-notifications`, `hud-clock`.
+**Terminal option keys:** `line-numbers`, `timestamps`, `welcome`, `share-redaction`, `project-auto-link-runs`, `project-auto-link-run-entities`, `run-notifications`, `hud-clock`, `compare-view`, `compare-context`, `prompt-username`.
 
-**Related files:** `app/static/js/app.js` (Options modal state, terminal command, notification preference, and session preference persistence), `app/static/js/features/preferences/secrets_panel.js` (encrypted secret rows and value prompt), `app/static/js/runner.js` (run-completion notification dispatch and browser-owned terminal command routing), `app/static/js/shell_chrome.js` (desktop options navigation), `app/static/js/mobile_chrome.js` (mobile menu wiring).
+**Related files:** `app/static/js/features/preferences/preferences.js` (Options modal state, notification preference, and session preference persistence), `app/static/js/features/terminal/local_commands.js` (terminal `config` command), `app/static/js/features/preferences/secrets_panel.js` (encrypted secret rows and value prompt), `app/static/js/runner.js` (run-completion notification dispatch and browser-owned terminal command routing), `app/static/js/shell_chrome.js` (desktop options navigation), `app/static/js/mobile_chrome.js` (mobile menu wiring).
 
 ---
 

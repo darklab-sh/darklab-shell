@@ -197,6 +197,20 @@ function _cliConfigEntries() {
       },
     },
     {
+      key: 'project-auto-link-runs',
+      description: 'Add completed external command runs to the active project',
+      values: ['on', 'off'],
+      get: () => getProjectAutoLinkExternalRunsPreference(),
+      set: (value) => applyProjectAutoLinkExternalRunsPreference(value),
+    },
+    {
+      key: 'project-auto-link-run-entities',
+      description: 'Add generated Atlas entities when an auto-linked run is added to the active project',
+      values: ['on', 'off'],
+      get: () => getProjectAutoLinkRunEntitiesPreference(),
+      set: (value) => applyProjectAutoLinkRunEntitiesPreference(value),
+    },
+    {
       key: 'run-notifications',
       description: 'Desktop notification when a run completes or is killed',
       values: ['on', 'off'],

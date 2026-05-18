@@ -714,6 +714,7 @@ function loadRunnerFns({
   notifyProjectWorkspaceChanged: notifyProjectWorkspaceChangedOverride = undefined,
   emitUiEvent: emitUiEventOverride = undefined,
   disableHighVolumeOutputResumeControls = () => {},
+  appendHighVolumeOutputFinalSummary = () => {},
   resetHighVolumeOutputState = () => {},
   runnerInitCode = '',
 } = {}) {
@@ -894,6 +895,7 @@ function loadRunnerFns({
       ...(notifyProjectWorkspaceChangedOverride ? { notifyProjectWorkspaceChanged: notifyProjectWorkspaceChangedOverride } : {}),
       ...(emitUiEventOverride ? { emitUiEvent: emitUiEventOverride } : {}),
       disableHighVolumeOutputResumeControls,
+      appendHighVolumeOutputFinalSummary,
       resetHighVolumeOutputState,
       ...(NotificationOverride !== undefined ? { Notification: NotificationOverride } : {}),
     },
@@ -1549,13 +1551,16 @@ describe('runner helpers', () => {
 
   it('disables high-volume resume controls when a brokered run exits', () => {
     const disableHighVolumeOutputResumeControls = vi.fn()
+    const appendHighVolumeOutputFinalSummary = vi.fn()
     const { _handleRunStreamMessage } = loadRunnerFns({
       tabs: [{ id: 'tab-1', st: 'running', runId: 'run-1', pendingKill: false, killed: false }],
       disableHighVolumeOutputResumeControls,
+      appendHighVolumeOutputFinalSummary,
     })
 
     _handleRunStreamMessage({ type: 'exit', code: 0, elapsed: 0.1 }, 'tab-1')
 
+    expect(appendHighVolumeOutputFinalSummary).toHaveBeenCalledWith('tab-1')
     expect(disableHighVolumeOutputResumeControls).toHaveBeenCalledWith('tab-1')
   })
 

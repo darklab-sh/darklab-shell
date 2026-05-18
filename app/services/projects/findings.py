@@ -25,7 +25,11 @@ from services.projects.contracts import (
 )
 from services.projects.metadata import _entity_labels_by_id, _entity_notes_by_id
 from services.projects.targets import _canonical_target_payload, _target_payload_from_candidate
-from services.projects.utils import now as _now
+from services.projects.utils import (
+    normalize_page_window as _normalize_page_window,
+    now as _now,
+    page_payload as _page_payload,
+)
 from services.runs.kinds import is_project_linkable_run_kind, normalize_run_kind
 
 
@@ -156,16 +160,19 @@ def _project_finding_page_payload(
     group_order=None,
     has_more=None,
 ):
-    return {
-        "findings": findings,
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-        "has_more": bool(has_more) if has_more is not None else offset + len(findings) < total,
-        "group_counts": group_counts if isinstance(group_counts, dict) else {},
-        "collapsed_group_counts": collapsed_group_counts if isinstance(collapsed_group_counts, dict) else {},
-        "group_order": group_order if isinstance(group_order, list) else [],
-    }
+    return _page_payload(
+        "findings",
+        findings,
+        total,
+        limit,
+        offset,
+        has_more=has_more,
+        extra={
+            "group_counts": group_counts if isinstance(group_counts, dict) else {},
+            "collapsed_group_counts": collapsed_group_counts if isinstance(collapsed_group_counts, dict) else {},
+            "group_order": group_order if isinstance(group_order, list) else [],
+        },
+    )
 
 
 def _project_finding_source_exists_sql():
@@ -201,21 +208,20 @@ def _normalize_finding_review_payload(data):
 
 
 def _run_finding_page_payload(findings, total, limit, offset, occurrence_total=0):
-    return {
-        "findings": findings,
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-        "has_more": offset + len(findings) < total,
-        "occurrence_total": occurrence_total,
-    }
+    return _page_payload(
+        "findings",
+        findings,
+        total,
+        limit,
+        offset,
+        extra={"occurrence_total": occurrence_total},
+    )
 
 
 def list_run_findings(session_id, run_id, *, limit=None, offset=0, include_total=False):
     run_id = _trim_text(run_id, MAX_ENTITY_ID_LEN)
     paginated = limit is not None or include_total
-    safe_limit = max(1, min(int(limit or 50), 200)) if paginated else None
-    safe_offset = max(0, int(offset or 0)) if paginated else 0
+    safe_limit, safe_offset = _normalize_page_window(limit, offset, enabled=paginated)
     base_sql = (
         "WITH run_occurrences AS ("
         "  SELECT finding_id, run_id, line_number, snippet, seen_at, "
@@ -375,8 +381,7 @@ def bulk_update_project_finding_review_states(session_id, project_id, data):
 def list_project_findings(session_id, project_id, filters=None, *, limit=None, offset=0, include_total=False):
     filters = filters if isinstance(filters, dict) else {}
     paginated = limit is not None or include_total
-    safe_limit = max(1, min(int(limit or 50), 200)) if paginated else None
-    safe_offset = max(0, int(offset or 0)) if paginated else 0
+    safe_limit, safe_offset = _normalize_page_window(limit, offset, enabled=paginated)
     with db_connect() as conn:
         project = conn.execute(
             "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",

@@ -26,6 +26,7 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {}, AnsiUpCtor = null } 
     `{
     appendLine,
     appendLines,
+    appendHighVolumeOutputFinalSummary,
     disableHighVolumeOutputResumeControls,
     renderRestoredTabOutput,
     resetHighVolumeOutputState,
@@ -592,6 +593,29 @@ describe('appendLine', () => {
     expect(button.disabled).toBe(true)
     expect(renderedText).not.toContain('live output rendering resumed')
     expect(renderedText).toContain('line 3')
+  })
+
+  it('adds a final high-volume summary for skipped live-rendered lines', () => {
+    const { appendLine, appendHighVolumeOutputFinalSummary } = loadOutputFns({
+      appConfig: {
+        high_volume_output_line_threshold: 1,
+        high_volume_output_status_interval_lines: 1,
+        max_output_lines: 20,
+      },
+    })
+
+    appendLine('line 1', '', 'tab-1', { live_output: true })
+    appendLine('line 2', '', 'tab-1', { live_output: true })
+    appendLine('[process exited with code 0]', 'exit-ok', 'tab-1')
+
+    expect(appendHighVolumeOutputFinalSummary('tab-1')).toBe(true)
+    expect(appendHighVolumeOutputFinalSummary('tab-1')).toBe(false)
+
+    const renderedText = Array.from(document.querySelectorAll('.line')).map(line => line.textContent).join('\n')
+    expect(renderedText).toContain('[process exited with code 0]')
+    expect(renderedText).toContain('high-volume output summary: 1 line was not rendered live in this tab')
+    expect(renderedText).toContain('retained output follows the normal saved preview and full-output settings')
+    expect(renderedText).not.toContain('line 2')
   })
 
   it('resets high-volume counters for a new run', () => {

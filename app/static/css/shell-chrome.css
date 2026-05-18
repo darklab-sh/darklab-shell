@@ -757,12 +757,4 @@
     z-index: 20;
   }
   .hud-save-wrap.open .save-menu { display: flex; }
-  .hud-save-wrap .save-menu button {
-    font-family: inherit;
-    padding: 5px 10px;
-    border-radius: 2px;
-  }
-  .hud-save-wrap .save-menu button:hover {
-    color: var(--text);
-  }
 }

@@ -481,10 +481,6 @@
     padding: 5px 10px;
     gap: 4px;
   }
-  body.mobile-terminal-mode .terminal-actions .btn {
-    min-height: 26px;
-    padding: 3px 8px;
-  }
   body.mobile-terminal-mode .history-entry {
     padding-top: 12px;
     padding-bottom: 12px;
@@ -752,10 +748,6 @@ body.mobile-terminal-mode .sheet-filter-menu.dropdown-surface .dropdown-item {
   }
   body.mobile-terminal-mode .history-pagination-controls {
     grid-template-columns: max-content minmax(96px, auto) max-content;
-  }
-  body.mobile-terminal-mode .history-pagination-controls > .btn {
-    min-height: 26px;
-    font-size: 10px;
   }
   body.mobile-terminal-mode .history-pagination-status {
     font-size: 11px;
