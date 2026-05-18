@@ -6,6 +6,7 @@ let _historyRunModalState = {
   run: null,
   details: null,
   findings: null,
+  findingsPagination: null,
   projectState: null,
   activeTab: 'summary',
   loadingDetails: false,
@@ -14,6 +15,7 @@ let _historyRunModalState = {
   error: '',
 };
 let _historyRunModalToken = 0;
+const HISTORY_RUN_FINDINGS_PAGE_LIMIT = 50;
 
 function _historyRunSelectorValue(value) {
   if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') {
@@ -66,6 +68,12 @@ function _ensureHistoryRunOverlay() {
     const tab = e.target.closest?.('[data-history-run-tab]');
     if (tab) {
       _setHistoryRunOverlayTab(tab.dataset.historyRunTab || 'summary');
+      return;
+    }
+    const findingsPage = e.target.closest?.('[data-history-run-findings-page]');
+    if (findingsPage) {
+      e.preventDefault();
+      _setHistoryRunFindingsPage(findingsPage.dataset.historyRunFindingsPage || '');
       return;
     }
     const action = e.target.closest?.('[data-history-run-action]');
@@ -263,6 +271,18 @@ function _historyRunField(label, content) {
 }
 
 function _renderHistoryRunSummary(body, run) {
+  const findingItems = Array.isArray(_historyRunModalState.findings) ? _historyRunModalState.findings : null;
+  const findingPagination = _historyRunModalState.findingsPagination || {};
+  const uniqueFindingCount = findingPagination.loaded
+    ? Number(findingPagination.total || 0)
+    : (findingItems ? findingItems.length : null);
+  const occurrenceCount = findingPagination.loaded
+    ? Number(findingPagination.occurrence_total || 0)
+    : Number(run.finding_count || 0);
+  const uniqueFindingLabel = uniqueFindingCount == null
+    ? (_historyRunModalState.loadingFindings ? 'Loading...' : '0')
+    : uniqueFindingCount.toLocaleString();
+  const occurrenceLabel = Number.isFinite(occurrenceCount) ? occurrenceCount.toLocaleString() : '0';
   const summary = document.createElement('div');
   summary.className = 'history-run-summary-grid';
   summary.append(
@@ -271,10 +291,7 @@ function _renderHistoryRunSummary(body, run) {
     _historyRunMetaRow('Finished', run.finished ? new Date(run.finished).toLocaleString() : ''),
     _historyRunMetaRow('Duration', _historyElapsedLabel(run)),
     _historyRunMetaRow('Lines', run.output_line_count ? Number(run.output_line_count).toLocaleString() : ''),
-    _historyRunMetaRow(
-      'Findings',
-      Number(run.finding_count || (_historyRunModalState.findings || []).length || 0).toLocaleString(),
-    ),
+    _historyRunMetaRow('Findings / Occurrences', `${uniqueFindingLabel} / ${occurrenceLabel}`),
     _historyRunMetaRow(
       'Artifacts',
       Number(run.artifact_count || (Array.isArray(run.artifacts) ? run.artifacts.length : 0) || 0).toLocaleString(),
@@ -402,13 +419,16 @@ function _renderHistoryRunFindings(body) {
     return;
   }
   const findings = Array.isArray(_historyRunModalState.findings) ? _historyRunModalState.findings : [];
+  const pager = _renderHistoryRunFindingsPagination(findings);
   if (!findings.length) {
     const empty = document.createElement('div');
     empty.className = 'history-run-empty';
     empty.textContent = 'No structured findings recorded for this run.';
     body.appendChild(empty);
+    if (pager) body.appendChild(pager);
     return;
   }
+  if (pager) body.appendChild(pager);
   const list = document.createElement('div');
   list.className = 'history-run-list';
   findings.forEach((finding) => {
@@ -423,6 +443,9 @@ function _renderHistoryRunFindings(body) {
       finding.severity ? `severity: ${finding.severity}` : '',
       finding.review_state ? `review: ${finding.review_state}` : '',
       Number.isFinite(Number(finding.line_number)) ? `line ${Number(finding.line_number) + 1}` : '',
+      Number(finding.run_occurrence_count || 0) > 1
+        ? `${Number(finding.run_occurrence_count).toLocaleString()} occurrences`
+        : '',
       finding.scope ? `scope: ${finding.scope}` : '',
     ].filter(Boolean);
     meta.textContent = parts.join(' · ');
@@ -436,6 +459,42 @@ function _renderHistoryRunFindings(body) {
     list.appendChild(item);
   });
   body.appendChild(list);
+  if (pager) body.appendChild(_renderHistoryRunFindingsPagination(findings));
+}
+
+function _renderHistoryRunFindingsPagination(findings) {
+  const pagination = _historyRunModalState.findingsPagination || {};
+  const limit = Math.max(1, Number(pagination.limit || HISTORY_RUN_FINDINGS_PAGE_LIMIT));
+  const offset = Math.max(0, Number(pagination.offset || 0));
+  const total = Math.max(0, Number(pagination.total || findings.length || 0));
+  if (total <= limit && offset === 0) return null;
+  const start = total && findings.length ? offset + 1 : 0;
+  const end = total && findings.length ? Math.min(total, offset + findings.length) : 0;
+  const wrap = document.createElement('div');
+  wrap.className = 'history-run-findings-pagination history-pagination';
+  const summary = document.createElement('div');
+  summary.className = 'history-pagination-summary';
+  summary.textContent = `${start}-${end} of ${total.toLocaleString()} findings`;
+  const controls = document.createElement('div');
+  controls.className = 'history-pagination-controls';
+  const prev = document.createElement('button');
+  prev.type = 'button';
+  prev.className = 'btn btn-secondary btn-compact';
+  prev.dataset.historyRunFindingsPage = 'prev';
+  prev.disabled = offset <= 0 || _historyRunModalState.loadingFindings;
+  prev.textContent = 'Previous';
+  const status = document.createElement('span');
+  status.className = 'history-pagination-status';
+  status.textContent = `Page ${Math.floor(offset / limit) + 1}`;
+  const next = document.createElement('button');
+  next.type = 'button';
+  next.className = 'btn btn-secondary btn-compact';
+  next.dataset.historyRunFindingsPage = 'next';
+  next.disabled = offset + findings.length >= total || _historyRunModalState.loadingFindings;
+  next.textContent = 'Next';
+  controls.append(prev, status, next);
+  wrap.append(summary, controls);
+  return wrap;
 }
 
 function _renderHistoryRunArtifacts(body, run) {
@@ -488,9 +547,12 @@ function _renderHistoryRunModal() {
   });
   const findingsTab = overlay.querySelector('[data-history-run-tab="findings"]');
   if (findingsTab) {
-    const count = Array.isArray(_historyRunModalState.findings)
+    const pagination = _historyRunModalState.findingsPagination || {};
+    const count = pagination.loaded
+      ? Number(pagination.total || 0)
+      : Array.isArray(_historyRunModalState.findings)
       ? _historyRunModalState.findings.length
-      : Number(run.finding_count || 0);
+      : 0;
     findingsTab.textContent = count ? `Findings (${count})` : 'Findings';
   }
   const artifactsTab = overlay.querySelector('[data-history-run-tab="artifacts"]');
@@ -532,18 +594,40 @@ async function _loadHistoryRunDetails(runId, token) {
   }
 }
 
-async function _loadHistoryRunFindings(runId, token) {
+async function _loadHistoryRunFindings(runId, token, { offset = 0 } = {}) {
   _historyRunModalState.loadingFindings = true;
   _renderHistoryRunModal();
+  const limit = HISTORY_RUN_FINDINGS_PAGE_LIMIT;
+  const query = new URLSearchParams({
+    limit: String(limit),
+    offset: String(Math.max(0, Number(offset || 0))),
+  });
   try {
-    const resp = await apiFetch(`/entities/run/${encodeURIComponent(runId)}/findings`, { cache: 'no-store' });
+    const resp = await apiFetch(`/entities/run/${encodeURIComponent(runId)}/findings?${query}`, { cache: 'no-store' });
     if (resp.ok === false) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     if (token !== _historyRunModalToken) return;
-    _historyRunModalState.findings = Array.isArray(data.findings) ? data.findings : [];
+    const payload = data && typeof data === 'object' ? data : {};
+    _historyRunModalState.findings = Array.isArray(payload.findings) ? payload.findings : [];
+    _historyRunModalState.findingsPagination = {
+      limit: Math.max(1, Number(payload.limit || limit)),
+      offset: Math.max(0, Number(payload.offset || offset || 0)),
+      total: Math.max(0, Number(payload.total || _historyRunModalState.findings.length || 0)),
+      has_more: !!payload.has_more,
+      occurrence_total: Math.max(0, Number(payload.occurrence_total || 0)),
+      loaded: true,
+    };
   } catch (_) {
     if (token === _historyRunModalToken) {
       _historyRunModalState.findings = [];
+      _historyRunModalState.findingsPagination = {
+        limit,
+        offset: 0,
+        total: 0,
+        has_more: false,
+        occurrence_total: 0,
+        loaded: true,
+      };
       _historyRunModalState.error = 'Could not load run findings.';
     }
   } finally {
@@ -552,6 +636,22 @@ async function _loadHistoryRunFindings(runId, token) {
       _renderHistoryRunModal();
     }
   }
+}
+
+function _setHistoryRunFindingsPage(direction) {
+  const run = _historyRunPrimary();
+  if (!run || !run.id || _historyRunModalState.loadingFindings) return;
+  const pagination = _historyRunModalState.findingsPagination || {};
+  const findings = Array.isArray(_historyRunModalState.findings) ? _historyRunModalState.findings : [];
+  const limit = Math.max(1, Number(pagination.limit || HISTORY_RUN_FINDINGS_PAGE_LIMIT));
+  const currentOffset = Math.max(0, Number(pagination.offset || 0));
+  const total = Math.max(0, Number(pagination.total || findings.length || 0));
+  const maxOffset = Math.max(0, Math.floor(Math.max(0, total - 1) / limit) * limit);
+  const nextOffset = direction === 'prev'
+    ? Math.max(0, currentOffset - limit)
+    : Math.min(maxOffset, currentOffset + limit);
+  if (nextOffset === currentOffset) return;
+  _loadHistoryRunFindings(run.id, _historyRunModalToken, { offset: nextOffset });
 }
 
 async function _loadHistoryRunProjectState(runId, token) {
@@ -590,6 +690,14 @@ function openHistoryRunDetails(run) {
     run,
     details: null,
     findings: null,
+    findingsPagination: {
+      limit: HISTORY_RUN_FINDINGS_PAGE_LIMIT,
+      offset: 0,
+      total: 0,
+      has_more: false,
+      occurrence_total: 0,
+      loaded: false,
+    },
     projectState: null,
     activeTab: 'summary',
     loadingDetails: false,

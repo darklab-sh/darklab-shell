@@ -196,6 +196,10 @@ function loadAtlas({
           last_seen_at: '2026-05-15T00:01:00Z',
         }],
         findings: [],
+        detail_limits: {
+          runs: { limit: 50, shown: 1, has_more: true },
+          findings: { limit: 50, shown: 0, has_more: false },
+        },
       }))
     }
     if (target === '/atlas/entities/ent_ip/project_links' && options.method === 'POST') {
@@ -333,17 +337,19 @@ describe('Atlas overlay', () => {
     expect(intelToggle?.classList.contains('btn-ghost')).toBe(true)
     expect(intelToggle?.getAttribute('aria-expanded')).toBe('false')
     expect(document.querySelector('.atlas-intel-card-body')?.classList.contains('u-hidden')).toBe(true)
+    expect(document.querySelector('.atlas-intel-card-body')?.textContent).not.toContain('ports')
     intelToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(intelToggle?.getAttribute('aria-expanded')).toBe('true')
     expect(document.querySelector('.atlas-intel-card-body')?.classList.contains('u-hidden')).toBe(false)
     expect(document.querySelector('.atlas-intel-card-body')?.textContent).toContain('ports')
     expect(document.querySelector('.atlas-intel-card-body')?.textContent).toContain('nginx')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('shodan host 107.178.109.44')
+    expect(document.getElementById('atlas-detail')?.textContent).toContain('Showing latest 50 source runs.')
     expect(document.querySelector('.atlas-shell')?.dataset.atlasMode).toBe('entity')
     expect(document.getElementById('atlas-finding-status-filter')?.classList.contains('u-hidden')).toBe(true)
     expect(document.getElementById('atlas-finding-bulk-row')?.classList.contains('u-hidden')).toBe(false)
-    expect(apiFetch).toHaveBeenCalledWith('/atlas?orphan_filter=hide', { cache: 'no-store' })
-    expect(apiFetch).toHaveBeenCalledWith('/atlas/entities/ent_ip', { cache: 'no-store' })
+    expect(apiFetch).toHaveBeenCalledWith('/atlas?orphan_filter=hide', expect.objectContaining({ cache: 'no-store' }))
+    expect(apiFetch).toHaveBeenCalledWith('/atlas/entities/ent_ip', expect.objectContaining({ cache: 'no-store' }))
   })
 
   it('cycles Atlas tabs forward and backward for modal keyboard shortcuts', async () => {
@@ -394,7 +400,7 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-list')?.textContent).toContain('No findings queued')
     expect(document.getElementById('atlas-detail')?.textContent).toContain('Select a finding')
     expect(showToast).not.toHaveBeenCalled()
-    expect(apiFetch).not.toHaveBeenCalledWith('/atlas/entities/ent_ip', { cache: 'no-store' })
+    expect(apiFetch).not.toHaveBeenCalledWith('/atlas/entities/ent_ip', expect.objectContaining({ cache: 'no-store' }))
   })
 
   it('adds the selected entity to the active project without leaving the surface', async () => {
@@ -500,7 +506,7 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-subtitle')?.textContent).toBe('1 entity · 1 finding · Case Alpha')
     expect(apiFetch).toHaveBeenCalledWith(
       '/atlas/findings?limit=50&offset=0&project_id=prj_1&orphan_filter=hide',
-      { cache: 'no-store' },
+      expect.objectContaining({ cache: 'no-store' }),
     )
   })
 
@@ -632,10 +638,14 @@ describe('Atlas overlay', () => {
     await vi.waitFor(() => {
       expect(apiFetch).toHaveBeenCalledWith(
         '/atlas/entities?type=hash&limit=50&offset=0&orphan_filter=hide',
-        { cache: 'no-store' },
+        expect.objectContaining({ cache: 'no-store' }),
       )
     })
+    const hashListCall = apiFetch.mock.calls.find(([url]) => (
+      String(url).startsWith('/atlas/entities?type=hash')
+    ))
     document.querySelector('[data-atlas-tab="domain"]')?.click()
+    expect(hashListCall?.[1]?.signal?.aborted).toBe(true)
     await vi.waitFor(() => {
       expect(document.getElementById('atlas-list')?.textContent).toContain('darklab.sh')
     })
@@ -849,7 +859,7 @@ describe('Atlas overlay', () => {
     await vi.waitFor(() => expect(downloadBlobAsAttachment).toHaveBeenCalled())
     expect(apiFetch).toHaveBeenCalledWith(
       '/atlas/entities/export?format=csv&type=ip&q=107.178&project_id=prj_1&orphan_filter=hide',
-      { cache: 'no-store' },
+      expect.objectContaining({ cache: 'no-store' }),
     )
     expect(downloadBlobAsAttachment).toHaveBeenCalledWith(
       expect.any(Blob),

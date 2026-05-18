@@ -55,6 +55,7 @@
         ctx.syncProjectFilterSortDivider(filterBar);
         ctx.scheduleProjectFilterSortDividerSync(filterBar);
       }
+      const findingFiltersActive = ctx.projectFindingServerFiltersActive(projectId, summary);
       if (
         ctx.workspaceTab() === 'findings'
         || ['runs', 'artifacts'].includes(ctx.workspaceTab())
@@ -62,12 +63,13 @@
         || ctx.projectTargetFilterActive(projectId, summary)
         || !ctx.projectFindingsLoaded(projectId)
       ) {
-        ctx.loadProjectFindings(projectId).catch(() => {});
+        if (!(ctx.workspaceTab() === 'findings' && findingFiltersActive)) {
+          ctx.loadProjectFindings(projectId).catch(() => {});
+        }
       }
       if (
         ctx.workspaceTab() === 'findings'
-        && ctx.projectFindingsLoaded(projectId)
-        && ctx.projectFindingServerFiltersActive(projectId, summary)
+        && findingFiltersActive
       ) {
         ctx.loadProjectFilteredFindings(projectId, summary).catch(() => {});
       }
@@ -75,7 +77,8 @@
 
     function renderWorkspace() {
       if (ctx.projectWorkspaceSubtitle) {
-        const count = ctx.projectRows().length;
+        const pagination = ctx.projectPagination?.() || {};
+        const count = Number(pagination.total || ctx.projectRows().length || 0);
         ctx.projectWorkspaceSubtitle.textContent = count
           ? `${count} project workspace${count === 1 ? '' : 's'} in this session.`
           : 'Select a project to review its targets, runs, findings, artifacts, and packages.';

@@ -169,6 +169,7 @@ class TestLoadConfig:
             "DATABASE_URL": "postgresql://darklab:secret@postgres:5432/darklab_shell",
             "DATABASE_POOL_MIN": "2",
             "DATABASE_POOL_MAX": "4",
+            "DATABASE_POSTGRES_JIT": "true",
             "WORKSPACE_ROOT": "/env/workspaces",
             "PROMETHEUS_MULTIPROC_DIR": "/env/prometheus",
         }):
@@ -183,6 +184,7 @@ class TestLoadConfig:
         assert cfg["database_url"] == "postgresql://darklab:secret@postgres:5432/darklab_shell"
         assert cfg["database_pool_min"] == 2
         assert cfg["database_pool_max"] == 4
+        assert cfg["database_postgres_jit"] is True
         assert cfg["workspace_root"] == "/env/workspaces"
         assert cfg["prometheus_multiproc_dir"] == "/env/prometheus"
 
@@ -227,6 +229,7 @@ class TestLoadConfig:
         assert cfg["database_url"] == ""
         assert cfg["database_pool_min"] == 1
         assert cfg["database_pool_max"] == 5
+        assert cfg["database_postgres_jit"] is False
         assert cfg["workspace_enabled"] is False
         assert cfg["workspace_backend"] == "tmpfs"
         assert cfg["workspace_quota_mb"] == 50
@@ -421,6 +424,7 @@ class TestDatabaseBackend:
             "postgresql://darklab:secret@postgres:5432/darklab_shell",
             2,
             7,
+            False,
         )
         with pytest.raises(database_backend.DatabaseBackendError, match="SQLite-specific SQL"):
             database_backend.require_sqlite_backend(cfg, "db_connect")
@@ -458,7 +462,7 @@ class TestDatabaseBackend:
                 "conninfo": "postgresql://darklab:secret@postgres:5432/darklab_shell",
                 "min_size": 1,
                 "max_size": 3,
-                "kwargs": {"row_factory": "dict_row"},
+                "kwargs": {"row_factory": "dict_row", "options": "-c jit=off"},
                 "open": True,
             }]
         finally:
@@ -631,7 +635,7 @@ class TestPostgresMigrations:
         sql = "\n".join(baseline.statements)
 
         assert baseline.version == "0001"
-        assert [migration.version for migration in MIGRATIONS] == ["0001", "0002", "0003"]
+        assert [migration.version for migration in MIGRATIONS] == ["0001", "0002", "0003", "0004", "0005"]
         for table_name in (
             "runs",
             "run_output_artifacts",
@@ -666,18 +670,25 @@ class TestPostgresMigrations:
 
         run_search_migration = MIGRATIONS[1]
         atlas_search_migration = MIGRATIONS[2]
+        atlas_detail_migration = MIGRATIONS[3]
+        project_findings_migration = MIGRATIONS[4]
         sql = "\n".join([*run_search_migration.statements, *atlas_search_migration.statements])
 
         assert run_search_migration.version == "0002"
         assert atlas_search_migration.version == "0003"
-        assert "CREATE EXTENSION IF NOT EXISTS pg_trgm" in sql
-        assert "gin_trgm_ops" in sql
+        assert atlas_detail_migration.version == "0004"
+        assert project_findings_migration.version == "0005"
+        assert "CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public" in sql
+        assert "public.gin_trgm_ops" in sql
         assert "command" in sql
         assert "output_search_text" in sql
         assert "canonical_value" in sql
         assert "title" in sql
         assert "raw_line" in sql
         assert "tool_root" in sql
+        assert "idx_entity_run_links_entity_seen" in "\n".join(atlas_detail_migration.statements)
+        assert "idx_findings_session_run_seen" in "\n".join(project_findings_migration.statements)
+        assert "idx_findings_occurrences_finding_seen" in "\n".join(project_findings_migration.statements)
 
     def test_migration_runner_serializes_with_advisory_lock_and_records_versions(self):
         from core.migrations.runner import Migration, run_migrations_with_advisory_lock
@@ -7773,6 +7784,9 @@ class TestDatabaseInit:
             occurrence_indexes = {
                 row[1] for row in conn.execute("PRAGMA index_list('findings_occurrences')").fetchall()
             }
+            entity_run_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('entity_run_links')").fetchall()
+            }
             label_indexes = {row[1] for row in conn.execute("PRAGMA index_list('entity_labels')").fetchall()}
             note_indexes = {row[1] for row in conn.execute("PRAGMA index_list('entity_notes')").fetchall()}
             package_indexes = {row[1] for row in conn.execute("PRAGMA index_list('evidence_packages')").fetchall()}
@@ -7785,9 +7799,15 @@ class TestDatabaseInit:
         assert "idx_findings_session_signature" in finding_indexes
         assert "idx_findings_session_status" in finding_indexes
         assert "idx_findings_session_entity_seen" in finding_indexes
+        assert "idx_findings_session_run_seen" in finding_indexes
+        assert "idx_findings_session_first_run_seen" in finding_indexes
+        assert "idx_findings_session_last_run_seen" in finding_indexes
         assert "idx_findings_session_tool_seen" in finding_indexes
         assert "idx_findings_session_severity_seen" in finding_indexes
         assert "idx_findings_occurrences_run" in occurrence_indexes
+        assert "idx_findings_occurrences_finding_seen" in occurrence_indexes
+        assert "idx_entity_run_links_run" in entity_run_indexes
+        assert "idx_entity_run_links_entity_seen" in entity_run_indexes
         assert "idx_entity_labels_entity_created" in label_indexes
         assert "idx_entity_notes_entity_updated" in note_indexes
         assert "idx_evidence_packages_project_updated" in package_indexes

@@ -23,6 +23,7 @@ MAX_BULK_RUN_ACTION_ITEMS = 100
 BULK_AUDIT_FAILURE_LIMIT = 20
 ACTIVE_PROJECT_PREF_KEY = "pref_active_project_id"
 PROJECT_AUTO_LINK_EXTERNAL_RUNS_PREF_KEY = "pref_project_auto_link_external_runs"
+PROJECT_AUTO_LINK_RUN_ENTITIES_PREF_KEY = "pref_project_auto_link_run_entities"
 
 PROJECT_STATUSES = frozenset({"active", "archived"})
 PROJECT_LINK_ENTITY_TYPES = frozenset({

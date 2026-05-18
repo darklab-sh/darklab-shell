@@ -973,6 +973,16 @@ describe('history panel actions', () => {
   })
 
   it('loads structured run findings into the run details findings tab', async () => {
+    const makeFinding = (index, occurrenceCount = 1) => ({
+      id: `finding-${index}`,
+      title: index === 1 ? 'Missing security header' : `Paged finding ${index}`,
+      raw_line: index === 1 ? '[info] missing header' : `[info] finding ${index}`,
+      severity: 'info',
+      review_state: 'new',
+      line_number: index - 1,
+      scope: 'http',
+      run_occurrence_count: occurrenceCount,
+    })
     const apiFetch = vi.fn((url) => {
       if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
         return Promise.resolve({
@@ -987,7 +997,7 @@ describe('history panel actions', () => {
               started: '2026-01-01T00:00:00Z',
               created: '2026-01-01T00:00:00Z',
               exit_code: 0,
-              finding_count: 1,
+              finding_count: 60,
             }],
             runs: [],
           }),
@@ -1001,23 +1011,33 @@ describe('history panel actions', () => {
             command: 'nuclei -u https://darklab.sh',
             output: ['finding line'],
             exit_code: 0,
-            finding_count: 1,
+            finding_count: 60,
           }),
         })
       }
-      if (url === '/entities/run/run-findings/findings') {
+      if (url === '/entities/run/run-findings/findings?limit=50&offset=0') {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            findings: [{
-              id: 'finding-1',
-              title: 'Missing security header',
-              raw_line: '[info] missing header',
-              severity: 'info',
-              review_state: 'new',
-              line_number: 0,
-              scope: 'http',
-            }],
+            findings: Array.from({ length: 50 }, (_, index) => makeFinding(index + 1, index === 0 ? 3 : 1)),
+            total: 51,
+            limit: 50,
+            offset: 0,
+            has_more: true,
+            occurrence_total: 60,
+          }),
+        })
+      }
+      if (url === '/entities/run/run-findings/findings?limit=50&offset=50') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            findings: [makeFinding(51)],
+            total: 51,
+            limit: 50,
+            offset: 50,
+            has_more: false,
+            occurrence_total: 60,
           }),
         })
       }
@@ -1034,9 +1054,21 @@ describe('history panel actions', () => {
     document.querySelector('[data-history-run-tab="findings"]')
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    expect(apiFetch).toHaveBeenCalledWith('/entities/run/run-findings/findings', { cache: 'no-store' })
+    expect(apiFetch).toHaveBeenCalledWith('/entities/run/run-findings/findings?limit=50&offset=0', { cache: 'no-store' })
+    expect(document.querySelector('[data-history-run-tab="findings"]').textContent).toBe('Findings (51)')
     expect(document.getElementById('history-run-body').textContent).toContain('Missing security header')
     expect(document.getElementById('history-run-body').textContent).toContain('[info] missing header')
+    expect(document.getElementById('history-run-body').textContent).toContain('3 occurrences')
+    expect(document.getElementById('history-run-body').textContent).toContain('1-50 of 51 findings')
+    document.querySelector('[data-history-run-findings-page="next"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(apiFetch).toHaveBeenCalledWith('/entities/run/run-findings/findings?limit=50&offset=50', { cache: 'no-store' })
+    expect(document.getElementById('history-run-body').textContent).toContain('Paged finding 51')
+    expect(document.getElementById('history-run-body').textContent).toContain('51-51 of 51 findings')
+    document.querySelector('[data-history-run-tab="summary"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(document.getElementById('history-run-body').textContent).toContain('Findings / Occurrences51 / 60')
   })
 
   it('closes the history panel for permalink but keeps it open for star and delete', async () => {

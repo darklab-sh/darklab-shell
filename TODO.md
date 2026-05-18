@@ -10,9 +10,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
 - [Feature Enhancements](#feature-enhancements)
-  - [Run comparison follow-ups](#run-comparison-follow-ups)
   - [Atlas Enhancements](#atlas-enhancements)
-  - [External intel provider enhancements](#external-intel-provider-enhancements)
   - [Future Project Workspace enhancements](#future-project-workspace-enhancements)
   - [Future interactive PTY enhancements](#future-interactive-pty-enhancements)
   - [Active run reattachment improvements](#active-run-reattachment-improvements)
@@ -60,10 +58,6 @@ No technical debt items are currently tracked.
 
 ## Feature Enhancements
 
-### Run comparison follow-ups
-- Consider active-tab compare, snapshot/permalink compare, package-artifact compare, and export/share comparison once the run-vs-run model has more production use.
-- Add focused large/noisy output regressions if real scanner output exposes performance or alignment gaps beyond the current backend, Vitest, and Playwright coverage.
-
 ### Atlas Enhancements
 - **Future**
   - Entity graph view (visual link map across hosts, domains, hashes, CVEs).
@@ -77,16 +71,6 @@ No technical debt items are currently tracked.
   - Cross-session Atlas view for operators managing multiple sessions or shared infrastructure.
   - Atlas import from external triage tools.
 
-### External intel provider enhancements
-- **Lower-priority candidates**
-  - **MISP** for operator-owned intel. Treat it as a self-hosted integration with `MISP_URL` plus `MISP_API_KEY`, not as a globally available default.
-  - BuiltWith Pro and other commercial tech-fingerprint services until local/lightweight tech detection proves insufficient.
-  - DeHashed, IntelligenceX, PassiveTotal/Defender TI, and DNSDB until entity storage, provider-status UI, and operator policy controls exist.
-  - More vendor CLIs unless the CLI adds a materially better workflow than an app-native REST call.
-- **Provider management follow-up**
-  - Add an optional operator provider denylist if deployments need to block outbound calls to specific vendors.
-  - Revisit mutating provider flows, such as urlscan.io scan submission, only after privacy, terms, visibility, and user-confirmation rules are explicit.
-
 ### Future Project Workspace enhancements
 - **Security and lifecycle**
   - Validate `workspace_file` entity ownership during session migration, or document that labels/notes on workspace-file paths can drift when a migrated token lands in a session with a different file at the same path.
@@ -97,15 +81,9 @@ No technical debt items are currently tracked.
   - Continue moving Projects modal rendering and event wiring out of `shell_chrome.js` into focused project workspace browser modules.
   - Reduce repeated `projects.py` route boilerplate with small serialization/404 helpers.
 - **Capture, tagging, and navigation**
-  - Expose `Add label`, `Add note`, `Open in project`, and `Add as project target` on transcript right-click or signal-tagged token long-press; this should replace the removed Projects-modal quick-add target flow.
-  - Add contextual quick-add target entry points from history rows and workspace file previews once the shared action-menu pattern exists.
-  - Consider a per-project current-target sub-state so `${target}` placeholder substitution can follow sustained work on a single host.
-  - Decide whether `host` remains a visible target type or is retained only as a backend compatibility value.
   - Add a compact project switcher near the prompt with recently used projects and a Create New action.
   - Show run, finding, artifact, and package counts on project-list rows so project scale is visible before opening each project.
 - **Future-state mobile polish**
-  - Add OS Back / browser Back support with `history.pushState` after the base sheet navigation is stable.
-  - Add a project search/filter input above the mobile list once project counts justify it.
   - Consider swipe gestures for target and finding rows only after overflow-menu interactions are shipped and tested.
 - **Findings and comparison**
   - Extend the Findings tab filters beyond target/run/review state to command root, severity, scope, labels, and note state.

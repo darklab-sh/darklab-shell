@@ -13,10 +13,13 @@
       const runFiltersActive = ctx.projectRunFilterActive(projectId, summary);
 
       if (tabId === 'findings') {
-        if (!ctx.projectFindingServerFiltersActive(projectId, summary) || !ctx.projectFindingsLoaded(projectId)) {
+        if (!ctx.projectFindingServerFiltersActive(projectId, summary)) {
           return String(totalCount);
         }
-        return `${ctx.filteredProjectFindings(projectId, summary).length}/${totalCount}`;
+        const page = ctx.projectFindingPagination?.(projectId, summary) || {};
+        const filteredTotal = Number(page.total || ctx.filteredProjectFindings(projectId, summary).length);
+        if (!page.loaded && !filteredTotal) return String(totalCount);
+        return `${filteredTotal}/${totalCount}`;
       }
 
       if (tabId === 'runs') {

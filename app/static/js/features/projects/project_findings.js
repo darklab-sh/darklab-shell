@@ -72,7 +72,7 @@
         count.className = 'project-finding-selection-count';
         count.setAttribute('aria-live', 'polite');
         count.textContent = `${selectedFindingIds.size} selected`;
-        const selectAll = ctx.makeProjectButton('Select all', 'select-all-project-findings', projectId);
+        const selectAll = ctx.makeProjectButton('Select page', 'select-all-project-findings', projectId);
         selectAll.disabled = !findings.length;
         const clear = ctx.makeProjectButton('Clear', 'clear-project-findings', projectId);
         clear.disabled = !selectedFindingIds.size;
@@ -99,12 +99,46 @@
       return toolbar;
     }
 
+    function renderPagination(projectId, summary, findings, position = 'bottom') {
+      const pagination = ctx.projectFindingPagination?.(projectId, summary) || {};
+      const limit = Math.max(1, Number(pagination.limit || 50));
+      const offset = Math.max(0, Number(pagination.offset || 0));
+      const total = Math.max(0, Number(pagination.total || findings.length || 0));
+      const loading = !!pagination.loading;
+      if (total <= limit && offset === 0) return null;
+      const start = total && findings.length ? offset + 1 : 0;
+      const end = total && findings.length ? Math.min(total, offset + findings.length) : 0;
+      const wrap = document.createElement('div');
+      wrap.className = 'project-finding-pagination project-workspace-pagination';
+      wrap.dataset.projectFindingsPagerPosition = position;
+      const summaryNode = document.createElement('div');
+      summaryNode.className = 'project-workspace-pagination-summary';
+      summaryNode.textContent = `${start}-${end} of ${total} findings`;
+      const controls = document.createElement('div');
+      controls.className = 'project-workspace-pagination-controls';
+      const prev = ctx.makeProjectButton('Previous', 'noop', projectId);
+      prev.dataset.projectFindingsPage = 'prev';
+      prev.dataset.projectFindingsPagerPosition = position;
+      prev.disabled = loading || offset <= 0;
+      const status = document.createElement('span');
+      status.className = 'project-workspace-pagination-status';
+      status.textContent = loading ? 'Loading...' : `Page ${Math.floor(offset / limit) + 1}`;
+      const next = ctx.makeProjectButton('Next', 'noop', projectId);
+      next.dataset.projectFindingsPage = 'next';
+      next.dataset.projectFindingsPagerPosition = position;
+      next.disabled = loading || offset + findings.length >= total;
+      controls.append(prev, status, next);
+      wrap.append(summaryNode, controls);
+      return wrap;
+    }
+
     function renderFindingRow(projectId, summary, finding) {
       const selectedFindingIds = ctx.selectedFindingIds();
       const selectMode = ctx.findingSelectMode();
       const lineIndex = Number(finding.line_number);
       const findingId = String(finding.id || '');
       const metaParts = [
+        finding.run_command || finding.run_id,
         finding.scope || 'finding',
         ctx.projectFindingTargetText(summary, finding) || ctx.projectTargetLabel(summary, finding.target_id),
         `line ${finding.line_number || 0}`,
@@ -142,15 +176,18 @@
     }
 
     function renderFindings(container, projectId, summary) {
-      if (ctx.findingsLoadingId() === projectId && !ctx.hasFindings(projectId)) {
+      const initialPagination = ctx.projectFindingPagination?.(projectId, summary) || {};
+      if (!initialPagination.loaded && !ctx.hasFindings(projectId)) {
         container.appendChild(ctx.emptyProjectPanel('Loading findings...'));
         return;
       }
       const allFindings = ctx.projectFindingItems(projectId);
       const findings = ctx.filteredProjectFindings(projectId, summary);
+      const pagination = initialPagination;
+      const total = Math.max(0, Number(pagination.total || allFindings.length || 0));
       pruneSelection(findings);
       container.appendChild(renderBulkToolbar(projectId, findings));
-      if (!allFindings.length) {
+      if (!allFindings.length && total === 0) {
         container.appendChild(ctx.emptyProjectPanel('No persisted findings for linked runs or linked entities yet.'));
         return;
       }
@@ -159,42 +196,17 @@
           ? 'No findings match the selected filters.'
           : 'No persisted findings for linked runs or linked entities yet.';
         container.appendChild(ctx.emptyProjectPanel(message));
+        const pager = renderPagination(projectId, summary, findings, 'bottom');
+        if (pager) container.appendChild(pager);
         return;
       }
-      ctx.groupBy(findings, finding => finding.run_command || finding.run_id).forEach((items, runLabel) => {
-        const group = document.createElement('section');
-        group.className = 'project-explorer-group project-findings-group';
-        const collapsed = groupCollapsed(projectId, runLabel);
-        group.classList.toggle('is-collapsed', collapsed);
-        const title = document.createElement('button');
-        title.type = 'button';
-        title.className = 'toggle-btn project-explorer-group-toggle';
-        title.dataset.projectFindingGroupToggle = '1';
-        title.dataset.projectId = projectId;
-        title.dataset.projectFindingGroup = runLabel;
-        title.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-        ctx.bindProjectRuntimePressable(title);
-        const caret = document.createElement('span');
-        caret.className = 'project-explorer-group-caret';
-        caret.setAttribute('aria-hidden', 'true');
-        caret.textContent = ctx.groupCaret || '';
-        const label = document.createElement('span');
-        label.className = 'project-explorer-group-title';
-        label.textContent = runLabel;
-        const count = document.createElement('span');
-        count.className = 'project-explorer-group-count';
-        count.textContent = `${items.length} finding${items.length === 1 ? '' : 's'}`;
-        title.append(caret, label, count);
-        group.appendChild(title);
-        const body = document.createElement('div');
-        body.className = 'project-explorer-group-body';
-        body.hidden = collapsed;
-        items.forEach((finding) => {
-          body.appendChild(renderFindingRow(projectId, summary, finding));
-        });
-        group.appendChild(body);
-        container.appendChild(group);
+      const topPager = renderPagination(projectId, summary, findings, 'top');
+      if (topPager) container.appendChild(topPager);
+      findings.forEach((finding) => {
+        container.appendChild(renderFindingRow(projectId, summary, finding));
       });
+      const pager = renderPagination(projectId, summary, findings, 'bottom');
+      if (pager) container.appendChild(pager);
     }
 
     return {

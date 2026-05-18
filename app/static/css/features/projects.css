@@ -1232,6 +1232,46 @@
   align-content: start;
 }
 
+.project-workspace-pagination {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--theme-panel-border);
+  background: var(--theme-chrome-row-bg);
+  font-family: var(--font-mono);
+}
+
+.project-workspace-pagination-summary {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.project-workspace-pagination-controls {
+  display: grid;
+  grid-template-columns: max-content minmax(86px, auto) max-content;
+  align-items: center;
+  gap: 6px;
+}
+
+.project-workspace-pagination-status {
+  color: var(--text);
+  font-size: 11px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.project-workspace-pagination-controls > .btn {
+  min-height: 24px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
+.project-workspace-pagination-controls > .btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 
 
 .project-workspace-section-label {

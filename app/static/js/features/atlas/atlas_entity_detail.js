@@ -181,6 +181,13 @@
     }
     rows.forEach(snapshot => {
       const card = node('div', 'atlas-intel-card');
+      const body = node('div', 'atlas-intel-card-body u-hidden');
+      let payloadRendered = false;
+      const renderPayloadOnce = () => {
+        if (payloadRendered) return;
+        body.appendChild(renderIntelPayload(snapshot));
+        payloadRendered = true;
+      };
       const toggle = document.createElement('button');
       toggle.type = 'button';
       toggle.className = 'btn btn-ghost btn-compact atlas-intel-card-toggle';
@@ -192,17 +199,19 @@
       );
       const summary = node('div', 'atlas-intel-summary', text(snapshot.summary, 'No summary'));
       const meta = node('div', 'atlas-muted', `Fetched ${formatDate(snapshot.fetched_at)}`);
-      const body = node('div', 'atlas-intel-card-body u-hidden');
-      body.appendChild(renderIntelPayload(snapshot));
       const disclosure = global.bindDisclosure?.(toggle, {
         panel: body,
         openClass: null,
         hiddenClass: 'u-hidden',
-        onToggle: (open) => card.classList.toggle('is-open', open),
+        onToggle: (open) => {
+          if (open) renderPayloadOnce();
+          card.classList.toggle('is-open', open);
+        },
       });
       if (!disclosure) {
         toggle.addEventListener('click', () => {
           const expanded = toggle.getAttribute('aria-expanded') === 'true';
+          if (!expanded) renderPayloadOnce();
           toggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
           body.classList.toggle('u-hidden', expanded);
           card.classList.toggle('is-open', !expanded);
@@ -251,7 +260,13 @@
     return wrap;
   }
 
-  function renderRuns(runs, onSeeRun) {
+  function renderLimitNotice(meta, noun) {
+    if (!meta || !meta.has_more) return null;
+    const limit = Number(meta.limit || meta.shown || 0);
+    return node('div', 'atlas-muted', `Showing latest ${limit.toLocaleString()} ${noun}.`);
+  }
+
+  function renderRuns(runs, onSeeRun, meta = null) {
     const wrap = node('div', 'atlas-source-list');
     const rows = Array.isArray(runs) ? runs : [];
     if (!rows.length) {
@@ -277,10 +292,12 @@
       }
       wrap.appendChild(row);
     });
+    const notice = renderLimitNotice(meta, 'source runs');
+    if (notice) wrap.appendChild(notice);
     return wrap;
   }
 
-  function renderFindings(findings) {
+  function renderFindings(findings, meta = null) {
     const wrap = node('div', 'atlas-finding-list');
     const rows = Array.isArray(findings) ? findings : [];
     if (!rows.length) {
@@ -298,6 +315,8 @@
       row.append(title, meta);
       wrap.appendChild(row);
     });
+    const notice = renderLimitNotice(meta, 'findings');
+    if (notice) wrap.appendChild(notice);
     return wrap;
   }
 
@@ -466,8 +485,8 @@
     container.append(section('Labels', renderLabels(entity.labels)));
     container.append(section('Metadata', renderMetadataEditor(entity, handlers)));
     container.append(section('Intel', renderIntelSnapshots(detail.intel_snapshots)));
-    container.append(section('Source runs', renderRuns(detail.runs, handlers.onSeeRun)));
-    container.append(section('Findings', renderFindings(detail.findings)));
+    container.append(section('Source runs', renderRuns(detail.runs, handlers.onSeeRun, detail.detail_limits?.runs)));
+    container.append(section('Findings', renderFindings(detail.findings, detail.detail_limits?.findings)));
   }
 
   function section(title, content) {

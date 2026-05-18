@@ -223,7 +223,7 @@ SQLiteConnection = sqlite3.Connection
 PostgresConnection = Any
 
 _POSTGRES_POOL: Any | None = None
-_POSTGRES_POOL_CONFIG: tuple[str, int, int] | None = None
+_POSTGRES_POOL_CONFIG: tuple[str, int, int, bool] | None = None
 _POSTGRES_TRANSIENT_SQLSTATES = frozenset({
     "08003",  # connection does not exist
     "08006",  # connection failure
@@ -283,7 +283,7 @@ def require_sqlite_backend(cfg: dict[str, Any], feature: str = "database") -> No
     )
 
 
-def postgres_pool_settings(cfg: dict[str, Any]) -> tuple[str, int, int]:
+def postgres_pool_settings(cfg: dict[str, Any]) -> tuple[str, int, int, bool]:
     dsn = str(cfg.get("database_url") or "").strip()
     if not dsn:
         raise PostgresConnectionError("database_url is required when database_backend='postgres'")
@@ -297,7 +297,8 @@ def postgres_pool_settings(cfg: dict[str, Any]) -> tuple[str, int, int]:
         max_size = 5
     if max_size < min_size:
         max_size = min_size or 1
-    return dsn, min_size, max_size
+    jit_enabled = bool(cfg.get("database_postgres_jit"))
+    return dsn, min_size, max_size, jit_enabled
 
 
 def _load_postgres_pool_types():
@@ -318,13 +319,16 @@ def get_postgres_pool(cfg: dict[str, Any]) -> Any:
         return _POSTGRES_POOL
     close_postgres_pool()
     connection_pool, dict_row = _load_postgres_pool_types()
-    dsn, min_size, max_size = pool_config
+    dsn, min_size, max_size, jit_enabled = pool_config
+    kwargs: dict[str, Any] = {"row_factory": dict_row}
+    if not jit_enabled:
+        kwargs["options"] = "-c jit=off"
     try:
         _POSTGRES_POOL = connection_pool(
             conninfo=dsn,
             min_size=min_size,
             max_size=max_size,
-            kwargs={"row_factory": dict_row},
+            kwargs=kwargs,
             open=True,
         )
     except Exception as exc:

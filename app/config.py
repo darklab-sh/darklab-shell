@@ -84,6 +84,19 @@ def _coerce_int_value(value, default=0, *, minimum=0):
     return max(minimum, parsed)
 
 
+def _coerce_bool_value(value, default=False):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 def load_config(conf_dir=None):
     """Load config.yaml plus optional config.local.yaml overlays.
 
@@ -103,6 +116,7 @@ def load_config(conf_dir=None):
         "database_url":               "",
         "database_pool_min":          1,
         "database_pool_max":          5,
+        "database_postgres_jit":       False,
         "permalink_retention_days":   365,
         "log_level":                  "INFO",
         "log_format":                 "text",
@@ -207,7 +221,7 @@ def load_config(conf_dir=None):
         "workspace_max_files":        100,
         "workspace_inactivity_ttl_hours": 1,
         "max_projects_per_session":   100,
-        "max_project_links_per_project": 1000,
+        "max_project_links_per_project": 5000,
         "max_project_targets_per_project": 200,
         "max_evidence_packages_per_project": 25,
         "max_entity_labels_per_session": 5000,
@@ -271,8 +285,12 @@ def load_config(conf_dir=None):
     env_database_pool_max = str(os.environ.get("DATABASE_POOL_MAX") or "").strip()
     if env_database_pool_max:
         defaults["database_pool_max"] = env_database_pool_max
+    env_database_postgres_jit = str(os.environ.get("DATABASE_POSTGRES_JIT") or "").strip()
+    if env_database_postgres_jit:
+        defaults["database_postgres_jit"] = env_database_postgres_jit
     defaults["database_pool_min"] = _coerce_int_value(defaults.get("database_pool_min"), 1, minimum=0)
     defaults["database_pool_max"] = _coerce_int_value(defaults.get("database_pool_max"), 5, minimum=1)
+    defaults["database_postgres_jit"] = _coerce_bool_value(defaults.get("database_postgres_jit"), False)
     if defaults["database_pool_max"] < defaults["database_pool_min"]:
         defaults["database_pool_max"] = defaults["database_pool_min"] or 1
     legacy_full_output_max_bytes = defaults.pop("full_output_max_bytes", None)

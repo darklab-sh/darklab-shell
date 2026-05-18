@@ -85,6 +85,7 @@ from services.runs.workspace_artifacts import (
 )
 from core.output_signals import OutputSignalClassifier
 from services.projects.workspace import (
+    link_active_project_run_entities,
     link_run_to_active_project,
     record_project_target_discoveries,
     record_run_file_artifacts,
@@ -492,6 +493,30 @@ def _save_completed_run(
                     "session": get_log_session_id(session_id),
                     "cmd": command,
                 })
+            if active_project_link and recorded_entities:
+                try:
+                    linked_entities = link_active_project_run_entities(
+                        conn,
+                        session_id,
+                        active_project_link["project_id"],
+                        run_id,
+                    )
+                    if linked_entities:
+                        active_project_link["linked_entity_count"] = int(
+                            linked_entities.get("added") or 0
+                        )
+                        active_project_link["available_entity_count"] = int(
+                            linked_entities.get("available") or 0
+                        )
+                        active_project_link["rejected_entity_count"] = int(
+                            linked_entities.get("rejected") or 0
+                        )
+                except Exception:
+                    log.error("PROJECT_ACTIVE_RUN_ENTITY_LINK_ERROR", exc_info=True, extra={
+                        "run_id": run_id,
+                        "session": get_log_session_id(session_id),
+                        "cmd": command,
+                    })
             conn.commit()
         app_metrics.record_findings_materialized(run_kind, len(recorded_findings))
         if active_project_link:
@@ -1558,6 +1583,16 @@ def _brokered_real_run_worker(
                     "project_name": project_name,
                     "project_targets_discovered": True,
                     "target_count": discovered_target_count,
+                })
+            linked_entity_count = int(active_project_link.get("linked_entity_count") or 0)
+            if linked_entity_count:
+                entity_label = "Atlas entity" if linked_entity_count == 1 else "Atlas entities"
+                publish_run_event(run_id, "notice", {
+                    "text": f"[project] linked {linked_entity_count} {entity_label} to {project_name}",
+                    "project_id": active_project_link.get("project_id"),
+                    "project_name": project_name,
+                    "project_entities_linked": True,
+                    "entity_count": linked_entity_count,
                 })
         publish_run_event(run_id, "exit", {
             "code": exit_code,

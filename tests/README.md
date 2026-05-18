@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,881
+- behavior tests: 2,885
 - docs/inventory meta-tests: 32
-- `pytest`: 1493 (1461 behavior + 32 meta)
+- `pytest`: 1497 (1465 behavior + 32 meta)
 - `vitest`: 1168
 - `playwright`: 252
-- total: 2,913
+- total: 2,917
 
 This document is organized in two parts:
 
@@ -1093,6 +1093,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestProjectRoutes.test_project_and_history_compare_match_artifacts_by_content_hash` | Verifies project and history run comparisons both treat same-content artifacts as unchanged even when workspace paths differ. |
 | `TestProjectRoutes.test_project_scoped_compare_lines_requires_linked_project_runs` | Verifies project-scoped compare-line expansion requires project-owned linked runs. |
 | `TestProjectRoutes.test_links_run_and_unlinks_without_duplicate_rows` | Verifies project run link creation is idempotent and links can be removed. |
+| `TestProjectRoutes.test_project_findings_can_exclude_collapsed_command_groups` | Verifies collapsed Project Findings command groups are excluded from the paged row query while their collapsed counts remain available. |
 | `TestProjectRoutes.test_bulk_project_links_report_mixed_results_and_keep_legacy_response` | Verifies bulk project links report per-run add/remove/reject results while legacy single-link callers keep their response shape. |
 | `TestProjectRoutes.test_project_run_link_can_include_source_atlas_entities` | Verifies run project links can preview and optionally link Atlas entities found in the same source run. |
 | `TestProjectRoutes.test_project_run_unlink_can_remove_non_curated_source_entities` | Verifies run project unlink can preview and optionally remove same-run, non-curated Atlas entity links from the project while keeping curated entities. |
@@ -1240,6 +1241,8 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestMobileWelcomeHintsRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestMobileWelcomeHintsRoute.test_items_key_present` | Checks items key present handling. |
 | `TestAtlasRoutes.test_lists_session_entities_and_detail` | Verifies Atlas summary, list, and detail routes return session-owned materialized entities and source runs. |
+| `TestAtlasRoutes.test_entity_list_batches_metadata_for_current_page` | Verifies Atlas entity lists batch visible-page labels and project-link counts without loading full notes or project links per row. |
+| `TestAtlasRoutes.test_entity_detail_caps_large_linked_collections` | Verifies Atlas entity detail responses cap large linked source-run and finding collections while reporting that more rows exist. |
 | `TestAtlasRoutes.test_orphan_filter_surfaces_atlas_rows_after_source_run_delete` | Verifies Atlas hides rows without source runs by default while the orphan filter can surface them. |
 | `TestAtlasRoutes.test_stale_run_links_do_not_hide_atlas_orphans_or_block_cleanup` | Verifies stale Atlas source links from deleted runs do not hide orphaned rows or block source-run cleanup. |
 | `TestAtlasRoutes.test_run_delete_can_prune_non_curated_atlas_orphans_and_keep_curated_entities` | Verifies run deletion can prune non-curated Atlas rows from the deleted run while preserving curated entities. |
@@ -1250,6 +1253,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestAtlasRoutes.test_refresh_intel_can_offload_provider_payload_and_restore_detail` | Verifies oversized Atlas intel payloads can be offloaded, restored in entity detail, and cleaned up with the entity. |
 | `TestAtlasRoutes.test_findings_tab_lists_and_bulk_updates_review_state` | Verifies the Atlas Findings queue lists deduped findings and bulk-updates review state for selected findings. |
 | `TestAtlasRoutes.test_unscoped_findings_flow_through_atlas_projects_and_run_routes` | Verifies unscoped findings share one review state across Atlas, Projects, and source-run finding routes. |
+| `TestAtlasRoutes.test_run_findings_route_returns_deduped_findings_with_occurrence_count` | Verifies source-run finding routes return deduped findings plus occurrence totals for large repeated findings. |
 | `TestAtlasRoutes.test_project_links_curate_atlas_entities_into_project_targets` | Verifies Atlas project links surface as Project Targets and can be unlinked without copying entity records. |
 | `TestAtlasRoutes.test_project_summary_surfaces_all_linked_atlas_entities` | Verifies Projects summaries surface linked Atlas entities beyond targets, including intel availability counts. |
 | `TestAtlasRoutes.test_project_findings_include_linked_entity_findings_without_linked_run` | Verifies Projects findings include findings reached through linked Atlas entities even when the source run is not linked. |

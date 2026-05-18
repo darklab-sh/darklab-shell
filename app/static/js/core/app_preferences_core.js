@@ -10,6 +10,7 @@
     'pref_welcome_intro',
     'pref_share_redaction_default',
     'pref_project_auto_link_external_runs',
+    'pref_project_auto_link_run_entities',
     'pref_run_notify',
     'pref_hud_clock',
     'pref_prompt_username',
@@ -87,6 +88,7 @@
       pref_welcome_intro: 'animated',
       pref_share_redaction_default: 'unset',
       pref_project_auto_link_external_runs: 'on',
+      pref_project_auto_link_run_entities: 'on',
       pref_run_notify: 'off',
       pref_hud_clock: 'utc',
       pref_prompt_username: '',
@@ -111,6 +113,7 @@
     prefs.pref_welcome_intro = coerceWelcomeIntroMode(source.pref_welcome_intro);
     prefs.pref_share_redaction_default = coerceShareRedactionDefaultMode(source.pref_share_redaction_default);
     prefs.pref_project_auto_link_external_runs = source.pref_project_auto_link_external_runs === 'off' ? 'off' : 'on';
+    prefs.pref_project_auto_link_run_entities = source.pref_project_auto_link_run_entities === 'off' ? 'off' : 'on';
     prefs.pref_run_notify = coerceRunNotifyMode(source.pref_run_notify);
     prefs.pref_hud_clock = coerceHudClockMode(source.pref_hud_clock);
     prefs.pref_prompt_username = normalizePromptUsername(source.pref_prompt_username);

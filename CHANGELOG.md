@@ -10,6 +10,18 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Project Findings pagination** — the Projects modal now loads Findings tab rows in pages and keeps the tab count tied to the full server-side total, including findings that are linked directly to project runs without a matching occurrence row.
+  - **Why:** large projects with tens of thousands of findings should not freeze the modal or understate the real finding count.
+  - **What:** added paged `/projects/<id>/findings` responses, server-side filter totals, direct-run fallback counting, an ungrouped paged Findings list that shows each row's source command, top and bottom pagination rows, an in-flight loading state while switching pages, run/status/target filters for narrowing large projects, indexed per-row occurrence lookups instead of whole-table occurrence ranking during page loads, visible-page selection, and supporting SQLite/Postgres indexes for project finding lookups.
+  - **Tests:** extended project route coverage for paged findings, direct-run fallback counts, and route-level collapsed command-group queries, and updated Projects shell unit coverage for paged finding loads.
+- **Project Runs pagination** — the Projects modal now pages linked run rows and keeps each run's finding/artifact chips tied to server-side per-run counts.
+  - **Why:** projects with many linked runs should stay responsive while still showing useful per-run totals for jumping into Findings or Artifacts.
+  - **What:** added paged `/projects/<id>/runs` responses, per-run finding totals that include direct-run fallback links, top and bottom pagination rows on desktop and mobile, in-flight page status, and anchored scroll behavior while switching pages.
+  - **Tests:** extended project route coverage for paged runs and per-run finding/artifact counts, and updated Projects shell unit coverage for paged run rendering.
+- **Project Entities and Artifacts pagination** — the Projects modal now loads project-linked Atlas entities and run artifacts from paged endpoints instead of carrying every row in the project summary response.
+  - **Why:** large cases should not make every project tab switch pay for entity and artifact rows the user may not open.
+  - **What:** added paged `/projects/<id>/entities` and `/projects/<id>/artifacts` responses, kept entity type counts and artifact totals available in the summary, preserved target/run artifact filters, added shared top and bottom pagination rows on desktop and mobile with anchored scroll behavior, and made evidence packages load artifact rows on demand when a package needs them.
+  - **Tests:** extended project route coverage for paged entity and artifact responses, and updated Projects shell unit coverage for lazy entity/artifact loading, filtered artifact fallbacks, and package artifact selection.
 - **High-volume live-output mode** — brokered commands now pause per-line browser rendering after `high_volume_output_line_threshold` received lines and show periodic status rows with a resume-live-rendering action for new output.
   - **Why:** very noisy tools should not make the terminal tab sluggish just because the browser is trying to paint every live row.
   - **What:** the output renderer keeps bounded raw preview lines, line counts, signal/entity metadata, and normal kill controls intact while high-volume mode is active. Stale resume controls are disabled when the command exits or is killed, and high-volume counters reset at the start of the next brokered run. Backend storage policy is unchanged: saved previews and full-output artifacts still follow `max_output_lines`, `output_preview_max_mb`, `persist_full_run_output`, and `full_output_max_mb`.
@@ -52,6 +64,8 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Tests:** added Postgres regression coverage for startup retention pruning with artifact/body-store cleanup, offloaded Atlas intel payload detail rendering, and complete `/diag` usage stats under psycopg dict rows.
 - **Postgres compatibility cleanup** — the Postgres sqlite-compat connection now closes the cursor it opens for `executemany()`, and the SQLite-to-Postgres migration helper no longer carries misleading trigger-toggle control flow or visually broken error indentation.
   - **Tests:** tightened backend compatibility coverage so connection-level `executemany()` proves its cursor is closed.
+- **Postgres app connections now avoid JIT startup cost by default** — pooled app connections set `jit=off` unless `database_postgres_jit` / `DATABASE_POSTGRES_JIT` opts back in, keeping complex interactive page queries from spending most of their time compiling a one-off plan.
+  - **Tests:** updated config and Postgres pool coverage for the JIT setting.
 - **Database dialect helper cleanup** — repeated Postgres-vs-SQLite SQL fragments now flow through `DatabaseDialect` helpers for JSON decoding, insert-ignore conflict handling, case-insensitive ordering, distinct string aggregation, write transaction starts, boolean parameters, and command-root extraction.
   - **Tests:** added backend-module coverage for the shared dialect helper contract.
 - **Postgres performance cleanup** — History table/column probes are now cached per backend schema, and Atlas entity/finding searches use backend-aware substring SQL so Postgres can serve them with new `pg_trgm` indexes on entity values and finding text fields.
@@ -115,6 +129,7 @@ Entries favor clear outcomes first, then implementation and test details when th
     - Added persisted many-to-many finding target associations, inline finding review and metadata controls, clickable finding rows that restore and highlight source run lines, and high-signal output finding capture that can attach a finding to one or more matching project targets.
     - Added active-project target autocomplete for matching domain, host, IP, CIDR, URL, and target slots, plus auto-discovered targets from typed command inputs and explicit target-list files.
     - Added automatic project linking for completed external server-owned runs, with transcript notices and cross-tab Projects modal refresh when active-project capture happens, while keeping browser-owned built-ins out of project run links.
+    - Added active-project Atlas entity capture for auto-linked runs, a matching Options toggle, transcript notices for linked entity counts, and a higher default project-link cap for larger recon projects.
     - Added project-aware `/history` filtering through URL parameters and the History drawer, project metadata in history/permalink/restored-run/workspace-file payloads, `/diag` project workspace object counts, retention warnings for expiring project-linked runs, run-owned metadata cleanup on deletion, and project deletion cleanup that preserves source runs and saved history.
     - Added desktop/mobile active-project shell chrome, a desktop HUD project chip that opens the Projects modal, session-token migration for project workspace records and active-project context, and async-safe app-native select option refresh for dynamic dropdowns.
     - Added end-user FAQ entries and welcome hints for Projects and interactive PTY mode, with PTY guidance hidden automatically unless interactive PTY support is enabled.
@@ -139,6 +154,24 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Run Details now separates findings from occurrences** — the Run Details summary and Findings tab now use the deduped persisted finding list for their "Findings" count, while the summary shows a paired "Findings / Occurrences" count for repeated finding hits. The Findings tab now loads in pages so large runs don't render every finding at once.
+  - **Tests:** added route coverage for deduped, paginated run findings with per-finding occurrence counts and updated History modal unit coverage for the clearer summary/tab wording and paging controls.
+- **Atlas entity lists batch row metadata** — Atlas entity tab pages now load visible-row labels and project-link counts in two page-level queries instead of fetching labels, notes, and full project-link payloads once per entity.
+  - **Tests:** added route coverage that traces the entity-list query path and keeps the docs inventory aligned.
+- **Atlas intel payloads render lazily** — entity detail cards now keep provider summaries visible but defer building each full structured provider payload until the user expands that provider.
+  - **Tests:** updated Atlas browser coverage so collapsed intel cards stay lightweight until opened.
+- **Atlas entity detail responses cap large linked collections** — entity detail fetches now return the latest page-sized source-run and finding collections with limit metadata instead of sending every linked row for heavily reused entities.
+  - **Tests:** added route coverage for capped detail collections and updated Atlas browser coverage for the limit notice.
+- **Atlas read requests cancel stale work** — switching Atlas tabs, rows, pages, or closing the modal now aborts superseded list/detail fetches and ignores aborts without showing error toasts.
+  - **Tests:** updated Atlas browser coverage for aborted stale tab requests.
+- **Atlas detail lookups gained a source-run ordering index** — SQLite startup and Postgres migrations now add `idx_entity_run_links_entity_seen` for the entity detail source-run query.
+  - **Tests:** updated SQLite index coverage plus the Postgres migration/index assertions.
+- **Projects modal list now pages large sessions** — the Projects modal now asks `/projects` for one page of rows with lightweight counts, renders desktop/mobile pagination controls, and loads the full project summary only for the selected project.
+  - **Tests:** updated Projects route coverage for paged list payloads and the shell chrome unit harness for the paged modal request.
+- **Project Entities tab now renders in pages** — linked Atlas entities in Projects now render a bounded page of rows per entity type on desktop and mobile, keeping entity-tab switches responsive in large projects.
+  - **Tests:** reran the Projects shell unit coverage and focused syntax checks for the Projects entity/event modules.
+- **Project Artifacts tab now renders in pages** — project artifact rows now render a bounded page on desktop and mobile, while run group headings preserve full per-run counts when a page only shows part of a run's artifacts.
+  - **Tests:** reran the Projects shell unit coverage and focused syntax checks for the Projects artifact/event/mobile modules.
 - **Atlas entity rows now share one renderer** — Atlas desktop/mobile lists and the Project Entities desktop list now use `app/static/js/features/atlas/atlas_entity_row.js` for the common entity row structure.
   - **Tests:** updated the Atlas desktop/mobile and shell chrome unit harnesses for the shared renderer and kept the docs inventory aligned.
 - **Project active context moved into a feature module** — Active Project HUD context, refresh, and target discovery helpers now live in `app/static/js/features/projects/project_active_context.js`.
@@ -185,7 +218,7 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
 - **Project filters moved into a feature module** — the Project workspace filter state, dropdowns, removable chips, filtered Runs/Findings/Artifacts helpers, menu state, and finding sort divider layout helper now live in `app/static/js/features/projects/project_filters.js`.
   - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
-- **Project Findings moved into a feature module** — Project Findings rows, group toggles, the bulk review toolbar, and review state controls now live in `app/static/js/features/projects/project_findings.js`.
+- **Project Findings moved into a feature module** — Project Findings rows, the bulk review toolbar, and review state controls now live in `app/static/js/features/projects/project_findings.js`.
   - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
 - **Project Artifacts moved into a feature module** — Project Artifact rows, status badges, file preview, and download helpers now live in `app/static/js/features/projects/project_artifacts.js`.
   - **Tests:** updated the shell chrome unit harness for the extracted module and kept the docs inventory aligned.
@@ -248,6 +281,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Postgres project run-entity previews no longer fail on ordered dedupe** — the project helper that previews Atlas entities from selected runs now uses a grouped subquery instead of `SELECT DISTINCT` with hidden sort columns, keeping the preview/link flow portable across SQLite and Postgres.
+  - **Tests:** extended the opt-in Postgres project route smoke test to hit the run-entity preview endpoint after materializing Atlas entities for a run.
 - **Review-blocker cleanup for intel, metrics, and Atlas controls** — the app now closes the immediate issues found in the latest workspace code review.
   - **Why:** provider API keys must not follow untrusted redirects, Prometheus live gauges need dead-worker cleanup under Gunicorn, metrics should describe what actually happened, `/diag` should keep its largest-run signal when saved-output columns change, Atlas selection controls should avoid duplicate destructive submits, and chip-like controls should stay aligned with shared primitives.
   - **What:** app-native intel clients now reject cross-origin provider redirects before reusing request headers or bodies, Gunicorn starts with a Prometheus `child_exit` hook that marks worker metric shards dead, evidence-package skipped metrics now count skipped artifacts separately from other skipped items, completed PTY metrics include exit-code class, manual Files deletes increment workspace eviction metrics as `manual`, the starter Grafana dashboard shows PTY starts and finishes together, the `/diag` largest-runs probe builds its payload expression from the saved-output columns that actually exist, metrics validation now requires cardinality policies for every label and unknown intel providers collapse to `unknown`, Atlas bulk delete guards against duplicate in-flight submits, Atlas intel disclosure buttons and transcript entity tokens use shared primitives, Secrets provider/status pills compose `.chip`/`.badge`, and Atlas selectable entity/finding rows no longer nest checkboxes inside row buttons.

@@ -89,6 +89,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `database_url` | _(empty)_ | Server-side only. Postgres DSN used when `database_backend: postgres`. Ignored by SQLite. Can also be set with the `DATABASE_URL` environment variable |
 | `database_pool_min` | `1` | Server-side only. Minimum Postgres pool size. Ignored by SQLite. Can also be set with `DATABASE_POOL_MIN` |
 | `database_pool_max` | `5` | Server-side only. Maximum Postgres pool size. Ignored by SQLite. Can also be set with `DATABASE_POOL_MAX` |
+| `database_postgres_jit` | `false` | Server-side only. Controls whether app-owned Postgres pool connections allow PostgreSQL JIT compilation. The default keeps interactive pages from paying JIT startup cost on complex queries. Can also be set with `DATABASE_POSTGRES_JIT` |
 | `permalink_retention_days` | `365` | Delete runs and snapshots older than this many days on startup. `0` means unlimited retention |
 | `runs_search_text_inline_max_bytes` | `0` | Server-side only. Offloads oversized `runs.output_search_text` values to compressed files under `data_dir/body-store` when the UTF-8 body is larger than this byte threshold. `0` keeps values inline |
 | `snapshots_inline_max_bytes` | `0` | Server-side only. Offloads oversized tab snapshot bodies under `data_dir/body-store` while share links still read back normally. `0` keeps snapshot content inline |
@@ -182,7 +183,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `workspace_max_files` | `100` | Server-side only. Maximum file count per session workspace |
 | `workspace_inactivity_ttl_hours` | `1` | Server-side only. Inactive session workspace cleanup threshold in hours; `0` disables age-based cleanup. Workspace activity touches the hashed session directory, and periodic cleanup removes expired `sess_*` directories rather than aging out individual files |
 | `max_projects_per_session` | `100` | Server-side only. Maximum project workspace records one session can create |
-| `max_project_links_per_project` | `1000` | Server-side only. Maximum linked source records per project |
+| `max_project_links_per_project` | `5000` | Server-side only. Maximum linked source records per project |
 | `max_project_targets_per_project` | `200` | Server-side only. Maximum targets per project |
 | `max_evidence_packages_per_project` | `25` | Server-side only. Maximum draft evidence package manifests per project |
 | `max_entity_labels_per_session` | `5000` | Server-side only. Maximum entity labels one session can create |
@@ -556,6 +557,7 @@ WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 # DATABASE_URL=postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell
 # DATABASE_POOL_MIN=1
 # DATABASE_POOL_MAX=5
+# DATABASE_POSTGRES_JIT=false
 # POSTGRES_DB=darklab_shell
 # POSTGRES_USER=darklab
 # POSTGRES_PASSWORD=darklab_dev_password
@@ -574,6 +576,7 @@ WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 | `DATABASE_BACKEND` | Flask app | Optional override for `database_backend`. Use `sqlite` for the default local/single-user path or `postgres` for a Postgres-backed deployment |
 | `DATABASE_URL` | Flask app | Optional override for `database_url`, normally a Postgres DSN when `DATABASE_BACKEND=postgres` |
 | `DATABASE_POOL_MIN` / `DATABASE_POOL_MAX` | Flask app | Optional Postgres connection-pool bounds |
+| `DATABASE_POSTGRES_JIT` | Flask app | Optional override for `database_postgres_jit`. Leave unset or `false` for lower-latency interactive app queries |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | Docker Compose | Credentials used by the optional `postgres` Compose profile |
 | `SECRETS_MASTER_KEY` | Flask app | Optional base64-encoded 32-byte master key for the encrypted per-session secrets vault. When unset, the app creates `<data_dir>/.secrets_master_key` with mode `0600` on first use and repairs broader existing key-file permissions to `0600` before use. If both env and file exist, the env value wins and the app logs `MASTER_KEY_FILE_IGNORED` |
 | `DOCKER_GELF_ADDRESS` | Production Compose overlay | GELF log destination for Docker's logging driver |
@@ -612,6 +615,7 @@ Postgres connection notes:
 
 - Keep `DATABASE_URL` aligned with any `POSTGRES_USER`, `POSTGRES_PASSWORD`, or `POSTGRES_DB` overrides.
 - URL-encode special characters in the password before putting it in `DATABASE_URL`.
+- App Postgres connections disable JIT by default because the UI favors predictable low-latency page requests over long analytical queries. Set `DATABASE_POSTGRES_JIT=true` only after measuring that your workload benefits from it.
 - If `POSTGRES_PASSWORD` changes after the `postgres-data` volume already exists, Postgres does not automatically change the existing role password. Change the role password manually or recreate the volume intentionally.
 - Keep the same `SECRETS_MASTER_KEY` or copied app-owned key file when migrating encrypted secrets.
 

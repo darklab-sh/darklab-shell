@@ -63,9 +63,64 @@
 
   function createProjectEntitiesController(context) {
     const ctx = context || {};
+    const pages = new Map();
+    const pageLimit = 50;
 
     function activeTab() {
       return String(ctx.getActiveTab?.() || 'ip');
+    }
+
+    function pageKey(projectId) {
+      return `${String(projectId || '')}:${activeTab()}`;
+    }
+
+    function page(projectId) {
+      const key = pageKey(projectId);
+      if (!pages.has(key)) pages.set(key, {
+        entities: [],
+        total: 0,
+        countsByType: {},
+        limit: pageLimit,
+        offset: 0,
+        loading: false,
+        loaded: false,
+        error: '',
+      });
+      return pages.get(key);
+    }
+
+    function setPageOffset(projectId, offset = 0) {
+      const state = page(projectId);
+      state.offset = Math.max(0, Number(offset || 0));
+      state.limit = pageLimit;
+      state.loading = true;
+      state.loaded = false;
+    }
+
+    function resetPages() {
+      pages.clear();
+    }
+
+    function linkedIds(projectId) {
+      const normalized = String(projectId || '');
+      const summary = ctx.getSummary?.(normalized);
+      return new Set(
+        (Array.isArray(summary?.links) ? summary.links : [])
+          .filter(link => String(link && link.entity_type || '') === 'atlas_entity')
+          .map(link => String(link && link.entity_id || ''))
+          .filter(Boolean),
+      );
+    }
+
+    function invalidate(projectId = '') {
+      const normalized = String(projectId || '');
+      if (!normalized) {
+        pages.clear();
+        return;
+      }
+      [...pages.keys()].forEach((key) => {
+        if (key.startsWith(`${normalized}:`)) pages.delete(key);
+      });
     }
 
     function selectedIds() {
@@ -85,7 +140,8 @@
     }
 
     function items(summary) {
-      return _entityItems(summary);
+      const projectId = String(summary?.project?.id || ctx.getSelectedProjectId?.() || '');
+      return page(projectId).entities || _entityItems(summary);
     }
 
     function tabs() {
@@ -101,19 +157,85 @@
     }
 
     function counts(summary) {
-      return _entityCounts(summary);
+      const projectId = String(summary?.project?.id || ctx.getSelectedProjectId?.() || '');
+      const loadedCounts = page(projectId).countsByType;
+      if (loadedCounts && Object.keys(loadedCounts).length) return loadedCounts;
+      return summary && summary.entity_counts && typeof summary.entity_counts === 'object'
+        ? summary.entity_counts
+        : _entityCounts(summary);
+    }
+
+    function activeType() {
+      const currentTabs = tabs();
+      const current = currentTabs.find(tab => tab.id === activeTab()) || currentTabs[0] || { type: '' };
+      return current.type || '';
     }
 
     function itemsForActiveTab(summary) {
-      const currentTabs = tabs();
-      const current = currentTabs.find(tab => tab.id === activeTab()) || currentTabs[0] || { type: '' };
-      return items(summary).filter(entity => !current.type || String(entity && entity.type || '') === current.type);
+      const projectId = String(summary?.project?.id || ctx.getSelectedProjectId?.() || '');
+      return page(projectId).entities || [];
+    }
+
+    function pagedItemsForActiveTab(projectId) {
+      return page(projectId).entities || [];
+    }
+
+    async function load(projectId, options = {}) {
+      const normalizedProjectId = String(projectId || ctx.getSelectedProjectId?.() || '');
+      if (!normalizedProjectId) return null;
+      const state = page(normalizedProjectId);
+      if (Object.prototype.hasOwnProperty.call(options, 'offset')) {
+        state.offset = Math.max(0, Number(options.offset || 0));
+      }
+      state.limit = pageLimit;
+      state.loading = true;
+      state.error = '';
+      const params = new URLSearchParams({
+        limit: String(state.limit),
+        offset: String(state.offset),
+      });
+      const type = activeType();
+      if (type) params.set('type', type);
+      try {
+        const resp = await ctx.apiFetch(`/projects/${encodeURIComponent(normalizedProjectId)}/entities?${params.toString()}`, {
+          cache: 'no-store',
+        });
+        if (!resp.ok) throw await ctx.projectResponseError(resp, 'Could not load project entities.');
+        const data = await resp.json();
+        state.entities = Array.isArray(data.entities) ? data.entities : [];
+        state.total = Number(data.total || 0);
+        state.limit = Number(data.limit || pageLimit);
+        state.offset = Number(data.offset || 0);
+        state.countsByType = data.counts_by_type && typeof data.counts_by_type === 'object' ? data.counts_by_type : {};
+        const fallbackSummary = ctx.getSummary?.(normalizedProjectId);
+        const fallbackEntities = _entityItems(fallbackSummary)
+          .filter(entity => !type || String(entity && entity.type || '') === type);
+        if (!state.entities.length && fallbackEntities.length) {
+          state.entities = fallbackEntities.slice(state.offset, state.offset + state.limit);
+          state.total = fallbackEntities.length;
+          state.countsByType = _entityCounts(fallbackSummary);
+        }
+        state.loaded = true;
+        return state;
+      } catch (err) {
+        state.error = err && err.message ? err.message : 'Could not load project entities.';
+        ctx.setProjectWorkspaceMessage?.(state.error, { error: true });
+        if (typeof ctx.logClientError === 'function') ctx.logClientError('failed to load project entities', err);
+        return state;
+      } finally {
+        state.loading = false;
+        if (!options.skipFinalRender) {
+          ctx.renderProjectExplorer?.();
+          if (ctx.mobileView?.() === 'detail') ctx.renderProjectMobileDetail?.();
+        }
+      }
     }
 
     function byId(summary, entityId) {
       const normalized = String(entityId || '').trim();
       if (!normalized) return null;
-      return items(summary).find(item => String(item && item.id || '') === normalized) || null;
+      const projectId = String(summary?.project?.id || ctx.getSelectedProjectId?.() || '');
+      return (page(projectId).entities || []).find(item => String(item && item.id || '') === normalized) || null;
     }
 
     function chips(entity) {
@@ -211,6 +333,38 @@
       }
       toolbar.append(actions, select);
       return toolbar;
+    }
+
+    function renderPagination(projectId, total, position = 'bottom') {
+      const state = page(projectId);
+      const offset = Number(state.offset || 0);
+      const limit = Math.max(1, Number(state.limit || pageLimit));
+      const loading = !!state.loading;
+      if (total <= limit && offset === 0) return null;
+      const wrap = document.createElement('div');
+      wrap.className = 'project-workspace-pagination project-entity-pagination';
+      wrap.dataset.projectEntitiesPagerPosition = position;
+      const start = total ? offset + 1 : 0;
+      const end = Math.min(total, offset + limit);
+      const summary = document.createElement('div');
+      summary.className = 'project-workspace-pagination-summary';
+      summary.textContent = `${start.toLocaleString()}-${end.toLocaleString()} of ${total.toLocaleString()} entities`;
+      const controls = document.createElement('div');
+      controls.className = 'project-workspace-pagination-controls';
+      const prev = ctx.makeProjectButton('Previous', 'noop', projectId);
+      prev.dataset.projectEntitiesPage = 'prev';
+      prev.dataset.projectEntitiesPagerPosition = position;
+      prev.disabled = loading || offset <= 0;
+      const status = document.createElement('span');
+      status.className = 'project-workspace-pagination-status';
+      status.textContent = loading ? 'Loading...' : `Page ${Math.floor(offset / limit) + 1}`;
+      const next = ctx.makeProjectButton('Next', 'noop', projectId);
+      next.dataset.projectEntitiesPage = 'next';
+      next.dataset.projectEntitiesPagerPosition = position;
+      next.disabled = loading || offset + limit >= total;
+      controls.append(prev, status, next);
+      wrap.append(summary, controls);
+      return wrap;
     }
 
     function openInAtlas(projectId, summary, entity) {
@@ -371,8 +525,10 @@
     }
 
     function renderEntities(container, projectId, summary) {
-      const allEntities = items(summary);
-      const visibleEntities = itemsForActiveTab(summary);
+      const state = page(projectId);
+      const visibleEntities = pagedItemsForActiveTab(projectId, summary);
+      const totalEntities = Number(summary?.counts?.entities || 0);
+      const activeTotal = Number(state.total || counts(summary)[activeType()] || 0);
       const currentSelected = selectedIds();
       currentSelected.forEach((entityId) => {
         if (!visibleEntities.some(entity => String(entity && entity.id || '') === entityId)) {
@@ -381,15 +537,28 @@
       });
       container.appendChild(renderTypeTabs(projectId, summary));
       container.appendChild(renderToolbar(projectId, visibleEntities));
-      if (!allEntities.length) {
+      if (!totalEntities) {
         container.appendChild(ctx.emptyProjectPanel('No Atlas entities are linked to this project yet.'));
         return;
       }
-      if (!visibleEntities.length) {
+      if (!state.loaded && !state.loading) {
+        load(projectId).catch(() => {});
+      }
+      if (state.loading && !visibleEntities.length) {
+        container.appendChild(ctx.emptyProjectPanel('Loading project entities...'));
+        return;
+      }
+      if (state.error && !visibleEntities.length) {
+        container.appendChild(ctx.emptyProjectPanel(state.error));
+        return;
+      }
+      if (!activeTotal) {
         const activeType = tabs().find(tab => tab.id === activeTab())?.type || '';
         container.appendChild(ctx.emptyProjectPanel(`No ${typeLabel(activeType).toLowerCase()} linked yet.`));
         return;
       }
+      const topPager = renderPagination(projectId, activeTotal, 'top');
+      if (topPager) container.appendChild(topPager);
       visibleEntities.forEach((entity) => {
         const entityId = String(entity.id || '');
         const value = String(entity.canonical_value || entity.value || '');
@@ -431,6 +600,8 @@
         });
         container.appendChild(row);
       });
+      const bottomPager = renderPagination(projectId, activeTotal, 'bottom');
+      if (bottomPager) container.appendChild(bottomPager);
     }
 
     function renderMobileEntitiesTab(projectId, summary) {
@@ -443,18 +614,33 @@
       );
       fragment.appendChild(toolbar);
       fragment.appendChild(renderTypeTabs(projectId, summary));
-      const allEntities = items(summary);
-      const visibleEntities = itemsForActiveTab(summary);
-      if (!allEntities.length) {
+      const state = page(projectId);
+      const visibleEntities = pagedItemsForActiveTab(projectId, summary);
+      const totalEntities = Number(summary?.counts?.entities || 0);
+      const activeTotal = Number(state.total || counts(summary)[activeType()] || 0);
+      if (!totalEntities) {
         fragment.appendChild(ctx.projectMobileEmptyPanel('No Atlas entities are linked to this project yet.', [
           ctx.makeProjectButton('Add entity', 'open-entity-picker', projectId, 'primary'),
         ]));
         return fragment;
       }
-      if (!visibleEntities.length) {
+      if (!state.loaded && !state.loading) {
+        load(projectId).catch(() => {});
+      }
+      if (state.loading && !visibleEntities.length) {
+        fragment.appendChild(ctx.emptyProjectPanel('Loading project entities...'));
+        return fragment;
+      }
+      if (state.error && !visibleEntities.length) {
+        fragment.appendChild(ctx.emptyProjectPanel(state.error));
+        return fragment;
+      }
+      if (!activeTotal) {
         fragment.appendChild(ctx.emptyProjectPanel('No entities match this type.'));
         return fragment;
       }
+      const topPager = renderPagination(projectId, activeTotal, 'top');
+      if (topPager) fragment.appendChild(topPager);
       const list = document.createElement('div');
       list.className = 'project-mobile-content-list';
       visibleEntities.forEach((entity) => {
@@ -481,6 +667,8 @@
         }));
       });
       fragment.appendChild(list);
+      const bottomPager = renderPagination(projectId, activeTotal, 'bottom');
+      if (bottomPager) fragment.appendChild(bottomPager);
       return fragment;
     }
 
@@ -554,6 +742,7 @@
 
     function setActiveTab(tabId) {
       ctx.setActiveTab?.(String(tabId || 'ip'));
+      resetPages();
     }
 
     function toggleSelected(entityId, checked = null) {
@@ -567,7 +756,7 @@
     }
 
     function selectAllForActiveTab(summary) {
-      itemsForActiveTab(summary).forEach((entity) => {
+      pagedItemsForActiveTab(ctx.getSelectedProjectId?.() || '', summary).forEach((entity) => {
         if (entity && entity.id) selectedIds().add(String(entity.id));
       });
     }
@@ -600,7 +789,10 @@
       intelSummary,
       counts,
       itemsForActiveTab,
+      pagedItemsForActiveTab,
       byId,
+      load,
+      invalidate,
       chips,
       renderTypeTabs,
       renderEntities,
@@ -614,6 +806,8 @@
       handlePickerChange,
       handlePickerClick,
       setActiveTab,
+      page,
+      setPageOffset,
       toggleSelected,
       selectAllForActiveTab,
       clearSelection,

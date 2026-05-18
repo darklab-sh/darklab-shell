@@ -91,6 +91,7 @@ function _buildCurrentSessionPreferenceSnapshot() {
     pref_welcome_intro: getWelcomeIntroPreference(),
     pref_share_redaction_default: getShareRedactionDefaultPreference(),
     pref_project_auto_link_external_runs: getProjectAutoLinkExternalRunsPreference(),
+    pref_project_auto_link_run_entities: getProjectAutoLinkRunEntitiesPreference(),
     pref_run_notify: getRunNotifyPreference(),
     pref_hud_clock: getHudClockPreference(),
     pref_prompt_username: getPromptUsernamePreference(),
@@ -187,6 +188,10 @@ function getShareRedactionDefaultPreference() {
 
 function getProjectAutoLinkExternalRunsPreference() {
   return getPreference('pref_project_auto_link_external_runs') === 'off' ? 'off' : 'on';
+}
+
+function getProjectAutoLinkRunEntitiesPreference() {
+  return getPreference('pref_project_auto_link_run_entities') === 'off' ? 'off' : 'on';
 }
 
 function getRunNotifyPreference() {
@@ -359,6 +364,10 @@ function syncOptionsControls() {
   if (optionsProjectAutoLinkExternalRunsToggle) {
     optionsProjectAutoLinkExternalRunsToggle.checked = getProjectAutoLinkExternalRunsPreference() !== 'off';
   }
+  if (optionsProjectAutoLinkRunEntitiesToggle) {
+    optionsProjectAutoLinkRunEntitiesToggle.checked = getProjectAutoLinkRunEntitiesPreference() !== 'off';
+    optionsProjectAutoLinkRunEntitiesToggle.disabled = getProjectAutoLinkExternalRunsPreference() === 'off';
+  }
   if (optionsHudClockSelect) optionsHudClockSelect.value = getHudClockPreference();
   if (optionsCompareViewModeSelect) optionsCompareViewModeSelect.value = getCompareViewModePreference();
   if (optionsCompareContextSelect) optionsCompareContextSelect.value = getCompareContextPreference();
@@ -427,6 +436,17 @@ function applyProjectAutoLinkExternalRunsPreference(mode, persist = true) {
     try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist project auto-link preference', err); }
   } else {
     _primePreferenceValue('pref_project_auto_link_external_runs', nextMode);
+  }
+  syncOptionsControls();
+}
+
+function applyProjectAutoLinkRunEntitiesPreference(mode, persist = true) {
+  const nextMode = mode === 'off' ? 'off' : 'on';
+  if (persist) {
+    _primePreferenceValue('pref_project_auto_link_run_entities', nextMode);
+    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist project entity auto-link preference', err); }
+  } else {
+    _primePreferenceValue('pref_project_auto_link_run_entities', nextMode);
   }
   syncOptionsControls();
 }

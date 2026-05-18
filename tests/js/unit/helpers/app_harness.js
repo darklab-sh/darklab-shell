@@ -243,6 +243,7 @@ export async function loadAppFns({
             <input id="options-notify-toggle" type="checkbox" />
           </label>
           <input id="options-project-auto-link-external-runs-toggle" type="checkbox" />
+          <input id="options-project-auto-link-run-entities-toggle" type="checkbox" />
           <label class="options-desktop-only">
             <select id="options-hud-clock-select">
               <option value="utc">utc</option>
@@ -388,6 +389,7 @@ export async function loadAppFns({
     optionsShareRedactionSelect: document.getElementById('options-share-redaction-select'),
     optionsNotifyToggle: document.getElementById('options-notify-toggle'),
     optionsProjectAutoLinkExternalRunsToggle: document.getElementById('options-project-auto-link-external-runs-toggle'),
+    optionsProjectAutoLinkRunEntitiesToggle: document.getElementById('options-project-auto-link-run-entities-toggle'),
     optionsHudClockSelect: document.getElementById('options-hud-clock-select'),
     optionsCompareViewModeSelect: document.getElementById('options-compare-view-mode-select'),
     optionsCompareContextSelect: document.getElementById('options-compare-context-select'),
@@ -697,6 +699,7 @@ export async function loadAppFns({
     getWelcomeIntroPreference,
     getShareRedactionDefaultPreference,
     getProjectAutoLinkExternalRunsPreference,
+    getProjectAutoLinkRunEntitiesPreference,
     getRunNotifyPreference,
     getHudClockPreference,
     getPromptUsernamePreference,
@@ -707,6 +710,7 @@ export async function loadAppFns({
     recordTourOpened,
     applyRunNotifyPreference,
     applyProjectAutoLinkExternalRunsPreference,
+    applyProjectAutoLinkRunEntitiesPreference,
     applyHudClockPreference,
     applyCompareViewModePreference,
     applyCompareContextPreference,

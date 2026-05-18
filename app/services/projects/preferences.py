@@ -9,6 +9,7 @@ from core.database_backend import dialect_for_backend
 from services.projects.contracts import (
     ACTIVE_PROJECT_PREF_KEY,
     PROJECT_AUTO_LINK_EXTERNAL_RUNS_PREF_KEY,
+    PROJECT_AUTO_LINK_RUN_ENTITIES_PREF_KEY,
 )
 
 
@@ -48,6 +49,12 @@ def clear_active_project_preference(conn, session_id, *, project_id=None):
 def project_auto_link_external_runs_enabled(conn, session_id):
     preferences = load_session_preferences(conn, session_id)
     value = str(preferences.get(PROJECT_AUTO_LINK_EXTERNAL_RUNS_PREF_KEY) or "on").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def project_auto_link_run_entities_enabled(conn, session_id):
+    preferences = load_session_preferences(conn, session_id)
+    value = str(preferences.get(PROJECT_AUTO_LINK_RUN_ENTITIES_PREF_KEY) or "on").strip().lower()
     return value not in {"0", "false", "no", "off"}
 
 

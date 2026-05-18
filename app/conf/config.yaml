@@ -69,6 +69,12 @@
 # database_url: postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell
 # database_pool_min: 1
 # database_pool_max: 5
+#
+# Postgres JIT can make interactive page requests slower when a complex query
+# crosses Postgres' cost threshold. The app disables JIT on pooled connections
+# by default; set this to true only if your workload benefits from JIT.
+# Server default if unset: false
+# database_postgres_jit: false
 
 # Enable the built-in basic redaction model for snapshot sharing. When enabled,
 # the app applies a
@@ -164,7 +170,7 @@
 # max_projects_per_session: 100
 #
 # Server default if unset: 1000
-# max_project_links_per_project: 1000
+# max_project_links_per_project: 5000
 #
 # Server default if unset: 200
 # max_project_targets_per_project: 200

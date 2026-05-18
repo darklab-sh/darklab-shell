@@ -73,6 +73,38 @@
     return fetch;
   }
 
+  let atlasLoadController = null;
+  let detailLoadController = null;
+
+  function isAbortError(err) {
+    return err && (err.name === 'AbortError' || err.code === 20);
+  }
+
+  function newAbortController() {
+    if (typeof global.AbortController !== 'function') return null;
+    return new global.AbortController();
+  }
+
+  function requestOptions(controller, extra = {}) {
+    if (controller && controller.signal) return { ...extra, signal: controller.signal };
+    return extra;
+  }
+
+  function abortAtlasLoad() {
+    if (atlasLoadController) atlasLoadController.abort();
+    atlasLoadController = null;
+  }
+
+  function abortDetailLoad() {
+    if (detailLoadController) detailLoadController.abort();
+    detailLoadController = null;
+  }
+
+  function abortReadRequests() {
+    abortAtlasLoad();
+    abortDetailLoad();
+  }
+
   function showToastSafe(message, tone = 'info') {
     if (typeof global.showToast === 'function') global.showToast(message, tone);
   }
@@ -133,6 +165,7 @@
 
   function hide({ refocus = true } = {}) {
     if (!overlay) return;
+    abortReadRequests();
     resetSelection({ selectMode: false, render: false });
     overlay.classList.add('u-hidden');
     overlay.classList.remove('open');
@@ -640,6 +673,9 @@
     if (resetOffset) state.offset = 0;
     const requestId = state.refreshSeq + 1;
     state.refreshSeq = requestId;
+    abortReadRequests();
+    const controller = newAbortController();
+    atlasLoadController = controller;
     const requestedTab = currentTab();
     const isStale = () => (
       requestId !== state.refreshSeq
@@ -650,7 +686,10 @@
     render();
     try {
       const summaryParams = new URLSearchParams({ orphan_filter: state.orphanFilter });
-      const summaryResp = await api()(`/atlas?${summaryParams.toString()}`, { cache: 'no-store' });
+      const summaryResp = await api()(
+        `/atlas?${summaryParams.toString()}`,
+        requestOptions(controller, { cache: 'no-store' }),
+      );
       if (!summaryResp.ok) throw new Error(`HTTP ${summaryResp.status}`);
       if (isStale()) return;
       state.summary = await summaryResp.json();
@@ -665,7 +704,10 @@
         if (state.projectId) params.set('project_id', state.projectId);
         if (state.findingStatus) params.append('review_state', state.findingStatus);
         params.set('orphan_filter', state.orphanFilter);
-        const listResp = await api()(`/atlas/findings?${params.toString()}`, { cache: 'no-store' });
+        const listResp = await api()(
+          `/atlas/findings?${params.toString()}`,
+          requestOptions(controller, { cache: 'no-store' }),
+        );
         if (!listResp.ok) throw new Error(`HTTP ${listResp.status}`);
         if (isStale()) return;
         const data = await listResp.json();
@@ -697,7 +739,10 @@
         if (state.query) params.set('q', state.query);
         if (state.projectId) params.set('project_id', state.projectId);
         params.set('orphan_filter', state.orphanFilter);
-        const listResp = await api()(`/atlas/entities?${params.toString()}`, { cache: 'no-store' });
+        const listResp = await api()(
+          `/atlas/entities?${params.toString()}`,
+          requestOptions(controller, { cache: 'no-store' }),
+        );
         if (!listResp.ok) throw new Error(`HTTP ${listResp.status}`);
         if (isStale()) return;
         const data = await listResp.json();
@@ -736,9 +781,11 @@
         await addToActiveProject();
       }
     } catch (err) {
+      if (isAbortError(err)) return;
       if (typeof global.logClientError === 'function') global.logClientError('failed to load /atlas', err);
       showToastSafe('Failed to load Atlas', 'error');
     } finally {
+      if (atlasLoadController === controller) atlasLoadController = null;
       if (!isStale()) {
         state.loading = false;
         render();
@@ -889,20 +936,28 @@
 
   async function loadDetail(entityId, { renderLoading = true } = {}) {
     if (!entityId) return;
+    abortDetailLoad();
+    const controller = newAbortController();
+    detailLoadController = controller;
     state.detailLoading = !!renderLoading;
     if (renderLoading) renderDetail();
     try {
-      const resp = await api()(`/atlas/entities/${encodeURIComponent(entityId)}`, { cache: 'no-store' });
+      const resp = await api()(
+        `/atlas/entities/${encodeURIComponent(entityId)}`,
+        requestOptions(controller, { cache: 'no-store' }),
+      );
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const detail = await resp.json();
       if (String(state.selectedId || '') !== String(entityId || '') || currentTab().id === 'findings') return;
       state.detail = detail;
     } catch (err) {
+      if (isAbortError(err)) return;
       if (String(state.selectedId || '') !== String(entityId || '')) return;
       state.detail = null;
       if (typeof global.logClientError === 'function') global.logClientError('failed to load atlas entity', err);
       showToastSafe('Failed to load entity', 'error');
     } finally {
+      if (detailLoadController === controller) detailLoadController = null;
       if (String(state.selectedId || '') === String(entityId || '')) {
         state.detailLoading = false;
         render();

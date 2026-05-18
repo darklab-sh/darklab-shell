@@ -33,6 +33,48 @@
       return heading;
     }
 
+    function renderPagination(host = ctx.projectWorkspacePagination, { compact = false } = {}) {
+      if (!host) return;
+      const pagination = ctx.projectPagination?.() || {};
+      const limit = Math.max(1, Number(pagination.limit || 50));
+      const offset = Math.max(0, Number(pagination.offset || 0));
+      const total = Math.max(0, Number(pagination.total || 0));
+      const showPager = total > limit || offset > 0;
+      host.replaceChildren();
+      host.classList.toggle('u-hidden', !showPager);
+      if (!showPager) return;
+      const start = total ? offset + 1 : 0;
+      const end = Math.min(offset + limit, total);
+      const currentPage = Math.floor(offset / limit) + 1;
+      const pageCount = Math.max(1, Math.ceil(total / limit));
+
+      const summary = document.createElement('div');
+      summary.className = 'project-workspace-pagination-summary';
+      summary.textContent = `${start}-${end} of ${total.toLocaleString()} projects`;
+
+      const controls = document.createElement('div');
+      controls.className = 'project-workspace-pagination-controls';
+      const prev = document.createElement('button');
+      prev.type = 'button';
+      prev.className = 'btn btn-ghost btn-compact';
+      prev.dataset.projectPage = 'prev';
+      prev.disabled = offset <= 0 || ctx.projectWorkspaceLoading();
+      prev.setAttribute('aria-label', 'Previous projects page');
+      prev.textContent = '‹';
+      const status = document.createElement('span');
+      status.className = 'project-workspace-pagination-status';
+      status.textContent = compact ? `${currentPage}/${pageCount}` : `Page ${currentPage} of ${pageCount}`;
+      const next = document.createElement('button');
+      next.type = 'button';
+      next.className = 'btn btn-ghost btn-compact';
+      next.dataset.projectPage = 'next';
+      next.disabled = offset + limit >= total || ctx.projectWorkspaceLoading();
+      next.setAttribute('aria-label', 'Next projects page');
+      next.textContent = '›';
+      controls.append(prev, status, next);
+      host.append(summary, controls);
+    }
+
     function renderListRow(project, activeId) {
       const projectId = String(project.id || '');
       const summary = ctx.projectSummary(projectId);
@@ -80,6 +122,7 @@
       const body = ctx.projectWorkspaceBody;
       if (!body) return;
       body.replaceChildren();
+      renderPagination();
       if (ctx.projectWorkspaceLoading()) {
         body.appendChild(ctx.emptyProjectPanel('Loading projects...'));
         return;
@@ -217,6 +260,7 @@
       listSection,
       renderListRow,
       renderList,
+      renderPagination,
       mobileCountEntries,
       renderMobileListRow,
       mobileSection,

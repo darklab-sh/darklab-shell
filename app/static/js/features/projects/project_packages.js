@@ -221,6 +221,21 @@
           }
         }).catch(() => {});
       }
+      if (typeof ctx.loadAllProjectArtifacts === 'function' && Number(summary?.counts?.artifacts || 0) > 0) {
+        ctx.loadAllProjectArtifacts(projectId, summary).then(() => {
+          if (isWizardActive(projectId)) {
+            const refreshed = presetDefaults(wizard.preset, summaryFor(projectId), ctx.projectFindingItems(projectId));
+            refreshed.name = wizard.name;
+            refreshed.description = wizard.description;
+            refreshed.labels = wizard.labels || '';
+            refreshed.notes = wizard.notes || '';
+            refreshed.collapsedRunIds = wizard.collapsedRunIds || new Set();
+            wizard = { projectId: String(projectId || ''), ...refreshed };
+            ctx.renderProjectExplorer?.();
+            renderWizardModal();
+          }
+        }).catch(() => {});
+      }
       ctx.renderProjectExplorer?.();
       renderWizardModal({ focus: true });
     }
@@ -272,6 +287,14 @@
       ctx.setProjectWorkspaceMessage?.('');
       if (!ctx.projectFindingsLoaded(projectId)) {
         ctx.loadProjectFindings(projectId).then(() => {
+          if (isWizardActive(projectId)) {
+            ctx.renderProjectExplorer?.();
+            renderWizardModal();
+          }
+        }).catch(() => {});
+      }
+      if (typeof ctx.loadAllProjectArtifacts === 'function' && Number(summary?.counts?.artifacts || 0) > 0) {
+        ctx.loadAllProjectArtifacts(projectId, summary).then(() => {
           if (isWizardActive(projectId)) {
             ctx.renderProjectExplorer?.();
             renderWizardModal();

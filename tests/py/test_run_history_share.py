@@ -1257,7 +1257,7 @@ class TestRunStreaming:
         )
         assert active_resp.status_code == 200
 
-        fake_proc = _FakeProc(lines=["project line\n", ""])
+        fake_proc = _FakeProc(lines=["project line https://darklab.sh/admin\n", ""])
         with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
@@ -1266,21 +1266,32 @@ class TestRunStreaming:
                  True,
                  True,
              ]):
-            resp = _post_run(client, json={"command": "echo project"}, headers={"X-Session-ID": session_id})
+            resp = _post_run(client, json={"command": "echo https://darklab.sh/admin"}, headers={"X-Session-ID": session_id})
             _ = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
         with db_connect() as conn:
-            row = conn.execute(
+            run_link_row = conn.execute(
                 "SELECT l.entity_type, l.entity_id, l.source, r.command "
                 "FROM project_links l JOIN runs r ON r.id = l.entity_id "
-                "WHERE l.project_id = ?",
+                "WHERE l.project_id = ? AND l.entity_type = 'run'",
                 (project["id"],),
             ).fetchone()
-        assert row is not None
-        assert row["entity_type"] == "run"
-        assert row["source"] == "active_project"
-        assert row["command"] == "echo project"
+            entity_link_row = conn.execute(
+                "SELECT l.entity_type, l.entity_id, l.source, e.canonical_value "
+                "FROM project_links l JOIN entities e ON e.id = l.entity_id "
+                "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' "
+                "ORDER BY e.canonical_value",
+                (project["id"],),
+            ).fetchone()
+        assert run_link_row is not None
+        assert run_link_row["entity_type"] == "run"
+        assert run_link_row["source"] == "active_project"
+        assert run_link_row["command"] == "echo https://darklab.sh/admin"
+        assert entity_link_row is not None
+        assert entity_link_row["entity_type"] == "atlas_entity"
+        assert entity_link_row["source"] == "active_project"
+        assert entity_link_row["canonical_value"] in {"darklab.sh", "https://darklab.sh/admin"}
 
     def test_completed_run_skips_active_project_when_auto_link_disabled(self):
         client = get_client()

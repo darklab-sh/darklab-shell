@@ -38,6 +38,8 @@ ATLAS_ENTITY_EXPORT_FIELDS = (
 
 MAX_INTEL_SUMMARY_HIGHLIGHTS = 8
 ORPHAN_FILTERS = {"all", "hide", "only"}
+ENTITY_DETAIL_RUN_LIMIT = 50
+ENTITY_DETAIL_FINDING_LIMIT = 50
 
 
 def _sql_join(parts: tuple[str, ...]) -> str:
@@ -545,6 +547,43 @@ def _metadata_for_entity(conn, session_id: str, entity_id: str) -> dict[str, Any
     }
 
 
+def _list_metadata_for_entities(conn, session_id: str, entity_ids: list[str]) -> dict[str, dict[str, Any]]:
+    if not entity_ids:
+        return {}
+    dialect = dialect_for_backend(DB_BACKEND)
+    entity_filter_sql, entity_filter_params = dialect.in_clause("entity_id", entity_ids)
+    link_filter_sql, link_filter_params = dialect.in_clause("l.entity_id", entity_ids)
+    metadata = {
+        entity_id: {
+            "labels": [],
+            "project_link_count": 0,
+        }
+        for entity_id in entity_ids
+    }
+    labels = conn.execute(
+        "SELECT entity_id, id, label, source, created "
+        "FROM entity_labels WHERE session_id = ? AND entity_type = 'atlas_entity' "
+        "AND " + entity_filter_sql + " ORDER BY " + _label_order_sql(),  # nosec
+        [session_id, *entity_filter_params],
+    ).fetchall()
+    for row in labels:
+        entity_id = str(row["entity_id"] or "")
+        if entity_id in metadata:
+            metadata[entity_id]["labels"].append(_row_to_label(row))
+    links = conn.execute(
+        "SELECT l.entity_id, COUNT(*) AS count "
+        "FROM project_links l JOIN projects p ON p.id = l.project_id "
+        "WHERE p.session_id = ? AND l.entity_type = 'atlas_entity' "
+        "AND " + link_filter_sql + " GROUP BY l.entity_id",  # nosec
+        [session_id, *link_filter_params],
+    ).fetchall()
+    for row in links:
+        entity_id = str(row["entity_id"] or "")
+        if entity_id in metadata:
+            metadata[entity_id]["project_link_count"] = int(row["count"] or 0)
+    return metadata
+
+
 def atlas_summary(conn, session_id: str, *, orphan_filter: str = "hide") -> dict[str, Any]:
     normalized_orphan_filter = _normalize_orphan_filter(orphan_filter)
     rows = conn.execute(
@@ -821,15 +860,14 @@ def list_entities(
         "ORDER BY e.last_seen_at DESC, e.canonical_value ASC LIMIT ? OFFSET ?",
     ))
     rows = conn.execute(rows_sql, [*common_params, page_limit, page_offset]).fetchall()
+    list_metadata = _list_metadata_for_entities(conn, session_id, [str(row["id"]) for row in rows])
     entities = []
     for row in rows:
         item = _row_to_entity(row)
         item["run_count"] = int(row["run_count"] or 0)
-        metadata = _metadata_for_entity(conn, session_id, item["id"])
-        item["labels"] = metadata["labels"]
-        item["note"] = metadata["note"]
-        item["project_links"] = metadata["project_links"]
-        item["project_link_count"] = len(metadata["project_links"])
+        metadata = list_metadata.get(str(item["id"]), {})
+        item["labels"] = metadata.get("labels", [])
+        item["project_link_count"] = int(metadata.get("project_link_count") or 0)
         entities.append(item)
     return {
         "entities": entities,
@@ -1025,8 +1063,8 @@ def entity_detail(conn, session_id: str, entity_id: str) -> dict[str, Any] | Non
         "erl.first_seen_at, erl.last_seen_at, erl.occurrence_count "
         "FROM entity_run_links erl JOIN runs r ON r.id = erl.run_id "
         "WHERE erl.entity_id = ? AND r.session_id = ? "
-        "ORDER BY erl.last_seen_at DESC, r.started DESC",
-        (entity_id, session_id),
+        "ORDER BY erl.last_seen_at DESC, r.started DESC LIMIT ?",
+        (entity_id, session_id, ENTITY_DETAIL_RUN_LIMIT + 1),
     ).fetchall()
     snapshot_rows = conn.execute(
         "SELECT id, provider, status, summary, data_json, fetched_at, expires_at "
@@ -1038,14 +1076,28 @@ def entity_detail(conn, session_id: str, entity_id: str) -> dict[str, Any] | Non
         "SELECT id, entity_id, subject_key, severity, kind, tool_root, first_run_id, last_run_id, "
         "first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created "
         "FROM findings WHERE session_id = ? AND entity_id = ? "
-        "ORDER BY last_seen_at DESC, created DESC",
-        (session_id, entity_id),
+        "ORDER BY last_seen_at DESC, created DESC LIMIT ?",
+        (session_id, entity_id, ENTITY_DETAIL_FINDING_LIMIT + 1),
     ).fetchall()
+    shown_run_rows = run_rows[:ENTITY_DETAIL_RUN_LIMIT]
+    shown_finding_rows = finding_rows[:ENTITY_DETAIL_FINDING_LIMIT]
     intel_snapshots = [_row_to_intel_snapshot(snapshot) for snapshot in snapshot_rows]
     return {
         "entity": entity,
-        "runs": [_row_to_run_link(run) for run in run_rows],
+        "runs": [_row_to_run_link(run) for run in shown_run_rows],
         "intel_snapshots": intel_snapshots,
         "intel_summary": summarize_intel_snapshots(entity["type"], intel_snapshots),
-        "findings": [_row_to_finding(finding) for finding in finding_rows],
+        "findings": [_row_to_finding(finding) for finding in shown_finding_rows],
+        "detail_limits": {
+            "runs": {
+                "limit": ENTITY_DETAIL_RUN_LIMIT,
+                "shown": len(shown_run_rows),
+                "has_more": len(run_rows) > ENTITY_DETAIL_RUN_LIMIT,
+            },
+            "findings": {
+                "limit": ENTITY_DETAIL_FINDING_LIMIT,
+                "shown": len(shown_finding_rows),
+                "has_more": len(finding_rows) > ENTITY_DETAIL_FINDING_LIMIT,
+            },
+        },
     }

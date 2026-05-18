@@ -62,6 +62,9 @@
       ctx.setProjectWorkspaceMessage('');
       setView('detail');
       ctx.renderProjectWorkspace();
+      Promise.resolve(ctx.ensureProjectSummary?.(nextProjectId))
+        .then(() => ctx.renderProjectWorkspace())
+        .catch(() => {});
     }
 
     function projectActions(project) {
@@ -87,7 +90,8 @@
       if (!ctx.projectMobileRoot || !ctx.projectMobileBody) return;
       const rows = ctx.projectRows();
       if (ctx.projectMobileSummary) {
-        const count = rows.length;
+        const pagination = ctx.projectPagination?.() || {};
+        const count = Number(pagination.total || rows.length || 0);
         ctx.projectMobileSummary.textContent = count
           ? `${count} project${count === 1 ? '' : 's'} in this session`
           : 'Create a project to group related work';
@@ -95,6 +99,7 @@
       if (view === 'detail' && !ctx.selectedProjectId()) view = 'list';
       setView(view);
       ctx.projectMobileBody.replaceChildren();
+      ctx.renderProjectPagination?.(ctx.projectMobilePagination, { compact: true });
       ctx.renderProjectMobileDetail();
       if (ctx.projectWorkspaceLoading()) {
         ctx.projectMobileBody.appendChild(ctx.emptyProjectPanel('Loading projects...'));
@@ -103,6 +108,7 @@
       if (!rows.length) {
         archivedOpen = false;
         ctx.projectMobileBody.appendChild(ctx.emptyProjectPanel('No projects yet. Create one to start grouping related work.'));
+        ctx.renderProjectPagination?.(ctx.projectMobilePagination, { compact: true });
         return;
       }
 

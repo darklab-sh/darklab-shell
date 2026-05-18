@@ -231,6 +231,7 @@ describe('app helpers', () => {
       'pref_welcome_intro',
       'pref_share_redaction_default',
       'pref_project_auto_link_external_runs',
+      'pref_project_auto_link_run_entities',
       'pref_run_notify',
       'pref_hud_clock',
       'pref_prompt_username',
@@ -294,6 +295,7 @@ describe('app helpers', () => {
     const {
       getHudClockPreference,
       getProjectAutoLinkExternalRunsPreference,
+      getProjectAutoLinkRunEntitiesPreference,
       getCompareViewModePreference,
       getCompareContextPreference,
     } = await loadAppFns({
@@ -315,8 +317,10 @@ describe('app helpers', () => {
     expect(document.getElementById('options-compare-view-mode-select').value).toBe('unified')
     expect(document.getElementById('options-compare-context-select').value).toBe('10')
     expect(document.getElementById('options-project-auto-link-external-runs-toggle').checked).toBe(true)
+    expect(document.getElementById('options-project-auto-link-run-entities-toggle').checked).toBe(true)
     expect(getHudClockPreference()).toBe('local')
     expect(getProjectAutoLinkExternalRunsPreference()).toBe('on')
+    expect(getProjectAutoLinkRunEntitiesPreference()).toBe('on')
     expect(getCompareViewModePreference()).toBe('unified')
     expect(getCompareContextPreference()).toBe('10')
   })
@@ -334,6 +338,7 @@ describe('app helpers', () => {
               pref_welcome_intro: 'disable_animation',
               pref_share_redaction_default: 'redacted',
               pref_project_auto_link_external_runs: 'off',
+              pref_project_auto_link_run_entities: 'off',
               pref_run_notify: 'off',
               pref_hud_clock: 'local',
               pref_compare_view_mode: 'changes_only',
@@ -375,6 +380,7 @@ describe('app helpers', () => {
     const {
       getHudClockPreference,
       getProjectAutoLinkExternalRunsPreference,
+      getProjectAutoLinkRunEntitiesPreference,
       getCompareViewModePreference,
       getCompareContextPreference,
       getOptionsModalLastTabPreference,
@@ -420,8 +426,11 @@ describe('app helpers', () => {
     expect(document.getElementById('options-panel-secrets').hidden).toBe(false)
     expect(document.getElementById('options-panel-preferences').hidden).toBe(true)
     expect(document.getElementById('options-project-auto-link-external-runs-toggle').checked).toBe(false)
+    expect(document.getElementById('options-project-auto-link-run-entities-toggle').checked).toBe(false)
+    expect(document.getElementById('options-project-auto-link-run-entities-toggle').disabled).toBe(true)
     expect(getHudClockPreference()).toBe('local')
     expect(getProjectAutoLinkExternalRunsPreference()).toBe('off')
+    expect(getProjectAutoLinkRunEntitiesPreference()).toBe('off')
     expect(getCompareViewModePreference()).toBe('changes_only')
     expect(getCompareContextPreference()).toBe('all')
     expect(getOptionsModalLastTabPreference()).toBe('secrets')
@@ -5263,6 +5272,7 @@ describe('app helpers', () => {
       getWelcomeIntroPreference,
       getShareRedactionDefaultPreference,
       getProjectAutoLinkExternalRunsPreference,
+      getProjectAutoLinkRunEntitiesPreference,
       getHudClockPreference,
       getCompareViewModePreference,
       getCompareContextPreference,
@@ -5335,6 +5345,10 @@ describe('app helpers', () => {
     document
       .getElementById('options-project-auto-link-external-runs-toggle')
       .dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('options-project-auto-link-run-entities-toggle').checked = false
+    document
+      .getElementById('options-project-auto-link-run-entities-toggle')
+      .dispatchEvent(new Event('change', { bubbles: true }))
 
     expect(document.body.classList.contains('ts-elapsed')).toBe(true)
     expect(document.body.classList.contains('ln-on')).toBe(true)
@@ -5346,12 +5360,14 @@ describe('app helpers', () => {
     expect(document.cookie).toContain('pref_welcome_intro=disable_animation')
     expect(document.cookie).toContain('pref_share_redaction_default=redacted')
     expect(document.cookie).toContain('pref_project_auto_link_external_runs=off')
+    expect(document.cookie).toContain('pref_project_auto_link_run_entities=off')
     expect(document.cookie).toContain('pref_hud_clock=local')
     expect(document.cookie).toContain('pref_compare_view_mode=side_by_side')
     expect(document.cookie).toContain('pref_compare_context=10')
     expect(getWelcomeIntroPreference()).toBe('disable_animation')
     expect(getShareRedactionDefaultPreference()).toBe('redacted')
     expect(getProjectAutoLinkExternalRunsPreference()).toBe('off')
+    expect(getProjectAutoLinkRunEntitiesPreference()).toBe('off')
     expect(getHudClockPreference()).toBe('local')
     expect(getCompareViewModePreference()).toBe('side_by_side')
     expect(getCompareContextPreference()).toBe('10')
@@ -5368,6 +5384,7 @@ describe('app helpers', () => {
       pref_welcome_intro: 'disable_animation',
       pref_share_redaction_default: 'redacted',
       pref_project_auto_link_external_runs: 'off',
+      pref_project_auto_link_run_entities: 'off',
       pref_hud_clock: 'local',
       pref_compare_view_mode: 'side_by_side',
       pref_compare_context: '10',

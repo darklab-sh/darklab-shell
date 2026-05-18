@@ -41,6 +41,7 @@
   const projectWorkspaceOverlay = document.getElementById('project-workspace-overlay');
   const projectWorkspaceModal = document.getElementById('project-workspace-modal');
   const projectWorkspaceBody = document.getElementById('project-workspace-body');
+  const projectWorkspacePagination = document.getElementById('project-workspace-pagination');
   const projectExplorerBody = document.getElementById('project-explorer-body');
   const projectWorkspaceSubtitle = document.getElementById('project-workspace-subtitle');
   const projectWorkspaceCreateForm = document.getElementById('project-workspace-create-form');
@@ -48,6 +49,7 @@
   const projectMobileRoot = document.getElementById('project-mobile-root');
   const projectMobileListView = document.getElementById('project-mobile-list-view');
   const projectMobileBody = document.getElementById('project-mobile-body');
+  const projectMobilePagination = document.getElementById('project-mobile-pagination');
   const projectMobileSummary = document.getElementById('project-mobile-summary');
   const projectMobileCreateForm = document.getElementById('project-mobile-create-form');
   const projectMobileNameInput = document.getElementById('project-mobile-name');
@@ -132,6 +134,7 @@
   let allWorkflows = [];
   let projectWorkspaceRows = [];
   let projectWorkspaceSummaries = new Map();
+  let projectWorkspacePaginationState = { limit: 50, offset: 0, total: 0 };
   let projectWorkspaceLoading = false;
   let projectWorkspaceSelectedId = '';
   let projectWorkspaceTab = 'details';
@@ -812,6 +815,7 @@
       refreshProjectWorkspace,
       selectedProjectId: () => projectWorkspaceSelectedId,
       setProjectMobileCreateOpen: _setProjectMobileCreateOpen,
+      setProjectPaginationOffset: _setProjectPaginationOffset,
       setProjectWorkspaceTab: (tab) => { projectWorkspaceTab = tab; },
       setSelectedProjectId: (projectId) => { projectWorkspaceSelectedId = String(projectId || ''); },
       showToast: typeof showToast === 'function' ? showToast : null,
@@ -896,6 +900,7 @@
       getSelectedIds: () => projectWorkspaceSelectedEntityIds,
       getPicker: () => projectWorkspaceEntityPicker,
       setPicker: (picker) => { projectWorkspaceEntityPicker = picker; },
+      getSelectedProjectId: () => projectWorkspaceSelectedId,
       formatDate: _formatProjectDate,
       shortProjectRunId: _shortProjectRunId,
       makeProjectButton: _makeProjectButton,
@@ -909,7 +914,13 @@
       projectResponseError: _projectResponseError,
       projectWorkspaceRequest: _projectWorkspaceRequest,
       refreshProjectWorkspace,
+      renderProjectExplorer: _renderProjectExplorer,
+      renderProjectMobileDetail: _renderProjectMobileDetail,
+      mobileView: () => _projectMobileShellController().currentView(),
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
+      logClientError: (message, err) => {
+        if (typeof logClientError === 'function') logClientError(message, err);
+      },
       downloadBlobAsAttachment: _downloadBlobAsAttachment,
       closeProjectWorkspace,
       openAtlas: global.openAtlas,
@@ -938,6 +949,7 @@
       projectSummary: _projectSummary,
       projectRunItems: _projectRunItems,
       projectArtifactItems: _projectArtifactItems,
+      loadAllProjectArtifacts: _loadAllProjectArtifacts,
       projectTargetItems: _projectTargetItems,
       projectFindingItems: _projectFindingItems,
       projectFindingsLoaded: _projectFindingsLoaded,
@@ -1019,7 +1031,9 @@
       projectSummary: _projectSummary,
       findingFilteredKey: _projectFindingFilteredKey,
       findingServerFilterParams: _projectFindingServerFilterParams,
+      collapsedFindingGroupLabels: _projectCollapsedFindingGroupLabels,
       filteredProjectFindings: _filteredProjectFindings,
+      pageLimit: 50,
       projectResponseError: _projectResponseError,
       renderProjectExplorer: _renderProjectExplorer,
       renderProjectMobileDetail: _renderProjectMobileDetail,
@@ -1042,10 +1056,12 @@
     projectFindingsController = factory({
       findingReviewStates: PROJECT_WORKSPACE_CONSTANTS.findingReviewStates,
       collapsedFindingGroups: () => projectWorkspaceCollapsedFindingGroups,
+      collapsedFindingGroupLabels: _projectCollapsedFindingGroupLabels,
       findingsLoadingId: () => _projectFindingsDataController().loadingId(),
       hasFindings: projectId => _projectFindingsDataController().loaded(projectId),
       findingSelectMode: () => projectWorkspaceFindingSelectMode,
       selectedFindingIds: () => projectWorkspaceSelectedFindingIds,
+      projectFindingPagination: (projectId, summary) => _projectFindingsDataController().page(projectId, summary),
       projectFindingItems: _projectFindingItems,
       filteredProjectFindings: _filteredProjectFindings,
       projectFindingServerFiltersActive: _projectFindingServerFiltersActive,
@@ -1071,19 +1087,30 @@
     if (typeof factory !== 'function') throw new Error('DarklabProjectArtifacts is unavailable');
     projectArtifactsController = factory({
       apiFetch,
+      projectResponseError: _projectResponseError,
       collapsedArtifactGroups: () => projectWorkspaceCollapsedArtifactGroups,
       filesEnabled: () => !!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true),
+      selectedProjectId: () => projectWorkspaceSelectedId,
       projectTargetFilterActive: _projectTargetFilterActive,
       projectFindingsLoaded: _projectFindingsLoaded,
       filteredProjectArtifacts: _filteredProjectArtifacts,
+      projectArtifactServerFilterParams: _projectArtifactServerFilterParams,
       projectRunById: _projectRunById,
       shortProjectRunId: _shortProjectRunId,
       entityMetadataChips: _entityMetadataChips,
       formatDate: _formatProjectDate,
       formatBytes: _formatProjectBytes,
+      makeProjectButton: _makeProjectButton,
       bindProjectRuntimePressable: _bindProjectRuntimePressable,
       emptyProjectPanel: _emptyProjectPanel,
       projectItemRow: _projectItemRow,
+      renderProjectExplorer: _renderProjectExplorer,
+      renderProjectMobileDetail: _renderProjectMobileDetail,
+      mobileView: () => _projectMobileShellController().currentView(),
+      setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
+      logClientError: (message, err) => {
+        if (typeof logClientError === 'function') logClientError(message, err);
+      },
       groupBy: _groupBy,
       downloadBlobAsAttachment: _downloadBlobAsAttachment,
       metaSeparator: ' · ',
@@ -1161,6 +1188,8 @@
       emptyProjectPanel: _emptyProjectPanel,
       mobileMenuText: '☰',
       mobileChevronText: '›',
+      projectPagination: () => projectWorkspacePaginationState,
+      projectWorkspacePagination,
     });
     return projectListController;
   }
@@ -1185,6 +1214,7 @@
       projectTargetFilterActive: _projectTargetFilterActive,
       projectRunFilterActive: _projectRunFilterActive,
       projectFindingsLoaded: _projectFindingsLoaded,
+      projectFindingPagination: _projectFindingPagination,
       projectFindingServerFiltersActive: _projectFindingServerFiltersActive,
       filteredProjectFindings: _filteredProjectFindings,
       filteredProjectRuns: _filteredProjectRuns,
@@ -1245,6 +1275,7 @@
       projectMobileDetailBody,
       projectMobileTabItems: _projectMobileTabItems,
       projectPackageWizardActive: _projectPackageWizardActive,
+      projectPagination: () => projectWorkspacePaginationState,
       projectRows: () => projectWorkspaceRows,
       projectSummary: _projectSummary,
       projectTargetFilterActive: _projectTargetFilterActive,
@@ -1368,6 +1399,8 @@
     const factory = global.DarklabProjectRuns && global.DarklabProjectRuns.createProjectRunsController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectRuns is unavailable');
     projectRunsController = factory({
+      apiFetch,
+      projectResponseError: _projectResponseError,
       projectExplorerBody: () => projectExplorerBody,
       projectRunItems: _projectRunItems,
       projectComparableRuns: _projectComparableRuns,
@@ -1376,6 +1409,7 @@
       projectArtifactItems: _projectArtifactItems,
       projectArtifactsVisible: _projectArtifactsVisible,
       projectTargetFilterActive: _projectTargetFilterActive,
+      projectRunFilterActive: _projectRunFilterActive,
       filteredProjectRuns: _filteredProjectRuns,
       entityLabelValues: _entityLabelValues,
       entityMetadataChips: _entityMetadataChips,
@@ -1384,6 +1418,13 @@
       bindProjectRuntimePressable: _bindProjectRuntimePressable,
       emptyProjectPanel: _emptyProjectPanel,
       projectItemRow: _projectItemRow,
+      renderProjectExplorer: _renderProjectExplorer,
+      renderProjectMobileDetail: _renderProjectMobileDetail,
+      mobileView: () => _projectMobileShellController().currentView(),
+      setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
+      logClientError: (message, err) => {
+        if (typeof logClientError === 'function') logClientError(message, err);
+      },
     });
     return projectRunsController;
   }
@@ -1428,14 +1469,19 @@
       projectMobileDetailView,
       projectMobileListView,
       projectMobileNameInput,
+      projectMobilePagination,
       projectMobileRoot,
       projectMobileSummary,
+      projectPagination: () => projectWorkspacePaginationState,
       projectRows: () => projectWorkspaceRows,
+      projectPagination: () => projectWorkspacePaginationState,
       projectWorkspaceLoading: () => projectWorkspaceLoading,
       renderMobileListRow: _renderProjectMobileListRow,
+      renderProjectPagination: _renderProjectPagination,
       renderProjectMobileDetail: _renderProjectMobileDetail,
       renderProjectWorkspace: _renderProjectWorkspace,
       selectedProjectId: () => projectWorkspaceSelectedId,
+      ensureProjectSummary: _ensureProjectSummary,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
       setSelectedProjectId: (projectId) => { projectWorkspaceSelectedId = String(projectId || ''); },
       setWorkspaceTab: (tabId) => { projectWorkspaceTab = tabId; },
@@ -1469,14 +1515,23 @@
       projectRunById: _projectRunById,
       projectComparableRuns: _projectComparableRuns,
       projectArtifactItems: _projectArtifactItems,
+      pagedProjectArtifactItems: _pagedProjectArtifactItems,
+      projectArtifactPagination: _projectArtifactPagination,
+      projectArtifactServerFilterKey: _projectArtifactServerFilterKey,
+      loadProjectArtifacts: _loadProjectArtifacts,
       projectFindingItems: _projectFindingItems,
       projectFindingsLoaded: _projectFindingsLoaded,
       projectFindingsLoadingId: () => _projectFindingsDataController().loadingId(),
       hasProjectFindings: (projectId) => _projectFindingsDataController().loaded(projectId),
+      projectFindingPagination: (projectId, summary) => _projectFindingsDataController().page(projectId, summary),
       projectFindingServerFiltersActive: _projectFindingServerFiltersActive,
       projectFindingGroupCollapsed: _projectFindingGroupCollapsed,
+      collapsedFindingGroupLabels: _projectCollapsedFindingGroupLabels,
       projectArtifactGroupCollapsed: _projectArtifactGroupCollapsed,
       projectTargetFilterActive: _projectTargetFilterActive,
+      projectRunFilterActive: _projectRunFilterActive,
+      projectRunPagination: _projectRunPagination,
+      loadProjectRuns: _loadProjectRuns,
       projectArtifactsVisible: _projectArtifactsVisible,
       projectArtifactStatus: _projectArtifactStatus,
       projectArtifactStatusLabel: _projectArtifactStatusLabel,
@@ -1560,13 +1615,25 @@
       setSelectedProjectId: (projectId) => { projectWorkspaceSelectedId = String(projectId || ''); },
       projectRows: () => projectWorkspaceRows,
       setProjectRows: (rows) => { projectWorkspaceRows = Array.isArray(rows) ? rows : []; },
+      projectPagination: () => projectWorkspacePaginationState,
+      setProjectPagination: (pagination) => {
+        projectWorkspacePaginationState = {
+          limit: Number(pagination && pagination.limit || 50),
+          offset: Number(pagination && pagination.offset || 0),
+          total: Number(pagination && pagination.total || 0),
+        };
+      },
       projectSummaries: () => projectWorkspaceSummaries,
+      setProjectSummary: (projectId, summary) => { projectWorkspaceSummaries.set(String(projectId || ''), summary); },
       setProjectSummaries: (summaries) => { projectWorkspaceSummaries = summaries instanceof Map ? summaries : new Map(); },
       projectWorkspaceLoading: () => projectWorkspaceLoading,
       setProjectWorkspaceLoading: (loading) => { projectWorkspaceLoading = !!loading; },
       activeProject: _activeProject,
       loadActiveProjectContext,
       invalidateProjectFindings: _invalidateProjectFindings,
+      invalidateProjectRuns: _invalidateProjectRuns,
+      invalidateProjectEntities: (projectId = '') => _projectEntitiesController().invalidate(projectId),
+      invalidateProjectArtifacts: (projectId = '') => _projectArtifactsController().invalidate?.(projectId),
       renderProjectWorkspace: _renderProjectWorkspace,
       syncProjectNotesForm: _syncProjectNotesForm,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
@@ -1614,11 +1681,14 @@
       invalidateProjectFindings: _invalidateProjectFindings,
       isProjectWorkspaceOpen,
       linkLastRunToProject: _linkLastRunToProject,
+      ensureProjectSummary: _ensureProjectSummary,
+      loadProjectRuns: _loadProjectRuns,
       loadProjectAutocompleteTargets: () => {
         if (typeof loadProjectAutocompleteTargets === 'function') {
           loadProjectAutocompleteTargets().catch(() => {});
         }
       },
+      loadProjectFilteredFindings: _loadProjectFilteredFindings,
       loadProjectFindings: _loadProjectFindings,
       mobileView: () => _projectMobileShellController().currentView(),
       openProjectEntityEditor: _openProjectEntityEditor,
@@ -1632,16 +1702,21 @@
       packagesController: _projectPackagesController,
       previewProjectArtifact: _previewProjectArtifact,
       projectArtifactItems: _projectArtifactItems,
+      projectArtifactPagination: _projectArtifactPagination,
       projectDisplayName: _projectDisplayName,
       projectExplorerBody,
+      projectFindingPagination: _projectFindingPagination,
       projectFindingItems: _projectFindingItems,
       projectFindingLabelFilterSet: _projectFindingLabelFilterSet,
+      projectFindingServerFiltersActive: _projectFindingServerFiltersActive,
       projectFindingStatusFilterSet: _projectFindingStatusFilterSet,
       projectMobileDetailBody,
       projectMobileListView,
       projectMobileProjectActions: _projectMobileProjectActions,
       projectPackageById: _projectPackageById,
+      projectPagination: () => projectWorkspacePaginationState,
       projectRows: () => projectWorkspaceRows,
+      projectRunPagination: _projectRunPagination,
       projectRunFilterSet: _projectRunFilterSet,
       projectRunItems: _projectRunItems,
       projectSummary: _projectSummary,
@@ -1658,6 +1733,10 @@
       selectedFindingIds: () => projectWorkspaceSelectedFindingIds,
       selectedProjectId: () => projectWorkspaceSelectedId,
       selectProjectFromMobile: _selectProjectFromMobile,
+      setProjectFindingPageOffset: _setProjectFindingPageOffset,
+      setProjectArtifactPageOffset: _setProjectArtifactPageOffset,
+      setProjectRunPageOffset: _setProjectRunPageOffset,
+      setProjectPaginationOffset: _setProjectPaginationOffset,
       setCachedFindingReviewState: _setCachedFindingReviewState,
       setFindingSelectMode: (enabled) => { projectWorkspaceFindingSelectMode = !!enabled; },
       setProjectMobileCreateOpen: _setProjectMobileCreateOpen,
@@ -1798,6 +1877,16 @@
     return _projectFindingsController().groupCollapsed(projectId, runLabel);
   }
 
+  function _projectCollapsedFindingGroupLabels(projectId = projectWorkspaceSelectedId) {
+    const normalized = String(projectId || '');
+    if (!normalized) return [];
+    const prefix = `${normalized}\x1f`;
+    return [...projectWorkspaceCollapsedFindingGroups]
+      .filter(key => String(key || '').startsWith(prefix))
+      .map(key => String(key).slice(prefix.length))
+      .filter(Boolean);
+  }
+
   function _projectArtifactGroupKey(projectId, runId) {
     return _projectArtifactsController().groupKey(projectId, runId);
   }
@@ -1808,6 +1897,22 @@
 
   function _projectRunItems(summary) {
     return _projectSharedUiController().runItems(summary);
+  }
+
+  function _projectRunPagination(projectId = projectWorkspaceSelectedId) {
+    return _projectRunsController().page(projectId);
+  }
+
+  function _setProjectRunPageOffset(projectId = projectWorkspaceSelectedId, offset = 0) {
+    _projectRunsController().setPageOffset(projectId, offset);
+  }
+
+  async function _loadProjectRuns(projectId = projectWorkspaceSelectedId, options = {}) {
+    await _projectRunsController().load(projectId, options);
+  }
+
+  function _invalidateProjectRuns(projectId = '') {
+    _projectRunsController().invalidate(projectId);
   }
 
   function _projectRunById(summary, runId) {
@@ -1824,6 +1929,26 @@
 
   function _projectArtifactItems(summary) {
     return _projectArtifactsController().items(summary);
+  }
+
+  function _projectArtifactPagination(projectId = projectWorkspaceSelectedId) {
+    return _projectArtifactsController().page(projectId);
+  }
+
+  function _setProjectArtifactPageOffset(projectId = projectWorkspaceSelectedId, offset = 0) {
+    _projectArtifactsController().setPageOffset(projectId, offset);
+  }
+
+  function _pagedProjectArtifactItems(projectId = projectWorkspaceSelectedId, artifacts = []) {
+    return _projectArtifactsController().pagedItems(projectId, artifacts);
+  }
+
+  async function _loadProjectArtifacts(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId), options = {}) {
+    return _projectArtifactsController().load(projectId, summary, options);
+  }
+
+  async function _loadAllProjectArtifacts(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId)) {
+    return _projectArtifactsController().loadAll(projectId, summary);
   }
 
   function _projectFilesEnabled() {
@@ -1997,8 +2122,36 @@
     return _projectFindingsDataController().loaded(projectId);
   }
 
+  function _projectFindingPagination(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId)) {
+    return _projectFindingsDataController().page(projectId, summary);
+  }
+
+  function _setProjectFindingPageOffset(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId), offset = 0) {
+    _projectFindingsDataController().setPageOffset(projectId, summary, offset);
+  }
+
   function _projectFindingServerFilterParams(projectId, summary = _projectSummary(projectId)) {
     return _projectFiltersController().findingServerFilterParams(projectId, summary);
+  }
+
+  function _projectArtifactServerFilterParams(projectId, summary = _projectSummary(projectId)) {
+    const params = new URLSearchParams();
+    const runFilters = _projectRunFilterSet(projectId);
+    runFilters.forEach((runId) => {
+      if (runId) params.append('run_id', runId);
+    });
+    const targetFilters = _projectTargetFilterSet(projectId);
+    const availableTargets = new Set(_projectTargetItems(summary).map(target => String(target && target.id || '')).filter(Boolean));
+    targetFilters.forEach((targetId) => {
+      if (targetId && availableTargets.has(targetId)) params.append('target_id', targetId);
+    });
+    return params;
+  }
+
+  function _projectArtifactServerFilterKey(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId)) {
+    const params = _projectArtifactServerFilterParams(projectId, summary);
+    params.sort?.();
+    return params.toString();
   }
 
   function _projectFindingServerFiltersActive(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId)) {
@@ -2073,12 +2226,12 @@
     return _projectRunsController().runRemoveControl(projectId, run);
   }
 
-  function _projectRunFindingCount(projectId, runId) {
-    return _projectRunsController().runFindingCount(projectId, runId);
+  function _projectRunFindingCount(projectId, runId, run = null) {
+    return _projectRunsController().runFindingCount(projectId, runId, run);
   }
 
-  function _projectRunArtifactCount(summary, runId) {
-    return _projectRunsController().runArtifactCount(summary, runId);
+  function _projectRunArtifactCount(summary, runId, run = null) {
+    return _projectRunsController().runArtifactCount(summary, runId, run);
   }
 
   function _projectRunControls(projectId, run, summary) {
@@ -2169,12 +2322,12 @@
     return _projectSharedUiController().groupBy(items, keyFn);
   }
 
-  async function _loadProjectFindings(projectId) {
-    return _projectFindingsDataController().load(projectId);
+  async function _loadProjectFindings(projectId, options = {}) {
+    return _projectFindingsDataController().load(projectId, options);
   }
 
-  async function _loadProjectFilteredFindings(projectId, summary = _projectSummary(projectId)) {
-    await _projectFindingsDataController().loadFiltered(projectId, summary);
+  async function _loadProjectFilteredFindings(projectId, summary = _projectSummary(projectId), options = {}) {
+    await _projectFindingsDataController().loadFiltered(projectId, summary, options);
   }
 
   function _syncProjectForms(project = _selectedProject()) {
@@ -2225,6 +2378,10 @@
 
   function _renderProjectMobileListRow(project, activeId) {
     return _projectListController().renderMobileListRow(project, activeId);
+  }
+
+  function _renderProjectPagination(host, options = {}) {
+    return _projectListController().renderPagination(host, options);
   }
 
   function _projectMobileSection(label, count, { open = true } = {}) {
@@ -2363,6 +2520,17 @@
 
   async function _loadProjectSummaries(projects) {
     await _projectWorkspaceLifecycleController().loadProjectSummaries(projects);
+  }
+
+  async function _ensureProjectSummary(projectId = projectWorkspaceSelectedId) {
+    return _projectWorkspaceLifecycleController().ensureProjectSummary(projectId);
+  }
+
+  function _setProjectPaginationOffset(offset) {
+    projectWorkspacePaginationState = {
+      ...projectWorkspacePaginationState,
+      offset: Math.max(0, Number(offset || 0)),
+    };
   }
 
   async function refreshProjectWorkspace() {

@@ -774,6 +774,7 @@
           <button type="button" id="project-mobile-new-btn" class="btn btn-secondary btn-compact" data-project-mobile-action="new-project">New Project</button>
         </div>
         <div id="project-mobile-body" class="project-mobile-body nice-scroll" aria-live="polite"></div>
+        <div id="project-mobile-pagination" class="project-workspace-pagination u-hidden" aria-live="polite"></div>
       </div>
       <form id="project-mobile-create-form" class="project-mobile-create-sheet u-hidden" aria-label="Create project">
         <div class="project-mobile-create-header">
@@ -806,6 +807,7 @@
           <button type="submit" class="btn btn-secondary btn-compact">Create</button>
         </form>
         <div id="project-workspace-body" class="project-workspace-body nice-scroll" aria-live="polite"></div>
+        <div id="project-workspace-pagination" class="project-workspace-pagination u-hidden" aria-live="polite"></div>
       </aside>
       <section class="project-explorer" aria-label="Selected project">
         <div id="project-explorer-body" class="project-explorer-body nice-scroll" aria-live="polite"></div>
@@ -1053,6 +1055,10 @@
             <label class="form-check">
               <input type="checkbox" id="options-project-auto-link-external-runs-toggle">
               <span>Add external command runs to the active project</span>
+            </label>
+            <label class="form-check">
+              <input type="checkbox" id="options-project-auto-link-run-entities-toggle">
+              <span>Also add Atlas entities from auto-linked runs</span>
             </label>
             <div class="options-session-token-desc">Built-in administrative commands are never added as project runs.</div>
           </div>

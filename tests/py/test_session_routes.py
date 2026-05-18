@@ -1331,6 +1331,7 @@ class TestSessionPreferences:
                 "pref_theme_name": "theme_light_blue",
                 "pref_timestamps": "clock",
                 "pref_project_auto_link_external_runs": "off",
+                "pref_project_auto_link_run_entities": "off",
                 "pref_run_notify": "on",
                 "pref_prompt_username": "operator_1",
                 "pref_compare_view_mode": "unified",

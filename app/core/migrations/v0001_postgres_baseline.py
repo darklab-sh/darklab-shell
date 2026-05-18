@@ -297,6 +297,10 @@ MIGRATION = Migration(
         "CREATE INDEX IF NOT EXISTS idx_entities_session_value ON entities (session_id, canonical_value)",
         "CREATE INDEX IF NOT EXISTS idx_entity_run_links_run ON entity_run_links (run_id)",
         """
+        CREATE INDEX IF NOT EXISTS idx_entity_run_links_entity_seen
+        ON entity_run_links (entity_id, last_seen_at DESC)
+        """,
+        """
         CREATE INDEX IF NOT EXISTS idx_entity_intel_snapshots_entity_fetched
         ON entity_intel_snapshots (entity_id, fetched_at DESC)
         """,
@@ -310,9 +314,19 @@ MIGRATION = Migration(
         """,
         "CREATE INDEX IF NOT EXISTS idx_findings_session_status ON findings (session_id, status)",
         "CREATE INDEX IF NOT EXISTS idx_findings_session_entity_seen ON findings (session_id, entity_id, last_seen_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_findings_session_run_seen ON findings (session_id, run_id, last_seen_at DESC)",
+        """
+        CREATE INDEX IF NOT EXISTS idx_findings_session_first_run_seen
+        ON findings (session_id, first_run_id, last_seen_at DESC)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_findings_session_last_run_seen
+        ON findings (session_id, last_run_id, last_seen_at DESC)
+        """,
         "CREATE INDEX IF NOT EXISTS idx_findings_session_tool_seen ON findings (session_id, tool_root, last_seen_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_findings_session_severity_seen ON findings (session_id, severity, last_seen_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_findings_occurrences_run ON findings_occurrences (run_id)",
+        "CREATE INDEX IF NOT EXISTS idx_findings_occurrences_finding_seen ON findings_occurrences (finding_id, seen_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_entity_labels_entity_created ON entity_labels (entity_type, entity_id, created)",
         "CREATE INDEX IF NOT EXISTS idx_entity_notes_entity_updated ON entity_notes (entity_type, entity_id, updated)",
         "CREATE INDEX IF NOT EXISTS idx_evidence_packages_project_updated ON evidence_packages (project_id, updated DESC)",

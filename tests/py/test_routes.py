@@ -470,6 +470,15 @@ class TestProjectRoutes:
         assert project_label.status_code == 201
         labeled_list = json.loads(client.get("/projects", headers={"X-Session-ID": session_id}).data)
         assert [label["label"] for label in labeled_list["projects"][0]["labels"]] == ["important"]
+        paged_list = json.loads(client.get(
+            "/projects?include_archived=1&include_counts=1&limit=1&offset=0",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        assert paged_list["total"] == 1
+        assert paged_list["limit"] == 1
+        assert paged_list["offset"] == 0
+        assert paged_list["projects"][0]["counts"]["runs"] == 0
+        assert [label["label"] for label in paged_list["projects"][0]["labels"]] == ["important"]
         labeled_get = json.loads(client.get(
             f"/projects/{project['id']}",
             headers={"X-Session-ID": session_id},
@@ -730,6 +739,13 @@ class TestProjectRoutes:
         assert first["slug"] == "case"
         assert second["slug"] == "case-2"
         assert other_session["slug"] == "case"
+        page = json.loads(client.get(
+            "/projects?include_archived=1&limit=1&offset=1",
+            headers={"X-Session-ID": session_a},
+        ).data)
+        assert page["total"] == 2
+        assert page["offset"] == 1
+        assert len(page["projects"]) == 1
 
         hidden = client.get(f"/projects/{first['id']}", headers={"X-Session-ID": session_b})
         assert hidden.status_code == 404
@@ -1391,13 +1407,40 @@ class TestProjectRoutes:
                 "VALUES (?, ?, ?, 'finding', 'open port 80', '80/tcp open http', 0, ?, datetime('now'))",
                 (f"fnd_{baseline_run_id}", session_id, baseline_run_id, f"fp-{baseline_run_id}"),
             )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "VALUES (?, ?, ?, 'finding', 'direct run finding', '8080/tcp open http-proxy', 1, ?, datetime('now'))",
+                (f"fnd_direct_{run_id}", session_id, run_id, f"fp-direct-{run_id}"),
+            )
+            conn.execute(
+                "DELETE FROM findings_occurrences WHERE finding_id = ?",
+                (f"fnd_direct_{run_id}",),
+            )
+            conn.execute(
+                "INSERT INTO entity_notes "
+                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "VALUES (?, ?, 'finding', ?, 'direct run fallback', datetime('now'), datetime('now'))",
+                (f"note_fnd_direct_{run_id}", session_id, f"fnd_direct_{run_id}"),
+            )
             conn.commit()
         with mock.patch.dict(shell_app.CFG, {"workspace_enabled": True}):
             summary = json.loads(client.get(
                 f"/projects/{project['id']}/summary",
                 headers={"X-Session-ID": session_id},
             ).data)
-            artifact_statuses = {item["workspace_path"]: item for item in summary["artifacts"]}
+            artifacts_page = json.loads(client.get(
+                f"/projects/{project['id']}/artifacts?limit=1&offset=0",
+                headers={"X-Session-ID": session_id},
+            ).data)
+            assert artifacts_page["total"] == 2
+            assert artifacts_page["limit"] == 1
+            assert len(artifacts_page["artifacts"]) == 1
+            all_artifacts = json.loads(client.get(
+                f"/projects/{project['id']}/artifacts?limit=10&offset=0",
+                headers={"X-Session-ID": session_id},
+            ).data)
+            artifact_statuses = {item["workspace_path"]: item for item in all_artifacts["artifacts"]}
             assert artifact_statuses["reports/run.txt"]["file_status"] == "available"
             assert artifact_statuses["reports/run.txt"]["file_available"] is True
             assert artifact_statuses["reports/run.txt"]["current_byte_size"] == 10
@@ -1428,12 +1471,12 @@ class TestProjectRoutes:
             )
             assert missing_preview.status_code == 404
             artifact_path.write_bytes(b"abcdefghij")
-            changed_summary = json.loads(client.get(
-                f"/projects/{project['id']}/summary",
+            changed_artifacts = json.loads(client.get(
+                f"/projects/{project['id']}/artifacts?limit=10&offset=0",
                 headers={"X-Session-ID": session_id},
             ).data)
             changed_artifact = {
-                item["workspace_path"]: item for item in changed_summary["artifacts"]
+                item["workspace_path"]: item for item in changed_artifacts["artifacts"]
             }["reports/run.txt"]
             assert changed_artifact["file_status"] == "changed"
             assert "checksum differs" in changed_artifact["file_status_detail"]
@@ -1444,19 +1487,31 @@ class TestProjectRoutes:
             "targets": 0,
             "pending_targets": 0,
             "artifacts": 2,
-            "findings": 2,
+            "findings": 3,
             "labels": 3,
-            "notes": 4,
+            "notes": 5,
             "packages": 0,
         }
-        assert {item["workspace_path"] for item in summary["artifacts"]} == {
-            "reports/old.txt",
-            "reports/run.txt",
-        }
+        assert summary["artifacts"] == []
+        assert summary["entities"] == []
+        assert summary["entity_counts"] == {}
         assert {item["id"] for item in summary["runs"]} == {run_id, baseline_run_id}
         run_summaries = {item["id"]: item for item in summary["runs"]}
         assert run_summaries[run_id]["labels"][0]["label"] == "baseline"
         assert run_summaries[run_id]["note"]["body"] == "Confirmed service owner"
+        assert run_summaries[run_id]["finding_count"] == 2
+        assert run_summaries[run_id]["artifact_count"] == 1
+        assert run_summaries[baseline_run_id]["finding_count"] == 1
+        assert run_summaries[baseline_run_id]["artifact_count"] == 1
+        paged_runs = json.loads(client.get(
+            f"/projects/{project['id']}/runs?limit=1&offset=0",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        assert paged_runs["total"] == 2
+        assert paged_runs["limit"] == 1
+        assert paged_runs["offset"] == 0
+        assert len(paged_runs["runs"]) == 1
+        assert {"finding_count", "artifact_count"}.issubset(paged_runs["runs"][0])
         project_findings = json.loads(client.get(
             f"/projects/{project['id']}/findings?review_state=new&command_root=nmap&run_id={run_id}"
             "&label=important&note_state=noted",
@@ -1475,6 +1530,16 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         ).data)
         assert [item["run_id"] for item in unnoted_findings["findings"]] == [baseline_run_id]
+        paged_findings = json.loads(client.get(
+            f"/projects/{project['id']}/findings?limit=1&offset=1",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        assert paged_findings["total"] == 3
+        assert paged_findings["limit"] == 1
+        assert paged_findings["offset"] == 1
+        assert len(paged_findings["findings"]) == 1
+        assert paged_findings["has_more"] is True
+        assert paged_findings["group_counts"] == {"nmap darklab.sh": 3}
         comparison = json.loads(client.get(
             self._project_compare_url(project["id"], left=run_id, right=baseline_run_id),
             headers={"X-Session-ID": session_id},
@@ -1776,7 +1841,7 @@ class TestProjectRoutes:
         ).data)
         assert summary_after_package["counts"]["packages"] == 1
         assert summary_after_package["counts"]["labels"] == 6
-        assert summary_after_package["counts"]["notes"] == 6
+        assert summary_after_package["counts"]["notes"] == 7
         assert [item["id"] for item in summary_after_package["packages"]] == [package["id"]]
 
         hidden_label = client.get(f"/entities/run/{run_id}/labels", headers={"X-Session-ID": "other-session"})
@@ -1834,6 +1899,119 @@ class TestProjectRoutes:
                 headers={"X-Session-ID": session_id},
             )
             assert missing_note.status_code == 404
+
+    def test_project_findings_can_exclude_collapsed_command_groups(self):
+        client = get_client()
+        session_id = self._session_id("collapsed-findings")
+        project = self._create_project(client, session_id)
+        katana_run_id = self._seed_run(
+            session_id,
+            "katana -u https://darklab.sh",
+            started="'2026-05-14T00:00:00+00:00'",
+        )
+        httpx_run_id = self._seed_run(
+            session_id,
+            "httpx https://darklab.sh",
+            started="'2026-05-14T00:01:00+00:00'",
+        )
+        self._link_run(client, session_id, project["id"], katana_run_id)
+        self._link_run(client, session_id, project["id"], httpx_run_id)
+        with sqlite3.connect(DB_PATH) as conn:
+            for index in range(3):
+                conn.execute(
+                    "INSERT INTO findings "
+                    "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                    "VALUES (?, ?, ?, 'finding', ?, ?, ?, ?, ?)",
+                    (
+                        f"fnd_katana_{index}_{uuid.uuid4().hex}",
+                        session_id,
+                        katana_run_id,
+                        f"katana finding {index}",
+                        f"https://darklab.sh/{index} [200]",
+                        index,
+                        f"fp-katana-{index}-{uuid.uuid4().hex}",
+                        f"2026-05-14T00:10:0{index}+00:00",
+                    ),
+                )
+            for index in range(2):
+                conn.execute(
+                    "INSERT INTO findings "
+                    "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                    "VALUES (?, ?, ?, 'finding', ?, ?, ?, ?, ?)",
+                    (
+                        f"fnd_httpx_{index}_{uuid.uuid4().hex}",
+                        session_id,
+                        httpx_run_id,
+                        f"httpx finding {index}",
+                        f"https://api.darklab.sh/{index} [200]",
+                        index,
+                        f"fp-httpx-{index}-{uuid.uuid4().hex}",
+                        f"2026-05-14T00:09:0{index}+00:00",
+                    ),
+                )
+            conn.commit()
+
+        first_page = json.loads(client.get(
+            f"/projects/{project['id']}/findings?limit=3&offset=0",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        collapsed_page = json.loads(client.get(
+            f"/projects/{project['id']}/findings?"
+            + urlencode({
+                "limit": "3",
+                "offset": "0",
+                "collapsed_group": "katana -u https://darklab.sh",
+            }),
+            headers={"X-Session-ID": session_id},
+        ).data)
+        collapsed_page_without_counts = json.loads(client.get(
+            f"/projects/{project['id']}/findings?"
+            + urlencode({
+                "limit": "3",
+                "offset": "0",
+                "collapsed_group": "katana -u https://darklab.sh",
+                "include_collapsed_group_counts": "0",
+            }),
+            headers={"X-Session-ID": session_id},
+        ).data)
+        page_without_count = json.loads(client.get(
+            f"/projects/{project['id']}/findings?"
+            + urlencode({
+                "limit": "3",
+                "offset": "0",
+                "include_total": "0",
+                "known_total": "5",
+                "include_group_counts": "0",
+            }),
+            headers={"X-Session-ID": session_id},
+        ).data)
+
+        assert [item["run_command"] for item in first_page["findings"]] == [
+            "katana -u https://darklab.sh",
+            "katana -u https://darklab.sh",
+            "katana -u https://darklab.sh",
+        ]
+        assert first_page["total"] == 5
+        assert first_page["group_counts"] == {"katana -u https://darklab.sh": 3}
+        assert first_page["group_order"] == ["katana -u https://darklab.sh"]
+        assert [item["run_command"] for item in collapsed_page["findings"]] == [
+            "httpx https://darklab.sh",
+            "httpx https://darklab.sh",
+        ]
+        assert collapsed_page["total"] == 2
+        assert collapsed_page["group_counts"] == {"httpx https://darklab.sh": 2}
+        assert collapsed_page["collapsed_group_counts"] == {"katana -u https://darklab.sh": 3}
+        assert collapsed_page["group_order"] == [
+            "katana -u https://darklab.sh",
+            "httpx https://darklab.sh",
+        ]
+        assert collapsed_page_without_counts["collapsed_group_counts"] == {}
+        assert collapsed_page_without_counts["group_counts"] == {"httpx https://darklab.sh": 2}
+        assert collapsed_page_without_counts["group_order"] == ["httpx https://darklab.sh"]
+        assert len(page_without_count["findings"]) == 3
+        assert page_without_count["total"] == 5
+        assert page_without_count["has_more"] is True
+        assert page_without_count["group_counts"] == {}
 
     def test_bulk_project_links_report_mixed_results_and_keep_legacy_response(self):
         client = get_client()
@@ -2424,8 +2602,14 @@ class TestProjectRoutes:
                 f"/projects/{project['id']}/summary",
                 headers={"X-Session-ID": session_id},
             )
+            artifacts_resp = client.get(
+                f"/projects/{project['id']}/artifacts?limit=10&offset=0",
+                headers={"X-Session-ID": session_id},
+            )
             assert summary_resp.status_code == 200
-            artifact = json.loads(summary_resp.data)["artifacts"][0]
+            assert json.loads(summary_resp.data)["artifacts"] == []
+            assert artifacts_resp.status_code == 200
+            artifact = json.loads(artifacts_resp.data)["artifacts"][0]
             assert artifact["file_status"] == "disabled"
             assert artifact["file_available"] is False
             assert artifact["file_status_detail"] == "Files are disabled on this instance"
@@ -4434,6 +4618,107 @@ class TestAtlasRoutes:
         assert detail["runs"][0]["run_id"] == run_id
         assert detail["findings"][0]["raw_line"] == "443/tcp open https on darklab.sh"
 
+    def test_entity_list_batches_metadata_for_current_page(self):
+        from services.atlas.lookup import list_entities
+
+        session_id = self._session_id()
+        _, recorded = self._seed_entity_run(session_id)
+        project_id = "prj-" + uuid.uuid4().hex
+        timestamp = "2026-05-14T00:00:03+00:00"
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                "VALUES (?, ?, 'Atlas Project', ?, ?, ?)",
+                (project_id, session_id, "atlas-project-" + uuid.uuid4().hex[:8], timestamp, timestamp),
+            )
+            for index, entity in enumerate(recorded):
+                entity_id = entity["id"]
+                conn.execute(
+                    "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created) "
+                    "VALUES (?, ?, 'atlas_entity', ?, ?, 'manual', ?)",
+                    ("lbl-" + uuid.uuid4().hex, session_id, entity_id, f"label-{index}", timestamp),
+                )
+                conn.execute(
+                    "INSERT INTO entity_notes (id, session_id, entity_type, entity_id, body, created, updated) "
+                    "VALUES (?, ?, 'atlas_entity', ?, ?, ?, ?)",
+                    ("note-" + uuid.uuid4().hex, session_id, entity_id, f"note-{index}", timestamp, timestamp),
+                )
+                conn.execute(
+                    "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                    "VALUES (?, ?, 'atlas_entity', ?, 'manual', ?)",
+                    ("plink-" + uuid.uuid4().hex, project_id, entity_id, timestamp),
+                )
+            conn.commit()
+
+            statements = []
+            conn.set_trace_callback(statements.append)
+            result = list_entities(conn, session_id, limit=50)
+            conn.set_trace_callback(None)
+
+        rows = result["entities"]
+        assert len(rows) == len(recorded)
+        assert all(row["labels"] for row in rows)
+        assert all(row["project_link_count"] == 1 for row in rows)
+        assert all("note" not in row and "project_links" not in row for row in rows)
+        assert sum("FROM entity_labels" in statement for statement in statements) == 1
+        assert sum("FROM entity_notes" in statement for statement in statements) == 0
+        assert sum("FROM project_links l JOIN projects" in statement for statement in statements) == 1
+
+    def test_entity_detail_caps_large_linked_collections(self):
+        client = get_client()
+        session_id = self._session_id()
+        _, recorded = self._seed_entity_run(session_id)
+        domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
+        with db_connect() as conn:
+            for index in range(55):
+                run_id = "run-extra-" + uuid.uuid4().hex
+                finding_id = "finding-extra-" + uuid.uuid4().hex
+                seen_at = f"2026-05-14T01:{index:02d}:00+00:00"
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_line_count) "
+                    "VALUES (?, ?, 'external', ?, ?, '[]', 1)",
+                    (run_id, session_id, f"nmap detail {index}", seen_at),
+                )
+                conn.execute(
+                    "INSERT INTO entity_run_links "
+                    "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                    "VALUES (?, ?, ?, ?, 1)",
+                    (domain_id, run_id, seen_at, seen_at),
+                )
+                conn.execute(
+                    "INSERT INTO findings "
+                    "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, kind, "
+                    "tool_root, first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, "
+                    "status, title, raw_line, created) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 'info', 'finding', 'nmap', ?, ?, ?, ?, 1, "
+                    "'new', ?, ?, ?)",
+                    (
+                        finding_id,
+                        session_id,
+                        run_id,
+                        domain_id,
+                        f"detail-{index}",
+                        f"sig-{uuid.uuid4().hex}",
+                        run_id,
+                        run_id,
+                        seen_at,
+                        seen_at,
+                        f"Detail finding {index}",
+                        f"detail finding line {index}",
+                        seen_at,
+                    ),
+                )
+            conn.commit()
+
+        resp = client.get(f"/atlas/entities/{domain_id}", headers={"X-Session-ID": session_id})
+
+        assert resp.status_code == 200
+        detail = resp.get_json()
+        assert len(detail["runs"]) == 50
+        assert len(detail["findings"]) == 50
+        assert detail["detail_limits"]["runs"] == {"limit": 50, "shown": 50, "has_more": True}
+        assert detail["detail_limits"]["findings"] == {"limit": 50, "shown": 50, "has_more": True}
+
     def test_orphan_filter_surfaces_atlas_rows_after_source_run_delete(self):
         client = get_client()
         session_id = self._session_id()
@@ -4969,6 +5254,50 @@ class TestAtlasRoutes:
         assert json.loads(review_resp.data)["finding"]["review_state"] == "needs_followup"
         assert json.loads(updated_project_findings_resp.data)["findings"][0]["review_state"] == "needs_followup"
 
+    def test_run_findings_route_returns_deduped_findings_with_occurrence_count(self):
+        client = get_client()
+        session_id = self._session_id()
+        run_id = "run-" + uuid.uuid4().hex
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, 'external', ?, ?, ?, 2)",
+                (run_id, session_id, "katana -u https://darklab.sh", "2026-05-14T00:00:00+00:00", "[]"),
+            )
+            recorded = record_run_findings(conn, session_id, run_id, [
+                {"text": "https://darklab.sh/login [200]", "signals": ["findings"], "line_index": 0},
+                {"text": "https://darklab.sh/login [200]", "signals": ["findings"], "line_index": 9},
+            ])
+            occurrence_count = conn.execute(
+                "SELECT COUNT(*) FROM findings_occurrences WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()[0]
+            conn.commit()
+
+        resp = client.get(f"/entities/run/{run_id}/findings", headers={"X-Session-ID": session_id})
+        findings = json.loads(resp.data)["findings"]
+
+        assert resp.status_code == 200
+        assert len(recorded) == 2
+        assert occurrence_count == 2
+        assert len(findings) == 1
+        assert findings[0]["run_occurrence_count"] == 2
+        assert findings[0]["line_number"] == 0
+
+        paged_resp = client.get(
+            f"/entities/run/{run_id}/findings?limit=1&offset=0",
+            headers={"X-Session-ID": session_id},
+        )
+        paged = json.loads(paged_resp.data)
+
+        assert paged_resp.status_code == 200
+        assert len(paged["findings"]) == 1
+        assert paged["total"] == 1
+        assert paged["limit"] == 1
+        assert paged["offset"] == 0
+        assert paged["has_more"] is False
+        assert paged["occurrence_total"] == 2
+
     def test_project_links_curate_atlas_entities_into_project_targets(self):
         client = get_client()
         session_id = self._session_id()
@@ -5047,16 +5376,29 @@ class TestAtlasRoutes:
             f"/projects/{project['id']}/summary",
             headers={"X-Session-ID": session_id},
         )
+        entities_resp = client.get(
+            f"/projects/{project['id']}/entities?type=cve&limit=1&offset=0",
+            headers={"X-Session-ID": session_id},
+        )
         data = json.loads(summary_resp.data)
+        entity_page = json.loads(entities_resp.data)
 
         assert bulk_resp.status_code == 200
         assert json.loads(bulk_resp.data)["counts"]["added"] == 2
         assert summary_resp.status_code == 200
+        assert entities_resp.status_code == 200
         assert data["counts"]["targets"] == 1
         assert data["counts"]["entities"] == 2
+        assert data["entities"] == []
+        assert data["entity_counts"]["domain"] == 1
+        assert data["entity_counts"]["cve"] == 1
         assert {item["id"] for item in data["targets"]} == {domain_id}
-        entities = {item["id"]: item for item in data["entities"]}
-        assert set(entities) == {domain_id, cve_id}
+        assert entity_page["total"] == 1
+        assert entity_page["limit"] == 1
+        assert entity_page["counts_by_type"]["domain"] == 1
+        assert entity_page["counts_by_type"]["cve"] == 1
+        entities = {item["id"]: item for item in entity_page["entities"]}
+        assert set(entities) == {cve_id}
         assert entities[cve_id]["type"] == "cve"
         assert entities[cve_id]["intel_provider_count"] == 1
         assert entities[cve_id]["intel_providers"] == ["nvd"]
@@ -5118,13 +5460,18 @@ class TestAtlasRoutes:
             f"/projects/{project['id']}/summary",
             headers={"X-Session-ID": session_id},
         )
+        entities_resp = client.get(
+            f"/projects/{project['id']}/entities?limit=10&offset=0",
+            headers={"X-Session-ID": session_id},
+        )
         data = json.loads(unlink_resp.data)
 
         assert unlink_resp.status_code == 200
         assert data["counts"]["removed"] == 1
         assert data["counts"]["not_found"] == 1
         assert {item["status"] for item in data["results"]} == {"removed", "not_found"}
-        assert {item["id"] for item in json.loads(summary_resp.data)["entities"]} == {cve_id}
+        assert json.loads(summary_resp.data)["entities"] == []
+        assert {item["id"] for item in json.loads(entities_resp.data)["entities"]} == {cve_id}
 
     def test_exports_entities_as_csv_and_jsonl_with_metadata(self):
         client = get_client()

@@ -263,7 +263,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
     conn.commit()
 
-    assert applied == ["0001", "0002", "0003"]
+    assert applied == ["0001", "0002", "0003", "0004", "0005"]
     assert applied_again == []
     table_rows = conn.execute(
         """
@@ -316,7 +316,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         SELECT indexname
         FROM pg_indexes
         WHERE schemaname = %s
-        AND tablename IN ('entities', 'findings')
+        AND tablename IN ('entities', 'findings', 'entity_run_links')
         """,
         (postgres_schema.schema,),
     ).fetchall()
@@ -325,6 +325,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
         "idx_findings_title_trgm",
         "idx_findings_raw_line_trgm",
         "idx_findings_tool_root_trgm",
+        "idx_entity_run_links_entity_seen",
     }.issubset({row["indexname"] for row in atlas_index_rows})
 
 
@@ -745,6 +746,7 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
             Jsonb({
                 "pref_active_project_id": project_id,
                 "pref_project_auto_link_external_runs": "on",
+                "pref_project_auto_link_run_entities": "on",
             }),
             timestamp,
         ),
@@ -814,6 +816,14 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
         "SELECT e.* FROM entities e JOIN entity_run_links erl ON erl.entity_id = e.id WHERE erl.run_id = %s",
         (run_id,),
     ).fetchone()
+    entity_project_link_row = conn.execute(
+        "SELECT l.*, e.canonical_value "
+        "FROM project_links l "
+        "JOIN entity_run_links erl ON erl.entity_id = l.entity_id "
+        "JOIN entities e ON e.id = l.entity_id "
+        "WHERE l.project_id = %s AND l.entity_type = 'atlas_entity' AND erl.run_id = %s",
+        (project_id, run_id),
+    ).fetchone()
     finding_row = conn.execute(
         "SELECT f.* FROM findings f JOIN findings_occurrences fo ON fo.finding_id = f.id WHERE fo.run_id = %s",
         (run_id,),
@@ -826,6 +836,8 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
 
     assert active_project_link is not None
     assert active_project_link["project_id"] == project_id
+    assert active_project_link["linked_entity_count"] == 1
+    assert active_project_link["available_entity_count"] == 1
     assert run_row["session_id"] == session_id
     assert run_row["run_kind"] == "external"
     assert run_row["owner_tab_id"] == "tab-postgres-external"
@@ -837,6 +849,9 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
     assert project_link_row["source"] == "active_project"
     assert entity_row["type"] == "domain"
     assert entity_row["canonical_value"] == "darklab.sh"
+    assert entity_project_link_row is not None
+    assert entity_project_link_row["canonical_value"] == "darklab.sh"
+    assert entity_project_link_row["source"] == "active_project"
     assert finding_row["run_id"] == run_id
     assert finding_row["target_id"] == entity_row["id"]
     assert finding_row["severity"] == "high"
@@ -1187,6 +1202,7 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     from app import app
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.atlas.materializer import materialize_run_entities
     from services.projects import metadata as project_metadata
     from services.projects import preferences as project_preferences
     from services.projects import workspace as project_workspace
@@ -1235,6 +1251,26 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
         headers={"X-Session-ID": session_id},
         json={"entity_type": "run", "entity_id": run_id},
     )
+    with _postgres_db_connect() as compat_conn:
+        materialize_run_entities(
+            compat_conn,
+            session_id,
+            run_id,
+            [{
+                "text": "darklab.sh 104.21.4.35",
+                "entities": [
+                    {"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"},
+                    {"type": "ip", "value": "104.21.4.35", "canonical_value": "104.21.4.35"},
+                ],
+            }],
+            seen_at="2026-05-17T00:00:01Z",
+        )
+    conn.commit()
+    run_entity_preview_resp = client.post(
+        f"/projects/{project['id']}/links/run-entities/preview",
+        headers={"X-Session-ID": session_id},
+        json={"run_ids": [run_id]},
+    )
     list_resp = client.get("/projects", headers={"X-Session-ID": session_id})
     targets_resp = client.get(f"/projects/{project['id']}/targets", headers={"X-Session-ID": session_id})
     links_resp = client.get(f"/projects/{project['id']}/links", headers={"X-Session-ID": session_id})
@@ -1247,6 +1283,8 @@ def test_project_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     assert target_resp.status_code == 201
     assert active_resp.status_code == 200
     assert link_resp.status_code == 201
+    assert run_entity_preview_resp.status_code == 200
+    assert json.loads(run_entity_preview_resp.data)["preview"]["available"] == 2
     assert [item["id"] for item in json.loads(list_resp.data)["projects"]] == [project["id"]]
     assert json.loads(targets_resp.data)["targets"][0]["source_detail"] == {"source": "manual"}
     assert json.loads(links_resp.data)["links"][0]["entity_id"] == run_id

@@ -42,6 +42,58 @@
         : (typeof global.restoreHistoryRun === 'function' ? global.restoreHistoryRun : null);
     }
 
+    function pagerDescriptor(button) {
+      const configs = [
+        {
+          pageDataset: 'projectFindingsPage',
+          positionDataset: 'projectFindingsPagerPosition',
+          pageAttr: 'data-project-findings-page',
+          positionAttr: 'data-project-findings-pager-position',
+        },
+        {
+          pageDataset: 'projectRunsPage',
+          positionDataset: 'projectRunsPagerPosition',
+          pageAttr: 'data-project-runs-page',
+          positionAttr: 'data-project-runs-pager-position',
+        },
+        {
+          pageDataset: 'projectEntitiesPage',
+          positionDataset: 'projectEntitiesPagerPosition',
+          pageAttr: 'data-project-entities-page',
+          positionAttr: 'data-project-entities-pager-position',
+        },
+        {
+          pageDataset: 'projectArtifactsPage',
+          positionDataset: 'projectArtifactsPagerPosition',
+          pageAttr: 'data-project-artifacts-page',
+          positionAttr: 'data-project-artifacts-pager-position',
+        },
+      ];
+      return configs.find(config => button?.dataset?.[config.pageDataset]) || null;
+    }
+
+    function preservePagerPosition(button, render) {
+      const scrollBody = mobileView() === 'detail' ? ctx.projectMobileDetailBody : ctx.projectExplorerBody;
+      const descriptor = pagerDescriptor(button);
+      const page = descriptor ? String(button?.dataset?.[descriptor.pageDataset] || '') : '';
+      const pagerPosition = descriptor ? String(button?.dataset?.[descriptor.positionDataset] || '') : '';
+      const positionSelector = descriptor && pagerPosition ? `[${descriptor.positionAttr}="${pagerPosition}"]` : '';
+      const selector = descriptor && page ? `[${descriptor.pageAttr}="${page}"]${positionSelector}` : '';
+      const anchor = button?.isConnected ? button : (selector ? scrollBody?.querySelector(selector) : null);
+      const beforeTop = anchor?.getBoundingClientRect?.().top;
+      render();
+      if (scrollBody && pagerPosition === 'bottom') {
+        scrollBody.scrollTop = Math.max(0, scrollBody.scrollHeight - scrollBody.clientHeight);
+        return;
+      }
+      if (!scrollBody || !Number.isFinite(beforeTop) || !page) return;
+      const nextButton = scrollBody.querySelector(selector);
+      const afterTop = nextButton?.getBoundingClientRect?.().top;
+      if (Number.isFinite(afterTop)) {
+        scrollBody.scrollTop += afterTop - beforeTop;
+      }
+    }
+
     async function handleInput(event) {
       ctx.packagesController?.().handleInput(event);
     }
@@ -323,17 +375,6 @@
         ctx.setProjectWorkspaceMessage('');
         return;
       }
-      const findingGroupToggle = event.target.closest?.('[data-project-finding-group-toggle]');
-      if (findingGroupToggle) {
-        event.preventDefault();
-        event.stopPropagation();
-        const projectId = String(findingGroupToggle.dataset.projectId || selectedProjectId() || '');
-        const runLabel = String(findingGroupToggle.dataset.projectFindingGroup || '');
-        ctx.toggleFindingGroup(projectId, runLabel);
-        if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
-        else ctx.renderProjectExplorer();
-        return;
-      }
       const artifactGroupToggle = event.target.closest?.('[data-project-artifact-group-toggle]');
       if (artifactGroupToggle) {
         event.preventDefault();
@@ -343,6 +384,33 @@
         ctx.toggleArtifactGroup(projectId, runId);
         if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
         else ctx.renderProjectExplorer();
+        return;
+      }
+      const artifactPageBtn = event.target.closest?.('[data-project-artifacts-page]');
+      if (artifactPageBtn) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (artifactPageBtn.disabled) return;
+        const projectId = String(artifactPageBtn.dataset.projectId || selectedProjectId() || '');
+        const page = ctx.projectArtifactPagination?.(projectId) || { limit: 50, offset: 0 };
+        const limit = Math.max(1, Number(page.limit || 50));
+        const offset = Math.max(0, Number(page.offset || 0));
+        const total = Math.max(0, Number(page.total || 0));
+        const direction = String(artifactPageBtn.dataset.projectArtifactsPage || '');
+        const nextOffset = direction === 'prev'
+          ? Math.max(0, offset - limit)
+          : Math.min(offset + limit, Math.max(0, total - 1));
+        const summary = ctx.projectSummary?.(projectId);
+        ctx.setProjectArtifactPageOffset?.(projectId, nextOffset);
+        preservePagerPosition(artifactPageBtn, () => {
+          if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
+          else ctx.renderProjectExplorer();
+        });
+        await ctx.loadProjectArtifacts?.(projectId, summary, { offset: nextOffset, skipFinalRender: true });
+        preservePagerPosition(artifactPageBtn, () => {
+          if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
+          else ctx.renderProjectExplorer();
+        });
         return;
       }
       const targetFilterClear = event.target.closest?.('[data-project-target-filter-clear]');
@@ -450,6 +518,33 @@
         if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
         return;
       }
+      const entityPageBtn = event.target.closest?.('[data-project-entities-page]');
+      if (entityPageBtn) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (entityPageBtn.disabled) return;
+        const projectId = String(entityPageBtn.dataset.projectId || selectedProjectId() || '');
+        const page = ctx.entitiesController?.().page(projectId) || { limit: 50, offset: 0 };
+        const limit = Math.max(1, Number(page.limit || 50));
+        const offset = Math.max(0, Number(page.offset || 0));
+        const total = Math.max(0, Number(page.total || 0));
+        const direction = String(entityPageBtn.dataset.projectEntitiesPage || '');
+        const nextOffset = direction === 'prev'
+          ? Math.max(0, offset - limit)
+          : Math.min(offset + limit, Math.max(0, total - 1));
+        ctx.entitiesController?.().setPageOffset(projectId, nextOffset);
+        ctx.entitiesController?.().clearSelection();
+        preservePagerPosition(entityPageBtn, () => {
+          ctx.renderProjectExplorer();
+          if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
+        });
+        await ctx.entitiesController?.().load(projectId, { offset: nextOffset, skipFinalRender: true });
+        preservePagerPosition(entityPageBtn, () => {
+          ctx.renderProjectExplorer();
+          if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
+        });
+        return;
+      }
       const entityCheckbox = event.target.closest?.('[data-project-entity-select]');
       if (entityCheckbox) {
         event.stopPropagation();
@@ -469,6 +564,74 @@
         ctx.renderProjectExplorer();
         return;
       }
+      const findingPagerButton = event.target.closest?.('[data-project-findings-page]');
+      if (findingPagerButton) {
+        event.preventDefault();
+        if (findingPagerButton.disabled) return;
+        const projectId = String(findingPagerButton.dataset.projectId || selectedProjectId() || '');
+        const summary = ctx.projectSummary?.(projectId);
+        const pagination = ctx.projectFindingPagination?.(projectId, summary) || {};
+        const limit = Math.max(1, Number(pagination.limit || 50));
+        const offset = Math.max(0, Number(pagination.offset || 0));
+        const total = Math.max(0, Number(pagination.total || 0));
+        const nextOffset = findingPagerButton.dataset.projectFindingsPage === 'next'
+          ? Math.min(offset + limit, Math.max(0, total - 1))
+          : Math.max(0, offset - limit);
+        ctx.setProjectFindingPageOffset?.(projectId, summary, nextOffset);
+        preservePagerPosition(findingPagerButton, () => {
+          ctx.renderProjectExplorer();
+          if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
+        });
+        if (ctx.projectFindingServerFiltersActive?.(projectId, summary)) {
+          await ctx.loadProjectFilteredFindings?.(projectId, summary, { offset: nextOffset, skipInitialRender: true });
+        } else {
+          await ctx.loadProjectFindings?.(projectId, { offset: nextOffset, skipInitialRender: true });
+        }
+        preservePagerPosition(findingPagerButton, () => {
+          ctx.renderProjectExplorer();
+          if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
+        });
+        return;
+      }
+      const runPagerButton = event.target.closest?.('[data-project-runs-page]');
+      if (runPagerButton) {
+        event.preventDefault();
+        if (runPagerButton.disabled) return;
+        const projectId = String(runPagerButton.dataset.projectId || selectedProjectId() || '');
+        const pagination = ctx.projectRunPagination?.(projectId) || {};
+        const limit = Math.max(1, Number(pagination.limit || 50));
+        const offset = Math.max(0, Number(pagination.offset || 0));
+        const total = Math.max(0, Number(pagination.total || 0));
+        const nextOffset = runPagerButton.dataset.projectRunsPage === 'next'
+          ? Math.min(offset + limit, Math.max(0, total - 1))
+          : Math.max(0, offset - limit);
+        ctx.setProjectRunPageOffset?.(projectId, nextOffset);
+        preservePagerPosition(runPagerButton, () => {
+          ctx.renderProjectExplorer();
+          if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
+        });
+        await ctx.loadProjectRuns?.(projectId, { offset: nextOffset, skipFinalRender: true });
+        preservePagerPosition(runPagerButton, () => {
+          ctx.renderProjectExplorer();
+          if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
+        });
+        return;
+      }
+      const pagerButton = event.target.closest?.('[data-project-page]');
+      if (pagerButton) {
+        event.preventDefault();
+        if (pagerButton.disabled) return;
+        const pagination = ctx.projectPagination?.() || {};
+        const limit = Math.max(1, Number(pagination.limit || 50));
+        const offset = Math.max(0, Number(pagination.offset || 0));
+        const total = Math.max(0, Number(pagination.total || 0));
+        const nextOffset = pagerButton.dataset.projectPage === 'next'
+          ? Math.min(offset + limit, Math.max(0, total - 1))
+          : Math.max(0, offset - limit);
+        ctx.setProjectPaginationOffset?.(nextOffset);
+        await ctx.refreshProjectWorkspace();
+        return;
+      }
       const btn = event.target.closest?.('[data-project-action]');
       if (!btn) return;
       if (btn.getAttribute('role') === 'button' && event.target.closest?.('select, input, textarea, a, button')) return;
@@ -486,6 +649,8 @@
           ctx.setSelectedProjectId(projectId);
           ctx.closeProjectTargetEditor();
           ctx.setProjectWorkspaceMessage('');
+          ctx.renderProjectWorkspace();
+          await ctx.ensureProjectSummary?.(projectId);
           ctx.renderProjectWorkspace();
           return;
         } else if (action === 'use') {

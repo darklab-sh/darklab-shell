@@ -168,6 +168,8 @@ function loadShellChrome({
   syncAppSelect = vi.fn(),
   getProjectAutoLinkExternalRunsPreference = () => preferences.pref_project_auto_link_external_runs || 'on',
   applyProjectAutoLinkExternalRunsPreference = (mode) => { preferences.pref_project_auto_link_external_runs = mode },
+  getProjectAutoLinkRunEntitiesPreference = () => preferences.pref_project_auto_link_run_entities || 'on',
+  applyProjectAutoLinkRunEntitiesPreference = (mode) => { preferences.pref_project_auto_link_run_entities = mode },
 } = {}) {
   document.body.innerHTML = `
     <aside id="rail">
@@ -372,6 +374,8 @@ function loadShellChrome({
     'showToast',
     'getProjectAutoLinkExternalRunsPreference',
     'applyProjectAutoLinkExternalRunsPreference',
+    'getProjectAutoLinkRunEntitiesPreference',
+    'applyProjectAutoLinkRunEntitiesPreference',
     'downloadBlobAsAttachment',
     `
       const globalThis = global;
@@ -466,6 +470,8 @@ function loadShellChrome({
     showToast,
     getProjectAutoLinkExternalRunsPreference,
     applyProjectAutoLinkExternalRunsPreference,
+    getProjectAutoLinkRunEntitiesPreference,
+    applyProjectAutoLinkRunEntitiesPreference,
     downloadBlobAsAttachment,
   )
 
@@ -610,7 +616,7 @@ describe('shell chrome project workspace', () => {
           json: () => Promise.resolve({ project }),
         })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ projects }),
@@ -695,7 +701,7 @@ describe('shell chrome project workspace', () => {
           json: () => Promise.resolve({ project: projects[2] }),
         })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ projects }),
@@ -816,7 +822,7 @@ describe('shell chrome project workspace', () => {
           json: () => Promise.resolve({ project: projects.find(project => project.id === activeProjectId) || null }),
         })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ projects }) })
       }
       if (url.endsWith('/summary')) {
@@ -869,7 +875,7 @@ describe('shell chrome project workspace', () => {
           json: () => Promise.resolve({ project: projects[0] }),
         })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ projects }) })
       }
       if (url === '/projects/project-1/summary') {
@@ -995,16 +1001,20 @@ describe('shell chrome project workspace', () => {
       if (url === '/projects/active') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ project }) })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ projects: [project] }) })
       }
       if (url === '/projects/project-1/summary') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve(summary) })
       }
-      if (url === '/projects/project-1/findings') {
+      if (String(url).startsWith('/projects/project-1/findings')) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
+            total: 1,
+            limit: 50,
+            offset: 0,
+            has_more: false,
             findings: [{
               id: 'finding-1',
               run_id: 'run-1',
@@ -1108,12 +1118,8 @@ describe('shell chrome project workspace', () => {
       actionSheet.click()
       await tick()
       expect(shell.enhanceAppSelects).toHaveBeenCalledWith(detailBody)
-      detailBody.querySelector('[data-project-finding-group-toggle]').click()
-      await tick()
-      expect(detailBody.querySelector('.project-findings-group .project-mobile-group-body').hidden).toBe(true)
-      detailBody.querySelector('[data-project-finding-group-toggle]').click()
-      await tick()
-      expect(detailBody.querySelector('.project-findings-group .project-mobile-group-body').hidden).toBe(false)
+      expect(detailBody.querySelector('[data-project-finding-group-toggle]')).toBeNull()
+      expect(detailBody.textContent).toContain('nmap darklab.sh')
       shell.restoreHistoryRunIntoTab.mockClear()
       detailBody.querySelector('[data-project-action="open-finding"]').click()
       await tick()
@@ -1200,7 +1206,7 @@ describe('shell chrome project workspace', () => {
       if (url === '/projects/active') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ project }) })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ projects: [project] }) })
       }
       if (url === '/projects/project-1/summary') {
@@ -1260,7 +1266,7 @@ describe('shell chrome project workspace', () => {
           json: () => Promise.resolve({ project: { id: 'project-1', name: 'darklab.sh', status: 'active' } }),
         })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ projects: [{ id: 'project-1', name: 'darklab.sh', status: 'active' }] }),
@@ -1289,7 +1295,10 @@ describe('shell chrome project workspace', () => {
     await tick()
 
     expect(document.getElementById('project-workspace-overlay').classList.contains('open')).toBe(true)
-    expect(apiFetch).toHaveBeenCalledWith('/projects?include_archived=1', { cache: 'no-store' })
+    expect(apiFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/projects?include_archived=1'),
+      { cache: 'no-store' },
+    )
   })
 
   it('hides project detail inputs when no projects exist', async () => {
@@ -1297,7 +1306,7 @@ describe('shell chrome project workspace', () => {
       if (url === '/projects/active') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ project: null }) })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ projects: [] }) })
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
@@ -1329,7 +1338,7 @@ describe('shell chrome project workspace', () => {
           json: () => Promise.resolve({ project: projects[0] }),
         })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ projects }),
@@ -1377,7 +1386,7 @@ describe('shell chrome project workspace', () => {
           json: () => Promise.resolve({ project: projects[0] }),
         })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ projects }),
@@ -1436,7 +1445,7 @@ describe('shell chrome project workspace', () => {
           json: () => Promise.resolve({ project: activeProject }),
         })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ projects }),
@@ -1489,7 +1498,7 @@ describe('shell chrome project workspace', () => {
           json: () => Promise.resolve({ project: { id: 'project-1', name: 'darklab.sh' } }),
         })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ projects: [{ id: 'project-1', name: 'darklab.sh', status: 'active' }] }),
@@ -1528,7 +1537,7 @@ describe('shell chrome project workspace', () => {
           json: () => Promise.resolve({ project: { id: 'project-1', name: 'darklab.sh' } }),
         })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ projects: [{ id: 'project-1', name: 'darklab.sh', status: 'active' }] }),
@@ -1614,7 +1623,7 @@ describe('shell chrome project workspace', () => {
           json: () => Promise.resolve({ project: { id: 'project-1', name: 'darklab.sh' } }),
         })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ projects: [{ id: 'project-1', name: 'darklab.sh', status: 'active' }] }),
@@ -1719,7 +1728,7 @@ describe('shell chrome project workspace', () => {
           json: () => Promise.resolve({ project: { id: 'project-1', name: 'darklab.sh' } }),
         })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ projects: [{ id: 'project-1', name: 'darklab.sh', status: 'active' }] }),
@@ -1737,10 +1746,20 @@ describe('shell chrome project workspace', () => {
           }),
         })
       }
-      if (url === '/projects/project-1/findings') {
+      if (String(url).startsWith('/projects/project-1/findings')) {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ findings: projectFindings }),
+          json: () => Promise.resolve({
+            findings: projectFindings,
+            total: projectFindings.length,
+            limit: 50,
+            offset: 0,
+            has_more: false,
+            group_counts: {
+              'nuclei old.example': 1,
+              'httpx new.example': 200,
+            },
+          }),
         })
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
@@ -1791,7 +1810,7 @@ describe('shell chrome project workspace', () => {
           }),
         })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
@@ -1880,7 +1899,7 @@ describe('shell chrome project workspace', () => {
           }),
         })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
@@ -2021,7 +2040,7 @@ describe('shell chrome project workspace', () => {
       if (url === '/projects/active') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ project }) })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ projects: [project] }) })
       }
       if (url === '/projects/project-1/summary') {
@@ -2047,8 +2066,11 @@ describe('shell chrome project workspace', () => {
           }),
         })
       }
-      if (url === '/projects/project-1/findings') {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ findings: [] }) })
+      if (String(url).startsWith('/projects/project-1/findings')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ findings: [], total: 0, limit: 50, offset: 0, has_more: false }),
+        })
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
@@ -2252,7 +2274,7 @@ describe('shell chrome project workspace', () => {
           json: () => Promise.resolve({ project: { id: 'project-1', name: 'darklab.sh' } }),
         })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ projects: [{ id: 'project-1', name: 'darklab.sh', status: 'active' }] }),
@@ -2331,6 +2353,11 @@ describe('shell chrome project workspace', () => {
       if (String(url).startsWith('/projects/project-1/findings')) {
         const params = new URL(`https://example.test${url}`).searchParams
         const matchesAny = (itemValue, values) => !values.length || values.includes(String(itemValue || ''))
+        const groupCounts = (items) => items.reduce((counts, finding) => {
+          const key = String(finding.run_command || finding.run_id || '')
+          counts[key] = Number(counts[key] || 0) + 1
+          return counts
+        }, {})
         const matchesLabels = (finding, labels) => {
           if (!labels.length) return true
           const findingLabels = entityLabels.get(`finding:${finding.id}`) || []
@@ -2343,8 +2370,8 @@ describe('shell chrome project workspace', () => {
         }
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({
-            findings: [
+          json: () => {
+            const filtered = [
               {
                 id: 'finding-1',
                 run_id: 'run-1',
@@ -2389,12 +2416,38 @@ describe('shell chrome project workspace', () => {
               })
               .filter(finding => matchesLabels(finding, params.getAll('label')))
               .filter(finding => matchesNoteState(finding, params.get('note_state')))
+            const collapsedGroups = params.getAll('collapsed_group')
+            const collapsedGroupCounts = params.get('include_collapsed_group_counts') === '0'
+              ? {}
+              : Object.fromEntries(
+                Object.entries(groupCounts(filtered)).filter(([key]) => collapsedGroups.includes(key)),
+              )
+            const orderedGroups = []
+            filtered.forEach((finding) => {
+              const groupLabel = String(finding.run_command || finding.run_id || '')
+              if (groupLabel && !orderedGroups.includes(groupLabel)) orderedGroups.push(groupLabel)
+            })
+            const visible = filtered
+              .filter(finding => !collapsedGroups.includes(String(finding.run_command || finding.run_id || '')))
               .map(finding => ({
-              ...finding,
-              labels: labelObjects('finding', finding.id),
-              note: noteObject('finding', finding.id),
-            })),
-          }),
+                ...finding,
+                labels: labelObjects('finding', finding.id),
+                note: noteObject('finding', finding.id),
+              }))
+            return Promise.resolve({
+              findings: visible,
+              total: visible.length,
+              limit: Number(params.get('limit') || 50),
+              offset: Number(params.get('offset') || 0),
+              has_more: false,
+              group_counts: groupCounts(visible),
+              collapsed_group_counts: collapsedGroupCounts,
+              group_order: orderedGroups.filter((groupLabel) => {
+                return collapsedGroups.includes(groupLabel)
+                  || visible.some(finding => String(finding.run_command || finding.run_id || '') === groupLabel)
+              }),
+            })
+          },
         })
       }
       const labelsMatch = String(url).match(/^\/entities\/([^/]+)\/([^/]+)\/labels$/)
@@ -2772,25 +2825,16 @@ describe('shell chrome project workspace', () => {
     expect(document.getElementById('project-explorer-body').textContent).not.toContain('api host responded')
     expectProjectPressablesBound([
       '.project-target-filter-trigger',
-      '.project-explorer-group-toggle',
       '.project-explorer-item-click-target',
       '.project-target-filter-chip',
       '.project-target-filter-clear',
     ])
-
-    const groupToggle = document.querySelector('[data-project-finding-group-toggle]')
-    expect(groupToggle).not.toBeNull()
-    expect(groupToggle.getAttribute('aria-expanded')).toBe('true')
-    expect(groupToggle.textContent).toContain('1 finding')
-    groupToggle.click()
-    await tick()
-    expect(document.querySelector('[data-project-finding-group-toggle]').getAttribute('aria-expanded')).toBe('false')
-    expect(document.querySelector('.project-explorer-group-body').hidden).toBe(true)
-    document.querySelector('[data-project-finding-group-toggle]').click()
-    await tick()
-    expect(document.querySelector('[data-project-finding-group-toggle]').getAttribute('aria-expanded')).toBe('true')
-    expect(document.querySelector('.project-explorer-group-body').hidden).toBe(false)
-    expect(document.getElementById('project-explorer-body').textContent).toContain('web port responded')
+    expect(document.querySelector('[data-project-finding-group-toggle]')).toBeNull()
+    expect(document.getElementById('project-explorer-body').textContent).toContain('nuclei https://darklab.sh')
+    expect(apiFetch.mock.calls.some(([url]) => (
+      String(url).startsWith('/projects/project-1/findings?')
+      && String(url).includes('include_group_counts=0')
+    ))).toBe(true)
 
     document.querySelector('[data-project-finding-status-filter-clear="important"]').click()
     await tick()
@@ -3283,7 +3327,7 @@ describe('shell chrome project workspace', () => {
     await tick()
     await tick()
     expect(document.querySelector('.project-explorer-item-meta')?.textContent)
-      .toBe('http · target domain: darklab.io · line 42')
+      .toBe('nuclei https://darklab.sh · http · target domain: darklab.io · line 42')
 
     const reviewControl = document.querySelector('.project-finding-review')
     expect(reviewControl.classList.contains('form-select')).toBe(true)
@@ -3387,7 +3431,7 @@ describe('shell chrome project workspace', () => {
           json: () => Promise.resolve({ project: { id: 'project-1', name: 'Sort Project' } }),
         })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ projects: [{ id: 'project-1', name: 'Sort Project', status: 'active' }] }),
@@ -3406,10 +3450,20 @@ describe('shell chrome project workspace', () => {
           }),
         })
       }
-      if (url === '/projects/project-1/findings') {
+      if (String(url).startsWith('/projects/project-1/findings')) {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ findings: projectFindings }),
+          json: () => Promise.resolve({
+            findings: projectFindings,
+            total: projectFindings.length,
+            limit: 50,
+            offset: 0,
+            has_more: false,
+            group_counts: {
+              'nuclei old.example': 1,
+              'httpx new.example': 200,
+            },
+          }),
         })
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
@@ -3424,6 +3478,7 @@ describe('shell chrome project workspace', () => {
       .map(node => node.textContent.trim())
 
     expect(titles()).toEqual(['Low issue', 'High issue', 'Critical issue'])
+    expect(document.querySelector('.project-explorer-group-count')).toBeNull()
 
     let sortControl = document.querySelector('[data-project-finding-sort]')
     await tick()
@@ -3458,7 +3513,7 @@ describe('shell chrome project workspace', () => {
           json: () => Promise.resolve({ project: { id: 'project-1', name: refreshed ? 'Updated Project' : 'Initial Project' } }),
         })
       }
-      if (url === '/projects?include_archived=1') {
+      if (String(url).startsWith('/projects?include_archived=1')) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ projects: [{ id: 'project-1', name: refreshed ? 'Updated Project' : 'Initial Project', status: 'active' }] }),

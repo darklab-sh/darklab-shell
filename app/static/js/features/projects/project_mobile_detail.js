@@ -307,28 +307,72 @@
 
       const allRuns = ctx.projectRunItems(summary);
       const filterActive = ctx.projectTargetFilterActive(projectId, summary);
+      const runFilterActive = ctx.projectRunFilterActive?.(projectId, summary);
+      const useServerPage = !filterActive && !runFilterActive;
+      const pagination = ctx.projectRunPagination?.(projectId) || {};
+      if (useServerPage && !pagination.loaded) ctx.loadProjectRuns?.(projectId).catch(() => {});
       if (filterActive && !ctx.projectFindingsLoaded(projectId)) {
         fragment.appendChild(ctx.emptyProjectPanel('Loading target associations...'));
         return fragment;
       }
-      const runs = ctx.filteredProjectRuns(projectId, summary);
+      const canUseLoadedPage = pagination.loaded && (pagination.total || (pagination.runs || []).length || !allRuns.length);
+      const runs = useServerPage && canUseLoadedPage
+        ? (Array.isArray(pagination.runs) ? pagination.runs : [])
+        : ctx.filteredProjectRuns(projectId, summary);
       if (!allRuns.length) {
         fragment.appendChild(emptyPanel('No linked runs yet.', [
           ctx.makeProjectButton('Link last run', 'link-last-run', projectId, 'primary'),
         ]));
         return fragment;
       }
+      if (useServerPage && !pagination.loaded) {
+        fragment.appendChild(ctx.emptyProjectPanel('Loading runs...'));
+        return fragment;
+      }
       if (!runs.length) {
         fragment.appendChild(ctx.emptyProjectPanel('No linked runs match the selected filters.'));
         return fragment;
       }
+      const appendPager = (position = 'bottom') => {
+        if (!useServerPage || !canUseLoadedPage) return;
+        const limit = Math.max(1, Number(pagination.limit || 50));
+        const offset = Math.max(0, Number(pagination.offset || 0));
+        const total = Math.max(0, Number(pagination.total || runs.length || 0));
+        const loading = !!pagination.loading;
+        if (total <= limit && offset === 0) return;
+        const pager = document.createElement('div');
+        pager.className = 'project-runs-pagination project-workspace-pagination';
+        pager.dataset.projectRunsPagerPosition = position;
+        const range = document.createElement('div');
+        range.className = 'project-workspace-pagination-summary';
+        const start = total && runs.length ? offset + 1 : 0;
+        const end = total && runs.length ? Math.min(total, offset + runs.length) : 0;
+        range.textContent = `${start}-${end} of ${total} runs`;
+        const controls = document.createElement('div');
+        controls.className = 'project-workspace-pagination-controls';
+        const prev = ctx.makeProjectButton('Previous', 'noop', projectId);
+        prev.dataset.projectRunsPage = 'prev';
+        prev.dataset.projectRunsPagerPosition = position;
+        prev.disabled = loading || offset <= 0;
+        const status = document.createElement('span');
+        status.className = 'project-workspace-pagination-status';
+        status.textContent = loading ? 'Loading...' : `Page ${Math.floor(offset / limit) + 1}`;
+        const next = ctx.makeProjectButton('Next', 'noop', projectId);
+        next.dataset.projectRunsPage = 'next';
+        next.dataset.projectRunsPagerPosition = position;
+        next.disabled = loading || offset + runs.length >= total;
+        controls.append(prev, status, next);
+        pager.append(range, controls);
+        fragment.appendChild(pager);
+      };
+      appendPager('top');
       const list = document.createElement('div');
       list.className = 'project-mobile-content-list';
       runs.forEach((run) => {
         const runId = String(run.id || '');
         const exit = run.exit_code === null || run.exit_code === undefined ? 'running' : `exit ${run.exit_code}`;
-        const findingCount = ctx.projectRunFindingCount(projectId, runId);
-        const artifactCount = ctx.projectRunArtifactCount(summary, runId);
+        const findingCount = ctx.projectRunFindingCount(projectId, runId, run);
+        const artifactCount = ctx.projectRunArtifactCount(summary, runId, run);
         const countParts = [`${findingCount} finding${findingCount === 1 ? '' : 's'}`];
         if (ctx.projectArtifactsVisible()) countParts.push(`${artifactCount} artifact${artifactCount === 1 ? '' : 's'}`);
         const runDetailLines = [
@@ -354,6 +398,7 @@
         }));
       });
       fragment.appendChild(list);
+      appendPager('bottom');
       return fragment;
     }
 
@@ -369,102 +414,160 @@
 
     function renderFindingsTab(projectId, summary) {
       const fragment = document.createDocumentFragment();
-      if (ctx.projectFindingsLoadingId() === projectId && !ctx.hasProjectFindings(projectId)) {
+      const pagination = ctx.projectFindingPagination?.(projectId, summary) || {};
+      if (!pagination.loaded && !ctx.hasProjectFindings(projectId)) {
         fragment.appendChild(ctx.emptyProjectPanel('Loading findings...'));
         return fragment;
       }
       const allFindings = ctx.projectFindingItems(projectId);
       const findings = ctx.filteredProjectFindings(projectId, summary);
-      if (!allFindings.length) {
+      const total = Math.max(0, Number(pagination.total || allFindings.length || 0));
+      const loading = !!pagination.loading;
+      const appendPager = (position = 'bottom') => {
+        const limit = Math.max(1, Number(pagination.limit || 50));
+        const offset = Math.max(0, Number(pagination.offset || 0));
+        if (total <= limit && offset === 0) return;
+        const pager = document.createElement('div');
+        pager.className = 'project-finding-pagination project-workspace-pagination';
+        pager.dataset.projectFindingsPagerPosition = position;
+        const range = document.createElement('div');
+        range.className = 'project-workspace-pagination-summary';
+        const start = total && findings.length ? offset + 1 : 0;
+        const end = total && findings.length ? Math.min(total, offset + findings.length) : 0;
+        range.textContent = `${start}-${end} of ${total} findings`;
+        const controls = document.createElement('div');
+        controls.className = 'project-workspace-pagination-controls';
+        const prev = ctx.makeProjectButton('Previous', 'noop', projectId);
+        prev.dataset.projectFindingsPage = 'prev';
+        prev.dataset.projectFindingsPagerPosition = position;
+        prev.disabled = loading || offset <= 0;
+        const status = document.createElement('span');
+        status.className = 'project-workspace-pagination-status';
+        status.textContent = loading ? 'Loading...' : `Page ${Math.floor(offset / limit) + 1}`;
+        const next = ctx.makeProjectButton('Next', 'noop', projectId);
+        next.dataset.projectFindingsPage = 'next';
+        next.dataset.projectFindingsPagerPosition = position;
+        next.disabled = loading || offset + findings.length >= total;
+        controls.append(prev, status, next);
+        pager.append(range, controls);
+        fragment.appendChild(pager);
+      };
+      const appendFindingRow = (finding) => {
+        const lineIndex = Number(finding.line_number);
+        const findingId = String(finding.id || '');
+        const metaParts = [
+          finding.run_command || finding.run_id,
+          finding.scope || 'finding',
+          ctx.projectFindingTargetText(summary, finding) || ctx.projectTargetLabel(summary, finding.target_id),
+          `line ${finding.line_number || 0}`,
+        ].filter(Boolean);
+        fragment.appendChild(contentRow({
+          title: finding.title || finding.raw_line || 'Finding',
+          meta: metaParts.join(ctx.metaSeparator || ' - '),
+          detail: finding.raw_line || '',
+          badge: finding.review_state || finding.severity || '',
+          chips: ctx.entityMetadataChips(finding),
+          action: finding.run_id ? {
+            action: 'open-finding',
+            dataset: {
+              projectId,
+              runId: String(finding.run_id || ''),
+              runCommand: String(finding.run_command || ''),
+              lineIndex: Number.isInteger(lineIndex) ? String(lineIndex) : '',
+            },
+          } : null,
+          accessory: findingId ? actionMenu(projectId, `Finding actions for ${finding.title || findingId}`, [
+            { node: findingReviewNode(finding, projectId) },
+            { label: 'Edit metadata', action: 'edit-finding-metadata', dataset: { findingId } },
+          ]) : null,
+        }));
+      };
+      if (!allFindings.length && total === 0) {
         fragment.appendChild(ctx.emptyProjectPanel('No persisted findings for linked runs or linked entities yet.'));
         return fragment;
       }
       if (!findings.length) {
         fragment.appendChild(ctx.emptyProjectPanel('No findings match selected filters.'));
+        appendPager('bottom');
         return fragment;
       }
-      ctx.groupBy(findings, finding => finding.run_command || finding.run_id).forEach((items, runLabel) => {
-        const group = document.createElement('section');
-        group.className = 'project-mobile-group project-findings-group';
-        const collapsed = ctx.projectFindingGroupCollapsed(projectId, runLabel);
-        group.classList.toggle('is-collapsed', collapsed);
-        const title = document.createElement('button');
-        title.type = 'button';
-        title.className = 'toggle-btn project-mobile-group-toggle';
-        title.dataset.projectFindingGroupToggle = '1';
-        title.setAttribute('data-project-finding-group-toggle', '1');
-        title.dataset.projectId = projectId;
-        title.dataset.projectFindingGroup = runLabel;
-        title.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-        ctx.bindProjectRuntimePressable(title);
-        const caret = document.createElement('span');
-        caret.className = 'project-explorer-group-caret';
-        caret.setAttribute('aria-hidden', 'true');
-        caret.textContent = ctx.caretText || 'v';
-        const label = document.createElement('span');
-        label.className = 'project-mobile-group-title';
-        label.textContent = runLabel;
-        const count = document.createElement('span');
-        count.className = 'project-mobile-group-count';
-        count.textContent = `${items.length} finding${items.length === 1 ? '' : 's'}`;
-        title.append(caret, label, count);
-        group.appendChild(title);
-        const groupBody = document.createElement('div');
-        groupBody.className = 'project-mobile-group-body';
-        groupBody.hidden = collapsed;
-        items.forEach((finding) => {
-          const lineIndex = Number(finding.line_number);
-          const findingId = String(finding.id || '');
-          const metaParts = [
-            finding.scope || 'finding',
-            ctx.projectFindingTargetText(summary, finding) || ctx.projectTargetLabel(summary, finding.target_id),
-            `line ${finding.line_number || 0}`,
-          ].filter(Boolean);
-          groupBody.appendChild(contentRow({
-            title: finding.title || finding.raw_line || 'Finding',
-            meta: metaParts.join(ctx.metaSeparator || ' - '),
-            detail: finding.raw_line || '',
-            badge: finding.review_state || finding.severity || '',
-            chips: ctx.entityMetadataChips(finding),
-            action: finding.run_id ? {
-              action: 'open-finding',
-              dataset: {
-                projectId,
-                runId: String(finding.run_id || ''),
-                runCommand: String(finding.run_command || ''),
-                lineIndex: Number.isInteger(lineIndex) ? String(lineIndex) : '',
-              },
-            } : null,
-            accessory: findingId ? actionMenu(projectId, `Finding actions for ${finding.title || findingId}`, [
-              { node: findingReviewNode(finding, projectId) },
-              { label: 'Edit metadata', action: 'edit-finding-metadata', dataset: { findingId } },
-            ]) : null,
-          }));
-        });
-        group.appendChild(groupBody);
-        fragment.appendChild(group);
-      });
+      appendPager('top');
+      findings.forEach(appendFindingRow);
+      appendPager('bottom');
       return fragment;
+    }
+
+    function renderArtifactsPager(projectId, total, position = 'bottom') {
+      const page = typeof ctx.projectArtifactPagination === 'function'
+        ? ctx.projectArtifactPagination(projectId)
+        : { limit: 50, offset: 0 };
+      const limit = Math.max(1, Number(page.limit || 50));
+      const offset = Math.max(0, Number(page.offset || 0));
+      const loading = !!page.loading;
+      if (total <= limit && offset === 0) return null;
+      const wrap = document.createElement('div');
+      wrap.className = 'project-workspace-pagination project-artifact-pagination';
+      wrap.dataset.projectArtifactsPagerPosition = position;
+      const summary = document.createElement('div');
+      summary.className = 'project-workspace-pagination-summary';
+      summary.textContent = `${(offset + 1).toLocaleString()}-${Math.min(total, offset + limit).toLocaleString()} of ${total.toLocaleString()} artifacts`;
+      const controls = document.createElement('div');
+      controls.className = 'project-workspace-pagination-controls';
+      const prev = ctx.makeProjectButton('Previous', 'noop', projectId);
+      prev.dataset.projectArtifactsPage = 'prev';
+      prev.dataset.projectArtifactsPagerPosition = position;
+      prev.disabled = loading || offset <= 0;
+      const status = document.createElement('span');
+      status.className = 'project-workspace-pagination-status';
+      status.textContent = loading ? 'Loading...' : `Page ${Math.floor(offset / limit) + 1}`;
+      const next = ctx.makeProjectButton('Next', 'noop', projectId);
+      next.dataset.projectArtifactsPage = 'next';
+      next.dataset.projectArtifactsPagerPosition = position;
+      next.disabled = loading || offset + limit >= total;
+      controls.append(prev, status, next);
+      wrap.append(summary, controls);
+      return wrap;
     }
 
     function renderArtifactsTab(projectId, summary) {
       const fragment = document.createDocumentFragment();
-      const allArtifacts = ctx.projectArtifactItems(summary);
+      const totalArtifacts = Number(summary?.counts?.artifacts || 0);
       const filterActive = ctx.projectTargetFilterActive(projectId, summary);
       if (filterActive && !ctx.projectFindingsLoaded(projectId)) {
         fragment.appendChild(ctx.emptyProjectPanel('Loading target associations...'));
         return fragment;
       }
-      const artifacts = ctx.filteredProjectArtifacts(projectId, summary);
-      if (!allArtifacts.length) {
+      const page = typeof ctx.projectArtifactPagination === 'function'
+        ? ctx.projectArtifactPagination(projectId)
+        : { artifacts: [], loaded: false, loading: false, total: 0 };
+      const filterKey = typeof ctx.projectArtifactServerFilterKey === 'function'
+        ? ctx.projectArtifactServerFilterKey(projectId, summary)
+        : '';
+      if ((!page.loaded || page.filterKey !== filterKey) && !page.loading && typeof ctx.loadProjectArtifacts === 'function') {
+        ctx.loadProjectArtifacts(projectId, summary, { offset: page.filterKey === filterKey ? page.offset : 0 }).catch(() => {});
+      }
+      const artifacts = Array.isArray(page.artifacts) ? page.artifacts : [];
+      if (!totalArtifacts) {
         fragment.appendChild(ctx.emptyProjectPanel('No run artifacts have been captured for this project yet.'));
         return fragment;
       }
-      if (!artifacts.length) {
+      if (page.loading && !artifacts.length) {
+        fragment.appendChild(ctx.emptyProjectPanel('Loading project artifacts...'));
+        return fragment;
+      }
+      if (page.error && !artifacts.length) {
+        fragment.appendChild(ctx.emptyProjectPanel(page.error));
+        return fragment;
+      }
+      if (!Number(page.total || 0)) {
         fragment.appendChild(ctx.emptyProjectPanel('No artifacts match the selected targets.'));
         return fragment;
       }
-      ctx.groupBy(artifacts, artifact => artifact.run_id).forEach((items, runId) => {
+      const pagedArtifacts = artifacts;
+      const artifactTotalsByRun = new Map(Object.entries(page.runCounts || {}));
+      const pager = renderArtifactsPager(projectId, Number(page.total || artifacts.length), 'top');
+      if (pager) fragment.appendChild(pager);
+      ctx.groupBy(pagedArtifacts, artifact => artifact.run_id).forEach((items, runId) => {
         const group = document.createElement('section');
         group.className = 'project-mobile-group project-artifacts-group';
         const run = ctx.projectRunById(summary, runId);
@@ -490,7 +593,11 @@
         label.textContent = `${command || 'Run'}${shortId ? ` (${shortId})` : ''}`;
         const count = document.createElement('span');
         count.className = 'project-mobile-group-count';
-        count.textContent = `${items.length} artifact${items.length === 1 ? '' : 's'}`;
+        const totalForRun = Number(artifactTotalsByRun.get(String(runId || '')) || items.length);
+        const visibleCountText = items.length === totalForRun
+          ? `${items.length}`
+          : `${items.length} of ${totalForRun}`;
+        count.textContent = `${visibleCountText} artifact${totalForRun === 1 ? '' : 's'}`;
         title.append(caret, label, count);
         group.appendChild(title);
         const groupBody = document.createElement('div');
@@ -532,13 +639,15 @@
         group.appendChild(groupBody);
         fragment.appendChild(group);
       });
+      const bottomPager = renderArtifactsPager(projectId, Number(page.total || artifacts.length), 'bottom');
+      if (bottomPager) fragment.appendChild(bottomPager);
       return fragment;
     }
 
     function renderTabBody(project, summary) {
       if (!ctx.projectMobileDetailBody) return;
       ctx.projectMobileDetailBody.replaceChildren();
-      if (!summary) {
+      if (!summary || summary.load_error) {
         const retryPanel = ctx.emptyProjectPanel('Could not load this project. It may have been deleted.');
         const retry = document.createElement('button');
         retry.type = 'button';
@@ -592,6 +701,7 @@
       if (typeof global.enhanceAppSelects === 'function') {
         global.enhanceAppSelects(ctx.projectMobileDetailBody);
       }
+      const findingFiltersActive = ctx.projectFindingServerFiltersActive(selectedId, summary);
       if (
         summary
         && (
@@ -602,13 +712,14 @@
           || !ctx.projectFindingsLoaded(selectedId)
         )
       ) {
-        ctx.loadProjectFindings(selectedId).catch(() => {});
+        if (!(ctx.projectWorkspaceTab() === 'findings' && findingFiltersActive)) {
+          ctx.loadProjectFindings(selectedId).catch(() => {});
+        }
       }
       if (
         summary
         && ctx.projectWorkspaceTab() === 'findings'
-        && ctx.projectFindingsLoaded(selectedId)
-        && ctx.projectFindingServerFiltersActive(selectedId, summary)
+        && findingFiltersActive
       ) {
         ctx.loadProjectFilteredFindings(selectedId, summary).catch(() => {});
       }

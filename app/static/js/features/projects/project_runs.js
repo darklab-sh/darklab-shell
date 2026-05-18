@@ -3,6 +3,74 @@
 
   function createProjectRunsController(context) {
     const ctx = context || {};
+    const pageLimit = Math.max(1, Number(ctx.pageLimit || 50));
+    const runPages = new Map();
+    let loadingProjectId = '';
+    let loadingPromise = null;
+
+    function defaultPage() {
+      return { runs: [], limit: pageLimit, offset: 0, total: 0, has_more: false, loaded: false, loading: false };
+    }
+
+    function page(projectId) {
+      return runPages.get(String(projectId || '')) || defaultPage();
+    }
+
+    function setPageOffset(projectId, offset = 0) {
+      const normalized = String(projectId || '');
+      if (!normalized) return;
+      const current = page(normalized);
+      runPages.set(normalized, { ...current, offset: Math.max(0, Number(offset || 0)), loaded: false, loading: true });
+    }
+
+    function invalidate(projectId = '') {
+      const normalized = String(projectId || '');
+      if (normalized) runPages.delete(normalized);
+      else runPages.clear();
+    }
+
+    async function load(projectId, options = {}) {
+      const normalized = String(projectId || '');
+      if (!normalized || typeof ctx.apiFetch !== 'function') return;
+      const current = page(normalized);
+      const offset = Math.max(0, Number(
+        Object.prototype.hasOwnProperty.call(options, 'offset') ? options.offset : current.offset,
+      ) || 0);
+      if (current.loaded && current.offset === offset) return;
+      if (loadingProjectId === normalized && loadingPromise) return loadingPromise;
+      loadingProjectId = normalized;
+      loadingPromise = Promise.resolve().then(async () => {
+        try {
+          const params = new URLSearchParams({ limit: String(pageLimit), offset: String(offset) });
+          const resp = await ctx.apiFetch(`/projects/${encodeURIComponent(normalized)}/runs?${params.toString()}`, { cache: 'no-store' });
+          if (!resp.ok) throw await ctx.projectResponseError(resp, 'Could not load project runs.');
+          const data = await resp.json();
+          runPages.set(normalized, {
+            runs: Array.isArray(data.runs) ? data.runs : [],
+            limit: Number(data.limit || pageLimit),
+            offset: Number(data.offset || offset),
+            total: Number(data.total || 0),
+            has_more: !!data.has_more,
+            loaded: true,
+            loading: false,
+          });
+        } catch (err) {
+          runPages.set(normalized, { runs: [], limit: pageLimit, offset, total: 0, has_more: false, loaded: true, loading: false });
+          ctx.setProjectWorkspaceMessage?.(err && err.message ? err.message : 'Could not load project runs.', { error: true });
+          ctx.logClientError?.('failed to load project runs', err);
+        } finally {
+          if (loadingProjectId === normalized) {
+            loadingProjectId = '';
+            loadingPromise = null;
+          }
+          if (!options.skipFinalRender) {
+            ctx.renderProjectExplorer?.();
+            if (ctx.mobileView?.() === 'detail') ctx.renderProjectMobileDetail?.();
+          }
+        }
+      });
+      return loadingPromise;
+    }
 
     function runRemoveControl(projectId, run) {
       const btn = ctx.makeProjectButton('Remove', 'unlink-run', projectId);
@@ -11,14 +79,16 @@
       return btn;
     }
 
-    function runFindingCount(projectId, runId) {
+    function runFindingCount(projectId, runId, run = null) {
+      if (run && Number.isFinite(Number(run.finding_count))) return Number(run.finding_count);
       const normalizedRunId = String(runId || '');
       if (!normalizedRunId || !ctx.projectFindingsLoaded(projectId)) return 0;
       return ctx.projectFindingItems(projectId)
         .filter(finding => String(finding && finding.run_id || '') === normalizedRunId).length;
     }
 
-    function runArtifactCount(summary, runId) {
+    function runArtifactCount(summary, runId, run = null) {
+      if (run && Number.isFinite(Number(run.artifact_count))) return Number(run.artifact_count);
       const normalizedRunId = String(runId || '');
       if (!normalizedRunId) return 0;
       return ctx.projectArtifactItems(summary)
@@ -32,10 +102,10 @@
       const counts = document.createElement('div');
       counts.className = 'project-run-row-counts';
       const countConfigs = [
-        ['finding', runFindingCount(projectId, runId), 'filter-run-findings'],
+        ['finding', runFindingCount(projectId, runId, run), 'filter-run-findings'],
       ];
       if (ctx.projectArtifactsVisible()) {
-        countConfigs.push(['artifact', runArtifactCount(summary, runId), 'filter-run-artifacts']);
+        countConfigs.push(['artifact', runArtifactCount(summary, runId, run), 'filter-run-artifacts']);
       }
       countConfigs.forEach(([label, count, action]) => {
         const chip = ctx.makeProjectButton(`${count} ${label}${count === 1 ? '' : 's'}`, action, projectId, count ? 'secondary' : 'ghost');
@@ -255,10 +325,54 @@
       return wrap;
     }
 
+    function renderPagination(projectId, pagination, runs, position = 'bottom') {
+      const limit = Math.max(1, Number(pagination.limit || pageLimit));
+      const offset = Math.max(0, Number(pagination.offset || 0));
+      const total = Math.max(0, Number(pagination.total || runs.length || 0));
+      const loading = !!pagination.loading;
+      if (total <= limit && offset === 0) return null;
+      const start = total && runs.length ? offset + 1 : 0;
+      const end = total && runs.length ? Math.min(total, offset + runs.length) : 0;
+      const wrap = document.createElement('div');
+      wrap.className = 'project-runs-pagination project-workspace-pagination';
+      wrap.dataset.projectRunsPagerPosition = position;
+      const summary = document.createElement('div');
+      summary.className = 'project-workspace-pagination-summary';
+      summary.textContent = `${start}-${end} of ${total.toLocaleString()} runs`;
+      const controls = document.createElement('div');
+      controls.className = 'project-workspace-pagination-controls';
+      const prev = ctx.makeProjectButton('Previous', 'noop', projectId);
+      prev.dataset.projectRunsPage = 'prev';
+      prev.dataset.projectRunsPagerPosition = position;
+      prev.disabled = loading || offset <= 0;
+      const status = document.createElement('span');
+      status.className = 'project-workspace-pagination-status';
+      status.textContent = loading ? 'Loading...' : `Page ${Math.floor(offset / limit) + 1}`;
+      const next = ctx.makeProjectButton('Next', 'noop', projectId);
+      next.dataset.projectRunsPage = 'next';
+      next.dataset.projectRunsPagerPosition = position;
+      next.disabled = loading || offset + runs.length >= total;
+      controls.append(prev, status, next);
+      wrap.append(summary, controls);
+      return wrap;
+    }
+
     function renderRuns(container, projectId, summary) {
       const allRuns = ctx.projectRunItems(summary);
-      const comparableRuns = ctx.projectComparableRuns(summary);
       const filterActive = ctx.projectTargetFilterActive(projectId, summary);
+      const runFilterActive = ctx.projectRunFilterActive?.(projectId, summary);
+      const useServerPage = !filterActive && !runFilterActive;
+      const pagination = page(projectId);
+      if (useServerPage && !pagination.loaded) {
+        load(projectId).catch(() => {});
+      }
+      const canUseLoadedPage = pagination.loaded && (pagination.total || (pagination.runs || []).length || !allRuns.length);
+      const runs = useServerPage && canUseLoadedPage
+        ? pagination.runs
+        : ctx.filteredProjectRuns(projectId, summary);
+      const comparableRuns = useServerPage && canUseLoadedPage
+        ? runs.filter(run => run && run.id)
+        : ctx.projectComparableRuns(summary);
       const toolbar = document.createElement('div');
       toolbar.className = 'project-runs-toolbar';
       toolbar.appendChild(renderCompareControls(comparableRuns));
@@ -283,15 +397,22 @@
         container.appendChild(ctx.emptyProjectPanel('Loading target associations...'));
         return;
       }
-      const runs = ctx.filteredProjectRuns(projectId, summary);
       if (!allRuns.length) {
         container.appendChild(ctx.emptyProjectPanel('No linked runs yet.'));
         return;
       }
-      if (!runs.length) {
-        container.appendChild(ctx.emptyProjectPanel('No linked runs match the selected filters.'));
+      if (useServerPage && !pagination.loaded) {
+        container.appendChild(ctx.emptyProjectPanel('Loading runs...'));
         return;
       }
+      if (!runs.length) {
+        container.appendChild(ctx.emptyProjectPanel('No linked runs match the selected filters.'));
+        const pager = useServerPage && canUseLoadedPage ? renderPagination(projectId, pagination, runs, 'bottom') : null;
+        if (pager) container.appendChild(pager);
+        return;
+      }
+      const pager = useServerPage && canUseLoadedPage ? renderPagination(projectId, pagination, runs, 'top') : null;
+      if (pager) container.appendChild(pager);
       runs.forEach((run) => {
         const exit = run.exit_code === null || run.exit_code === undefined ? 'running' : `exit ${run.exit_code}`;
         container.appendChild(ctx.projectItemRow({
@@ -311,9 +432,13 @@
           } : null,
         }));
       });
+      if (pager) container.appendChild(renderPagination(projectId, pagination, runs, 'bottom'));
     }
 
     return {
+      invalidate,
+      load,
+      page,
       runRemoveControl,
       runFindingCount,
       runArtifactCount,
@@ -325,6 +450,7 @@
       avoidCompareLabelSelfTarget,
       compareRuns,
       renderCompareControls,
+      setPageOffset,
       renderRuns,
     };
   }

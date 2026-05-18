@@ -135,6 +135,7 @@
         });
       }
       if (projectId) ctx.setSelectedProjectId?.(projectId);
+      if (projectId) ctx.setProjectPaginationOffset?.(0);
       ctx.setProjectWorkspaceTab?.('details');
       if (input) input.value = '';
       ctx.setProjectMobileCreateOpen?.(false);

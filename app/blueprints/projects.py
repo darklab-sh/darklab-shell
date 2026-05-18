@@ -41,10 +41,14 @@ from services.projects.workspace import (
     link_project_entity,
     list_entity_labels,
     list_evidence_packages,
+    list_project_artifacts,
+    list_project_entities,
     list_project_findings,
     list_project_links,
+    list_project_runs,
     list_project_targets,
     list_run_findings,
+    list_projects_page,
     list_projects,
     preview_project_run_entity_links,
     preview_project_run_entity_unlinks,
@@ -77,6 +81,14 @@ projects_bp = Blueprint("projects", __name__)
 
 def _project_write_limit():
     return f"{CFG['rate_limit_per_minute']} per minute; {CFG['rate_limit_per_second']} per second"
+
+
+def _parse_int(value, default, *, minimum=0, maximum=100):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(parsed, maximum))
 
 
 def _evidence_package_download_limit():
@@ -138,6 +150,25 @@ def _workspace_project_artifact_error_response(exc):
 def projects_list():
     session_id = get_session_id()
     include_archived = str(request.args.get("include_archived") or "").lower() in {"1", "true", "yes"}
+    include_counts = str(request.args.get("include_counts") or "").lower() in {"1", "true", "yes"}
+    if "limit" in request.args or "offset" in request.args or include_counts:
+        limit = _parse_int(request.args.get("limit"), 50, minimum=1, maximum=100)
+        offset = _parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000)
+        page = list_projects_page(
+            session_id,
+            include_archived=include_archived,
+            limit=limit,
+            offset=offset,
+            include_counts=include_counts,
+        )
+        log.debug("PROJECTS_VIEWED", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "count": len(page["projects"]),
+            "total": page["total"],
+            "include_archived": include_archived,
+        })
+        return jsonify(page)
     projects = list_projects(session_id, include_archived=include_archived)
     log.debug("PROJECTS_VIEWED", extra={
         "ip": get_client_ip(),
@@ -262,6 +293,35 @@ def projects_links_list(project_id):
     if links is None:
         return jsonify({"error": "project not found"}), 404
     return jsonify({"links": links})
+
+
+@projects_bp.route("/projects/<project_id>/runs")
+def projects_runs_list(project_id):
+    session_id = get_session_id()
+    runs = list_project_runs(
+        session_id,
+        project_id,
+        limit=_parse_int(request.args.get("limit"), 50, minimum=1, maximum=200),
+        offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
+    )
+    if runs is None:
+        return jsonify({"error": "project not found"}), 404
+    return jsonify(runs)
+
+
+@projects_bp.route("/projects/<project_id>/entities")
+def projects_entities_list(project_id):
+    session_id = get_session_id()
+    entities = list_project_entities(
+        session_id,
+        project_id,
+        entity_type=request.args.get("type") or "",
+        limit=_parse_int(request.args.get("limit"), 50, minimum=1, maximum=200),
+        offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
+    )
+    if entities is None:
+        return jsonify({"error": "project not found"}), 404
+    return jsonify(entities)
 
 
 @projects_bp.route("/projects/<project_id>/links", methods=["POST"])
@@ -597,6 +657,25 @@ def projects_packages_delete(project_id, package_id):
     return jsonify({"ok": True})
 
 
+@projects_bp.route("/projects/<project_id>/artifacts")
+def projects_artifacts_list(project_id):
+    session_id = get_session_id()
+    filters = {
+        "run_id": request.args.getlist("run_id"),
+        "target_id": request.args.getlist("target_id"),
+    }
+    artifacts = list_project_artifacts(
+        session_id,
+        project_id,
+        filters,
+        limit=_parse_int(request.args.get("limit"), 50, minimum=1, maximum=200),
+        offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
+    )
+    if artifacts is None:
+        return jsonify({"error": "project not found"}), 404
+    return jsonify(artifacts)
+
+
 @projects_bp.route("/projects/<project_id>/artifacts/<artifact_id>/preview")
 def projects_artifacts_preview(project_id, artifact_id):
     session_id = get_session_id()
@@ -644,6 +723,7 @@ def projects_artifacts_download(project_id, artifact_id):
 @projects_bp.route("/projects/<project_id>/findings")
 def projects_findings_list(project_id):
     session_id = get_session_id()
+    paginated = "limit" in request.args or "offset" in request.args
     filters = {
         "run_id": request.args.getlist("run_id"),
         "target_id": request.args.getlist("target_id"),
@@ -654,22 +734,51 @@ def projects_findings_list(project_id):
         "label": request.args.getlist("label"),
         "note_state": request.args.get("note_state"),
         "orphan_filter": request.args.get("orphan_filter"),
+        "collapsed_group": request.args.getlist("collapsed_group"),
+        "include_collapsed_group_counts": request.args.get("include_collapsed_group_counts"),
+        "include_group_counts": request.args.get("include_group_counts"),
+        "known_total": request.args.get("known_total"),
     }
+    include_total = str(request.args.get("include_total") or "1").lower() not in {"0", "false", "no", "off"}
     try:
-        findings = list_project_findings(session_id, project_id, filters)
+        if paginated:
+            findings = list_project_findings(
+                session_id,
+                project_id,
+                filters,
+                limit=_parse_int(request.args.get("limit"), 50, minimum=1, maximum=200),
+                offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
+                include_total=include_total,
+            )
+        else:
+            findings = list_project_findings(session_id, project_id, filters)
     except ProjectWorkspaceError as exc:
         return jsonify({"error": str(exc)}), 400
     if findings is None:
         return jsonify({"error": "project not found"}), 404
+    if paginated:
+        return jsonify(findings)
     return jsonify({"findings": findings})
 
 
 @projects_bp.route("/entities/run/<run_id>/findings")
 def run_findings_list(run_id):
     session_id = get_session_id()
-    findings = list_run_findings(session_id, run_id)
+    paginated = "limit" in request.args or "offset" in request.args
+    if paginated:
+        findings = list_run_findings(
+            session_id,
+            run_id,
+            limit=_parse_int(request.args.get("limit"), 50, minimum=1, maximum=200),
+            offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
+            include_total=True,
+        )
+    else:
+        findings = list_run_findings(session_id, run_id)
     if findings is None:
         return jsonify({"error": "run not found"}), 404
+    if paginated:
+        return jsonify(findings)
     return jsonify({"findings": findings})
 
 

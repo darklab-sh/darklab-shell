@@ -392,6 +392,9 @@ optionsNotifyToggle?.addEventListener('change', e => {
 optionsProjectAutoLinkExternalRunsToggle?.addEventListener('change', e => {
   applyProjectAutoLinkExternalRunsPreference(e.target.checked ? 'on' : 'off');
 });
+optionsProjectAutoLinkRunEntitiesToggle?.addEventListener('change', e => {
+  applyProjectAutoLinkRunEntitiesPreference(e.target.checked ? 'on' : 'off');
+});
 optionsHudClockSelect?.addEventListener('change', e => {
   applyHudClockPreference(e.target.value);
 });
