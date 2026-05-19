@@ -169,9 +169,16 @@
 # Server default if unset: 100
 # max_projects_per_session: 100
 #
-# Server default if unset: 1000
+# Server default if unset: 5000
 # max_project_links_per_project: 5000
 #
+# Maximum Atlas entities linked into one project. Set to 0 for unlimited,
+# though max_project_links_per_project still applies.
+# Server default if unset: 5000
+# max_project_entities_per_project: 5000
+#
+# Maximum manual or discovered project targets. Bulk-linked Atlas entities use
+# max_project_entities_per_project instead.
 # Server default if unset: 200
 # max_project_targets_per_project: 200
 #

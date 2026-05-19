@@ -2388,6 +2388,74 @@ class TestProjectRoutes:
             {"run_id": third_run_id, "status": "rejected", "reason": "policy_blocked"},
         ]
 
+    def test_project_target_quota_ignores_bulk_linked_atlas_entities(self):
+        client = get_client()
+        session_id = self._session_id("project-target-quota")
+        with mock.patch.dict(shell_app.CFG, {
+            "max_project_links_per_project": 20,
+            "max_project_entities_per_project": 20,
+            "max_project_targets_per_project": 1,
+        }, clear=False):
+            project = self._create_project(client, session_id)
+            run_id = self._seed_run(session_id, "katana -u https://darklab.sh")
+            recorded = self._seed_run_entities(session_id, run_id)
+            entity_ids = [item["id"] for item in recorded]
+
+            bulk_link = client.post(
+                f"/projects/{project['id']}/links",
+                json={"entity_type": "atlas_entity", "entity_ids": entity_ids},
+                headers={"X-Session-ID": session_id},
+            )
+            first_target = client.post(
+                f"/projects/{project['id']}/targets",
+                json={"type": "domain", "value": "example.com"},
+                headers={"X-Session-ID": session_id},
+            )
+            second_target = client.post(
+                f"/projects/{project['id']}/targets",
+                json={"type": "domain", "value": "example.net"},
+                headers={"X-Session-ID": session_id},
+            )
+
+        assert bulk_link.status_code == 200
+        bulk_data = json.loads(bulk_link.data)
+        assert bulk_data["counts"]["added"] == 2
+        assert first_target.status_code == 201
+        assert second_target.status_code == 409
+        assert json.loads(second_target.data) == {"error": "project target quota exceeded for this project"}
+
+    def test_bulk_project_atlas_links_obey_entity_quota(self):
+        client = get_client()
+        session_id = self._session_id("project-entity-quota")
+        with mock.patch.dict(shell_app.CFG, {
+            "max_project_links_per_project": 20,
+            "max_project_entities_per_project": 1,
+            "max_project_targets_per_project": 20,
+        }, clear=False):
+            project = self._create_project(client, session_id)
+            run_id = self._seed_run(session_id, "katana -u https://darklab.sh")
+            recorded = self._seed_run_entities(session_id, run_id)
+            entity_ids = [item["id"] for item in recorded]
+
+            bulk_link = client.post(
+                f"/projects/{project['id']}/links",
+                json={"entity_type": "atlas_entity", "entity_ids": entity_ids},
+                headers={"X-Session-ID": session_id},
+            )
+
+        assert bulk_link.status_code == 200
+        bulk_data = json.loads(bulk_link.data)
+        assert bulk_data["counts"] == {
+            "added": 1,
+            "already_linked": 0,
+            "removed": 0,
+            "not_linked": 0,
+            "not_found": 0,
+            "rejected": 1,
+        }
+        assert [item["status"] for item in bulk_data["results"]] == ["added", "rejected"]
+        assert bulk_data["results"][1]["reason"] == "policy_blocked"
+
     def test_redacted_evidence_package_redacts_manifest_and_transcripts(self, tmp_path):
         client = get_client()
         session_id = self._session_id("project-package-redacted")

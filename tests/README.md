@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,910
+- behavior tests: 2,914
 - docs/inventory meta-tests: 32
-- `pytest`: 1512 (1480 behavior + 32 meta)
+- `pytest`: 1516 (1484 behavior + 32 meta)
 - `vitest`: 1178
 - `playwright`: 252
-- total: 2,942
+- total: 2,946
 
 This document is organized in two parts:
 
@@ -551,6 +551,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunBrokerMemoryStore.test_bounded_replay_keeps_latest_output_and_terminal_event` | Verifies that bounded replay preserves the latest output plus the terminal event. |
 | `TestRunBrokerMemoryStore.test_stream_run_events_replays_snapshot_before_waiting_for_live_events` | Verifies that broker stream subscriptions replay an initial snapshot before waiting for live events. |
 | `TestRunBrokerMemoryStore.test_stream_run_events_skips_trim_notice_when_resuming_live_tail` | Verifies that broker streams skip trim notices when choosing the live-tail resume cursor. |
+| `TestRunBrokerMemoryStore.test_stream_run_events_exits_cleanly_when_redis_stream_disconnects` | Verifies that broker streams end cleanly when Redis closes a blocked stream read during shutdown. |
 | `TestRunBrokerMemoryStore.test_decode_payload_accepts_redis_bytes_fields` | Verifies that broker Redis payload decoding accepts byte-string stream fields. |
 | `TestRunBrokerMemoryStore.test_redis_store_decodes_bytes_event_ids_and_payloads` | Verifies that the Redis broker store decodes byte-string event IDs and payloads before replay filtering. |
 | `TestRunBrokerMemoryStore.test_redis_store_normalizes_invalid_resume_ids` | Verifies that Redis replay normalizes stale synthetic resume IDs before calling Redis stream APIs. |
@@ -1103,6 +1104,8 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestProjectRoutes.test_project_run_unlink_can_remove_non_curated_source_entities` | Verifies run project unlink can preview and optionally remove same-run, non-curated Atlas entity links from the project while keeping curated entities. |
 | `TestProjectRoutes.test_bulk_project_links_reject_too_many_entity_ids` | Verifies bulk project link requests reject payloads over the server-side run limit. |
 | `TestProjectRoutes.test_bulk_project_links_report_policy_blocked_when_project_link_limit_is_reached` | Verifies bulk project links report `policy_blocked` when the project link limit is reached mid-batch. |
+| `TestProjectRoutes.test_project_target_quota_ignores_bulk_linked_atlas_entities` | Verifies project target quota checks do not count bulk-linked Atlas entities as discovered or manually added project targets. |
+| `TestProjectRoutes.test_bulk_project_atlas_links_obey_entity_quota` | Verifies bulk Atlas entity linking obeys the project entity quota independently from the broader project link quota. |
 | `TestProjectRoutes.test_redacted_evidence_package_redacts_manifest_and_transcripts` | Verifies redacted evidence packages redact manifests, static pages, and run transcripts while excluding raw artifacts. |
 | `TestProjectRoutes.test_project_workspace_write_quotas_return_conflict` | Verifies project workspace quotas return conflict responses without blocking idempotent writes. |
 | `TestProjectRoutes.test_evidence_package_download_enforces_size_limit` | Verifies evidence package downloads refuse archives that exceed the configured size cap. |
@@ -1450,6 +1453,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestRunStreaming.test_project_targets_reject_cidr_targets` | Verifies that project targets reject CIDR values now that project target rows are backed by concrete Atlas entities. |
 | `TestRunStreaming.test_project_targets_reject_port_set_targets` | Verifies that project targets reject port-set values now that project target rows are backed by concrete Atlas entities. |
 | `TestRunStreaming.test_active_project_auto_discovers_typed_command_targets` | Verifies that active projects stage typed command inputs as pending targets and suppress dismissed discoveries until user re-add. |
+| `TestRunStreaming.test_active_project_target_quota_skip_does_not_log_server_error` | Verifies that expected active-project target quota skips log as warnings without server-error tracebacks. |
 | `TestRunStreaming.test_nonblocking_stream_reader_preserves_partial_lines_until_finalize` | Checks that the nonblocking stream reader buffers partial lines until a newline or finalize flush completes them. |
 | `TestRunStreaming.test_nonblocking_stream_reader_logs_when_nonblocking_setup_fails` | Verifies that non-blocking stream setup failures warn before falling back to blocking line reads. |
 | `TestRunStreaming.test_run_returns_500_when_spawn_fails` | Checks that run returns 500 when spawn fails. |

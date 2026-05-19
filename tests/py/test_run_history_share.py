@@ -29,6 +29,7 @@ import services.workspace.files as shell_workspace
 from config import PROJECT_README
 from core.database import db_connect
 from services.runs.output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
+from services.projects.contracts import ProjectWorkspaceQuotaExceeded
 
 # These tests lean toward end-to-end backend behavior and intentionally exercise
 # the real SQLite/artifact flow rather than heavy mocking.
@@ -1164,6 +1165,51 @@ class TestRunStreaming:
         assert file_target["source"] == "auto_input_file"
         assert file_target["confidence"] == 0.85
         assert file_target["source_detail"]["path"] == "targets.txt"
+
+    def test_active_project_target_quota_skip_does_not_log_server_error(self):
+        client = get_client()
+        session_id = "sess-project-target-quota-skip"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Target Quota Skip"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        client.post(
+            "/projects/active",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        fake_proc = _FakeProc(lines=[
+            "Nmap scan report for darklab.sh\n",
+            "80/tcp open http\n",
+            "",
+        ])
+
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]), \
+             mock.patch.object(run_routes.log, "warning") as log_warning, \
+             mock.patch(
+                 "blueprints.run.record_project_target_discoveries",
+                 side_effect=ProjectWorkspaceQuotaExceeded("project target quota exceeded for this project"),
+             ):
+            resp = _post_run(
+                client,
+                json={"command": "nmap -p 80 darklab.sh"},
+                headers={"X-Session-ID": session_id},
+            )
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "[project] linked run" in body
+        assert "[project] discovered" not in body
+        log_warning.assert_called_once()
+        assert log_warning.call_args.args == ("PROJECT_TARGET_DISCOVERY_SKIPPED",)
+        assert "exc_info" not in log_warning.call_args.kwargs
 
     def test_nonblocking_stream_reader_preserves_partial_lines_until_finalize(self):
         read_fd, write_fd = os.pipe()

@@ -4929,6 +4929,25 @@ class TestRunBrokerMemoryStore:
         assert '"text": "tail"' in events[1]
         assert store.wait_after_id == "5-0"
 
+    def test_stream_run_events_exits_cleanly_when_redis_stream_disconnects(self):
+        class FakeStore:
+            def replay(self, run_id):
+                assert run_id == "run-1"
+                return []
+
+            def wait_after(self, run_id, after_id, timeout):
+                assert run_id == "run-1"
+                assert after_id == "0-0"
+                raise run_broker.RedisConnectionError("Connection closed by server.")
+
+        with mock.patch.object(run_broker.log, "info") as log_info, \
+             mock.patch.object(run_broker, "_store", return_value=FakeStore()):
+            events = list(run_broker.stream_run_events("run-1"))
+
+        assert events == []
+        log_info.assert_called_once()
+        assert log_info.call_args.args == ("RUN_BROKER_STREAM_DISCONNECTED",)
+
     def test_decode_payload_accepts_redis_bytes_fields(self):
         payload = run_broker._decode_payload({b"payload": b'{"type":"output","text":"hello"}'})
 

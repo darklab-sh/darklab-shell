@@ -121,7 +121,23 @@ def _project_error_response(exc):
         status = 409
     else:
         status = 400
-    return jsonify({"error": str(exc)}), status
+    return _project_json_error(str(exc), status)
+
+
+def _project_json_error(message, status):
+    return jsonify({"error": message}), status
+
+
+def _project_not_found(message="project not found"):
+    return _project_json_error(message, 404)
+
+
+def _project_json_or_404(value, *, key=None, error="project not found"):
+    if value is None:
+        return _project_not_found(error)
+    if key:
+        return jsonify({key: value})
+    return jsonify(value)
 
 
 def _project_bulk_too_many_response():
@@ -228,7 +244,7 @@ def projects_active_set():
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if not project:
-        return jsonify({"error": "project not found"}), 404
+        return _project_not_found()
     log.info("PROJECT_ACTIVE_SET", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -254,18 +270,14 @@ def projects_active_clear():
 def projects_get(project_id):
     session_id = get_session_id()
     project = get_project(session_id, project_id)
-    if not project:
-        return jsonify({"error": "project not found"}), 404
-    return jsonify({"project": project})
+    return _project_json_or_404(project, key="project")
 
 
 @projects_bp.route("/projects/<project_id>/summary")
 def projects_summary(project_id):
     session_id = get_session_id()
     summary = get_project_summary(session_id, project_id)
-    if summary is None:
-        return jsonify({"error": "project not found"}), 404
-    return jsonify(summary)
+    return _project_json_or_404(summary)
 
 
 @projects_bp.route("/projects/<project_id>", methods=["PUT"])
@@ -277,7 +289,7 @@ def projects_update(project_id):
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if not project:
-        return jsonify({"error": "project not found"}), 404
+        return _project_not_found()
     log.info("PROJECT_UPDATED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -293,7 +305,7 @@ def projects_delete(project_id):
     session_id = get_session_id()
     deleted = delete_project(session_id, project_id)
     if not deleted:
-        return jsonify({"error": "project not found"}), 404
+        return _project_not_found()
     log.info("PROJECT_DELETED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -306,9 +318,7 @@ def projects_delete(project_id):
 def projects_links_list(project_id):
     session_id = get_session_id()
     links = list_project_links(session_id, project_id)
-    if links is None:
-        return jsonify({"error": "project not found"}), 404
-    return jsonify({"links": links})
+    return _project_json_or_404(links, key="links")
 
 
 @projects_bp.route("/projects/<project_id>/runs")
@@ -320,9 +330,7 @@ def projects_runs_list(project_id):
         limit=_parse_int(request.args.get("limit"), 50, minimum=1, maximum=200),
         offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
     )
-    if runs is None:
-        return jsonify({"error": "project not found"}), 404
-    return jsonify(runs)
+    return _project_json_or_404(runs)
 
 
 @projects_bp.route("/projects/<project_id>/entities")
@@ -340,9 +348,7 @@ def projects_entities_list(project_id):
         limit=_parse_int(request.args.get("limit"), 50, minimum=1, maximum=200),
         offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
     )
-    if entities is None:
-        return jsonify({"error": "project not found"}), 404
-    return jsonify(entities)
+    return _project_json_or_404(entities)
 
 
 @projects_bp.route("/projects/<project_id>/links", methods=["POST"])
@@ -358,7 +364,7 @@ def projects_links_create(project_id):
                 return _project_bulk_too_many_response()
             return _project_error_response(exc)
         if result is None:
-            return jsonify({"error": "project not found"}), 404
+            return _project_not_found()
         counts = result.get("counts", {})
         log.info("PROJECT_LINKS_BULK_ADDED", extra={
             "ip": get_client_ip(),
@@ -383,7 +389,7 @@ def projects_links_create(project_id):
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if link is None:
-        return jsonify({"error": "project not found"}), 404
+        return _project_not_found()
     log.info("PROJECT_LINK_ADDED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -415,7 +421,7 @@ def projects_run_entity_link_preview(project_id):
             return _project_bulk_too_many_response()
         return _project_error_response(exc)
     if preview is None:
-        return jsonify({"error": "project not found"}), 404
+        return _project_not_found()
     return jsonify({"ok": True, "preview": preview})
 
 
@@ -430,7 +436,7 @@ def projects_run_entity_unlink_preview(project_id):
             return _project_bulk_too_many_response()
         return _project_error_response(exc)
     if preview is None:
-        return jsonify({"error": "project not found"}), 404
+        return _project_not_found()
     return jsonify({"ok": True, "preview": preview})
 
 
@@ -447,7 +453,7 @@ def projects_links_delete(project_id):
                 return _project_bulk_too_many_response()
             return _project_error_response(exc)
         if result is None:
-            return jsonify({"error": "project not found"}), 404
+            return _project_not_found()
         counts = result.get("counts", {})
         log.info("PROJECT_LINKS_BULK_REMOVED", extra={
             "ip": get_client_ip(),
@@ -463,9 +469,9 @@ def projects_links_delete(project_id):
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if deleted is None:
-        return jsonify({"error": "project not found"}), 404
+        return _project_not_found()
     if not deleted:
-        return jsonify({"error": "project link not found"}), 404
+        return _project_not_found("project link not found")
     body: dict[str, object] = {"ok": True}
     unlinked_entity_count = 0
     if (
@@ -496,9 +502,7 @@ def projects_links_delete(project_id):
 def projects_targets_list(project_id):
     session_id = get_session_id()
     targets = list_project_targets(session_id, project_id)
-    if targets is None:
-        return jsonify({"error": "project not found"}), 404
-    return jsonify({"targets": targets})
+    return _project_json_or_404(targets, key="targets")
 
 
 @projects_bp.route("/projects/<project_id>/targets", methods=["POST"])
@@ -510,7 +514,7 @@ def projects_targets_create(project_id):
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if target is None:
-        return jsonify({"error": "project not found"}), 404
+        return _project_not_found()
     log.info("PROJECT_TARGET_ADDED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -529,7 +533,7 @@ def projects_targets_update(project_id, target_id):
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if target is None:
-        return jsonify({"error": "target not found"}), 404
+        return _project_not_found("target not found")
     log.info("PROJECT_TARGET_UPDATED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -548,9 +552,9 @@ def projects_targets_delete(project_id, target_id):
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if deleted is None:
-        return jsonify({"error": "project not found"}), 404
+        return _project_not_found()
     if not deleted:
-        return jsonify({"error": "target not found"}), 404
+        return _project_not_found("target not found")
     log.info("PROJECT_TARGET_REMOVED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -564,9 +568,7 @@ def projects_targets_delete(project_id, target_id):
 def projects_packages_list(project_id):
     session_id = get_session_id()
     packages = list_evidence_packages(session_id, project_id)
-    if packages is None:
-        return jsonify({"error": "project not found"}), 404
-    return jsonify({"packages": packages})
+    return _project_json_or_404(packages, key="packages")
 
 
 @projects_bp.route("/projects/<project_id>/packages", methods=["POST"])
@@ -578,7 +580,7 @@ def projects_packages_create(project_id):
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if package is None:
-        return jsonify({"error": "project not found"}), 404
+        return _project_not_found()
     log.info("EVIDENCE_PACKAGE_CREATED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -595,7 +597,7 @@ def projects_packages_get(project_id, package_id):
     session_id = get_session_id()
     package = get_evidence_package(session_id, project_id, package_id)
     if package is None:
-        return jsonify({"error": "package not found"}), 404
+        return _project_not_found("package not found")
     log.info("EVIDENCE_PACKAGE_VIEWED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -620,7 +622,7 @@ def projects_packages_download(project_id, package_id):
         raise
     if archive is None:
         app_metrics.record_evidence_package_build("not_found", time.perf_counter() - build_started)
-        return jsonify({"error": "package not found"}), 404
+        return _project_not_found("package not found")
     metrics = archive.get("metrics") if isinstance(archive.get("metrics"), dict) else {}
     app_metrics.record_evidence_package_build(
         "success",
@@ -671,7 +673,7 @@ def projects_packages_download(project_id, package_id):
 def projects_packages_download_job_create(project_id, package_id):
     session_id = get_session_id()
     if get_evidence_package(session_id, project_id, package_id) is None:
-        return jsonify({"error": "package not found"}), 404
+        return _project_not_found("package not found")
     job = start_evidence_package_archive_job(session_id, project_id, package_id, cfg=CFG)
     job_id = str(job.get("id") or "") if isinstance(job, dict) else ""
     log.info("EVIDENCE_PACKAGE_BUILD_JOB_STARTED", extra={
@@ -688,9 +690,7 @@ def projects_packages_download_job_create(project_id, package_id):
 def projects_packages_download_job_get(project_id, package_id, job_id):
     session_id = get_session_id()
     job = get_evidence_package_archive_job(session_id, project_id, package_id, job_id)
-    if job is None:
-        return jsonify({"error": "package build job not found"}), 404
-    return jsonify({"job": job})
+    return _project_json_or_404(job, key="job", error="package build job not found")
 
 
 @projects_bp.route("/projects/<project_id>/packages/<package_id>/download-jobs/<job_id>/download")
@@ -699,7 +699,7 @@ def projects_packages_download_job_file(project_id, package_id, job_id):
     session_id = get_session_id()
     archive = evidence_package_archive_for_job(session_id, project_id, package_id, job_id)
     if archive is None:
-        return jsonify({"error": "package build job not found"}), 404
+        return _project_not_found("package build job not found")
     status = archive.get("status")
     if status != "complete":
         status_code = 409 if status not in {"failed"} else 400
@@ -741,7 +741,7 @@ def projects_packages_delete(project_id, package_id):
     session_id = get_session_id()
     deleted = delete_evidence_package(session_id, project_id, package_id)
     if not deleted:
-        return jsonify({"error": "package not found"}), 404
+        return _project_not_found("package not found")
     log.info("EVIDENCE_PACKAGE_DELETED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -765,9 +765,7 @@ def projects_artifacts_list(project_id):
         limit=_parse_int(request.args.get("limit"), 50, minimum=1, maximum=200),
         offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
     )
-    if artifacts is None:
-        return jsonify({"error": "project not found"}), 404
-    return jsonify(artifacts)
+    return _project_json_or_404(artifacts)
 
 
 @projects_bp.route("/projects/<project_id>/artifacts/<artifact_id>/preview")
@@ -775,7 +773,7 @@ def projects_artifacts_preview(project_id, artifact_id):
     session_id = get_session_id()
     artifact = get_project_run_file_artifact(session_id, project_id, artifact_id)
     if artifact is None:
-        return jsonify({"error": "artifact not found"}), 404
+        return _project_not_found("artifact not found")
     if not artifact.get("file_available"):
         status = 403 if artifact.get("file_status") == "disabled" else 404
         return jsonify({
@@ -794,7 +792,7 @@ def projects_artifacts_download(project_id, artifact_id):
     session_id = get_session_id()
     artifact = get_project_run_file_artifact(session_id, project_id, artifact_id)
     if artifact is None:
-        return jsonify({"error": "artifact not found"}), 404
+        return _project_not_found("artifact not found")
     if not artifact.get("file_available"):
         status = 403 if artifact.get("file_status") == "disabled" else 404
         return jsonify({
@@ -847,9 +845,9 @@ def projects_findings_list(project_id):
         else:
             findings = list_project_findings(session_id, project_id, filters)
     except ProjectWorkspaceError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return _project_json_error(str(exc), 400)
     if findings is None:
-        return jsonify({"error": "project not found"}), 404
+        return _project_not_found()
     if paginated:
         return jsonify(findings)
     return jsonify({"findings": findings})
@@ -870,7 +868,7 @@ def projects_findings_bulk_review_update(project_id):
             return _project_bulk_too_many_response()
         return _project_error_response(exc)
     if result is None:
-        return jsonify({"error": "project not found"}), 404
+        return _project_not_found()
     log.info("PROJECT_FINDINGS_BULK_REVIEW_UPDATED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -897,7 +895,7 @@ def run_findings_list(run_id):
     else:
         findings = list_run_findings(session_id, run_id)
     if findings is None:
-        return jsonify({"error": "run not found"}), 404
+        return _project_not_found("run not found")
     if paginated:
         return jsonify(findings)
     return jsonify({"findings": findings})
@@ -912,7 +910,7 @@ def findings_review_update(finding_id):
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if finding is None:
-        return jsonify({"error": "finding not found"}), 404
+        return _project_not_found("finding not found")
     log.info("FINDING_REVIEW_UPDATED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -927,9 +925,9 @@ def entity_labels_list(entity_type, entity_id):
     try:
         labels = list_entity_labels(session_id, entity_type, entity_id)
     except ProjectWorkspaceError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return _project_json_error(str(exc), 400)
     if labels is None:
-        return jsonify({"error": "entity not found"}), 404
+        return _project_not_found("entity not found")
     return jsonify({"labels": labels})
 
 
@@ -942,7 +940,7 @@ def entity_labels_create(entity_type, entity_id):
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if label is None:
-        return jsonify({"error": "entity not found"}), 404
+        return _project_not_found("entity not found")
     log.info("ENTITY_LABEL_ADDED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -960,9 +958,9 @@ def entity_labels_delete(entity_type, entity_id):
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if deleted is None:
-        return jsonify({"error": "entity not found"}), 404
+        return _project_not_found("entity not found")
     if not deleted:
-        return jsonify({"error": "label not found"}), 404
+        return _project_not_found("label not found")
     log.info("ENTITY_LABEL_REMOVED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -977,10 +975,10 @@ def entity_note_get(entity_type, entity_id):
     session_id = get_session_id()
     try:
         if not entity_metadata_target_exists(session_id, entity_type, entity_id):
-            return jsonify({"error": "entity not found"}), 404
+            return _project_not_found("entity not found")
         note = get_entity_note(session_id, entity_type, entity_id)
     except ProjectWorkspaceError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return _project_json_error(str(exc), 400)
     return jsonify({"note": note})
 
 
@@ -993,7 +991,7 @@ def entity_note_update(entity_type, entity_id):
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if note is None:
-        return jsonify({"error": "entity not found"}), 404
+        return _project_not_found("entity not found")
     log.info("ENTITY_NOTE_SAVED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
@@ -1011,9 +1009,9 @@ def entity_note_delete(entity_type, entity_id):
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
     if deleted is None:
-        return jsonify({"error": "entity not found"}), 404
+        return _project_not_found("entity not found")
     if not deleted:
-        return jsonify({"error": "note not found"}), 404
+        return _project_not_found("note not found")
     log.info("ENTITY_NOTE_REMOVED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),

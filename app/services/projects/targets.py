@@ -38,6 +38,8 @@ from services.projects.utils import (
 from services.workspace.files import WorkspaceError, read_workspace_text_file
 
 
+PROJECT_TARGET_SOURCE_DETAIL_FLAG = "project_target"
+
 _URL_RE = re.compile(r"https?://[^\s<>'\"`]+", re.I)
 _DOMAIN_RE = re.compile(
     r"\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\b",
@@ -186,6 +188,38 @@ def _project_link_count(conn, project_id, entity_type):
     return int(row["count"] or 0) if row else 0
 
 
+def _target_source_detail(source_detail):
+    detail = dict(source_detail) if isinstance(source_detail, dict) else {}
+    detail[PROJECT_TARGET_SOURCE_DETAIL_FLAG] = True
+    return detail
+
+
+def _source_detail_marks_project_target(source_detail):
+    detail = dialect_for_backend(DB_BACKEND).decode_json_dict(source_detail)
+    if not isinstance(detail, dict):
+        return False
+    value = detail.get(PROJECT_TARGET_SOURCE_DETAIL_FLAG)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _project_target_link_count(conn, session_id, project_id):
+    rows = conn.execute(
+        "SELECT l.source, l.source_detail "
+        "FROM project_links l JOIN entities e ON e.id = l.entity_id "
+        "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' "
+        "AND e.session_id = ? AND e.type IN ('domain', 'ip', 'url')",
+        (project_id, session_id),
+    ).fetchall()
+    count = 0
+    for row in rows:
+        source = str(row["source"] or "")
+        if source in {"auto_command", "auto_input_file"} or _source_detail_marks_project_target(row["source_detail"]):
+            count += 1
+    return count
+
+
 def _ensure_project_entity_link(
     conn,
     session_id,
@@ -199,7 +233,8 @@ def _ensure_project_entity_link(
     source_detail=None,
 ):
     source = validate_project_link_source(source)
-    detail_json = dialect_for_backend(DB_BACKEND).json_param(source_detail if isinstance(source_detail, dict) else {})
+    source_detail = _target_source_detail(source_detail)
+    detail_json = dialect_for_backend(DB_BACKEND).json_param(source_detail)
     entity_id = upsert_entity(
         conn,
         session_id,
@@ -221,6 +256,12 @@ def _ensure_project_entity_link(
         return entity_id
     if not row and _quota_exceeded(
         _project_link_count(conn, project_id, "atlas_entity"),
+        "max_project_entities_per_project",
+        5000,
+    ):
+        _raise_quota("project entity quota exceeded for this project")
+    if not row and _quota_exceeded(
+        _project_target_link_count(conn, session_id, project_id),
         "max_project_targets_per_project",
         200,
     ):

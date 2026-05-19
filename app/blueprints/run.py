@@ -89,6 +89,7 @@ from services.projects.links import (
     link_active_project_run_entities,
     link_run_to_active_project,
 )
+from services.projects.contracts import ProjectWorkspaceQuotaExceeded
 from services.projects.targets import (
     record_project_target_discoveries,
 )
@@ -481,6 +482,16 @@ def _save_completed_run(
                         run_id,
                         command_project_target_inputs(command, cfg=CFG),
                     )
+                except ProjectWorkspaceQuotaExceeded as exc:
+                    recorded_targets = []
+                    active_project_link["target_discovery_skipped_reason"] = str(exc)
+                    log.warning("PROJECT_TARGET_DISCOVERY_SKIPPED", extra={
+                        "run_id": run_id,
+                        "session": get_log_session_id(session_id),
+                        "project_id": active_project_link["project_id"],
+                        "cmd": command,
+                        "reason": str(exc),
+                    })
                 except Exception:
                     recorded_targets = []
                     log.error("PROJECT_TARGET_DISCOVERY_ERROR", exc_info=True, extra={

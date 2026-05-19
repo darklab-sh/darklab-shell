@@ -38,6 +38,59 @@ from services.runs.kinds import RUN_KIND_EXTERNAL, is_project_linkable_run_kind,
 from services.workspace.files import WorkspaceError, resolve_workspace_path
 
 
+def _cfg_limit(key, default):
+    try:
+        value = int(_config.CFG.get(key, default))
+    except (TypeError, ValueError):
+        value = default
+    return max(0, value)
+
+
+def _quota_budget(count, key, default):
+    limit = _cfg_limit(key, default)
+    if limit <= 0:
+        return None
+    return max(0, limit - count)
+
+
+def _budget_available(*budgets):
+    return all(budget is None or budget > 0 for budget in budgets)
+
+
+def _consume_budget(budget):
+    return None if budget is None else max(0, budget - 1)
+
+
+def _project_link_count(conn, project_id, *, entity_type=None):
+    if entity_type:
+        row = conn.execute(
+            "SELECT COUNT(*) AS count FROM project_links WHERE project_id = ? AND entity_type = ?",
+            (project_id, entity_type),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT COUNT(*) AS count FROM project_links WHERE project_id = ?",
+            (project_id,),
+        ).fetchone()
+    return int(row["count"] or 0) if row else 0
+
+
+def _project_link_budgets(conn, project_id, entity_type):
+    link_budget = _quota_budget(
+        _project_link_count(conn, project_id),
+        "max_project_links_per_project",
+        5000,
+    )
+    entity_budget = None
+    if entity_type == "atlas_entity":
+        entity_budget = _quota_budget(
+            _project_link_count(conn, project_id, entity_type="atlas_entity"),
+            "max_project_entities_per_project",
+            5000,
+        )
+    return link_budget, entity_budget
+
+
 def link_run_to_active_project(conn, session_id, run_id):
     if not _project_auto_link_external_runs_enabled(conn, session_id):
         return None
@@ -496,13 +549,7 @@ def _link_project_run_entities_on_conn(conn, session_id, project_id, run_ids, so
     linkable_run_ids = [run_id for run_id in normalized_run_ids if run_id in run_maps["linkable"]]
     entity_ids = _run_entity_ids_for_project_link(conn, session_id, linkable_run_ids)
     stats = _project_run_entity_link_stats(conn, project_id, entity_ids)
-    count_row = conn.execute(
-        "SELECT COUNT(*) AS count FROM project_links WHERE project_id = ?",
-        [project_id],
-    ).fetchone()
-    current_count = int(count_row["count"] or 0) if count_row else 0
-    limit = int(_config.CFG.get("max_project_links_per_project", 5000) or 5000)
-    new_link_budget = max(0, limit - current_count)
+    new_link_budget, new_entity_budget = _project_link_budgets(conn, project_id, "atlas_entity")
     linked_rows = set()
     if entity_ids:
         placeholders = ",".join("?" for _ in entity_ids)
@@ -517,12 +564,13 @@ def _link_project_run_entities_on_conn(conn, session_id, project_id, run_ids, so
     for entity_id in entity_ids:
         if entity_id in linked_rows:
             continue
-        if new_link_budget <= 0:
+        if not _budget_available(new_link_budget, new_entity_budget):
             stats["rejected"] += 1
             continue
         _insert_project_link(conn, project_id, "atlas_entity", entity_id, source)
         stats["added"] += 1
-        new_link_budget -= 1
+        new_link_budget = _consume_budget(new_link_budget)
+        new_entity_budget = _consume_budget(new_entity_budget)
     stats["linkable"] = max(0, stats["available"] - stats["already_linked"])
     stats["run_count"] = len(normalized_run_ids)
     return stats
@@ -681,17 +729,18 @@ def link_project_entity(session_id, project_id, data):
         ).fetchone()
         if row:
             return _row_to_link(row)
-        count_row = conn.execute(
-            "SELECT COUNT(*) AS count FROM project_links "
-            "WHERE project_id = ?",
-            [project_id],
-        ).fetchone()
         if _quota_exceeded(
-            int(count_row["count"] or 0) if count_row else 0,
+            _project_link_count(conn, project_id),
             "max_project_links_per_project",
             5000,
         ):
             _raise_quota("project link quota exceeded for this project")
+        if entity_type == "atlas_entity" and _quota_exceeded(
+            _project_link_count(conn, project_id, entity_type="atlas_entity"),
+            "max_project_entities_per_project",
+            5000,
+        ):
+            _raise_quota("project entity quota exceeded for this project")
         for _ in range(10):
             link_id = _new_project_link_id()
             conn.execute(
@@ -787,14 +836,7 @@ def link_project_entities(session_id, project_id, data):
             [project_id, entity_type, *entity_ids],
         ).fetchall()
         linked_by_id = {str(row["entity_id"]): _row_to_link(row) for row in link_rows}
-        count_row = conn.execute(
-            "SELECT COUNT(*) AS count FROM project_links "
-            "WHERE project_id = ?",
-            [project_id],
-        ).fetchone()
-        current_count = int(count_row["count"] or 0) if count_row else 0
-        limit = int(_config.CFG.get("max_project_links_per_project", 5000) or 5000)
-        new_link_budget = max(0, limit - current_count)
+        new_link_budget, new_entity_budget = _project_link_budgets(conn, project_id, entity_type)
         links = []
         for entity_id in entity_ids:
             if entity_id not in entity_maps["owned"]:
@@ -806,12 +848,13 @@ def link_project_entities(session_id, project_id, data):
             if entity_id in linked_by_id:
                 results.append(_project_bulk_result(counts, entity_type, entity_id, "already_linked"))
                 continue
-            if new_link_budget <= 0:
+            if not _budget_available(new_link_budget, new_entity_budget):
                 results.append(_project_bulk_result(counts, entity_type, entity_id, "rejected", reason="policy_blocked"))
                 continue
             link = _insert_project_link(conn, project_id, entity_type, entity_id, source)
             links.append(link)
-            new_link_budget -= 1
+            new_link_budget = _consume_budget(new_link_budget)
+            new_entity_budget = _consume_budget(new_entity_budget)
             results.append(_project_bulk_result(counts, entity_type, entity_id, "added"))
         conn.commit()
     return {"ok": True, "counts": counts, "results": results, "links": links}

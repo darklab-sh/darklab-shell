@@ -17,6 +17,18 @@ from services.projects.contracts import (
 from services.projects.utils import trim_text
 
 
+PROJECT_TARGET_SOURCE_DETAIL_FLAG = "project_target"
+
+
+def _public_source_detail(source_detail):
+    detail = source_detail if isinstance(source_detail, dict) else {}
+    return {
+        key: value
+        for key, value in detail.items()
+        if key != PROJECT_TARGET_SOURCE_DETAIL_FLAG
+    }
+
+
 def row_to_project(row):
     if not row:
         return None
@@ -102,7 +114,7 @@ def row_to_target(row):
             "review_state": row["review_state"] if "review_state" in row.keys() else "confirmed",
             "status": row["review_state"] if "review_state" in row.keys() else "confirmed",
             "source": "user" if ("source" not in row.keys() or row["source"] == "manual") else row["source"],
-            "source_detail": source_detail,
+            "source_detail": _public_source_detail(source_detail),
             "seen_count": max(1, int(row["occurrence_count"] or 0)),
             "occurrence_count": int(row["occurrence_count"] or 0),
             "suppressed": bool(row["suppressed"]) if "suppressed" in row.keys() else False,
@@ -132,7 +144,7 @@ def row_to_target(row):
         "confidence": row["confidence"],
         "review_state": row["review_state"],
         "source": row["source"],
-        "source_detail": source_detail if isinstance(source_detail, dict) else {},
+        "source_detail": _public_source_detail(source_detail),
         "seen_count": int(row["seen_count"] or 0),
         "last_seen": row["last_seen"] or "",
         "dismissed_at": row["dismissed_at"] or "",

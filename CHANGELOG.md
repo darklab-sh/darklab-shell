@@ -34,6 +34,18 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Why:** interactive terminals need clearer behavior when a run is opened from another browser or worker, and operators need the same runtime visibility they have for normal brokered runs.
   - **What:** new-client PTY stream attaches publish a targeted displacement event to the previous owner tab, Redis snapshot payloads include their age for browser notices, PTY buffer/input/heartbeat/snapshot stream settings moved into config, and diagnostics now show active PTYs, completed duration averages/p95, input bytes, dropped bytes, and control queue depth.
   - **Tests:** added active-run ownership transition coverage, distributed PTY snapshot-age coverage, displaced-owner event coverage, `/diag` PTY metric coverage, and browser unit coverage for client-scoped PTY displacement.
+- **Project route boilerplate cleanup** — Project routes now share small JSON error and serialize-or-404 helpers for repeated route responses.
+  - **Why:** `projects.py` had many repeated `None` checks and hand-built `{"error": ...}` responses that made future route changes noisier than they needed to be.
+  - **What:** centralized common project error responses while preserving the existing status codes, response bodies, workspace-file errors, evidence package size errors, and route-specific not-found messages.
+  - **Tests:** reran focused Project route coverage, Python compile, Ruff, and whitespace checks.
+- **Expected run-finalization and shutdown noise no longer logs as server errors** — active-project target quota skips and Redis stream disconnects during shutdown now use quieter, intentional log paths.
+  - **Why:** hitting a project target quota during auto-discovery and losing a Redis `XREAD` while Gunicorn is terminating are expected operational states, not application crashes.
+  - **What:** target discovery quota skips now log `PROJECT_TARGET_DISCOVERY_SKIPPED` as a warning without traceback, while brokered SSE streams catch Redis connection/timeout closures and end cleanly after recording `RUN_BROKER_STREAM_DISCONNECTED`.
+  - **Tests:** added backend regressions for quota-skip logging and Redis stream disconnect handling.
+- **Project Atlas entity quota split** — Project target limits now apply to target-created links instead of every linked Atlas entity, and bulk Atlas entity links have their own configurable project cap.
+  - **Why:** adding a high-volume run to a project can legitimately attach hundreds or thousands of Atlas entities, and that should not make later command target discovery look like a target quota failure.
+  - **What:** added `max_project_entities_per_project`, kept `max_project_links_per_project` as the outer project-link safety cap, marked target-created links for target quota accounting, and preserved `max_project_targets_per_project` for manual/discovered project targets.
+  - **Tests:** added Project route coverage for target quota checks with pre-existing bulk-linked entities and for bulk Atlas entity linking under the entity cap.
 - **Project workspace navigation polish** — Project list rows now show run, finding, artifact, and package scale at a glance, and Project finding tabs can surface prefetched new/high signal counts before the Findings tab is opened.
   - **Why:** operators should be able to pick the right project and spot triage-heavy work without paying the cost of opening every project section first.
   - **What:** added `project rename <name-or-id> <new-name>` for terminal-native renames, carried lightweight finding review/severity summaries in project list and summary payloads, and updated the Projects modal list/tab labels to use that prefetched state.

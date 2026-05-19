@@ -222,6 +222,7 @@ def load_config(conf_dir=None):
         "workspace_inactivity_ttl_hours": 1,
         "max_projects_per_session":   100,
         "max_project_links_per_project": 5000,
+        "max_project_entities_per_project": 5000,
         "max_project_targets_per_project": 200,
         "max_evidence_packages_per_project": 25,
         "max_entity_labels_per_session": 5000,

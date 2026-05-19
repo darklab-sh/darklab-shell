@@ -184,7 +184,8 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `workspace_inactivity_ttl_hours` | `1` | Server-side only. Inactive session workspace cleanup threshold in hours; `0` disables age-based cleanup. Workspace activity touches the hashed session directory, and periodic cleanup removes expired `sess_*` directories rather than aging out individual files |
 | `max_projects_per_session` | `100` | Server-side only. Maximum project workspace records one session can create |
 | `max_project_links_per_project` | `5000` | Server-side only. Maximum linked source records per project |
-| `max_project_targets_per_project` | `200` | Server-side only. Maximum targets per project |
+| `max_project_entities_per_project` | `5000` | Server-side only. Maximum Atlas entities linked into one project |
+| `max_project_targets_per_project` | `200` | Server-side only. Maximum manual or discovered project targets per project, separate from bulk-linked Atlas entities |
 | `max_evidence_packages_per_project` | `25` | Server-side only. Maximum draft evidence package manifests per project |
 | `max_entity_labels_per_session` | `5000` | Server-side only. Maximum entity labels one session can create |
 | `max_entity_labels_per_entity` | `20` | Server-side only. Maximum labels attached to a single supported entity |

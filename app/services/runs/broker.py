@@ -11,6 +11,9 @@ import threading
 import time
 from typing import Any, cast
 
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
+
 from config import CFG
 from core.process import redis_client
 
@@ -19,6 +22,7 @@ log = logging.getLogger("shell")
 TERMINAL_EVENT_TYPES = {"exit", "error"}
 REPLAY_TRIM_NOTICE = "[live replay starts here; earlier output was trimmed due to size]"
 LINE_BOUNDED_REPLAY_TYPES = {"output", "notice"}
+REDIS_STREAM_DISCONNECT_ERRORS = (RedisConnectionError, RedisTimeoutError)
 
 
 def _stream_key(run_id: str) -> str:
@@ -511,5 +515,11 @@ def stream_run_events(run_id: str, after_id: str = "0-0") -> Iterator[str]:
                 yield event.as_sse()
                 if event.payload.get("type") in TERMINAL_EVENT_TYPES:
                     return
+    except REDIS_STREAM_DISCONNECT_ERRORS as exc:
+        log.info("RUN_BROKER_STREAM_DISCONNECTED", extra={
+            "run_id": run_id,
+            "reason": str(exc),
+        })
+        return
     finally:
         app_metrics.record_broker_subscriber_delta(-1)

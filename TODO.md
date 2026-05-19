@@ -50,7 +50,7 @@ No known issues are currently tracked.
 
 ## Technical Debt
 
-- **Project route boilerplate** — reduce repeated `projects.py` route boilerplate with small serialization/404 helpers.
+No technical debt is currently tracked.
 
 ---
 
