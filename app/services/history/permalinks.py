@@ -165,6 +165,8 @@ def _normalize_permalink_run_meta(meta: dict | None) -> dict | None:
         "lines": meta.get("lines") or None,
         "artifactCount": meta.get("artifact_count") or 0,
         "findingCount": meta.get("finding_count") or 0,
+        "atlasEntityCount": meta.get("atlas_entity_count") or 0,
+        "atlasFindingCount": meta.get("atlas_finding_count") or 0,
         "labelCount": meta.get("label_count") or 0,
         "noteCount": meta.get("note_count") or 0,
         "version": meta.get("version") or None,
@@ -194,6 +196,14 @@ def _build_permalink_run_meta_items(run_meta: dict | None) -> list[dict]:
     if isinstance(finding_count, int) and finding_count > 0:
         label = "finding" if finding_count == 1 else "findings"
         items.append({"kind": "item", "text": f"{finding_count} {label}"})
+    atlas_entity_count = run_meta.get("atlasEntityCount")
+    if isinstance(atlas_entity_count, int) and atlas_entity_count > 0:
+        label = "Atlas entity" if atlas_entity_count == 1 else "Atlas entities"
+        items.append({"kind": "item", "text": f"{atlas_entity_count} {label}"})
+    atlas_finding_count = run_meta.get("atlasFindingCount")
+    if isinstance(atlas_finding_count, int) and atlas_finding_count > 0:
+        label = "Atlas finding" if atlas_finding_count == 1 else "Atlas findings"
+        items.append({"kind": "item", "text": f"{atlas_finding_count} {label}"})
     label_count = run_meta.get("labelCount")
     if isinstance(label_count, int) and label_count > 0:
         label = "label" if label_count == 1 else "labels"

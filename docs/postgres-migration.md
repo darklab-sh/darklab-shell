@@ -91,9 +91,11 @@ python scripts/migrate_sqlite_to_postgres.py \
   --validate
 ```
 
-Use `--schema <name>` when you want to test the migration in an isolated Postgres schema before touching `public`. Run the app migrations against that schema first; the helper creates the schema if needed, checks `schema_migrations`, and refuses to copy into schemas that are missing the expected app migration versions. For a direct host run, that usually looks like:
+Use `--schema <name>` when you want to test the migration in an isolated Postgres schema before touching `public`. Create the schema, then run the app migrations against that schema first. The helper checks `schema_migrations` in the selected schema and refuses to copy into schemas that are missing the expected app migration versions. For a direct host run, that usually looks like:
 
 ```bash
+psql "$DATABASE_URL" -c 'CREATE SCHEMA IF NOT EXISTS darklab_migration_test'
+
 PGOPTIONS="-c search_path=darklab_migration_test" \
   PYTHONPATH=app DATABASE_BACKEND=postgres DATABASE_URL="$DATABASE_URL" \
   python -c "from core.database import db_init; db_init()"

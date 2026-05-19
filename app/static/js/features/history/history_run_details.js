@@ -299,7 +299,7 @@ function _historyRunEntityRow(entity) {
   }
   const row = document.createElement('button');
   row.type = 'button';
-  row.className = 'history-run-list-item history-run-entity-row';
+  row.className = 'chrome-row chrome-row-clickable history-run-entity-row';
   row.dataset.historyRunEntityId = String(entity && entity.id || '');
   const title = document.createElement('div');
   title.className = 'history-run-list-title';

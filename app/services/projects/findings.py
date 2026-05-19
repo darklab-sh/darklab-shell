@@ -7,9 +7,11 @@ from __future__ import annotations
 import hashlib
 import re
 import shlex
+from typing import Any
 
 from core.database import db_connect
 from core.output_signals import strip_ansi_codes
+from services.atlas.recalculation import recalculate_atlas_findings
 from services.atlas.materializer import (
     canonicalize_entity_record,
     upsert_entity,
@@ -29,56 +31,47 @@ from services.projects.utils import (
     normalize_page_window as _normalize_page_window,
     now as _now,
     page_payload as _page_payload,
+    trim_text as _trim_text,
 )
 from services.runs.kinds import is_project_linkable_run_kind, normalize_run_kind
-
-
-def _trim_text(value, limit):
-    return str(value or "").strip()[:limit]
 
 
 def row_to_finding(row):
     if not row:
         return None
-    if "last_run_id" in row.keys():
-        run_id = row["run_id"] if "run_id" in row.keys() else row["last_run_id"]
-        line_number = row["line_number"] if "line_number" in row.keys() else None
-        snippet = row["snippet"] if "snippet" in row.keys() else row["raw_line"]
-        target_id = row["entity_id"] or (row["target_id"] if "target_id" in row.keys() else "")
-        return {
-            "id": row["id"],
-            "session_id": row["session_id"],
-            "run_id": run_id or row["last_run_id"],
-            "target_id": target_id,
-            "entity_id": target_id,
-            "subject_key": row["subject_key"] or "",
-            "scope": row["kind"] or "finding",
-            "kind": row["kind"] or "finding",
-            "title": row["title"],
-            "raw_line": snippet or row["raw_line"],
-            "line_number": line_number,
-            "severity": row["severity"],
-            "fingerprint": row["fingerprint"],
-            "review_state": row["status"],
-            "status": row["status"],
-            "first_seen_at": row["first_seen_at"],
-            "last_seen_at": row["last_seen_at"],
-            "occurrence_count": int(row["occurrence_count"] or 0),
-            "created": row["created"],
-        }
+    row_keys = set(row.keys())
+
+    def value(key: str, default: Any = "") -> Any:
+        if key not in row_keys:
+            return default
+        item = row[key]
+        return default if item is None else item
+
+    run_id = value("occurrence_run_id") or value("run_id") or value("last_run_id") or value("first_run_id")
+    target_id = value("entity_id") or value("target_id")
+    kind = value("kind") or value("scope") or "finding"
+    status = value("status") or value("review_state") or "new"
+    raw_line = value("snippet") or value("raw_line")
     return {
-        "id": row["id"],
-        "session_id": row["session_id"],
-        "run_id": row["run_id"],
-        "target_id": row["target_id"],
-        "scope": row["scope"],
-        "title": row["title"],
-        "raw_line": row["raw_line"],
-        "line_number": row["line_number"],
-        "severity": row["severity"],
-        "fingerprint": row["fingerprint"],
-        "review_state": row["review_state"],
-        "created": row["created"],
+        "id": value("id"),
+        "session_id": value("session_id"),
+        "run_id": run_id,
+        "target_id": target_id,
+        "entity_id": target_id,
+        "subject_key": value("subject_key"),
+        "scope": value("scope") or kind,
+        "kind": kind,
+        "title": value("title"),
+        "raw_line": raw_line,
+        "line_number": value("line_number", None),
+        "severity": value("severity"),
+        "fingerprint": value("fingerprint"),
+        "review_state": status,
+        "status": status,
+        "first_seen_at": value("first_seen_at"),
+        "last_seen_at": value("last_seen_at"),
+        "occurrence_count": int(value("occurrence_count", 0) or 0),
+        "created": value("created"),
     }
 
 
@@ -904,32 +897,13 @@ def record_run_findings(conn, session_id, run_id, entries):
             "ON CONFLICT(finding_id, run_id, line_number) DO NOTHING",
             (finding_id, run_id, line_index, raw_line, created),
         )
-        occurrence_row = conn.execute(
-            "SELECT COUNT(*) AS count, MIN(seen_at) AS first_seen_at, MAX(seen_at) AS last_seen_at "
-            "FROM findings_occurrences WHERE finding_id = ?",
-            (finding_id,),
-        ).fetchone()
-        last_run = conn.execute(
-            "SELECT run_id FROM findings_occurrences WHERE finding_id = ? ORDER BY seen_at DESC, run_id DESC LIMIT 1",
-            (finding_id,),
-        ).fetchone()
-        conn.execute(
-            "UPDATE findings SET occurrence_count = ?, first_seen_at = ?, last_seen_at = ?, last_run_id = ? "
-            "WHERE id = ?",
-            (
-                int(occurrence_row["count"] or 0) if occurrence_row else 0,
-                occurrence_row["first_seen_at"] if occurrence_row else created,
-                occurrence_row["last_seen_at"] if occurrence_row else created,
-                last_run["run_id"] if last_run else run_id,
-                finding_id,
-            ),
-        )
+        recalculate_atlas_findings(conn, [finding_id])
         full_row = conn.execute(
             "SELECT f.id, f.session_id, COALESCE(f.entity_id, f.target_id) AS entity_id, "
             "f.subject_key, f.signature_hash, f.severity, "
             "f.kind, f.tool_root, f.first_run_id, f.last_run_id, f.first_seen_at, f.last_seen_at, "
             "f.occurrence_count, f.status, f.fingerprint, f.title, f.raw_line, f.created, "
-            "fo.run_id, fo.line_number, fo.snippet "
+            "fo.run_id AS occurrence_run_id, fo.line_number, fo.snippet "
             "FROM findings f JOIN findings_occurrences fo ON fo.finding_id = f.id "
             "WHERE f.id = ? AND fo.run_id = ? AND fo.line_number = ?",
             (finding_id, run_id, line_index),
@@ -939,33 +913,5 @@ def record_run_findings(conn, session_id, run_id, entries):
             finding["target_ids"] = [entity_id] if entity_id else []
             recorded.append(finding)
     if existing_finding_ids:
-        for finding_id in existing_finding_ids:
-            row = conn.execute(
-                "SELECT COUNT(*) AS count, MIN(seen_at) AS first_seen_at, MAX(seen_at) AS last_seen_at "
-                "FROM findings_occurrences WHERE finding_id = ?",
-                (finding_id,),
-            ).fetchone()
-            count = int(row["count"] or 0) if row else 0
-            if count <= 0:
-                conn.execute(
-                    "UPDATE findings SET occurrence_count = 0, run_id = '', last_run_id = '', "
-                    "first_seen_at = '', last_seen_at = '', line_number = NULL WHERE id = ?",
-                    (finding_id,),
-                )
-                continue
-            last_run = conn.execute(
-                "SELECT run_id FROM findings_occurrences WHERE finding_id = ? ORDER BY seen_at DESC, run_id DESC LIMIT 1",
-                (finding_id,),
-            ).fetchone()
-            conn.execute(
-                "UPDATE findings SET occurrence_count = ?, first_seen_at = ?, last_seen_at = ?, last_run_id = ? "
-                "WHERE id = ?",
-                (
-                    count,
-                    row["first_seen_at"] or "",
-                    row["last_seen_at"] or "",
-                    last_run["run_id"] if last_run else "",
-                    finding_id,
-                ),
-            )
+        recalculate_atlas_findings(conn, existing_finding_ids)
     return recorded

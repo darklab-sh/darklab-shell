@@ -89,6 +89,9 @@ function createController(overrides = {}) {
     offset: 0,
     limit: 50,
     total: 1,
+    savedViews: [],
+    selectedSavedViewId: '',
+    savedViewsLoading: false,
     ...overrides.state,
   }
   const controller = {
@@ -197,6 +200,13 @@ function createController(overrides = {}) {
       state.runLabel = String(runLabel || '')
       renderer?.(state)
     }),
+    applySavedView: vi.fn((viewId) => {
+      state.selectedSavedViewId = String(viewId || '')
+      renderer?.(state)
+    }),
+    saveCurrentView: vi.fn(),
+    updateCurrentSavedView: vi.fn(),
+    deleteCurrentSavedView: vi.fn(),
     openSourceRun: vi.fn(),
     updateFindingReviewState: vi.fn(),
     openEntityFromFinding: vi.fn((finding) => {
@@ -299,6 +309,38 @@ describe('Mobile Atlas controller', () => {
     document.querySelector('.atlas-mobile-orphan-chip')?.click()
     expect(state.orphanFilter).toBe('hide')
     expect(controller.refreshAtlas).toHaveBeenCalledWith({ resetOffset: true })
+  })
+
+  it('disables saved-view update and delete until a saved view is selected', () => {
+    const { controller, render, state } = createController({
+      state: {
+        savedViews: [{ id: 'view-1', name: 'Orphans' }],
+      },
+    })
+    loadMobileAtlas(controller)
+
+    render()
+    document.querySelector('.atlas-mobile-filters-toggle')?.click()
+    const select = document.querySelector('.atlas-mobile-saved-view-select')
+    const update = document.querySelector('.atlas-mobile-saved-view-update')
+    const del = document.querySelector('.atlas-mobile-saved-view-delete')
+
+    expect(update.disabled).toBe(true)
+    expect(del.disabled).toBe(true)
+
+    select.value = 'view-1'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+
+    expect(controller.applySavedView).toHaveBeenCalledWith('view-1')
+    expect(state.selectedSavedViewId).toBe('view-1')
+    expect(update.disabled).toBe(false)
+    expect(del.disabled).toBe(false)
+
+    select.value = ''
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+
+    expect(update.disabled).toBe(true)
+    expect(del.disabled).toBe(true)
   })
 
   it('enters select mode from the action sheet and uses row taps for bulk selection', () => {

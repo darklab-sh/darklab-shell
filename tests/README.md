@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,914
+- behavior tests: 2,919
 - docs/inventory meta-tests: 32
-- `pytest`: 1516 (1484 behavior + 32 meta)
-- `vitest`: 1178
+- `pytest`: 1519 (1487 behavior + 32 meta)
+- `vitest`: 1180
 - `playwright`: 252
-- total: 2,946
+- total: 2,951
 
 This document is organized in two parts:
 
@@ -404,6 +404,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseBackend.test_unknown_backend_is_rejected_with_supported_values` | Verifies unsupported database backend names are rejected with the accepted backend list. |
 | `TestDatabaseBackend.test_database_dialect_exposes_shared_sql_and_json_helpers` | Verifies shared dialect helpers for JSON decoding, insert-ignore clauses, case-insensitive ordering, distinct string aggregation, write transactions, and command-root extraction. |
 | `TestPostgresMigrations.test_baseline_migration_covers_current_app_schema` | Verifies the first app-owned Postgres migration covers the current app tables, JSONB columns, booleans, bytea secrets, and intentionally excludes SQLite FTS internals. |
+| `TestPostgresMigrations.test_sqlite_schema_matches_postgres_migration_core_shape` | Verifies SQLite init and the Postgres migration registry keep core table columns, shared index names, and Atlas finding triggers aligned. |
 | `TestPostgresMigrations.test_postgres_search_migration_adds_trigram_indexes` | Verifies the Postgres run-search migration creates `pg_trgm` and trigram indexes for command and output search. |
 | `TestPostgresMigrations.test_migration_runner_serializes_with_advisory_lock_and_records_versions` | Verifies the Postgres migration runner takes a transaction-scoped advisory lock and records applied migration versions. |
 | `TestPostgresMigrations.test_database_init_runs_postgres_migrations_without_sqlite_bootstrap` | Verifies Postgres startup runs migrations without entering the SQLite bootstrap path. |
@@ -1008,6 +1009,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `test_client_side_run_route_writes_to_postgres` | Verifies the browser-owned client-side run persistence route writes run rows through Postgres. |
 | `test_run_output_artifact_upsert_writes_to_postgres` | Verifies full-output artifact metadata uses a Postgres-safe conflict update. |
 | `test_completed_external_run_persistence_writes_full_postgres_graph` | Verifies completed external runs persist run rows, full-output artifacts, workspace artifacts, active project links, Atlas entities, findings, and History readback through Postgres. |
+| `test_completed_run_finalize_rolls_back_optional_postgres_failure` | Verifies optional Postgres run-finalization failures roll back their partial writes without losing the completed run row. |
 | `test_share_routes_roundtrip_snapshot_on_postgres` | Verifies snapshot share create/read/delete routes round-trip through Postgres. |
 | `test_session_metadata_routes_write_to_postgres` | Verifies session preferences, recent values, starred commands, and user workflows write through Postgres using JSONB-safe parameters and native conflict handling. |
 | `test_session_token_lifecycle_and_migration_routes_use_postgres` | Verifies session token generation, lookup, verification, revocation, guarded session migration, and migrated session data through Postgres. |
@@ -1085,6 +1087,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestSecretsRoutes.test_session_secrets_reject_invalid_name` | Verifies session secret routes reject invalid secret names with the expected error shape. |
 | `TestSecretsRoutes.test_session_secrets_require_valid_session_id` | Verifies session secret routes reject missing or invalid session headers instead of using a shared empty namespace. |
 | `TestSecretsRoutes.test_session_secrets_reject_duplicate_consumer_env_binding` | Verifies the routes return a conflict when another secret already owns the requested consumer env binding. |
+| `TestProjectRoutes.test_project_host_target_ip_is_stored_as_ip_entity` | Verifies manual host targets that contain an IP literal are stored as IP Atlas entities instead of domain entities. |
 | `TestProjectRoutes.test_builtin_runs_do_not_record_findings_even_with_legacy_project_link` | Verifies built-in runs stay out of persisted findings even if old data links them to a project. |
 | `TestProjectRoutes.test_project_write_routes_are_rate_limited` | Verifies project workspace write routes are wrapped by the shared limiter. |
 | `TestProjectRoutes.test_create_list_get_update_archive_and_delete_project` | Verifies the current-session project CRUD and archive filtering route flow. |
@@ -1953,6 +1956,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | --- | --- |
 | `renders mobile tabs and drills into entity detail with Back preserving the list` | Verifies that Mobile Atlas renders its tab row and entity list, drills into entity detail, and returns to the list with Back. |
 | `syncs filter disclosure controls and clears selected rows before refreshing` | Verifies that Mobile Atlas filter controls update shared state, clear selected rows, refresh the list, and render the orphan-only clear chip. |
+| `disables saved-view update and delete until a saved view is selected` | Verifies that Mobile Atlas keeps saved-view update/delete actions disabled until a saved view is selected. |
 | `enters select mode from the action sheet and uses row taps for bulk selection` | Verifies that the Mobile Atlas overflow action sheet enters select mode, shows the sticky bulk bar, and turns row taps into selection toggles. |
 | `opens finding detail and keeps review updates in the sticky footer` | Verifies that Mobile Atlas opens finding detail and routes the footer review-state picker through the shared finding update handler. |
 | `honors forceView detail requests once the selected entity is resolved` | Verifies that Mobile Atlas opens directly to entity detail when a caller requests detail view and the selected entity is already resolved. |
@@ -2140,6 +2144,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `centers restored finding highlights in the terminal output container` | Verifies that restored finding highlights are centered in the terminal output container. |
 | `refreshHistoryPanel permalink action falls back to execCommand when clipboard writes reject` | Verifies the history drawer permalink action falls back to execCommand when clipboard writeText rejects. |
 | `clicking a history entry row opens run details without closing the panel` | Verifies row click opens the Run Details modal while keeping the History drawer in context, leaving the composer untouched, and passing the run context to Atlas. |
+| `uses shared row primitives for fallback Run Details entity rows` | Verifies Run Details fallback entity rows use the shared clickable row primitives when the Atlas row renderer is unavailable. |
 | `shows remove from project in Run Details and can also unlink same-run entities` | Verifies Run Details replaces project add actions with remove for linked runs and can include same-run, non-curated Atlas entity unlinking. |
 | `uses Current Project attachment state for Run Details project actions when link metadata is missing` | Verifies Run Details still shows remove-from-project actions when an opened run lacks embedded project-link metadata but the Current Project card confirms the active project link. |
 | `loads structured run findings into the run details findings tab` | Verifies the Run Details modal consumes `/entities/run/<id>/findings` and renders structured findings in the Findings tab. |

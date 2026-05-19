@@ -292,11 +292,13 @@
     updateView.type = 'button';
     updateView.className = 'btn btn-ghost btn-compact atlas-mobile-saved-view-update';
     updateView.textContent = 'Update';
+    updateView.disabled = true;
     updateView.addEventListener('click', () => controller.updateCurrentSavedView());
     const deleteView = document.createElement('button');
     deleteView.type = 'button';
     deleteView.className = 'btn btn-ghost btn-compact atlas-mobile-saved-view-delete';
     deleteView.textContent = 'Delete';
+    deleteView.disabled = true;
     deleteView.addEventListener('click', () => controller.deleteCurrentSavedView());
     savedViewRow.append(savedViewSelect, saveView, updateView, deleteView);
 

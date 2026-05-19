@@ -255,11 +255,9 @@ function loadShellChrome({
           <form id="project-target-create-form">
             <select id="project-target-type">
               <option value="domain">domain</option>
+              <option value="url">url</option>
               <option value="host">host</option>
               <option value="ip">ip</option>
-              <option value="cidr">cidr</option>
-              <option value="url">url</option>
-              <option value="port_set">port set</option>
             </select>
             <input id="project-target-value">
             <small id="project-target-value-help"></small>
@@ -1616,10 +1614,10 @@ describe('shell chrome project workspace', () => {
     expect(syncAppSelect).toHaveBeenCalledWith(typeSelect)
     expect(valueInput.placeholder).toBe('host.example.com')
     expect(valueHelp.textContent).toContain('192.0.2.10')
-    typeSelect.value = 'port_set'
+    typeSelect.value = 'url'
     typeSelect.dispatchEvent(new Event('change', { bubbles: true }))
-    expect(valueInput.placeholder).toBe('80,443,8000-8080')
-    expect(valueHelp.textContent).toContain('8000-8080')
+    expect(valueInput.placeholder).toBe('https://target.example.com/path')
+    expect(valueHelp.textContent).toContain('https://darklab.sh')
     typeSelect.value = 'host'
     typeSelect.dispatchEvent(new Event('change', { bubbles: true }))
     valueInput.value = 'www.darklab.sh'
@@ -1696,15 +1694,15 @@ describe('shell chrome project workspace', () => {
     expect(valueInput.getAttribute('aria-invalid')).toBe('false')
     expect(valueError.classList.contains('u-hidden')).toBe(true)
 
-    typeSelect.value = 'port_set'
+    typeSelect.value = 'ip'
     typeSelect.dispatchEvent(new Event('change', { bubbles: true }))
-    valueInput.value = '80,70000'
+    valueInput.value = '999.0.0.1'
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await tick()
-    expect(valueError.textContent).toContain('Use ports or ranges')
+    expect(valueError.textContent).toContain('Use a single IPv4 or IPv6 address')
     expect(apiFetch.mock.calls.some(([url, options]) => url === '/projects/project-1/targets' && options?.method === 'POST')).toBe(false)
 
-    valueInput.value = '80,443,8000-8080'
+    valueInput.value = '192.0.2.10'
     notesInput.value = 'Scope notes'
     notesInput.dispatchEvent(new Event('input', { bubbles: true }))
     expect(notesInput.getAttribute('aria-invalid')).toBe('false')
@@ -1715,8 +1713,8 @@ describe('shell chrome project workspace', () => {
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({
-        type: 'port_set',
-        value: '80,443,8000-8080',
+        type: 'ip',
+        value: '192.0.2.10',
       }),
     }))
     expect(apiFetch).toHaveBeenCalledWith('/entities/target/target-1/note', expect.objectContaining({
@@ -2154,8 +2152,8 @@ describe('shell chrome project workspace', () => {
       },
       {
         id: 'target-3',
-        type: 'port_set',
-        value: '80,443',
+        type: 'ip',
+        value: '107.178.109.44',
       },
     ]
     let projectEntities = [
@@ -3051,7 +3049,7 @@ describe('shell chrome project workspace', () => {
     portTargetFilter.checked = true
     portTargetFilter.dispatchEvent(new Event('change', { bubbles: true }))
     await tick()
-    expect(document.querySelector('.project-target-filter-chip')?.textContent).toContain('target: port_set: 80,443')
+    expect(document.querySelector('.project-target-filter-chip')?.textContent).toContain('target: ip: 107.178.109.44')
     expect(document.getElementById('project-explorer-body').textContent).toContain('web port responded')
     expect(document.getElementById('project-explorer-body').textContent).not.toContain('api host responded')
 

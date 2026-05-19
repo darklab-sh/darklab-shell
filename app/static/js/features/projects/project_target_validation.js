@@ -3,11 +3,9 @@
 window.ProjectTargetValidation = (() => {
   const TARGET_TYPES = [
     { value: 'domain', label: 'domain' },
+    { value: 'url', label: 'url' },
     { value: 'host', label: 'host' },
     { value: 'ip', label: 'ip' },
-    { value: 'cidr', label: 'cidr' },
-    { value: 'url', label: 'url' },
-    { value: 'port_set', label: 'port set' },
   ];
   const TARGET_NOTES_MAX_LENGTH = 20000;
   const DOMAIN_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
@@ -33,16 +31,6 @@ window.ProjectTargetValidation = (() => {
       placeholder: '192.0.2.10',
       help: 'Single IPv4 or IPv6 address. Examples: 192.0.2.10, 2001:db8::10',
       error: 'Use a single IPv4 or IPv6 address, such as 192.0.2.10 or 2001:db8::10.',
-    },
-    cidr: {
-      placeholder: '192.0.2.0/24',
-      help: 'CIDR network range. Examples: 192.0.2.0/24, 2001:db8::/32',
-      error: 'Use a CIDR network range, such as 192.0.2.0/24 or 2001:db8::/32.',
-    },
-    port_set: {
-      placeholder: '80,443,8000-8080',
-      help: 'Ports or ranges separated by commas. Examples: 80,443 or 8000-8080',
-      error: 'Use ports or ranges separated by commas, such as 80,443 or 8000-8080.',
     },
   };
 
@@ -82,30 +70,6 @@ window.ProjectTargetValidation = (() => {
     }
   }
 
-  function isValidCidr(value) {
-    const candidate = String(value || '').trim();
-    const parts = candidate.split('/');
-    if (parts.length !== 2 || !parts[0] || !/^\d+$/.test(parts[1])) return false;
-    const prefix = Number(parts[1]);
-    if (!isValidIpAddress(parts[0])) return false;
-    return parts[0].includes(':') ? prefix >= 0 && prefix <= 128 : prefix >= 0 && prefix <= 32;
-  }
-
-  function isValidPortSet(value) {
-    const parts = String(value || '').trim().split(',');
-    if (!parts.length) return false;
-    return parts.every(part => {
-      const match = part.trim().match(/^(\d{1,5})(?:\s*-\s*(\d{1,5}))?$/);
-      if (!match) return false;
-      const start = Number(match[1]);
-      const end = Number(match[2] || match[1]);
-      return Number.isInteger(start) && Number.isInteger(end)
-        && start >= 1 && start <= 65535
-        && end >= 1 && end <= 65535
-        && start <= end;
-    });
-  }
-
   function helpForType(type) {
     const normalized = String(type || 'domain').trim();
     return TARGET_VALUE_HELP[normalized] || TARGET_VALUE_HELP.domain;
@@ -120,8 +84,6 @@ window.ProjectTargetValidation = (() => {
       url: isValidUrl,
       host: isValidHost,
       ip: isValidIpAddress,
-      cidr: isValidCidr,
-      port_set: isValidPortSet,
     };
     const validator = validators[normalized] || validators.domain;
     if (validator(candidate)) return '';

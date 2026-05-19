@@ -10,6 +10,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Styled run permalinks include Atlas counts** — owner-view run permalink pages now show Atlas entity and Atlas finding counts in the same header metadata row as artifacts, findings, labels, and notes.
+  - **Why:** History rows, Run Details, and Projects already expose a run's Atlas footprint, so private styled run links should carry the same passive context.
+  - **Tests:** updated run permalink route coverage for owner-visible Atlas metadata.
 - **Redacted evidence package artifact derivatives** — redacted packages can now include selected safe text/JSON artifacts as sanitized derivative files instead of dropping artifact selections entirely.
   - **Why:** operators should be able to share text evidence from workspace artifacts without accidentally bundling raw files in a redacted handoff.
   - **What:** raw artifacts remain limited to raw packages, redacted packages write derivative files under `artifacts-redacted/`, unsafe or unavailable artifacts surface per-item warnings in the package manifest and wizard preview, and artifact path metadata stays redacted in the exported archive.
@@ -46,6 +49,10 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Why:** adding a high-volume run to a project can legitimately attach hundreds or thousands of Atlas entities, and that should not make later command target discovery look like a target quota failure.
   - **What:** added `max_project_entities_per_project`, kept `max_project_links_per_project` as the outer project-link safety cap, marked target-created links for target quota accounting, and preserved `max_project_targets_per_project` for manual/discovered project targets.
   - **Tests:** added Project route coverage for target quota checks with pre-existing bulk-linked entities and for bulk Atlas entity linking under the entity cap.
+- **Project target editor type alignment** — the Project target editor now offers only target types the backend accepts.
+  - **Why:** CIDR and port-set command metadata is still useful for autocomplete, but exposing those values in the Project target editor led to valid-looking submissions that the server rejected.
+  - **What:** removed unsupported CIDR and port-set choices from the target editor, browser target validation, and direct UI tests while leaving command recent-value/autocomplete handling intact.
+  - **Tests:** updated Project target editor browser coverage for the supported IP/URL flows.
 - **Project workspace navigation polish** — Project list rows now show run, finding, artifact, and package scale at a glance, and Project finding tabs can surface prefetched new/high signal counts before the Findings tab is opened.
   - **Why:** operators should be able to pick the right project and spot triage-heavy work without paying the cost of opening every project section first.
   - **What:** added `project rename <name-or-id> <new-name>` for terminal-native renames, carried lightweight finding review/severity summaries in project list and summary payloads, and updated the Projects modal list/tab labels to use that prefetched state.
@@ -420,6 +427,36 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Atlas finding source pointers recalculate consistently after run cleanup** — deleting a run from History and rerunning project finding capture now use the same Atlas recalculation helper as run-retaining Atlas cleanup.
+  - **Why:** a finding that still had later occurrences could keep a stale `run_id` or `first_run_id` after its original source run was deleted.
+  - **Tests:** extended History delete coverage for both fully detached findings and findings that should move to the remaining source run.
+- **Project finding payloads use a consistent shape** — Project finding row normalization now returns the same core fields for stored finding rows, occurrence-backed rows, run-scoped rows, and review-update responses.
+  - **Why:** mixed field sets make bulk actions and UI state harder to reason about as findings move between Atlas, Projects, and Run Details.
+  - **Tests:** extended unscoped finding route coverage across Project Findings, run-scoped findings, and review updates.
+- **Mobile Atlas saved-view actions stay inactive until a view is selected** — the mobile filter panel now keeps Update and Delete disabled unless the saved-view picker has an active saved view.
+  - **Why:** mobile controls should match desktop behavior and avoid no-op saved-view actions.
+  - **Tests:** added mobile Atlas unit coverage for saved-view action state.
+- **Run Details fallback entity rows use shared row primitives** — fallback entity rows in the Run Details Entities tab now use the shared clickable row styling when the Atlas entity row renderer is unavailable.
+  - **Why:** fallback UI should behave like the primary Atlas-enhanced row path instead of carrying a one-off list-item treatment.
+  - **Tests:** added History unit coverage for the fallback entity row classes.
+- **Project service text trimming uses one helper** — project metadata, artifact, comparison, and finding helpers now share the existing project utility text-trimming helper.
+  - **Why:** small duplicate helpers make service splits noisier and easier to drift during later backend cleanup.
+  - **Tests:** reran focused backend module coverage and syntax checks.
+- **SQLite and Postgres schema parity has a focused guardrail** — backend module coverage now compares core SQLite init tables against the Postgres migration registry for table columns, shared indexes, and Atlas finding triggers.
+  - **Why:** the app maintains two schema definitions, and the finding recalculation work depends on both backends keeping the same Atlas/finding shape.
+  - **Tests:** added a schema parity regression under `TestPostgresMigrations`.
+- **Postgres Compose and migration docs match runtime behavior** — Compose now passes `DATABASE_POSTGRES_JIT` into the app container, `.env.example` includes the toggle, the config reference documents current `app/conf/` reload and local-overlay behavior, and the isolated-schema migration guide creates the schema before running app migrations.
+  - **Why:** operators following the documented Postgres and config-overlay paths should get the behavior the docs describe without hidden Compose or schema setup gaps.
+  - **Tests:** reran docs inventory coverage.
+- **Manual host targets classify IP literals correctly** — adding a Project target as `host` now stores IP-looking values as Atlas `ip` entities instead of domain-shaped entities.
+  - **Why:** manual target entry should match auto-discovery behavior so project target identity, counts, and links stay consistent.
+  - **Tests:** added Project route coverage for a `host` target containing an IP literal.
+- **History search checks offloaded run-search bodies** — run output terms stored past a body-store pointer preview are searchable again when `runs_search_text_inline_max_bytes` offloads large `runs.output_search_text` values.
+  - **Why:** offloading should reduce database row size without making long scanner output effectively unsearchable after the pointer preview.
+  - **Tests:** extended SQLite route coverage and Postgres History search coverage for terms that exist only beyond an offloaded pointer preview.
+- **Postgres run finalization survives optional write failures** — completed runs now isolate optional project/artifact/finding/Atlas finalize steps in savepoints so a caught Postgres write error rolls back that step without poisoning the transaction that stores the run.
+  - **Why:** optional enrichment should not turn a successful command into a missing History row when Postgres marks the transaction failed after a recoverable error.
+  - **Tests:** added Postgres regression coverage for an optional finding-capture failure during run finalization.
 - **Project Entities respects shared project filters** — the Projects modal Entities tab now participates in the shared target/run filter bar, loads filtered entity pages from the server, updates outer and entity-type tab counts as `filtered/total` even when filters are applied from another tab, and hides stale pagination rows when filters return no entities.
   - **Tests:** added route coverage for run- and target-filtered project entities plus shell chrome coverage that verifies cross-tab filtered entity counts and zero-result entity sub-tabs.
 - **Postgres migration smoke coverage stays aligned** — the isolated-schema Postgres migration smoke test now expects the current `0001` through `0007` migration registry.

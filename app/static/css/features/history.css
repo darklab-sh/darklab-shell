@@ -727,6 +727,20 @@ body #history-panel { background: var(--theme-chrome-bg); }
   border-bottom: 0;
 }
 
+.history-run-entity-list .history-run-entity-row {
+  display: block;
+  padding: 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  color: inherit;
+  font: inherit;
+}
+
+.history-run-entity-list .history-run-entity-row:last-child {
+  border-bottom: 0;
+}
+
 .history-run-entity-row {
   width: 100%;
   text-align: left;

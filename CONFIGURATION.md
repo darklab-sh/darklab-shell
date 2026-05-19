@@ -33,9 +33,10 @@ Most operator-owned files under `app/conf/` and `app/conf/themes/` support sibli
 | Base file | Local overlay | Behavior |
 |-----------|---------------|----------|
 | `app/conf/config.yaml` | `app/conf/config.local.yaml` | Overrides any subset of app settings |
-| `app/conf/commands.yaml` | `app/conf/commands.local.yaml` | Appends command registry entries |
+| `app/conf/commands.yaml` | `app/conf/commands.local.yaml` | Adds new command roots and merges same-root entries into the base registry |
 | `app/conf/faq.yaml` | `app/conf/faq.local.yaml` | Appends local FAQ entries |
 | `app/conf/welcome.yaml` | `app/conf/welcome.local.yaml` | Appends local welcome samples |
+| `app/conf/workflows.yaml` | `app/conf/workflows.local.yaml` | Appends local guided workflows |
 | `app/conf/ascii.txt` | `app/conf/ascii.local.txt` | Replaces desktop banner art |
 | `app/conf/ascii_mobile.txt` | `app/conf/ascii_mobile.local.txt` | Replaces mobile banner art |
 | `app/conf/app_hints.txt` | `app/conf/app_hints.local.txt` | Appends desktop hints |
@@ -55,6 +56,9 @@ Most operator-owned files under `app/conf/` and `app/conf/themes/` support sibli
 | `conf/app_hints_mobile.txt` | On next page load |
 | `conf/welcome.yaml` | On next page load |
 | `conf/tour.yaml` | Immediately for tour renderers |
+| `conf/wordlists.yaml` | Immediately for the `wordlist` command and autocomplete requests |
+| `conf/workflows.yaml` | Immediately for Workflows panel, command registry, and smoke-corpus helpers |
+| `conf/themes/*.yaml` | On next page load, permalink load, diagnostics load, or HTML export |
 | `conf/commands.yaml` | On next page load for autocomplete; immediately for command policy, catalog, diagnostics, and smoke-corpus helpers |
 | `conf/config.yaml` | After `docker compose restart` |
 
@@ -91,7 +95,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `database_pool_max` | `5` | Server-side only. Maximum Postgres pool size. Ignored by SQLite. Can also be set with `DATABASE_POOL_MAX` |
 | `database_postgres_jit` | `false` | Server-side only. Controls whether app-owned Postgres pool connections allow PostgreSQL JIT compilation. The default keeps interactive pages from paying JIT startup cost on complex queries. Can also be set with `DATABASE_POSTGRES_JIT` |
 | `permalink_retention_days` | `365` | Delete runs and snapshots older than this many days on startup. `0` means unlimited retention |
-| `runs_search_text_inline_max_bytes` | `0` | Server-side only. Offloads oversized `runs.output_search_text` values to compressed files under `data_dir/body-store` when the UTF-8 body is larger than this byte threshold. `0` keeps values inline |
+| `runs_search_text_inline_max_bytes` | `0` | Server-side only. Offloads oversized `runs.output_search_text` values to compressed files under `data_dir/body-store` when the UTF-8 body is larger than this byte threshold. History search still checks the offloaded body when needed, so terms beyond the stored preview remain findable. `0` keeps values inline |
 | `snapshots_inline_max_bytes` | `0` | Server-side only. Offloads oversized tab snapshot bodies under `data_dir/body-store` while share links still read back normally. `0` keeps snapshot content inline |
 | `intel_payload_inline_max_bytes` | `0` | Server-side only. Offloads oversized Atlas intel provider payloads under `data_dir/body-store` while entity detail responses still return the provider data. `0` keeps intel payloads inline |
 | `rate_limit_enabled` | `true` | Enables the `/runs` rate limiter. Set to `false` only for test-only or maintenance overlays where throttling should be bypassed |
@@ -248,7 +252,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `app/conf/app_hints.txt` | Desktop rotating welcome hints |
 | `app/conf/app_hints_mobile.txt` | Mobile rotating welcome hints |
 | `app/conf/wordlists.yaml` | Curated SecLists categories for the `wordlist` command and autocomplete |
-| `app/conf/workflows.yaml` | Built-in guided workflows shown in the Workflows panel |
+| `app/conf/workflows.yaml` | Operator-configured guided workflows shown in the Workflows panel after built-in workflow entries |
 | `app/conf/themes/` | Named theme variants used by the shell, permalink pages, diagnostics, and HTML export |
 | `app/conf/theme_dark.yaml.example` | Generated dark-theme reference template |
 | `app/conf/theme_light.yaml.example` | Generated light-theme reference template |
@@ -276,7 +280,7 @@ The `tour_enabled` setting in `config.yaml` is the kill-switch for tour entry po
 
 ## Command Registry Autocomplete
 
-`app/conf/commands.yaml` stores each external command under `commands`, with policy, runtime adaptations, encrypted secret requirements, workspace file flags, and root-aware flag, argument, subcommand, and example hints. Optional local additions can live in `app/conf/commands.local.yaml`.
+`app/conf/commands.yaml` stores each external command under `commands`, with policy, runtime adaptations, encrypted secret requirements, workspace file flags, and root-aware flag, argument, subcommand, and example hints. Optional local additions can live in `app/conf/commands.local.yaml`. A local entry with a new `root` adds a new command; a local entry with an existing `root` merges into the base command entry instead of replacing it wholesale.
 
 ```yaml
 commands:
@@ -612,7 +616,7 @@ POSTGRES_PASSWORD=<redacted>
 DATABASE_URL=postgresql://darklab:<redacted>@postgres:5432/darklab_shell
 ```
 
-`COMPOSE_PROFILES=postgres` enables the profile-gated `postgres` service without passing `--profile postgres` on every command. `DATABASE_BACKEND` and `DATABASE_URL` are read by the Flask app. `POSTGRES_PASSWORD` is read by the Postgres container at database initialization time.
+`COMPOSE_PROFILES=postgres` enables the profile-gated `postgres` service without passing `--profile postgres` on every command. `DATABASE_BACKEND`, `DATABASE_URL`, `DATABASE_POOL_MIN`, `DATABASE_POOL_MAX`, and `DATABASE_POSTGRES_JIT` are read by the Flask app. `POSTGRES_PASSWORD` is read by the Postgres container at database initialization time.
 
 If you run the app outside Compose, or you prefer file-based app config, the equivalent app-side settings are:
 
@@ -891,7 +895,7 @@ Use the production Compose overlay and `DOCKER_GELF_ADDRESS` if Docker should al
 - Add FAQ entries in `app/conf/faq.local.yaml`.
 - Add welcome samples in `app/conf/welcome.local.yaml`.
 - Add deployment-specific command registry entries in `app/conf/commands.local.yaml`.
-- Add workflows in `app/conf/workflows.yaml` or through the in-app workflow editor.
+- Add deployment-specific workflows in `app/conf/workflows.local.yaml` or through the in-app workflow editor.
 
 ---
 

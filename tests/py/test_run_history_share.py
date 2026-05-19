@@ -3692,10 +3692,38 @@ class TestRunOutputArtifacts:
 
     def test_delete_run_removes_output_artifact(self):
         client = get_client()
-        artifact_path = self._insert_run_with_artifact("artifact-delete-run", session_id="sess-delete-artifact")
+        run_id = "artifact-delete-run"
+        retained_run_id = "artifact-delete-retained"
+        session_id = "sess-delete-artifact"
+        artifact_path = self._insert_run_with_artifact(run_id, session_id=session_id)
+        shared_finding_id = f"fnd_shared_{run_id}"
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview) "
+                "VALUES (?, ?, 'nmap -sV 10.0.0.2', datetime('now'), '[]')",
+                (retained_run_id, session_id),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "VALUES (?, ?, ?, 'finding', 'shared issue', 'shared issue', 0, ?, datetime('now'))",
+                (shared_finding_id, session_id, run_id, f"fp-{shared_finding_id}"),
+            )
+            conn.execute(
+                "INSERT INTO findings_occurrences (finding_id, run_id, line_number, snippet, seen_at) "
+                "VALUES (?, ?, 1, 'shared issue', datetime('now', '+1 second'))",
+                (shared_finding_id, retained_run_id),
+            )
+            conn.execute(
+                "UPDATE findings SET occurrence_count = 2, first_run_id = ?, last_run_id = ?, "
+                "first_seen_at = datetime('now'), last_seen_at = datetime('now', '+1 second') "
+                "WHERE id = ?",
+                (run_id, retained_run_id, shared_finding_id),
+            )
+            conn.commit()
         assert os.path.exists(artifact_path)
 
-        resp = client.delete("/history/artifact-delete-run", headers={"X-Session-ID": "sess-delete-artifact"})
+        resp = client.delete(f"/history/{run_id}", headers={"X-Session-ID": session_id})
 
         assert resp.status_code == 200
         assert not os.path.exists(artifact_path)
@@ -3703,39 +3731,48 @@ class TestRunOutputArtifacts:
             assert (
                 conn.execute(
                     "SELECT 1 FROM run_output_artifacts WHERE run_id = ?",
-                    ("artifact-delete-run",),
+                    (run_id,),
                 ).fetchone()
                 is None
             )
             assert (
                 conn.execute(
                     "SELECT 1 FROM run_file_artifacts WHERE run_id = ?",
-                    ("artifact-delete-run",),
+                    (run_id,),
                 ).fetchone()
                 is None
             )
             assert conn.execute(
                 "SELECT COUNT(*) FROM findings WHERE id = ?",
-                ("fnd_artifact-delete-run",),
+                (f"fnd_{run_id}",),
             ).fetchone()[0] == 1
             assert conn.execute(
                 "SELECT COUNT(*) FROM findings_occurrences WHERE run_id = ?",
-                ("artifact-delete-run",),
+                (run_id,),
             ).fetchone()[0] == 0
             finding = conn.execute(
-                "SELECT occurrence_count, run_id, last_run_id FROM findings WHERE id = ?",
-                ("fnd_artifact-delete-run",),
+                "SELECT occurrence_count, run_id, first_run_id, last_run_id FROM findings WHERE id = ?",
+                (f"fnd_{run_id}",),
             ).fetchone()
             assert finding["occurrence_count"] == 0
             assert finding["run_id"] == ""
+            assert finding["first_run_id"] == ""
             assert finding["last_run_id"] == ""
+            shared_finding = conn.execute(
+                "SELECT occurrence_count, run_id, first_run_id, last_run_id FROM findings WHERE id = ?",
+                (shared_finding_id,),
+            ).fetchone()
+            assert shared_finding["occurrence_count"] == 1
+            assert shared_finding["run_id"] == retained_run_id
+            assert shared_finding["first_run_id"] == retained_run_id
+            assert shared_finding["last_run_id"] == retained_run_id
             assert conn.execute(
                 "SELECT COUNT(*) FROM entity_labels WHERE id = ?",
-                ("lbl_artifact-delete-run",),
+                (f"lbl_{run_id}",),
             ).fetchone()[0] == 1
             assert conn.execute(
                 "SELECT COUNT(*) FROM entity_notes WHERE id = ?",
-                ("note_artifact-delete-run",),
+                (f"note_{run_id}",),
             ).fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM project_links").fetchone()[0] == 0
 

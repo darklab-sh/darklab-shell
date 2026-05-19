@@ -11,12 +11,9 @@ from services.projects.contracts import (
     MAX_LABEL_LEN,
     ProjectWorkspaceError,
 )
+from services.projects.utils import trim_text as _trim_text
 
 MAX_PROJECT_COMPARE_ITEMS_PER_SIDE = run_comparison.MAX_COMPARE_ITEMS_PER_SIDE
-
-
-def _trim_text(value, limit):
-    return str(value or "").strip()[:limit]
 
 
 def _project_linked_run_ids(conn, session_id, project_id):

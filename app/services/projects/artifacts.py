@@ -8,7 +8,7 @@ import hashlib
 import re
 
 from services.projects.contracts import MAX_ENTITY_ID_LEN, ProjectWorkspaceError
-from services.projects.utils import new_run_file_artifact_id, now, trim_text
+from services.projects.utils import new_run_file_artifact_id, now, trim_text as _trim_text
 from services.runs.kinds import is_project_linkable_run_kind, normalize_run_kind
 from services.workspace.files import (
     WorkspaceDisabled,
@@ -16,10 +16,6 @@ from services.workspace.files import (
     open_workspace_file_for_download,
     resolve_workspace_path,
 )
-
-
-def _trim_text(value, limit):
-    return str(value or "").strip()[:limit]
 
 
 def row_to_run_file_artifact(row):
@@ -148,7 +144,7 @@ def artifact_snapshot_mismatch_reason(artifact, resolved):
 
 
 def record_run_file_artifacts(conn, session_id, run_id, artifacts):
-    run_id = trim_text(run_id, MAX_ENTITY_ID_LEN)
+    run_id = _trim_text(run_id, MAX_ENTITY_ID_LEN)
     run = conn.execute(
         "SELECT command, run_kind FROM runs WHERE session_id = ? AND id = ?",
         (session_id, run_id),
@@ -166,15 +162,15 @@ def record_run_file_artifacts(conn, session_id, run_id, artifacts):
     for item in artifact_items:
         if not isinstance(item, dict):
             continue
-        workspace_path = trim_text(item.get("workspace_path"), MAX_ENTITY_ID_LEN)
+        workspace_path = _trim_text(item.get("workspace_path"), MAX_ENTITY_ID_LEN)
         if not workspace_path or workspace_path in seen_paths:
             continue
         seen_paths.add(workspace_path)
-        display_name = trim_text(item.get("display_name"), 255) or workspace_path.rsplit("/", 1)[-1]
-        kind = trim_text(item.get("kind") or "unknown", 64) or "unknown"
-        detected_by = trim_text(item.get("detected_by") or "workspace_flag", 64) or "workspace_flag"
-        content_type = trim_text(item.get("content_type"), 128)
-        preview_type = trim_text(item.get("preview_type"), 64)
+        display_name = _trim_text(item.get("display_name"), 255) or workspace_path.rsplit("/", 1)[-1]
+        kind = _trim_text(item.get("kind") or "unknown", 64) or "unknown"
+        detected_by = _trim_text(item.get("detected_by") or "workspace_flag", 64) or "workspace_flag"
+        content_type = _trim_text(item.get("content_type"), 128)
+        preview_type = _trim_text(item.get("preview_type"), 64)
         content_sha256 = (
             normalize_sha256(item.get("content_sha256"))
             or workspace_file_sha256(session_id, workspace_path)

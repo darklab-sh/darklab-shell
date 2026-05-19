@@ -359,22 +359,31 @@ def _extract_output_search_text(preview_lines):
 
 
 def _link_active_project_run_entities_for_finalize(conn, session_id, project_id, run_id):
-    conn.execute("SAVEPOINT active_project_entity_link")
-    try:
-        linked_entities = link_active_project_run_entities(
+    return _run_finalize_savepoint(
+        conn,
+        "active_project_entity_link",
+        lambda: link_active_project_run_entities(
             conn,
             session_id,
             project_id,
             run_id,
-        )
+        ),
+    )
+
+
+def _run_finalize_savepoint(conn, name, callback):
+    savepoint = f"run_finalize_{name}"
+    conn.execute(f"SAVEPOINT {savepoint}")
+    try:
+        result = callback()
     except Exception:
         try:
-            conn.execute("ROLLBACK TO SAVEPOINT active_project_entity_link")
+            conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
         finally:
-            conn.execute("RELEASE SAVEPOINT active_project_entity_link")
+            conn.execute(f"RELEASE SAVEPOINT {savepoint}")
         raise
-    conn.execute("RELEASE SAVEPOINT active_project_entity_link")
-    return linked_entities
+    conn.execute(f"RELEASE SAVEPOINT {savepoint}")
+    return result
 
 
 def _save_completed_run(
@@ -450,7 +459,11 @@ def _save_completed_run(
                 )
             if link_active_project:
                 try:
-                    active_project_link = link_run_to_active_project(conn, session_id, run_id)
+                    active_project_link = _run_finalize_savepoint(
+                        conn,
+                        "active_project_link",
+                        lambda: link_run_to_active_project(conn, session_id, run_id),
+                    )
                 except Exception:
                     active_project_link = None
                     log.error("PROJECT_ACTIVE_RUN_LINK_ERROR", exc_info=True, extra={
@@ -460,11 +473,15 @@ def _save_completed_run(
                     })
             if workspace_artifacts:
                 try:
-                    recorded_artifacts = record_run_file_artifacts(
+                    recorded_artifacts = _run_finalize_savepoint(
                         conn,
-                        session_id,
-                        run_id,
-                        _workspace_artifacts_with_sizes(session_id, workspace_artifacts),
+                        "run_file_artifacts",
+                        lambda: record_run_file_artifacts(
+                            conn,
+                            session_id,
+                            run_id,
+                            _workspace_artifacts_with_sizes(session_id, workspace_artifacts),
+                        ),
                     )
                 except Exception:
                     recorded_artifacts = []
@@ -475,12 +492,16 @@ def _save_completed_run(
                     })
             if active_project_link:
                 try:
-                    recorded_targets = record_project_target_discoveries(
+                    recorded_targets = _run_finalize_savepoint(
                         conn,
-                        session_id,
-                        active_project_link["project_id"],
-                        run_id,
-                        command_project_target_inputs(command, cfg=CFG),
+                        "project_target_discovery",
+                        lambda: record_project_target_discoveries(
+                            conn,
+                            session_id,
+                            active_project_link["project_id"],
+                            run_id,
+                            command_project_target_inputs(command, cfg=CFG),
+                        ),
                     )
                 except ProjectWorkspaceQuotaExceeded as exc:
                     recorded_targets = []
@@ -500,7 +521,11 @@ def _save_completed_run(
                         "cmd": command,
                     })
             try:
-                recorded_findings = record_run_findings(conn, session_id, run_id, persisted_entries)
+                recorded_findings = _run_finalize_savepoint(
+                    conn,
+                    "run_findings",
+                    lambda: record_run_findings(conn, session_id, run_id, persisted_entries),
+                )
             except Exception:
                 recorded_findings = []
                 app_metrics.record_run_finalize_error("db_write")
@@ -510,12 +535,16 @@ def _save_completed_run(
                     "cmd": command,
                 })
             try:
-                recorded_entities = materialize_run_entities(
+                recorded_entities = _run_finalize_savepoint(
                     conn,
-                    session_id,
-                    run_id,
-                    persisted_entries,
-                    seen_at=finished_iso,
+                    "atlas_entities",
+                    lambda: materialize_run_entities(
+                        conn,
+                        session_id,
+                        run_id,
+                        persisted_entries,
+                        seen_at=finished_iso,
+                    ),
                 )
             except Exception:
                 recorded_entities = []

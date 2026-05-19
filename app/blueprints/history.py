@@ -49,7 +49,7 @@ from services.projects.contracts import (
 from core.redaction import omit_raw_only_line_entries, redact_line_entries
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, builtin_command_roots_for_storage
 from services.runs.output_store import load_full_output_entries
-from services.storage.body_store import inline_threshold_bytes, load_text_body, maybe_store_text_body
+from services.storage.body_store import inline_threshold_bytes, load_text_body, maybe_store_text_body, stored_body_pointer
 from services import metrics as app_metrics
 
 APP_VERSION = _config.APP_VERSION
@@ -238,6 +238,72 @@ def _history_match_clause(query, scope, force_like=False):
     return clause.sql, clause.params, clause.fts_query
 
 
+def _history_search_text_matches_body(body, query):
+    text = str(body or "").casefold()
+    needle = str(query or "").strip().casefold()
+    if not needle:
+        return False
+    if needle in text:
+        return True
+    terms = [term for term in needle.split() if term]
+    return bool(terms) and all(term in text for term in terms)
+
+
+def _history_offloaded_search_run_ids(
+    conn,
+    session_id,
+    query,
+    command_root,
+    exit_code_filter,
+    date_range,
+    project_id,
+    *,
+    starred_only=False,
+    run_kind="all",
+    has_run_kind_column=True,
+):
+    if not query:
+        return []
+    sql = " FROM runs r WHERE r.session_id = ?"
+    params: list[Any] = [session_id]
+    if run_kind in {RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL}:
+        run_kind_expr = "r.run_kind" if has_run_kind_column else _history_run_kind_sql("r.command")
+        sql += f" AND {run_kind_expr} = ?"
+        params.append(run_kind)
+    if project_id:
+        sql += (
+            " AND EXISTS (SELECT 1 FROM project_links pl "  # nosec
+            "JOIN projects p ON p.id = pl.project_id "
+            "WHERE p.session_id = ? AND p.id = ? "
+            "AND pl.entity_type = 'run' AND pl.entity_id = r.id) "
+        )
+        params.extend([session_id, project_id])
+    if starred_only:
+        sql += (
+            " AND EXISTS (SELECT 1 FROM starred_commands sc "
+            "WHERE sc.session_id = r.session_id AND sc.command = r.command)"
+        )
+    sql, params = _history_add_filters(sql, params, command_root, exit_code_filter, date_range)
+    rows = conn.execute("SELECT r.id, r.output_search_text" + sql, params).fetchall()
+    run_ids = []
+    for row in rows:
+        stored = row["output_search_text"]
+        if stored_body_pointer(stored) is None:
+            continue
+        try:
+            body = load_text_body(stored)
+        except (OSError, ValueError) as exc:
+            log.warning("HISTORY_BODY_SEARCH_SKIPPED", extra={
+                "run_id": row["id"],
+                "session": get_log_session_id(session_id),
+                "error": str(exc),
+            })
+            continue
+        if _history_search_text_matches_body(body, query):
+            run_ids.append(str(row["id"]))
+    return run_ids
+
+
 def _history_base_clause(
     session_id,
     query,
@@ -251,6 +317,7 @@ def _history_base_clause(
     run_kind="all",
     has_run_kind_column=True,
     force_like=False,
+    offloaded_match_run_ids=None,
 ):
     sql = " FROM runs r WHERE r.session_id = ?"
     params: list[Any] = [session_id]
@@ -272,8 +339,16 @@ def _history_base_clause(
             "WHERE sc.session_id = r.session_id AND sc.command = r.command)"
         )
     match_sql, match_params, fts_q = _history_match_clause(query, scope, force_like=force_like)
-    sql += match_sql
-    params.extend(match_params)
+    offloaded_ids = [str(run_id) for run_id in (offloaded_match_run_ids or [])]
+    if match_sql and offloaded_ids:
+        match_predicate = match_sql[5:] if match_sql.startswith(" AND ") else match_sql
+        placeholders = ", ".join("?" for _ in offloaded_ids)
+        sql += f" AND (({match_predicate}) OR r.id IN ({placeholders}))"
+        params.extend(match_params)
+        params.extend(offloaded_ids)
+    else:
+        sql += match_sql
+        params.extend(match_params)
     sql, params = _history_add_filters(sql, params, command_root, exit_code_filter, date_range)
     return sql, params, fts_q
 
@@ -963,6 +1038,20 @@ def get_history():
         has_run_kind_column = _history_column_exists(conn, "runs", "run_kind")
         snapshots_available = _history_table_exists(conn, "snapshots")
         if type_filter in {"all", "runs", "runs_builtin", "runs_external"}:
+            offloaded_match_run_ids = []
+            if query and scope != "command":
+                offloaded_match_run_ids = _history_offloaded_search_run_ids(
+                    conn,
+                    session_id,
+                    query,
+                    command_root,
+                    exit_code_filter,
+                    date_range,
+                    project_id,
+                    starred_only=starred_only,
+                    run_kind=run_kind,
+                    has_run_kind_column=has_run_kind_column,
+                )
             run_sql, run_params, fts_q = _history_base_clause(
                 session_id,
                 query,
@@ -975,6 +1064,7 @@ def get_history():
                 run_kind=run_kind,
                 has_run_kind_column=has_run_kind_column,
                 force_like=force_like,
+                offloaded_match_run_ids=offloaded_match_run_ids,
             )
             root_command_rows = conn.execute(
                 "SELECT r.command, MAX(r.started) AS latest_started"
@@ -1592,6 +1682,8 @@ def get_run(run_id):
         "lines": lines_label,
         "artifact_count": run["artifact_count"],
         "finding_count": run["finding_count"],
+        "atlas_entity_count": run["atlas_entity_count"],
+        "atlas_finding_count": run["atlas_finding_count"],
         "label_count": run["label_count"],
         "note_count": run["note_count"],
         "version": APP_VERSION,

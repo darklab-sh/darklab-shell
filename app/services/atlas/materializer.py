@@ -8,6 +8,7 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from services.atlas.recalculation import recalculate_atlas_entities
 from services.intel.canonical import CanonicalizationError, canonical_entity, entity_signature
 from services.intel.schema import ENTITY_TYPES
 
@@ -89,21 +90,7 @@ def upsert_entity(
 
 
 def recalculate_entities(conn, entity_ids: Iterable[str]) -> None:
-    for entity_id in {str(value or "") for value in entity_ids if str(value or "")}:
-        row = conn.execute(
-            "SELECT COALESCE(SUM(occurrence_count), 0) AS occurrence_count, "
-            "MIN(first_seen_at) AS first_seen_at, MAX(last_seen_at) AS last_seen_at "
-            "FROM entity_run_links WHERE entity_id = ?",
-            (entity_id,),
-        ).fetchone()
-        occurrence_count = int(row["occurrence_count"] or 0) if row else 0
-        if occurrence_count <= 0:
-            conn.execute("UPDATE entities SET occurrence_count = 0 WHERE id = ?", (entity_id,))
-            continue
-        conn.execute(
-            "UPDATE entities SET occurrence_count = ?, first_seen_at = ?, last_seen_at = ? WHERE id = ?",
-            (occurrence_count, row["first_seen_at"] or "", row["last_seen_at"] or "", entity_id),
-        )
+    recalculate_atlas_entities(conn, entity_ids)
 
 
 def _iter_entry_entities(entries: Iterable[object]) -> Iterable[Mapping[str, Any]]:

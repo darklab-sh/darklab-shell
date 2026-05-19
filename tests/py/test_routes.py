@@ -387,6 +387,22 @@ class TestProjectRoutes:
             params["baseline_label"] = baseline_label
         return f"/history/compare?{urlencode(params)}"
 
+    def test_project_host_target_ip_is_stored_as_ip_entity(self):
+        client = get_client()
+        session_id = self._session_id("project-host-ip")
+        project = self._create_project(client, session_id)
+
+        resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "host", "value": "192.0.2.10"},
+            headers={"X-Session-ID": session_id},
+        )
+        target = json.loads(resp.data)["target"]
+
+        assert resp.status_code == 201
+        assert target["type"] == "ip"
+        assert target["value"] == "192.0.2.10"
+
     def test_builtin_runs_do_not_record_findings_even_with_legacy_project_link(self):
         client = get_client()
         session_id = self._session_id("builtin-findings")
@@ -5976,6 +5992,28 @@ class TestAtlasRoutes:
         assert len(recorded) == 1
         assert recorded[0]["entity_id"] == ""
         assert recorded[0]["target_ids"] == []
+        expected_finding_keys = {
+            "id",
+            "session_id",
+            "run_id",
+            "target_id",
+            "entity_id",
+            "subject_key",
+            "scope",
+            "kind",
+            "title",
+            "raw_line",
+            "line_number",
+            "severity",
+            "fingerprint",
+            "review_state",
+            "status",
+            "first_seen_at",
+            "last_seen_at",
+            "occurrence_count",
+            "created",
+        }
+        assert expected_finding_keys.issubset(recorded[0])
         assert atlas_resp.status_code == 200
         assert finding["entity_id"] == ""
         assert finding["entity_value"] == ""
@@ -5983,11 +6021,16 @@ class TestAtlasRoutes:
         assert project_findings_resp.status_code == 200
         project_findings = json.loads(project_findings_resp.data)["findings"]
         assert [(item["id"], item["target_ids"]) for item in project_findings] == [(finding["id"], [])]
+        assert expected_finding_keys.issubset(project_findings[0])
         assert run_findings_resp.status_code == 200
         run_findings = json.loads(run_findings_resp.data)["findings"]
         assert [(item["id"], item["target_ids"]) for item in run_findings] == [(finding["id"], [])]
+        assert expected_finding_keys.issubset(run_findings[0])
         assert review_resp.status_code == 200
-        assert json.loads(review_resp.data)["finding"]["review_state"] == "needs_followup"
+        reviewed_finding = json.loads(review_resp.data)["finding"]
+        assert reviewed_finding["review_state"] == "needs_followup"
+        assert reviewed_finding["status"] == "needs_followup"
+        assert expected_finding_keys.issubset(reviewed_finding)
         assert json.loads(updated_project_findings_resp.data)["findings"][0]["review_state"] == "needs_followup"
 
     def test_run_findings_route_returns_deduped_findings_with_occurrence_count(self):
@@ -7159,13 +7202,14 @@ class TestRunRoute:
         with tempfile.TemporaryDirectory() as tmp, \
              mock.patch.object(body_store, "DATA_DIR", tmp), \
              mock.patch.dict("config.CFG", {"runs_search_text_inline_max_bytes": 1}):
+            offloaded_line = "Available themes: " + ("x" * 4100) + " needle-after-pointer-preview"
             resp = client.post(
                 "/run/client",
                 headers={"X-Session-ID": session},
                 json={
                     "command": "theme list",
                     "exit_code": 0,
-                    "lines": [{"text": "Available themes: " + ("x" * 64), "cls": "builtin-section"}],
+                    "lines": [{"text": offloaded_line, "cls": "builtin-section"}],
                 },
             )
             run_id = json.loads(resp.data)["run_id"]
@@ -7185,10 +7229,18 @@ class TestRunRoute:
                     headers={"X-Session-ID": session},
                 ).data
             )
+            search_resp = client.get(
+                "/history?q=needle-after-pointer-preview&scope=all&include_total=1",
+                headers={"X-Session-ID": session},
+            )
+            search_data = json.loads(search_resp.data)
             delete_resp = client.delete(f"/history/{run_id}", headers={"X-Session-ID": session})
 
             assert resp.status_code == 200
-            assert detail["output"] == ["Available themes: " + ("x" * 64)]
+            assert detail["output"] == [offloaded_line]
+            assert search_resp.status_code == 200
+            assert search_data["total_count"] == 1
+            assert search_data["runs"][0]["id"] == run_id
             assert delete_resp.status_code == 200
             assert not os.path.exists(body_path)
 
@@ -10029,10 +10081,27 @@ class TestRunPermalinkRoute:
                 "detected_by": "workspace_flag",
             }],
         )
+        with db_connect() as conn:
+            materialize_run_entities(
+                conn,
+                "test-session",
+                run_id,
+                [{"text": "darklab.sh", "entities": [{"type": "domain", "value": "darklab.sh"}]}],
+                seen_at="2026-05-17T00:00:01+00:00",
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "VALUES (?, 'test-session', ?, 'finding', 'open service', 'open service', 0, ?, datetime('now'))",
+                ("permalink-html-atlas-finding", run_id, "fp-permalink-html-atlas"),
+            )
+            conn.commit()
         try:
             resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
             assert b"nmap -sV 10.0.0.1" in resp.data
             assert b"1 artifact" in resp.data
+            assert b"1 Atlas entity" in resp.data
+            assert b"1 Atlas finding" in resp.data
         finally:
             self._delete_run(run_id)
 

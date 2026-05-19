@@ -434,15 +434,23 @@ def test_history_commands_route_reads_from_postgres(monkeypatch, postgres_schema
 
 
 @pytest.mark.postgres
-def test_history_route_reads_search_results_from_postgres(monkeypatch, postgres_schema):
+def test_history_route_reads_search_results_from_postgres(monkeypatch, postgres_schema, tmp_path):
     from app import app
     import blueprints.history as history_blueprint
     from core.migrations import MIGRATIONS
     from core.migrations.runner import run_migrations_with_advisory_lock
+    from services.storage import body_store
 
     conn = postgres_schema.conn
     run_migrations_with_advisory_lock(conn, MIGRATIONS)
     session_id = str(uuid.uuid4())
+    monkeypatch.setattr(body_store, "DATA_DIR", str(tmp_path))
+    offloaded_search_text = body_store.maybe_store_text_body(
+        "run_search",
+        "run-pg-search-offloaded",
+        "scanner prelude " + ("x" * 4100) + " needle-after-pg-pointer-preview",
+        1,
+    )
     rows = [
         (
             "run-pg-search-1",
@@ -457,6 +465,13 @@ def test_history_route_reads_search_results_from_postgres(monkeypatch, postgres_
             "whois example.org",
             "registrar: example registrar",
             "2026-05-16T00:00:02Z",
+        ),
+        (
+            "run-pg-search-offloaded",
+            session_id,
+            "katana -u https://darklab.sh",
+            offloaded_search_text,
+            "2026-05-16T00:00:03Z",
         ),
     ]
     with conn.cursor() as cursor:
@@ -503,6 +518,17 @@ def test_history_route_reads_search_results_from_postgres(monkeypatch, postgres_
     assert data["total_count"] == 1
     assert data["runs"][0]["id"] == "run-pg-search-1"
     assert data["roots"] == ["host"]
+
+    offloaded_resp = app.test_client().get(
+        "/history?q=needle-after-pg-pointer-preview&scope=all&include_total=1",
+        headers={"X-Session-ID": session_id},
+    )
+    offloaded_data = json.loads(offloaded_resp.data)
+
+    assert offloaded_resp.status_code == 200
+    assert offloaded_data["total_count"] == 1
+    assert offloaded_data["runs"][0]["id"] == "run-pg-search-offloaded"
+    assert offloaded_data["roots"] == ["katana"]
 
 
 @pytest.mark.postgres
@@ -859,6 +885,78 @@ def test_completed_external_run_persistence_writes_full_postgres_graph(monkeypat
     assert history_data["runs"][0]["artifact_count"] == 1
     assert history_data["runs"][0]["finding_count"] == 1
     assert history_data["runs"][0]["project_link_count"] == 1
+
+
+@pytest.mark.postgres
+def test_completed_run_finalize_rolls_back_optional_postgres_failure(monkeypatch, postgres_schema):
+    import blueprints.run as run_blueprint
+    from core.migrations import MIGRATIONS
+    from core.migrations.runner import run_migrations_with_advisory_lock
+
+    conn = postgres_schema.conn
+    run_migrations_with_advisory_lock(conn, MIGRATIONS)
+    conn.commit()
+    session_id = str(uuid.uuid4())
+    run_id = "run-" + uuid.uuid4().hex
+    timestamp = "2026-05-17T00:00:00Z"
+    persisted_entries = [{
+        "text": "optional finding capture should fail without losing the run",
+        "cls": "output",
+        "line_index": 0,
+    }]
+
+    @contextmanager
+    def _postgres_db_connect():
+        yield PostgresSqliteCompatConnection(conn)
+
+    class FakeCapture:
+        preview_lines = persisted_entries
+        preview_truncated = False
+        output_line_count = 1
+        full_output_available = False
+        full_output_truncated = False
+        full_output_bytes = 0
+        artifact_rel_path = ""
+
+        def finalize(self):
+            return None
+
+    def failing_record_findings(db_conn, _session_id, _run_id, _entries):
+        db_conn.execute("INSERT INTO missing_finalize_table VALUES (?)", ("boom",))
+
+    monkeypatch.setattr(run_blueprint, "DB_BACKEND", DatabaseBackend.POSTGRES)
+    monkeypatch.setattr(run_blueprint, "db_connect", _postgres_db_connect)
+    monkeypatch.setattr(run_blueprint, "record_run_findings", failing_record_findings)
+    monkeypatch.setattr(run_blueprint, "materialize_run_entities", lambda *_args, **_kwargs: [])
+
+    active_project_link = run_blueprint._save_completed_run(
+        run_id,
+        session_id,
+        "nuclei -u https://darklab.sh",
+        timestamp,
+        "2026-05-17T00:00:01Z",
+        0,
+        FakeCapture(),
+        link_active_project=False,
+        run_kind="external",
+        owner_tab_id="tab-postgres-optional-failure",
+    )
+    run_row = conn.execute(
+        "SELECT id, session_id, command, owner_tab_id, output_search_text FROM runs WHERE id = %s",
+        (run_id,),
+    ).fetchone()
+    finding_count = conn.execute(
+        "SELECT COUNT(*) AS count FROM findings_occurrences WHERE run_id = %s",
+        (run_id,),
+    ).fetchone()["count"]
+
+    assert active_project_link is None
+    assert run_row is not None
+    assert run_row["session_id"] == session_id
+    assert run_row["command"] == "nuclei -u https://darklab.sh"
+    assert run_row["owner_tab_id"] == "tab-postgres-optional-failure"
+    assert "optional finding capture" in run_row["output_search_text"]
+    assert finding_count == 0
 
 
 @pytest.mark.postgres

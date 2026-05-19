@@ -874,6 +874,106 @@ describe('history panel actions', () => {
     })
   })
 
+  it('uses shared row primitives for fallback Run Details entity rows', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              roots: ['nmap'],
+              items: [
+                {
+                  id: 'run-entity',
+                  type: 'run',
+                  command: 'nmap darklab.sh',
+                  label: 'nmap darklab.sh',
+                  started: '2026-01-01T00:00:00Z',
+                  created: '2026-01-01T00:00:00Z',
+                  exit_code: 0,
+                  atlas_entity_count: 1,
+                },
+              ],
+              runs: [],
+            }),
+        })
+      }
+      if (url === '/history/run-entity?json&preview=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              command: 'nmap darklab.sh',
+              output: ['ok'],
+              exit_code: 0,
+              atlas_entity_count: 1,
+            }),
+        })
+      }
+      if (typeof url === 'string' && url.startsWith('/entities/run/run-entity/findings')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ findings: [], total: 0, limit: 50, offset: 0 }),
+        })
+      }
+      if (typeof url === 'string' && url.startsWith('/atlas?')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ total: 1, counts: { ip: 1 } }),
+        })
+      }
+      if (typeof url === 'string' && url.startsWith('/atlas/entities?')) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              entities: [
+                {
+                  id: 'ent_1',
+                  type: 'ip',
+                  canonical_value: '192.0.2.10',
+                  occurrence_count: 2,
+                  run_count: 1,
+                },
+              ],
+              total: 1,
+              limit: 50,
+              offset: 0,
+              has_more: false,
+            }),
+        })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects: [] }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const entry = document.querySelector('#history-list .history-entry')
+    entry.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await vi.waitFor(() => {
+      expect(document.getElementById('history-run-overlay').classList.contains('open')).toBe(true)
+    })
+
+    document.querySelector('[data-history-run-tab="entities"]').click()
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-history-run-entity-id="ent_1"]')).not.toBeNull()
+    })
+
+    const row = document.querySelector('[data-history-run-entity-id="ent_1"]')
+    expect(row.classList.contains('chrome-row')).toBe(true)
+    expect(row.classList.contains('chrome-row-clickable')).toBe(true)
+    expect(row.classList.contains('history-run-list-item')).toBe(false)
+    expect(row.textContent).toContain('192.0.2.10')
+  })
+
   it('shows remove from project in Run Details and can also unlink same-run entities', async () => {
     let linked = true
     const showConfirm = vi.fn((options = {}) => {

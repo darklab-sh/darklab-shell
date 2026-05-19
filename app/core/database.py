@@ -31,6 +31,7 @@ from core.database_backend import (
 )
 from services.runs.output_store import delete_artifact_file, ensure_run_output_dir, load_full_output_entries
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, builtin_command_roots_for_storage
+from services.atlas.recalculation import recalculate_atlas_entities, recalculate_atlas_findings
 from services.storage.body_store import delete_text_body
 
 log = logging.getLogger("shell")
@@ -880,65 +881,6 @@ def _migrate_schema(conn):
     return fts_needs_rebuild
 
 
-def _recalculate_entity_rows(conn, entity_ids):
-    ids = [entity_id for entity_id in entity_ids if entity_id]
-    if not ids:
-        return
-    for entity_id in ids:
-        row = conn.execute(
-            "SELECT COALESCE(SUM(occurrence_count), 0) AS occurrence_count, "
-            "MIN(first_seen_at) AS first_seen_at, MAX(last_seen_at) AS last_seen_at "
-            "FROM entity_run_links WHERE entity_id = ?",
-            (entity_id,),
-        ).fetchone()
-        occurrence_count = int(row["occurrence_count"] or 0) if row else 0
-        if occurrence_count <= 0:
-            conn.execute(
-                "UPDATE entities SET occurrence_count = 0 WHERE id = ?",
-                (entity_id,),
-            )
-            continue
-        conn.execute(
-            "UPDATE entities SET occurrence_count = ?, first_seen_at = ?, last_seen_at = ? WHERE id = ?",
-            (occurrence_count, row["first_seen_at"] or "", row["last_seen_at"] or "", entity_id),
-        )
-
-
-def _recalculate_finding_rows(conn, finding_ids):
-    ids = [finding_id for finding_id in finding_ids if finding_id]
-    if not ids:
-        return
-    for finding_id in ids:
-        row = conn.execute(
-            "SELECT COUNT(*) AS occurrence_count, MIN(seen_at) AS first_seen_at, MAX(seen_at) AS last_seen_at "
-            "FROM findings_occurrences WHERE finding_id = ?",
-            (finding_id,),
-        ).fetchone()
-        occurrence_count = int(row["occurrence_count"] or 0) if row else 0
-        if occurrence_count <= 0:
-            conn.execute(
-                "UPDATE findings SET occurrence_count = 0, run_id = '', last_run_id = '', "
-                "first_seen_at = '', last_seen_at = '', line_number = NULL WHERE id = ?",
-                (finding_id,),
-            )
-            continue
-        last_run = conn.execute(
-            "SELECT run_id FROM findings_occurrences WHERE finding_id = ? ORDER BY seen_at DESC, run_id DESC LIMIT 1",
-            (finding_id,),
-        ).fetchone()
-        conn.execute(
-            "UPDATE findings SET occurrence_count = ?, first_seen_at = ?, last_seen_at = ?, last_run_id = ? "
-            "WHERE id = ?",
-            (
-                occurrence_count,
-                row["first_seen_at"] or "",
-                row["last_seen_at"] or "",
-                last_run["run_id"] if last_run else "",
-                finding_id,
-            ),
-        )
-
-
 def delete_run_artifacts(conn, run_ids):
     # The database row is the source of truth; once it is gone, best-effort file
     # cleanup can run without leaving dangling metadata behind.
@@ -1006,12 +948,12 @@ def delete_run_artifacts(conn, run_ids):
         f"DELETE FROM findings_occurrences WHERE run_id IN ({placeholders})",  # nosec
         ids,
     )
-    _recalculate_finding_rows(conn, finding_ids)
+    recalculate_atlas_findings(conn, finding_ids)
     conn.execute(
         f"DELETE FROM entity_run_links WHERE run_id IN ({placeholders})",  # nosec
         ids,
     )
-    _recalculate_entity_rows(conn, entity_ids)
+    recalculate_atlas_entities(conn, entity_ids)
     conn.execute(
         f"DELETE FROM run_file_artifacts WHERE run_id IN ({placeholders})",  # nosec
         ids,

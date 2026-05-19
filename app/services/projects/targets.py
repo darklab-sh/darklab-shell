@@ -149,12 +149,18 @@ def _atlas_type_for_target_type(target_type):
 
 
 def _canonical_target_payload(payload):
-    target_type = _atlas_type_for_target_type((payload or {}).get("type"))
+    payload_type = _trim_text((payload or {}).get("type"), 32).lower()
+    target_type = _atlas_type_for_target_type(payload_type)
     if not target_type:
         raise ProjectWorkspaceError("Atlas targets support domain, url, host, ip, hash, and cve")
     raw_value = _trim_text((payload or {}).get("value"), MAX_TARGET_VALUE_LEN)
     if not raw_value:
         raise ProjectWorkspaceError("target value is required")
+    if payload_type == "host":
+        try:
+            return "ip", canonical_entity("ip", raw_value)
+        except CanonicalizationError:
+            pass
     try:
         canonical_value = canonical_entity(target_type, raw_value)
     except CanonicalizationError as exc:

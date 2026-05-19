@@ -628,6 +628,67 @@ class TestDatabaseBackend:
 
 
 class TestPostgresMigrations:
+    CORE_SCHEMA_TABLES = (
+        "runs",
+        "run_output_artifacts",
+        "snapshots",
+        "session_tokens",
+        "session_preferences",
+        "starred_commands",
+        "session_variables",
+        "user_workflows",
+        "recent_values",
+        "secrets",
+        "projects",
+        "project_links",
+        "entities",
+        "entity_run_links",
+        "entity_intel_snapshots",
+        "run_file_artifacts",
+        "findings",
+        "findings_occurrences",
+        "entity_labels",
+        "entity_notes",
+        "evidence_packages",
+    )
+
+    @staticmethod
+    def _postgres_table_columns(statements, table_name):
+        create_re = re.compile(rf"CREATE TABLE IF NOT EXISTS {re.escape(table_name)}\s*\(", re.I)
+        for statement in statements:
+            if not create_re.search(statement):
+                continue
+            body = statement[statement.find("(") + 1:statement.rfind(")")]
+            columns = set()
+            for raw_line in body.splitlines():
+                line = raw_line.strip().rstrip(",")
+                if not line:
+                    continue
+                keyword = line.split()[0].upper()
+                if keyword in {"PRIMARY", "UNIQUE", "FOREIGN", "CHECK", "CONSTRAINT"}:
+                    continue
+                columns.add(line.split()[0].strip('"'))
+            return columns
+        return set()
+
+    @staticmethod
+    def _postgres_shared_index_names(statements):
+        indexes = set()
+        index_re = re.compile(r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+(\w+)\s+ON\s+(\w+)", re.I)
+        for statement in statements:
+            match = index_re.search(statement)
+            if not match:
+                continue
+            name, table_name = match.groups()
+            if table_name in TestPostgresMigrations.CORE_SCHEMA_TABLES and not name.endswith("_trgm"):
+                indexes.add(name)
+        return indexes
+
+    @staticmethod
+    def _postgres_trigger_names(statements):
+        trigger_re = re.compile(r"CREATE\s+TRIGGER\s+(\w+)", re.I)
+        return {match.group(1) for statement in statements for match in [trigger_re.search(statement)] if match}
+
     def test_baseline_migration_covers_current_app_schema(self):
         from core.migrations import MIGRATIONS
 
@@ -675,6 +736,64 @@ class TestPostgresMigrations:
         assert "suppressed_reason TEXT NOT NULL DEFAULT ''" in sql
         assert "suppressed_at TEXT NOT NULL DEFAULT ''" in sql
         assert "runs_fts" not in sql
+
+    def test_sqlite_schema_matches_postgres_migration_core_shape(self):
+        from core.migrations import MIGRATIONS
+
+        postgres_statements = [statement for migration in MIGRATIONS for statement in migration.statements]
+        postgres_columns = {
+            table: self._postgres_table_columns(postgres_statements, table)
+            for table in self.CORE_SCHEMA_TABLES
+        }
+        postgres_indexes = self._postgres_shared_index_names(postgres_statements)
+        postgres_triggers = self._postgres_trigger_names(postgres_statements)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "schema-parity.db")
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            sqlite_columns = {
+                table: {row[1] for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()}
+                for table in self.CORE_SCHEMA_TABLES
+            }
+            sqlite_indexes = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'index' "
+                    "AND tbl_name IN ({}) AND name NOT LIKE 'sqlite_autoindex%'".format(
+                        ",".join("?" for _ in self.CORE_SCHEMA_TABLES)
+                    ),
+                    self.CORE_SCHEMA_TABLES,
+                ).fetchall()
+            }
+            sqlite_triggers = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'findings'"
+                ).fetchall()
+            }
+            sqlite_trigger_sql = {
+                row[0]: row[1]
+                for row in conn.execute(
+                    "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'findings'"
+                ).fetchall()
+            }
+            conn.close()
+
+        assert sqlite_columns == postgres_columns
+        assert sqlite_indexes == postgres_indexes
+        assert sqlite_triggers == postgres_triggers == {"findings_legacy_ai", "findings_ad"}
+        postgres_sql = "\n".join(postgres_statements)
+        assert "first_run_id" in sqlite_trigger_sql["findings_legacy_ai"]
+        assert "last_run_id" in sqlite_trigger_sql["findings_legacy_ai"]
+        assert "occurrence_count" in sqlite_trigger_sql["findings_legacy_ai"]
+        assert "first_run_id" in postgres_sql
+        assert "last_run_id" in postgres_sql
+        assert "occurrence_count" in postgres_sql
+        assert "DELETE FROM findings_occurrences WHERE finding_id = OLD.id" in sqlite_trigger_sql["findings_ad"]
+        assert "DELETE FROM findings_occurrences WHERE finding_id = OLD.id" in postgres_sql
 
     def test_postgres_search_migration_adds_trigram_indexes(self):
         from core.migrations import MIGRATIONS

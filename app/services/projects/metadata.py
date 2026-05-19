@@ -19,11 +19,8 @@ from services.projects.contracts import (
     ProjectWorkspaceError,
     ProjectWorkspaceQuotaExceeded,
 )
+from services.projects.utils import trim_text as _trim_text
 from services.workspace.files import WorkspaceError, resolve_workspace_path
-
-
-def _trim_text(value, limit):
-    return str(value or "").strip()[:limit]
 
 
 def _cfg_int(key, default, *, cfg=None):

@@ -488,7 +488,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── cleanup.py      # Atlas run-link, orphan, and delete cleanup helpers
 │   │   │   ├── intel_bridge.py # Atlas entity intel refresh and snapshot persistence helpers
 │   │   │   ├── lookup.py       # Session entity list/detail queries and Atlas metadata shaping
-│   │   │   └── materializer.py # Run-output entity materialization into the Atlas tables
+│   │   │   ├── materializer.py # Run-output entity materialization into the Atlas tables
+│   │   │   └── recalculation.py # Shared Atlas entity/finding aggregate refresh helpers
 │   │   ├── commands/
 │   │   │   ├── __init__.py     # Command service package marker
 │   │   │   ├── builtin_autocomplete.yaml # App-owned built-in command autocomplete grammar

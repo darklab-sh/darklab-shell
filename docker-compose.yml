@@ -59,6 +59,7 @@ services:
       - DATABASE_URL=${DATABASE_URL:-}
       - DATABASE_POOL_MIN=${DATABASE_POOL_MIN:-1}
       - DATABASE_POOL_MAX=${DATABASE_POOL_MAX:-5}
+      - DATABASE_POSTGRES_JIT=${DATABASE_POSTGRES_JIT:-false}
       # The entrypoint uses this path to normalize workspace permissions before
       # dropping privileges. The app also treats WORKSPACE_ROOT as the runtime
       # workspace_root override, so Compose deployments only need this setting.
