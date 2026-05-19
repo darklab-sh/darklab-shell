@@ -1587,6 +1587,7 @@ def delete_run(run_id):
     """Delete a specific run from history for this session."""
     session_id = get_session_id()
     prune_atlas = str(request.args.get("prune_atlas") or "").strip().lower() in {"1", "true", "yes"}
+    prune_curated_atlas = str(request.args.get("prune_curated_atlas") or "").strip().lower() in {"1", "true", "yes"}
     atlas_cleanup = {"entities": 0, "findings": 0}
     with db_connect() as conn:
         owned = conn.execute(
@@ -1594,7 +1595,11 @@ def delete_run(run_id):
             (run_id, session_id),
         ).fetchone()
         if owned:
-            cleanup_preview = atlas_run_cleanup_preview(conn, session_id, [run_id]) if prune_atlas else None
+            cleanup_preview = (
+                atlas_run_cleanup_preview(conn, session_id, [run_id], include_curated=prune_curated_atlas)
+                if prune_atlas
+                else None
+            )
             delete_run_artifacts(conn, [run_id])
             if cleanup_preview:
                 atlas_cleanup = delete_atlas_cleanup_preview(conn, session_id, cleanup_preview)

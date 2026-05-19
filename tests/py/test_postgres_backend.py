@@ -263,7 +263,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
     conn.commit()
 
-    assert applied == ["0001", "0002", "0003", "0004", "0005", "0006"]
+    assert applied == ["0001", "0002", "0003", "0004", "0005", "0006", "0007"]
     assert applied_again == []
     table_rows = conn.execute(
         """
@@ -1522,13 +1522,14 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     detail_resp = client.get(f"/atlas/entities/{entity_id}", headers={"X-Session-ID": session_id})
     export_resp = client.get("/atlas/entities/export?format=jsonl", headers={"X-Session-ID": session_id})
     findings_resp = client.get("/atlas/findings?q=https", headers={"X-Session-ID": session_id})
+    runs_resp = client.get("/atlas/runs?q=nmap", headers={"X-Session-ID": session_id})
     saved_view_resp = client.post(
         "/atlas/views",
         headers={"X-Session-ID": session_id},
         json={
             "name": "Postgres Atlas",
             "tab": "findings",
-            "filters": {"query": "https", "finding_status": "new"},
+            "filters": {"query": "https", "finding_status": "new", "run_id": run_id, "run_label": "nmap darklab.sh"},
         },
     )
     saved_views_resp = client.get("/atlas/views", headers={"X-Session-ID": session_id})
@@ -1561,8 +1562,11 @@ def test_atlas_routes_use_postgres_query_path(monkeypatch, postgres_schema):
     exported = [json.loads(line) for line in export_resp.data.decode("utf-8").splitlines()]
     assert exported[0]["intel_providers_with_data"] == ["crtsh"]
     assert json.loads(findings_resp.data)["findings"][0]["id"] == finding_id
+    assert json.loads(runs_resp.data)["runs"][0]["id"] == run_id
     assert saved_view_resp.status_code == 201
-    assert json.loads(saved_views_resp.data)["views"][0]["name"] == "Postgres Atlas"
+    saved_view = json.loads(saved_views_resp.data)["views"][0]
+    assert saved_view["name"] == "Postgres Atlas"
+    assert saved_view["filters"]["run_id"] == run_id
     assert review_resp.status_code == 200
     assert json.loads(review_resp.data)["counts"] == {"updated": 1, "not_found": 0}
     assert suppression_resp.status_code == 200

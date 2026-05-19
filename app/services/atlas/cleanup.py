@@ -56,6 +56,7 @@ def _public_preview(preview: dict[str, Any]) -> dict[str, Any]:
         "curated_total": curated_entity_count + curated_finding_count,
         "total": entity_count + finding_count,
         "has_cleanup": bool(entity_count or finding_count),
+        "has_curated_cleanup": bool(curated_entity_count or curated_finding_count),
     }
 
 
@@ -70,18 +71,48 @@ def _finding_curated_sql() -> str:
         "OR COALESCE(NULLIF(f.review_state, ''), 'new') != 'new' "
         "OR EXISTS ("
         "  SELECT 1 FROM project_links finding_link "
+        "  JOIN projects finding_project ON finding_project.id = finding_link.project_id "
         "  WHERE finding_link.entity_type = 'finding' "
-        "  AND finding_link.entity_id = f.id"
+        "  AND finding_link.entity_id = f.id "
+        "  AND finding_project.session_id = f.session_id"
+        ") "
+        "OR EXISTS ("
+        "  SELECT 1 FROM findings_occurrences project_fo "
+        "  JOIN project_links project_run_link ON project_run_link.entity_type = 'run' "
+        "    AND project_run_link.entity_id = project_fo.run_id "
+        "  JOIN projects project_run_project ON project_run_project.id = project_run_link.project_id "
+        "  WHERE project_fo.finding_id = f.id "
+        "  AND project_run_project.session_id = f.session_id"
+        ") "
+        "OR EXISTS ("
+        "  SELECT 1 FROM project_links direct_run_link "
+        "  JOIN projects direct_run_project ON direct_run_project.id = direct_run_link.project_id "
+        "  WHERE direct_run_link.entity_type = 'run' "
+        "  AND direct_run_project.session_id = f.session_id "
+        "  AND ("
+        "    direct_run_link.entity_id = f.run_id "
+        "    OR direct_run_link.entity_id = f.first_run_id "
+        "    OR direct_run_link.entity_id = f.last_run_id"
+        "  )"
+        ") "
+        "OR EXISTS ("
+        "  SELECT 1 FROM project_links linked_entity_link "
+        "  JOIN projects linked_entity_project ON linked_entity_project.id = linked_entity_link.project_id "
+        "  WHERE linked_entity_link.entity_type = 'atlas_entity' "
+        "  AND linked_entity_link.entity_id = COALESCE(f.entity_id, f.target_id) "
+        "  AND linked_entity_project.session_id = f.session_id"
         ") "
         "OR EXISTS ("
         "  SELECT 1 FROM entity_labels finding_label "
         "  WHERE finding_label.entity_type = 'finding' "
-        "  AND finding_label.entity_id = f.id"
+        "  AND finding_label.entity_id = f.id "
+        "  AND finding_label.session_id = f.session_id"
         ") "
         "OR EXISTS ("
         "  SELECT 1 FROM entity_notes finding_note "
         "  WHERE finding_note.entity_type = 'finding' "
-        "  AND finding_note.entity_id = f.id"
+        "  AND finding_note.entity_id = f.id "
+        "  AND finding_note.session_id = f.session_id"
         ")"
     )
 
@@ -115,6 +146,7 @@ def atlas_run_cleanup_preview(
     *,
     exclude_entity_ids: list[str] | tuple[str, ...] | set[str] | None = None,
     exclude_finding_ids: list[str] | tuple[str, ...] | set[str] | None = None,
+    include_curated: bool = False,
 ) -> dict[str, Any]:
     """Find non-curated Atlas rows only linked to the given run ids."""
     ids = _unique_ids(run_ids)
@@ -161,8 +193,9 @@ def atlas_run_cleanup_preview(
     )
     finding_params = [session_id]
     finding_curated = _finding_curated_sql()
+    finding_curated_filter = "" if include_curated else f"AND NOT ({finding_curated})"
     finding_rows = conn.execute(
-        "SELECT DISTINCT f.id " + finding_base + f"AND NOT ({finding_curated})",
+        "SELECT DISTINCT f.id " + finding_base + finding_curated_filter,
         finding_params,
     ).fetchall()
     curated_finding_count = int(conn.execute(
@@ -192,6 +225,7 @@ def atlas_run_cleanup_preview(
     )
     entity_params = [session_id]
     entity_curated = _entity_curated_sql()
+    entity_curated_filter = "" if include_curated else f"AND NOT ({entity_curated}) "
     entity_child_block = (
         "AND NOT EXISTS ("
         "  SELECT 1 FROM findings child_f "
@@ -203,7 +237,7 @@ def atlas_run_cleanup_preview(
     entity_rows = conn.execute(
         "SELECT DISTINCT e.id "
         + entity_base
-        + f"AND NOT ({entity_curated}) "
+        + entity_curated_filter
         + entity_child_block,
         entity_params,
     ).fetchall()
@@ -325,6 +359,164 @@ def delete_atlas_cleanup_preview(conn, session_id: str, preview: dict[str, Any])
     return {
         "entities": int(deleted_entities.get("entities") or 0),
         "findings": deleted_findings + int(deleted_entities.get("findings") or 0),
+    }
+
+
+def _owned_run_ids(conn, session_id: str, run_ids: list[str]) -> list[str]:
+    ids = _unique_ids(run_ids)
+    if not ids:
+        return []
+    placeholders = _placeholders(ids)
+    rows = conn.execute(
+        f"SELECT id FROM runs WHERE session_id = ? AND id IN ({placeholders}) ORDER BY started DESC, id DESC",  # nosec
+        [session_id, *ids],
+    ).fetchall()
+    return [str(row["id"]) for row in rows if row["id"]]
+
+
+def _atlas_entity_ids_for_runs(conn, session_id: str, run_ids: list[str]) -> list[str]:
+    if not run_ids:
+        return []
+    placeholders = _placeholders(run_ids)
+    rows = conn.execute(
+        "SELECT DISTINCT erl.entity_id "  # nosec
+        "FROM entity_run_links erl "
+        "JOIN entities e ON e.id = erl.entity_id "
+        f"WHERE e.session_id = ? AND erl.run_id IN ({placeholders})",
+        [session_id, *run_ids],
+    ).fetchall()
+    return [str(row["entity_id"]) for row in rows if row["entity_id"]]
+
+
+def _atlas_finding_ids_for_runs(conn, session_id: str, run_ids: list[str]) -> list[str]:
+    if not run_ids:
+        return []
+    placeholders = _placeholders(run_ids)
+    rows = conn.execute(
+        "SELECT DISTINCT fo.finding_id "  # nosec
+        "FROM findings_occurrences fo "
+        "JOIN findings f ON f.id = fo.finding_id "
+        f"WHERE f.session_id = ? AND fo.run_id IN ({placeholders})",
+        [session_id, *run_ids],
+    ).fetchall()
+    return [str(row["finding_id"]) for row in rows if row["finding_id"]]
+
+
+def _recalculate_atlas_entities(conn, entity_ids: list[str]) -> None:
+    for entity_id in _unique_ids(entity_ids):
+        row = conn.execute(
+            "SELECT COALESCE(SUM(occurrence_count), 0) AS occurrence_count, "
+            "MIN(first_seen_at) AS first_seen_at, MAX(last_seen_at) AS last_seen_at "
+            "FROM entity_run_links WHERE entity_id = ?",
+            (entity_id,),
+        ).fetchone()
+        occurrence_count = int(row["occurrence_count"] or 0) if row else 0
+        if occurrence_count <= 0:
+            conn.execute(
+                "UPDATE entities SET occurrence_count = 0 WHERE id = ?",
+                (entity_id,),
+            )
+            continue
+        conn.execute(
+            "UPDATE entities SET occurrence_count = ?, first_seen_at = ?, last_seen_at = ? WHERE id = ?",
+            (occurrence_count, row["first_seen_at"] or "", row["last_seen_at"] or "", entity_id),
+        )
+
+
+def _recalculate_atlas_findings(conn, finding_ids: list[str]) -> None:
+    for finding_id in _unique_ids(finding_ids):
+        row = conn.execute(
+            "SELECT COUNT(*) AS occurrence_count, MIN(seen_at) AS first_seen_at, MAX(seen_at) AS last_seen_at "
+            "FROM findings_occurrences WHERE finding_id = ?",
+            (finding_id,),
+        ).fetchone()
+        occurrence_count = int(row["occurrence_count"] or 0) if row else 0
+        if occurrence_count <= 0:
+            conn.execute(
+                "UPDATE findings SET occurrence_count = 0, run_id = '', first_run_id = '', last_run_id = '', "
+                "first_seen_at = '', last_seen_at = '', line_number = NULL WHERE id = ?",
+                (finding_id,),
+            )
+            continue
+        first_run = conn.execute(
+            "SELECT run_id FROM findings_occurrences WHERE finding_id = ? ORDER BY seen_at ASC, run_id ASC LIMIT 1",
+            (finding_id,),
+        ).fetchone()
+        last_run = conn.execute(
+            "SELECT run_id FROM findings_occurrences WHERE finding_id = ? ORDER BY seen_at DESC, run_id DESC LIMIT 1",
+            (finding_id,),
+        ).fetchone()
+        first_run_id = str(first_run["run_id"] or "") if first_run else ""
+        last_run_id = str(last_run["run_id"] or "") if last_run else ""
+        conn.execute(
+            "UPDATE findings SET occurrence_count = ?, run_id = ?, first_run_id = ?, last_run_id = ?, "
+            "first_seen_at = ?, last_seen_at = ? WHERE id = ?",
+            (
+                occurrence_count,
+                first_run_id,
+                first_run_id,
+                last_run_id,
+                row["first_seen_at"] or "",
+                row["last_seen_at"] or "",
+                finding_id,
+            ),
+        )
+
+
+def detach_atlas_run_sources(
+    conn,
+    session_id: str,
+    run_ids: list[str] | tuple[str, ...] | set[str],
+    *,
+    include_curated: bool = False,
+) -> dict[str, Any]:
+    """Detach runs from Atlas rows while keeping the runs themselves."""
+    owned_run_ids = _owned_run_ids(conn, session_id, _unique_ids(run_ids))
+    if not owned_run_ids:
+        return {
+            "run_ids": [],
+            "detached_entities": 0,
+            "detached_findings": 0,
+            "deleted_entities": 0,
+            "deleted_findings": 0,
+            "curated_entities": 0,
+            "curated_findings": 0,
+            "recalculated_entities": 0,
+            "recalculated_findings": 0,
+        }
+
+    affected_entities = _atlas_entity_ids_for_runs(conn, session_id, owned_run_ids)
+    affected_findings = _atlas_finding_ids_for_runs(conn, session_id, owned_run_ids)
+    cleanup_preview = atlas_run_cleanup_preview(conn, session_id, owned_run_ids, include_curated=include_curated)
+    deleted = delete_atlas_cleanup_preview(conn, session_id, cleanup_preview)
+
+    placeholders = _placeholders(owned_run_ids)
+    entity_link_delete = conn.execute(
+        f"DELETE FROM entity_run_links WHERE run_id IN ({placeholders})",  # nosec
+        owned_run_ids,
+    )
+    finding_occurrence_delete = conn.execute(
+        f"DELETE FROM findings_occurrences WHERE run_id IN ({placeholders})",  # nosec
+        owned_run_ids,
+    )
+
+    deleted_entity_ids = set(_unique_ids(cleanup_preview.get("entity_ids") or []))
+    deleted_finding_ids = set(_unique_ids(cleanup_preview.get("finding_ids") or []))
+    remaining_entities = [entity_id for entity_id in affected_entities if entity_id not in deleted_entity_ids]
+    remaining_findings = [finding_id for finding_id in affected_findings if finding_id not in deleted_finding_ids]
+    _recalculate_atlas_entities(conn, remaining_entities)
+    _recalculate_atlas_findings(conn, remaining_findings)
+
+    return {
+        "run_ids": owned_run_ids,
+        "detached_entities": int(entity_link_delete.rowcount or 0),
+        "detached_findings": int(finding_occurrence_delete.rowcount or 0),
+        "deleted_entities": int(deleted.get("entities") or 0),
+        "deleted_findings": int(deleted.get("findings") or 0),
+        "curated_entities": int(cleanup_preview.get("curated_entity_count") or 0),
+        "curated_findings": int(cleanup_preview.get("curated_finding_count") or 0),
+        "recalculated_entities": len(set(remaining_entities)),
+        "recalculated_findings": len(set(remaining_findings)),
     }
 
 

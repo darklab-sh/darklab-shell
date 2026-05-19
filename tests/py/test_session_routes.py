@@ -768,6 +768,71 @@ class TestSessionMigrate:
         assert workspace.read_workspace_text_file(to_id, "from-only.txt", cfg) == "move\n"
         assert workspace.read_workspace_text_file(from_id, "shared.txt", cfg) == "source\n"
 
+    def test_migrate_workspace_file_metadata_only_for_moved_files(self, tmp_path, monkeypatch):
+        client = get_client()
+        cfg = self._enable_workspace(monkeypatch, tmp_path)
+        from_id = "migrate-ws-meta-src-" + __import__("uuid").uuid4().hex[:8]
+        to_id = str(__import__("uuid").uuid4())
+        workspace.write_workspace_text_file(from_id, "shared.txt", "source\n", cfg)
+        workspace.write_workspace_text_file(from_id, "from-only.txt", "move\n", cfg)
+        workspace.write_workspace_text_file(to_id, "shared.txt", "dest\n", cfg)
+        with sqlite3.connect(DB_PATH) as conn:
+            for path, label in (("shared.txt", "source-shared"), ("from-only.txt", "source-only")):
+                conn.execute(
+                    "INSERT OR REPLACE INTO entity_labels "
+                    "(id, session_id, entity_type, entity_id, label, created) "
+                    "VALUES (?, ?, 'workspace_file', ?, ?, datetime('now'))",
+                    ("lbl_" + __import__("uuid").uuid4().hex, from_id, path, label),
+                )
+                conn.execute(
+                    "INSERT OR REPLACE INTO entity_notes "
+                    "(id, session_id, entity_type, entity_id, body, created, updated) "
+                    "VALUES (?, ?, 'workspace_file', ?, ?, datetime('now'), datetime('now'))",
+                    ("note_" + __import__("uuid").uuid4().hex, from_id, path, f"note {label}"),
+                )
+            conn.commit()
+
+        resp = client.post(
+            "/session/migrate",
+            json={"from_session_id": from_id, "to_session_id": to_id},
+            headers={"X-Session-ID": from_id},
+        )
+        data = json.loads(resp.data)
+
+        with sqlite3.connect(DB_PATH) as conn:
+            moved_label = conn.execute(
+                "SELECT label FROM entity_labels WHERE session_id = ? "
+                "AND entity_type = 'workspace_file' AND entity_id = 'from-only.txt'",
+                (to_id,),
+            ).fetchone()
+            skipped_label = conn.execute(
+                "SELECT label FROM entity_labels WHERE session_id = ? "
+                "AND entity_type = 'workspace_file' AND entity_id = 'shared.txt'",
+                (from_id,),
+            ).fetchone()
+            drifted_label = conn.execute(
+                "SELECT label FROM entity_labels WHERE session_id = ? "
+                "AND entity_type = 'workspace_file' AND entity_id = 'shared.txt'",
+                (to_id,),
+            ).fetchone()
+            moved_note = conn.execute(
+                "SELECT body FROM entity_notes WHERE session_id = ? "
+                "AND entity_type = 'workspace_file' AND entity_id = 'from-only.txt'",
+                (to_id,),
+            ).fetchone()
+
+        assert resp.status_code == 200
+        assert data["migrated_workspace_files"] == 1
+        assert data["skipped_workspace_files"] == 1
+        assert data["migrated_entity_labels"] == 1
+        assert data["migrated_entity_notes"] == 1
+        assert data["skipped_workspace_file_labels"] == 1
+        assert data["skipped_workspace_file_notes"] == 1
+        assert tuple(moved_label) == ("source-only",)
+        assert tuple(moved_note) == ("note source-only",)
+        assert tuple(skipped_label) == ("source-shared",)
+        assert drifted_label is None
+
 
 # ── /session/workflows ────────────────────────────────────────────────────────
 

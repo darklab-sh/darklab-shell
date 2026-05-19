@@ -205,20 +205,96 @@ function _historyProjectRunEntityOptionContent({
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
   checkbox.checked = false;
+  checkbox.dataset.historyProjectRunEntitiesScope = kind === 'remove' ? 'disposable' : 'all';
   const text = document.createElement('span');
   label.append(checkbox, text);
   wrap.append(label);
   const note = document.createElement('div');
   note.className = 'history-project-run-entities-note u-hidden';
   wrap.appendChild(note);
+  const curatedLabel = document.createElement('label');
+  curatedLabel.className = 'form-check u-hidden';
+  const curatedCheckbox = document.createElement('input');
+  curatedCheckbox.type = 'checkbox';
+  curatedCheckbox.checked = false;
+  curatedCheckbox.dataset.historyProjectRunEntitiesScope = 'curated';
+  const curatedText = document.createElement('span');
+  curatedLabel.append(curatedCheckbox, curatedText);
+  const curatedNote = document.createElement('div');
+  curatedNote.className = 'history-project-run-entities-note u-hidden';
+  if (kind === 'remove') {
+    wrap.append(curatedLabel, curatedNote);
+  }
+  const runFindingsNote = document.createElement('div');
+  runFindingsNote.className = 'history-project-run-entities-note u-hidden';
+  if (kind === 'remove') {
+    wrap.prepend(runFindingsNote);
+  }
   return {
     wrap,
     checkbox,
     text,
     note,
+    curatedCheckbox,
+    includeEntities() {
+      return !!checkbox.checked && !checkbox.disabled;
+    },
+    includeCuratedEntities() {
+      return !!curatedCheckbox.checked && !curatedCheckbox.disabled;
+    },
+    includeAnyEntities() {
+      return this.includeEntities() || this.includeCuratedEntities();
+    },
     setPreview(preview) {
-      const count = Number(preview && (preview.linkable ?? preview.removable) || 0);
       const runCount = Number(preview && preview.run_count || 0);
+      if (kind === 'remove') {
+        const removable = Number(preview && preview.removable || 0);
+        const curated = Number(preview && (preview.curated ?? preview.kept_curated) || 0);
+        const runFindings = Number(preview && preview.run_findings || 0);
+        const removableFindings = Number(preview && preview.removable_findings || 0);
+        const curatedFindings = Number(preview && (preview.curated_findings ?? preview.kept_curated_findings) || 0);
+        const entityLabel = removable === 1 ? 'entity' : 'entities';
+        const curatedEntityLabel = curated === 1 ? 'entity' : 'entities';
+        const runFindingLabel = runFindings === 1 ? 'finding' : 'findings';
+        const removableFindingLabel = removableFindings === 1 ? 'finding' : 'findings';
+        const curatedFindingLabel = curatedFindings === 1 ? 'finding' : 'findings';
+        checkbox.checked = false;
+        checkbox.disabled = removable <= 0;
+        curatedCheckbox.checked = false;
+        curatedCheckbox.disabled = curated <= 0;
+        wrap.classList.toggle('u-hidden', removable <= 0 && curated <= 0 && runFindings <= 0);
+        runFindingsNote.classList.toggle('u-hidden', runFindings <= 0);
+        runFindingsNote.textContent = runFindings > 0
+          ? `Removing the run link will remove ${runFindings.toLocaleString()} ${runFindingLabel} from this project's Findings tab.`
+          : '';
+        label.classList.toggle('u-hidden', removable <= 0);
+        curatedLabel.classList.toggle('u-hidden', curated <= 0);
+        text.textContent = removable > 0
+          ? 'Also remove disposable same-run Atlas entities from this project'
+          : '';
+        note.classList.toggle('u-hidden', removable <= 0);
+        note.textContent = removable > 0
+          ? [
+            `This will unlink ${removable.toLocaleString()} ${entityLabel} found only in ${runCount > 1 ? 'these runs' : 'this run'}.`,
+            removableFindings > 0
+              ? `${removableFindings.toLocaleString()} related ${removableFindingLabel} will no longer appear in this project.`
+              : '',
+          ].filter(Boolean).join(' ')
+          : '';
+        curatedText.textContent = curated > 0
+          ? 'Also remove curated same-run Atlas entities from this project'
+          : '';
+        curatedNote.classList.toggle('u-hidden', curated <= 0);
+        curatedNote.textContent = curated > 0
+          ? [
+            `${curated.toLocaleString()} curated ${curatedEntityLabel}`,
+            curatedFindings > 0 ? `and ${curatedFindings.toLocaleString()} related ${curatedFindingLabel}` : '',
+            `will stay in this project unless this is checked. Curated means project-linked elsewhere, labeled, noted, reviewed, or carrying project target metadata.`,
+          ].filter(Boolean).join(' ')
+          : '';
+        return;
+      }
+      const count = Number(preview && preview.linkable || 0);
       const keptCurated = Number(preview && preview.kept_curated || 0);
       checkbox.checked = false;
       checkbox.disabled = count <= 0;
@@ -294,7 +370,28 @@ function _historyProjectFromLink(link) {
 }
 
 function _historyRunProjectLinks(run) {
-  return (Array.isArray(run?.project_links) ? run.project_links : [])
+  const links = Array.isArray(run?.project_links) ? run.project_links.slice() : [];
+  try {
+    const state = typeof _historyRunModalState !== 'undefined' ? _historyRunModalState : null;
+    const projectState = state && state.projectState;
+    const project = projectState && projectState.project;
+    const runId = String(run && run.id || '');
+    const modalRunId = String((state && (state.details || state.run) || {}).id || '');
+    const hasActiveLink = !!(project && project.id)
+      && projectState.attached
+      && runId
+      && (!modalRunId || modalRunId === runId)
+      && !links.some(item => String(item && item.project_id || '') === String(project.id || ''));
+    if (hasActiveLink) {
+      links.push({
+        project_id: project.id,
+        entity_type: 'run',
+        entity_id: runId,
+        project,
+      });
+    }
+  } catch (_) {}
+  return links
     .map((link) => ({ link, project: _historyProjectFromLink(link) }))
     .filter((item) => item.project && item.project.id)
     .sort((a, b) => _historyProjectDisplayName(a.project).localeCompare(
@@ -306,6 +403,7 @@ function _historyRunProjectLinks(run) {
 
 async function _historyUnlinkRunFromProject(run, project, options = {}) {
   const includeEntities = !!options.includeEntities;
+  const includeCuratedEntities = !!options.includeCuratedEntities;
   if (!run || !run.id) throw new Error('Run is missing its identifier.');
   if (!project || !project.id) throw new Error('Project is missing its identifier.');
   const resp = await apiFetch(`/projects/${encodeURIComponent(project.id)}/links`, {
@@ -315,6 +413,7 @@ async function _historyUnlinkRunFromProject(run, project, options = {}) {
       entity_type: 'run',
       entity_id: run.id,
       ...(includeEntities ? { include_entities: true } : {}),
+      ...(includeCuratedEntities ? { include_curated_entities: true } : {}),
     }),
   });
   if (!resp.ok) {
@@ -419,7 +518,8 @@ async function _historyRemoveRunFromProject(run) {
   if (typeof project === 'function') project = project();
   try {
     await _historyUnlinkRunFromProject(run, project, {
-      includeEntities: !!removeOption.checkbox.checked && !removeOption.checkbox.disabled,
+      includeEntities: removeOption.includeAnyEntities(),
+      includeCuratedEntities: removeOption.includeCuratedEntities(),
     });
   } catch (_) {
     showToast('Failed to remove run from project', 'error');

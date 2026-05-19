@@ -294,7 +294,7 @@
     return wrap;
   }
 
-  function renderRuns(runs, onSeeRun, meta = null, onPage = null) {
+  function renderRuns(runs, onSeeRun, meta = null, onPage = null, onCleanRunAtlas = null) {
     const wrap = node('div', 'atlas-source-list');
     const rows = Array.isArray(runs) ? runs : [];
     if (!rows.length) {
@@ -310,14 +310,24 @@
         `${formatCount(run.occurrence_count, 'hit')} · ${formatDate(run.last_seen_at || run.started)}`,
       );
       row.append(title, meta);
+      const actions = node('div', 'atlas-source-actions');
       if (typeof onSeeRun === 'function') {
         const action = document.createElement('button');
         action.type = 'button';
         action.className = 'btn btn-ghost btn-compact atlas-source-action';
         action.textContent = 'See in run';
         action.addEventListener('click', () => onSeeRun(run));
-        row.appendChild(action);
+        actions.appendChild(action);
       }
+      if (typeof onCleanRunAtlas === 'function') {
+        const cleanup = document.createElement('button');
+        cleanup.type = 'button';
+        cleanup.className = 'btn btn-ghost btn-compact atlas-source-action';
+        cleanup.textContent = 'Clean Atlas';
+        cleanup.addEventListener('click', () => onCleanRunAtlas(run));
+        actions.appendChild(cleanup);
+      }
+      if (actions.childElementCount) row.appendChild(actions);
       wrap.appendChild(row);
     });
     const pager = renderCollectionPager(meta, 'source runs', onPage);
@@ -568,6 +578,7 @@
       handlers.onSeeRun,
       detail.detail_limits?.runs,
       handlers.onPageRuns,
+      handlers.onCleanRunAtlas,
     )));
     container.append(section('Findings', renderFindings(
       detail.findings,

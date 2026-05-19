@@ -988,6 +988,11 @@ def delete_run_artifacts(conn, run_ids):
     if file_artifact_ids:
         artifact_placeholders = ",".join("?" for _ in file_artifact_ids)
         conn.execute(
+            "DELETE FROM project_links WHERE entity_type = 'run_file_artifact' "  # nosec
+            f"AND entity_id IN ({artifact_placeholders})",
+            file_artifact_ids,
+        )
+        conn.execute(
             "DELETE FROM entity_labels WHERE entity_type = 'run_file_artifact' "  # nosec
             f"AND entity_id IN ({artifact_placeholders})",
             file_artifact_ids,

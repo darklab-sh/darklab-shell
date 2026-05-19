@@ -50,6 +50,12 @@ function deferred() {
   return { promise, resolve, reject }
 }
 
+async function flushPromises(count = 8) {
+  for (let index = 0; index < count; index += 1) {
+    await Promise.resolve()
+  }
+}
+
 function setupAtlasDom() {
   document.body.innerHTML = `
     <input id="cmd" />
@@ -59,6 +65,9 @@ function setupAtlasDom() {
         <div id="atlas-subtitle"></div>
         <div id="atlas-tabs" class="atlas-tabs tab-strip"></div>
         <input id="atlas-search" />
+        <input id="atlas-run-filter-search" />
+        <select id="atlas-run-filter-select" class="form-select form-control-compact"></select>
+        <div id="atlas-run-filter-chip" class="atlas-run-filter-chip u-hidden"></div>
         <select id="atlas-finding-status-filter" class="form-select form-control-compact u-hidden"></select>
         <select id="atlas-orphan-filter" class="form-select form-control-compact"></select>
         <select id="atlas-suppression-filter" class="form-select form-control-compact"></select>
@@ -69,6 +78,7 @@ function setupAtlasDom() {
         <button id="atlas-export-csv-btn" type="button">csv</button>
         <button id="atlas-export-jsonl-btn" type="button">jsonl</button>
         <button id="atlas-refresh-btn" type="button">refresh</button>
+        <button id="atlas-clear-filters-btn" type="button">clear filters</button>
         <div class="atlas-shell">
           <div id="atlas-finding-bulk-row" class="u-hidden">
             <div class="atlas-bulk-action-row">
@@ -122,6 +132,18 @@ function loadAtlas({
     }
     if (target === '/atlas/views') {
       return Promise.resolve(jsonResponse({ views: [] }))
+    }
+    if (target.startsWith('/atlas/runs?')) {
+      return Promise.resolve(jsonResponse({
+        runs: [{
+          id: 'run1',
+          run_id: 'run1',
+          command: 'nmap 107.178.109.44',
+          entity_count: 1,
+          finding_count: 1,
+        }],
+        limit: 30,
+      }))
     }
     if (target.startsWith('/atlas/findings?')) {
       return Promise.resolve(jsonResponse({
@@ -354,11 +376,13 @@ describe('Atlas overlay', () => {
     })
     const { openAtlas } = loadAtlas({ apiFetchImpl: apiFetch, showConfirmImpl: showConfirm })
 
-    await openAtlas({ source: 'test' })
+    await openAtlas({ source: 'test', projectId: 'prj_keep', projectName: 'Keep Scope' })
     window.DarklabAtlasOverlay.state.query = 'ssl'
     window.DarklabAtlasOverlay.state.findingStatus = 'important'
     window.DarklabAtlasOverlay.state.orphanFilter = 'only'
     window.DarklabAtlasOverlay.state.suppressionFilter = 'only'
+    window.DarklabAtlasOverlay.state.runId = 'run1'
+    window.DarklabAtlasOverlay.state.runLabel = 'nmap 107.178.109.44'
     document.getElementById('atlas-saved-view-save').click()
 
     await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/atlas/views', expect.objectContaining({ method: 'POST' })))
@@ -371,17 +395,53 @@ describe('Atlas overlay', () => {
         orphan_filter: 'only',
         suppression_filter: 'only',
         finding_status: 'important',
+        run_id: 'run1',
+        run_label: 'nmap 107.178.109.44',
       },
     })
 
     const select = document.getElementById('atlas-saved-view-select')
+    views[0] = { ...views[0], tab: 'ip' }
     select.value = 'atv_1111111111111111'
     select.dispatchEvent(new Event('change', { bubbles: true }))
 
     await vi.waitFor(() => expect(document.getElementById('atlas-search').value).toBe('ssl'))
+    expect(window.DarklabAtlasOverlay.state.activeTab).toBe('findings')
+    expect(document.querySelector('[data-atlas-tab="findings"]')?.classList.contains('is-active')).toBe(true)
     expect(window.DarklabAtlasOverlay.state.findingStatus).toBe('important')
+    expect(window.DarklabAtlasOverlay.state.runId).toBe('run1')
     await vi.waitFor(() => {
       expect(apiFetch.mock.calls.some(([url]) => String(url).includes('review_state=important'))).toBe(true)
+    })
+
+    window.DarklabAtlasOverlay.state.offset = 50
+    window.DarklabAtlasOverlay.state.selectedFindingIds.add('fnd_1')
+    document.getElementById('atlas-clear-filters-btn').click()
+
+    await vi.waitFor(() => expect(window.DarklabAtlasOverlay.state.query).toBe(''))
+    expect(document.getElementById('atlas-search').value).toBe('')
+    expect(window.DarklabAtlasOverlay.state.findingStatus).toBe('')
+    expect(window.DarklabAtlasOverlay.state.orphanFilter).toBe('hide')
+    expect(window.DarklabAtlasOverlay.state.suppressionFilter).toBe('hide')
+    expect(window.DarklabAtlasOverlay.state.runId).toBe('')
+    expect(window.DarklabAtlasOverlay.state.selectedSavedViewId).toBe('')
+    expect(window.DarklabAtlasOverlay.state.projectId).toBe('prj_keep')
+    expect(window.DarklabAtlasOverlay.state.offset).toBe(0)
+    expect(window.DarklabAtlasOverlay.state.selectedFindingIds.size).toBe(0)
+    expect(document.getElementById('atlas-saved-view-select').value).toBe('')
+    expect(document.getElementById('atlas-saved-view-update').disabled).toBe(true)
+    await vi.waitFor(() => {
+      const clearedRequest = apiFetch.mock.calls.some(([url]) => {
+        const target = String(url)
+        return target.startsWith('/atlas/findings?')
+          && target.includes('project_id=prj_keep')
+          && target.includes('orphan_filter=hide')
+          && target.includes('suppression_filter=hide')
+          && !target.includes('run_id=')
+          && !target.includes('review_state=')
+          && !target.includes('q=')
+      })
+      expect(clearedRequest).toBe(true)
     })
   })
 
@@ -412,7 +472,7 @@ describe('Atlas overlay', () => {
     expect(isAtlasOverlayOpen()).toBe(true)
     expect(document.getElementById('atlas-overlay')?.classList.contains('u-hidden')).toBe(false)
     expect(document.getElementById('atlas-subtitle')?.textContent).toBe('1 entity · 1 finding')
-    expect(document.getElementById('atlas-tabs')?.textContent).toContain('Hosts/IPs1')
+    expect(document.getElementById('atlas-tabs')?.textContent).toContain('Hosts/IPs(1)')
     expect(document.getElementById('atlas-tabs')?.classList.contains('tab-strip')).toBe(true)
     expect(document.querySelector('[data-atlas-tab="ip"]')?.classList.contains('tab-strip-item')).toBe(true)
     expect(document.querySelector('[data-atlas-tab="ip"]')?.classList.contains('is-active')).toBe(true)
@@ -547,7 +607,17 @@ describe('Atlas overlay', () => {
     const previews = [
       { source_run_id: 'run1', sibling_cleanup: { has_cleanup: false, entities: 0, findings: 0, curated_total: 0 } },
       { source_run_id: 'run1', sibling_cleanup: { has_cleanup: true, entities: 1, findings: 0, curated_total: 0 } },
-      { source_run_id: 'run1', sibling_cleanup: { has_cleanup: true, entities: 1, findings: 1, curated_total: 2 } },
+      {
+        source_run_id: 'run1',
+        sibling_cleanup: {
+          has_cleanup: true,
+          entities: 1,
+          findings: 1,
+          curated_entities: 1,
+          curated_findings: 1,
+          curated_total: 2,
+        },
+      },
     ]
     const apiFetch = vi.fn((url) => {
       const target = String(url)
@@ -603,7 +673,8 @@ describe('Atlas overlay', () => {
     await Promise.resolve()
     const curatedContent = showConfirm.mock.calls[2][0].content
     expect(curatedContent.querySelector('input[type="checkbox"]')).not.toBeNull()
-    expect(curatedContent.textContent).toContain('2 curated items will be kept.')
+    expect(curatedContent.textContent).toContain('Also delete curated single-source Atlas items')
+    expect(curatedContent.textContent).toContain('1 curated entity and 1 curated finding will be kept unless this is checked.')
   })
 
   it('applies the project filter when opened from a project', async () => {
@@ -614,6 +685,74 @@ describe('Atlas overlay', () => {
     expect(document.getElementById('atlas-subtitle')?.textContent).toBe('1 entity · 1 finding · Case Alpha')
     expect(apiFetch).toHaveBeenCalledWith(
       '/atlas/findings?limit=50&offset=0&project_id=prj_1&orphan_filter=hide&suppression_filter=hide',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+  })
+
+  it('opens Findings scoped to a run and clears the run filter chip', async () => {
+    const { openAtlas, apiFetch } = loadAtlas()
+
+    await openAtlas({
+      source: 'run-details',
+      tab: 'findings',
+      runId: 'run1',
+      runLabel: 'nmap 107.178.109.44',
+    })
+
+    expect(document.getElementById('atlas-run-filter-chip')?.textContent).toContain('Run: nmap 107.178.1...')
+    expect(document.getElementById('atlas-tabs')?.textContent).toContain('Findings(1/1)')
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/atlas?orphan_filter=hide&suppression_filter=hide&run_id=run1',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/atlas?orphan_filter=hide&suppression_filter=hide',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/atlas/findings?limit=50&offset=0&run_id=run1&orphan_filter=hide&suppression_filter=hide',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+
+    document.querySelector('[data-atlas-tab="ip"]')?.click()
+    await flushPromises()
+
+    expect(document.getElementById('atlas-run-filter-chip')?.textContent).toContain('Run: nmap 107.178.1...')
+    expect(document.getElementById('atlas-tabs')?.textContent).toContain('Hosts/IPs(1/1)')
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/atlas/entities?type=ip&limit=50&offset=0&run_id=run1&orphan_filter=hide&suppression_filter=hide',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+
+    document.querySelector('#atlas-run-filter-chip button')?.click()
+    await flushPromises()
+
+    expect(document.getElementById('atlas-run-filter-chip')?.classList.contains('u-hidden')).toBe(true)
+    expect(apiFetch.mock.calls.some(([url]) => (
+      String(url) === '/atlas/entities?type=ip&limit=50&offset=0&orphan_filter=hide&suppression_filter=hide'
+    ))).toBe(true)
+  })
+
+  it('applies a source-run filter from the Atlas run selector', async () => {
+    const { openAtlas, apiFetch } = loadAtlas()
+
+    await openAtlas({ source: 'test', tab: 'findings' })
+
+    await vi.waitFor(() => {
+      expect([...document.getElementById('atlas-run-filter-select').options].some(option => option.value === 'run1')).toBe(true)
+    })
+    const select = document.getElementById('atlas-run-filter-select')
+    select.value = 'run1'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    await flushPromises()
+
+    expect(document.getElementById('atlas-run-filter-chip')?.textContent).toContain('Run: nmap 107.178.1...')
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/atlas?orphan_filter=hide&suppression_filter=hide&run_id=run1',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/atlas/findings?limit=50&offset=0&run_id=run1&orphan_filter=hide&suppression_filter=hide',
       expect.objectContaining({ cache: 'no-store' }),
     )
   })

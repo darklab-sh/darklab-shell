@@ -144,7 +144,7 @@ def _project_list_counts(conn, session_id, project_ids):
     meta_filter_sql, meta_filter_params = dialect.in_clause("entity_id", ids)
 
     for row in conn.execute(
-        "SELECT l.project_id, COUNT(*) AS count "  # nosec B608
+        "SELECT l.project_id, COUNT(*) AS count "  # nosec
         "FROM project_links l JOIN runs r ON r.id = l.entity_id "
         "WHERE " + project_filter_sql + " AND l.entity_type = 'run' "
         "AND r.session_id = ? AND r.run_kind = ? "
@@ -154,7 +154,7 @@ def _project_list_counts(conn, session_id, project_ids):
         counts[str(row["project_id"])]["runs"] = int(row["count"] or 0)
 
     for row in conn.execute(
-        "SELECT l.project_id, e.type, l.review_state, COUNT(*) AS count "  # nosec B608
+        "SELECT l.project_id, e.type, l.review_state, COUNT(*) AS count "  # nosec
         "FROM project_links l JOIN entities e ON e.id = l.entity_id "
         "WHERE " + project_filter_sql + " AND l.entity_type = 'atlas_entity' "
         "AND e.session_id = ? AND COALESCE(e.suppressed, FALSE) = FALSE "
@@ -171,7 +171,7 @@ def _project_list_counts(conn, session_id, project_ids):
                 project_counts["targets"] += count
 
     for row in conn.execute(
-        "SELECT l.project_id, COUNT(a.id) AS count "  # nosec B608
+        "SELECT l.project_id, COUNT(a.id) AS count "  # nosec
         "FROM project_links l "
         "JOIN runs r ON r.id = l.entity_id "
         "JOIN run_file_artifacts a ON a.run_id = r.id "
@@ -183,7 +183,7 @@ def _project_list_counts(conn, session_id, project_ids):
         counts[str(row["project_id"])]["artifacts"] = int(row["count"] or 0)
 
     for row in conn.execute(
-        "SELECT project_id, COUNT(*) AS count FROM evidence_packages "  # nosec B608
+        "SELECT project_id, COUNT(*) AS count FROM evidence_packages "  # nosec
         "WHERE session_id = ? AND " + package_filter_sql + " "
         "GROUP BY project_id",
         (session_id, *package_filter_params),
@@ -191,7 +191,7 @@ def _project_list_counts(conn, session_id, project_ids):
         counts[str(row["project_id"])]["packages"] = int(row["count"] or 0)
 
     for row in conn.execute(
-        "SELECT project_id, COUNT(DISTINCT finding_id) AS count FROM ("  # nosec B608
+        "SELECT project_id, COUNT(DISTINCT finding_id) AS count FROM ("  # nosec
         "SELECT l.project_id, fo.finding_id "
         "FROM project_links l "
         "JOIN runs r ON r.id = l.entity_id "
@@ -235,7 +235,7 @@ def _project_list_counts(conn, session_id, project_ids):
         counts[str(row["project_id"])]["findings"] = int(row["count"] or 0)
 
     for row in conn.execute(
-        "SELECT entity_id AS project_id, COUNT(*) AS count FROM entity_labels "  # nosec B608
+        "SELECT entity_id AS project_id, COUNT(*) AS count FROM entity_labels "  # nosec
         "WHERE session_id = ? AND entity_type = 'project' AND " + meta_filter_sql + " "
         "GROUP BY entity_id",
         (session_id, *meta_filter_params),
@@ -243,7 +243,7 @@ def _project_list_counts(conn, session_id, project_ids):
         counts[str(row["project_id"])]["labels"] = int(row["count"] or 0)
 
     for row in conn.execute(
-        "SELECT entity_id AS project_id, COUNT(*) AS count FROM entity_notes "  # nosec B608
+        "SELECT entity_id AS project_id, COUNT(*) AS count FROM entity_notes "  # nosec
         "WHERE session_id = ? AND entity_type = 'project' AND " + meta_filter_sql + " "
         "GROUP BY entity_id",
         (session_id, *meta_filter_params),
@@ -258,7 +258,7 @@ def list_projects(session_id, *, include_archived=False):
         where_sql = _project_list_where_sql(include_archived=include_archived)
         active_project_id = _active_project_id_from_preferences(conn, session_id)
         rows = conn.execute(
-            "SELECT id, session_id, name, slug, description, status, color, created, updated "  # nosec B608
+            "SELECT id, session_id, name, slug, description, status, color, created, updated "  # nosec
             "FROM projects "
             + where_sql
             + " "
@@ -275,12 +275,12 @@ def list_projects_page(session_id, *, include_archived=False, limit=50, offset=0
         where_sql = _project_list_where_sql(include_archived=include_archived)
         active_project_id = _active_project_id_from_preferences(conn, session_id)
         total_row = conn.execute(
-            "SELECT COUNT(*) AS count FROM projects " + where_sql,  # nosec B608
+            "SELECT COUNT(*) AS count FROM projects " + where_sql,  # nosec
             (session_id,),
         ).fetchone()
         total = int(total_row["count"] or 0) if total_row else 0
         rows = conn.execute(
-            "SELECT id, session_id, name, slug, description, status, color, created, updated "  # nosec B608
+            "SELECT id, session_id, name, slug, description, status, color, created, updated "  # nosec
             "FROM projects "
             + where_sql
             + " "
@@ -526,7 +526,7 @@ def get_project_summary(session_id, project_id):
             ).fetchall()
             artifact_id_rows = conn.execute(
                 "SELECT id "
-                f"FROM run_file_artifacts WHERE run_id IN ({placeholders}) ",  # nosec B608
+                f"FROM run_file_artifacts WHERE run_id IN ({placeholders}) ",  # nosec
                 run_ids,
             ).fetchall()
         if run_ids or entity_ids:

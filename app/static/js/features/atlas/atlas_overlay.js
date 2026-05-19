@@ -13,6 +13,9 @@
   const tabsHost = document.getElementById('atlas-tabs');
   const subtitle = document.getElementById('atlas-subtitle');
   const searchInput = document.getElementById('atlas-search');
+  const runFilterSearch = document.getElementById('atlas-run-filter-search');
+  const runFilterSelect = document.getElementById('atlas-run-filter-select');
+  const runFilterChip = document.getElementById('atlas-run-filter-chip');
   const findingStatusFilter = document.getElementById('atlas-finding-status-filter');
   const orphanFilter = document.getElementById('atlas-orphan-filter');
   const suppressionFilter = document.getElementById('atlas-suppression-filter');
@@ -25,6 +28,7 @@
   const exportCsvBtn = document.getElementById('atlas-export-csv-btn');
   const exportJsonlBtn = document.getElementById('atlas-export-jsonl-btn');
   const refreshBtn = document.getElementById('atlas-refresh-btn');
+  const clearFiltersBtn = document.getElementById('atlas-clear-filters-btn');
   const findingBulkRow = document.getElementById('atlas-finding-bulk-row');
   const selectToggle = document.getElementById('atlas-select-toggle');
   const findingSelectionSummary = document.getElementById('atlas-finding-selection-summary');
@@ -78,6 +82,7 @@
   const state = {
     activeTab: 'findings',
     summary: null,
+    baseSummary: null,
     entities: [],
     findings: [],
     findingCounts: {},
@@ -95,6 +100,15 @@
     query: '',
     projectId: '',
     projectName: '',
+    launchProjectId: '',
+    launchProjectName: '',
+    runId: '',
+    runLabel: '',
+    runOptions: [],
+    runOptionsLoaded: false,
+    runOptionsLoading: false,
+    runOptionsQuery: '',
+    runSearchTimer: null,
     savedViews: [],
     selectedSavedViewId: '',
     savedViewsLoaded: false,
@@ -207,6 +221,7 @@
     overlay.classList.remove('u-hidden');
     overlay.classList.add('open');
     overlay.setAttribute('aria-hidden', 'false');
+    if (typeof global.syncModalOverlayState === 'function') global.syncModalOverlayState();
   }
 
   function hide({ refocus = true } = {}) {
@@ -216,6 +231,7 @@
     overlay.classList.add('u-hidden');
     overlay.classList.remove('open');
     overlay.setAttribute('aria-hidden', 'true');
+    if (typeof global.syncModalOverlayState === 'function') global.syncModalOverlayState();
     if (refocus && typeof global.refocusComposerAfterAction === 'function') {
       global.refocusComposerAfterAction({ defer: true });
     }
@@ -227,6 +243,11 @@
     if (options && options.tab) state.activeTab = tabsApi.tabById?.(options.tab)?.id || state.activeTab;
     state.projectId = String(options && options.projectId || '');
     state.projectName = String(options && options.projectName || '').trim();
+    state.launchProjectId = state.projectId;
+    state.launchProjectName = state.projectName;
+    state.runId = String(options && options.runId || '').trim();
+    state.runLabel = String(options && options.runLabel || '').trim();
+    state.runOptionsQuery = '';
     state.requestedEntityValue = String(options && options.entityValue || '').trim();
     state.requestedView = ['detail', 'list'].includes(String(options && options.forceView || ''))
       ? String(options.forceView)
@@ -256,6 +277,9 @@
     render();
     loadSavedViews().catch((err) => {
       if (typeof global.logClientError === 'function') global.logClientError('failed to load atlas saved views', err);
+    });
+    loadRunOptions().catch((err) => {
+      if (typeof global.logClientError === 'function') global.logClientError('failed to load atlas run filters', err);
     });
     await refreshAtlas({ resetOffset: true });
   }
@@ -375,7 +399,7 @@
       label.textContent = tab.label;
       const count = document.createElement('span');
       count.className = 'atlas-tab-count';
-      count.textContent = String(tabsApi.countForTab ? tabsApi.countForTab(tab, state.summary) : 0);
+      count.textContent = `(${tabCountText(tab)})`;
       button.append(label, count);
       button.addEventListener('click', () => {
         setActiveAtlasTab(tab.id);
@@ -428,8 +452,13 @@
       savedViewSelect.appendChild(option('Saved views', ''));
       savedViewSelect.dataset.populated = '1';
     }
+    if (runFilterSelect && !runFilterSelect.dataset.populated) {
+      runFilterSelect.appendChild(option('Filter by run', ''));
+      runFilterSelect.dataset.populated = '1';
+    }
     syncSelectDisplay(findingStatusFilter);
     syncSelectDisplay(findingBulkStatus);
+    syncSelectDisplay(runFilterSelect);
     syncSelectDisplay(orphanFilter);
     syncSelectDisplay(suppressionFilter);
     syncSelectDisplay(savedViewSelect);
@@ -513,6 +542,72 @@
     return Array.isArray(value) ? value.filter(item => item && item.id && item.name) : [];
   }
 
+  function normalizeRunOptions(value) {
+    return Array.isArray(value)
+      ? value.map(item => ({
+        id: String(item && (item.id || item.run_id) || '').trim(),
+        run_id: String(item && (item.run_id || item.id) || '').trim(),
+        command: String(item && item.command || '').trim(),
+        started: String(item && item.started || '').trim(),
+        entity_count: Number(item && item.entity_count || 0),
+        finding_count: Number(item && item.finding_count || 0),
+      })).filter(item => item.id)
+      : [];
+  }
+
+  function runOptionLabel(run) {
+    const command = String(run && run.command || '').trim() || 'Run';
+    const entityCount = Number(run && run.entity_count || 0);
+    const findingCount = Number(run && run.finding_count || 0);
+    const counts = [];
+    if (entityCount) counts.push(`${entityCount.toLocaleString()} ent`);
+    if (findingCount) counts.push(`${findingCount.toLocaleString()} fnd`);
+    return counts.length ? `${command} (${counts.join(', ')})` : command;
+  }
+
+  function selectedRunOption() {
+    const selectedId = String(state.runId || '');
+    return state.runOptions.find(run => String(run.id || '') === selectedId) || null;
+  }
+
+  function renderRunFilterControls() {
+    if (runFilterSearch && runFilterSearch.value !== state.runOptionsQuery) {
+      runFilterSearch.value = state.runOptionsQuery || '';
+    }
+    if (!runFilterSelect) return;
+    const optionRows = [...state.runOptions];
+    if (state.runId && !optionRows.some(run => String(run.id || '') === state.runId)) {
+      optionRows.unshift({
+        id: state.runId,
+        run_id: state.runId,
+        command: state.runLabel || state.runId,
+        entity_count: 0,
+        finding_count: 0,
+      });
+    }
+    const nextValues = ['', ...optionRows.map(run => String(run.id || ''))].join('\n');
+    const currentValues = Array.from(runFilterSelect.options || []).map(option => option.value).join('\n');
+    if (nextValues !== currentValues) {
+      runFilterSelect.replaceChildren();
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = state.runOptionsLoading ? 'Loading runs...' : 'Filter by run';
+      runFilterSelect.appendChild(placeholder);
+      optionRows.forEach((run) => {
+        const option = document.createElement('option');
+        option.value = String(run.id || '');
+        option.textContent = runOptionLabel(run);
+        option.dataset.runCommand = String(run.command || '');
+        runFilterSelect.appendChild(option);
+      });
+    } else if (runFilterSelect.options[0]) {
+      runFilterSelect.options[0].textContent = state.runOptionsLoading ? 'Loading runs...' : 'Filter by run';
+    }
+    runFilterSelect.value = state.runId || '';
+    runFilterSelect.disabled = state.runOptionsLoading;
+    syncSelectDisplay(runFilterSelect);
+  }
+
   function currentSavedViewState(name = '') {
     return {
       name: String(name || '').trim(),
@@ -524,6 +619,8 @@
         finding_status: String(state.findingStatus || ''),
         project_id: String(state.projectId || ''),
         project_name: String(state.projectName || ''),
+        run_id: String(state.runId || ''),
+        run_label: String(state.runLabel || ''),
         sort: '',
       },
     };
@@ -592,7 +689,7 @@
       title,
       body: {
         text: title,
-        note: 'Saved views remember the current tab, search, filters, review state, and project scope.',
+        note: 'Saved views remember search, filters, review state, source run, and project scope.',
       },
       content,
       actions: [
@@ -624,6 +721,40 @@
     } finally {
       state.savedViewsLoading = false;
       renderSavedViewControls();
+    }
+  }
+
+  async function loadRunOptions({ query = state.runOptionsQuery, force = false } = {}) {
+    const normalizedQuery = String(query || '').trim();
+    if (
+      !force
+      && state.runOptionsLoaded
+      && normalizedQuery === state.runOptionsQuery
+      && (!state.runId || state.runOptions.some(run => String(run.id || '') === String(state.runId || '')))
+    ) {
+      return state.runOptions;
+    }
+    state.runOptionsQuery = normalizedQuery;
+    state.runOptionsLoading = true;
+    renderRunFilterControls();
+    try {
+      const params = new URLSearchParams({ limit: '30' });
+      if (normalizedQuery) params.set('q', normalizedQuery);
+      if (state.runId) params.set('run_id', state.runId);
+      const resp = await api()(`/atlas/runs?${params.toString()}`, { cache: 'no-store' });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      state.runOptions = normalizeRunOptions(data.runs);
+      state.runOptionsLoaded = true;
+      const selected = selectedRunOption();
+      if (selected && selected.command && !state.runLabel) state.runLabel = selected.command;
+      return state.runOptions;
+    } catch (err) {
+      if (typeof global.logClientError === 'function') global.logClientError('failed to load atlas run filters', err);
+      return state.runOptions;
+    } finally {
+      state.runOptionsLoading = false;
+      renderRunFilterControls();
     }
   }
 
@@ -709,8 +840,6 @@
       return;
     }
     const filters = view.filters && typeof view.filters === 'object' ? view.filters : {};
-    const tabId = String(view.tab || 'findings');
-    if ((tabsApi.tabs || []).some(tab => String(tab.id || '') === tabId)) state.activeTab = tabId;
     state.selectedSavedViewId = String(view.id || '');
     state.query = String(filters.query || '').trim();
     state.orphanFilter = String(filters.orphan_filter || 'hide') || 'hide';
@@ -718,6 +847,9 @@
     state.findingStatus = String(filters.finding_status || '');
     state.projectId = String(filters.project_id || '');
     state.projectName = String(filters.project_name || '');
+    state.runId = String(filters.run_id || '').trim();
+    state.runLabel = String(filters.run_label || '').trim();
+    state.runOptionsQuery = '';
     if (searchInput) searchInput.value = state.query;
     state.selectedId = '';
     state.selectedFindingId = '';
@@ -730,6 +862,9 @@
     state.refreshIntelOnSelect = false;
     state.addActiveProjectOnSelect = false;
     render();
+    loadRunOptions({ force: true }).catch((err) => {
+      if (typeof global.logClientError === 'function') global.logClientError('failed to load atlas run filters', err);
+    });
     refreshAtlas({ resetOffset: true });
   }
 
@@ -974,6 +1109,7 @@
       onRemoveProjectLink: (link) => removeProjectLink(link),
       onSaveMetadata: (payload) => saveMetadata(payload),
       onSeeRun: (run) => openSourceRun(run),
+      onCleanRunAtlas: (run) => confirmCleanRunAtlas(run),
       onDeleteEntity: () => confirmDeleteEntity(),
       onSuppressEntity: (entity) => updateSuppression(entity, !entity.suppressed),
       onPageRuns: (offset) => pageEntityDetail('runs', offset),
@@ -992,6 +1128,8 @@
     renderShellMode();
     renderSubtitle();
     renderFindingControls();
+    renderRunFilterControls();
+    renderRunFilterChip();
     renderTabs();
     renderList();
     renderPagination();
@@ -1005,6 +1143,99 @@
 
   function renderShellMode() {
     shell?.setAttribute('data-atlas-mode', currentTab().id === 'findings' ? 'findings' : 'entity');
+  }
+
+  function clearRunFilter() {
+    applyRunFilter('', '');
+  }
+
+  function clearAtlasFilters() {
+    clearTimeout(state.searchTimer);
+    clearTimeout(state.runSearchTimer);
+    state.query = '';
+    state.runId = '';
+    state.runLabel = '';
+    state.runOptionsQuery = '';
+    state.findingStatus = '';
+    state.orphanFilter = 'hide';
+    state.suppressionFilter = 'hide';
+    state.projectId = state.launchProjectId;
+    state.projectName = state.launchProjectName;
+    state.selectedSavedViewId = '';
+    state.selectedId = '';
+    state.selectedFindingId = '';
+    state.requestedEntityValue = '';
+    state.requestedView = '';
+    state.requestedViewStarted = 0;
+    state.refreshIntelOnSelect = false;
+    state.addActiveProjectOnSelect = false;
+    state.detailOffsets = { runs: 0, findings: 0 };
+    state.detail = null;
+    resetSelection({ selectMode: false, render: false });
+    if (searchInput) searchInput.value = '';
+    if (runFilterSearch) runFilterSearch.value = '';
+    render();
+    loadRunOptions({ query: '', force: true }).catch((err) => {
+      if (typeof global.logClientError === 'function') global.logClientError('failed to load atlas run filters', err);
+    });
+    refreshAtlas({ resetOffset: true });
+  }
+
+  function applyRunFilter(runId, runLabel = '') {
+    state.runId = '';
+    state.runLabel = '';
+    const normalizedRunId = String(runId || '').trim();
+    if (normalizedRunId) {
+      const matched = state.runOptions.find(run => String(run.id || '') === normalizedRunId);
+      state.runId = normalizedRunId;
+      state.runLabel = String(runLabel || matched?.command || normalizedRunId).trim();
+    }
+    state.runOptionsQuery = '';
+    state.selectedFindingId = '';
+    state.selectedFindingIds.clear();
+    state.selectedId = '';
+    state.selectedEntityIds.clear();
+    state.detailOffsets = { runs: 0, findings: 0 };
+    state.detail = null;
+    state.requestedEntityValue = '';
+    state.requestedView = '';
+    state.requestedViewStarted = 0;
+    state.refreshIntelOnSelect = false;
+    state.addActiveProjectOnSelect = false;
+    renderRunFilterControls();
+    refreshAtlas({ resetOffset: true });
+  }
+
+  function truncateRunFilterLabel(value) {
+    const text = String(value || '').trim() || 'run';
+    if (text.length <= 17) return text;
+    return `${text.slice(0, 14).trimEnd()}...`;
+  }
+
+  function formatTabCount(value) {
+    return Math.max(0, Number(value || 0)).toLocaleString();
+  }
+
+  function tabCountText(tab) {
+    const filtered = tabsApi.countForTab ? tabsApi.countForTab(tab, state.summary) : 0;
+    const total = tabsApi.countForTab ? tabsApi.countForTab(tab, state.baseSummary || state.summary) : filtered;
+    if (state.runId) return `${formatTabCount(filtered)}/${formatTabCount(total)}`;
+    return formatTabCount(filtered);
+  }
+
+  function renderRunFilterChip() {
+    if (!runFilterChip) return;
+    runFilterChip.replaceChildren();
+    const hasRunFilter = !!state.runId;
+    runFilterChip.classList.toggle('u-hidden', !hasRunFilter);
+    if (!hasRunFilter) return;
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip chip-removable';
+    chip.textContent = `Run: ${truncateRunFilterLabel(state.runLabel || state.runId)} ×`;
+    chip.title = state.runLabel ? `${state.runLabel} (${state.runId})` : state.runId;
+    chip.addEventListener('click', clearRunFilter);
+    runFilterChip.appendChild(chip);
   }
 
   async function refreshAtlas({ resetOffset = false } = {}) {
@@ -1028,6 +1259,7 @@
         orphan_filter: state.orphanFilter,
         suppression_filter: state.suppressionFilter,
       });
+      if (state.runId) summaryParams.set('run_id', state.runId);
       const summaryResp = await api()(
         `/atlas?${summaryParams.toString()}`,
         requestOptions(controller, { cache: 'no-store' }),
@@ -1036,6 +1268,22 @@
       if (isStale()) return;
       state.summary = await summaryResp.json();
       if (isStale()) return;
+      if (state.runId) {
+        const baseSummaryParams = new URLSearchParams({
+          orphan_filter: state.orphanFilter,
+          suppression_filter: state.suppressionFilter,
+        });
+        const baseSummaryResp = await api()(
+          `/atlas?${baseSummaryParams.toString()}`,
+          requestOptions(controller, { cache: 'no-store' }),
+        );
+        if (!baseSummaryResp.ok) throw new Error(`HTTP ${baseSummaryResp.status}`);
+        if (isStale()) return;
+        state.baseSummary = await baseSummaryResp.json();
+        if (isStale()) return;
+      } else {
+        state.baseSummary = state.summary;
+      }
       const tab = requestedTab;
       if (tab.id === 'findings') {
         const params = new URLSearchParams({
@@ -1044,6 +1292,7 @@
         });
         if (state.query) params.set('q', state.query);
         if (state.projectId) params.set('project_id', state.projectId);
+        if (state.runId) params.set('run_id', state.runId);
         if (state.findingStatus) params.append('review_state', state.findingStatus);
         params.set('orphan_filter', state.orphanFilter);
         params.set('suppression_filter', state.suppressionFilter);
@@ -1081,6 +1330,7 @@
         });
         if (state.query) params.set('q', state.query);
         if (state.projectId) params.set('project_id', state.projectId);
+        if (state.runId) params.set('run_id', state.runId);
         params.set('orphan_filter', state.orphanFilter);
         params.set('suppression_filter', state.suppressionFilter);
         const listResp = await api()(
@@ -1417,29 +1667,49 @@
       + `${findings.toLocaleString()} ${findings === 1 ? 'finding' : 'findings'}`;
   }
 
+  function curatedCleanupLabel(cleanup) {
+    const entities = Number(cleanup?.curated_entities || 0);
+    const findings = Number(cleanup?.curated_findings || 0);
+    return `${entities.toLocaleString()} curated ${entities === 1 ? 'entity' : 'entities'} and `
+      + `${findings.toLocaleString()} curated ${findings === 1 ? 'finding' : 'findings'}`;
+  }
+
   function deleteCleanupContent(preview, checkboxId) {
     const cleanup = preview?.sibling_cleanup || {};
-    if (!preview?.source_run_id || !cleanup.has_cleanup) return null;
+    const curated = Number(cleanup.curated_total || 0);
+    if (!preview?.source_run_id || (!cleanup.has_cleanup && curated <= 0)) return null;
     const wrap = document.createElement('div');
     wrap.className = 'atlas-delete-cleanup-option';
-    const label = document.createElement('label');
-    label.className = 'form-check';
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.id = checkboxId;
-    checkbox.checked = false;
-    const textNode = document.createElement('span');
-    textNode.textContent = 'Also remove non-curated Atlas items only created by the same run';
-    label.append(checkbox, textNode);
-    const note = document.createElement('div');
-    note.className = 'atlas-muted';
-    const curated = Number(cleanup.curated_total || 0);
-    note.textContent = `This will remove ${cleanupLabel(cleanup)}.`;
-    wrap.append(label, note);
+    if (cleanup.has_cleanup) {
+      const label = document.createElement('label');
+      label.className = 'form-check';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.id = checkboxId;
+      checkbox.checked = false;
+      checkbox.dataset.atlasDeleteCleanup = '1';
+      const textNode = document.createElement('span');
+      textNode.textContent = 'Also remove disposable Atlas items only sourced by the same run';
+      label.append(checkbox, textNode);
+      const note = document.createElement('div');
+      note.className = 'atlas-muted';
+      note.textContent = `This will remove ${cleanupLabel(cleanup)}.`;
+      wrap.append(label, note);
+    }
     if (curated > 0) {
+      const curatedLabel = document.createElement('label');
+      curatedLabel.className = 'form-check';
+      const curatedCheckbox = document.createElement('input');
+      curatedCheckbox.type = 'checkbox';
+      curatedCheckbox.checked = false;
+      curatedCheckbox.dataset.atlasDeleteCuratedCleanup = '1';
+      const curatedText = document.createElement('span');
+      curatedText.textContent = 'Also delete curated single-source Atlas items';
+      curatedLabel.append(curatedCheckbox, curatedText);
       const curatedNote = document.createElement('div');
       curatedNote.className = 'atlas-muted';
-      curatedNote.textContent = `${curated.toLocaleString()} curated ${curated === 1 ? 'item' : 'items'} will be kept.`;
+      curatedNote.textContent = `${curatedCleanupLabel(cleanup)} will be kept unless this is checked. Curated means project-linked, project-visible, reviewed, labeled, or noted.`;
+      wrap.append(curatedLabel);
       wrap.appendChild(curatedNote);
     }
     return wrap;
@@ -1469,11 +1739,13 @@
         ],
       });
       if (choice !== 'delete') return;
-      const prune = !!content?.querySelector?.('input')?.checked;
+      const prune = !!content?.querySelector?.('[data-atlas-delete-cleanup]')?.checked
+        || !!content?.querySelector?.('[data-atlas-delete-curated-cleanup]')?.checked;
+      const pruneCurated = !!content?.querySelector?.('[data-atlas-delete-curated-cleanup]')?.checked;
       const resp = await api()(`/atlas/entities/${encodeURIComponent(entityId)}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prune_source_run: prune }),
+        body: JSON.stringify({ prune_source_run: prune, prune_curated_source_run: pruneCurated }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       showToastSafe(prune ? 'Entity and related Atlas items deleted' : 'Entity deleted', 'success');
@@ -1506,11 +1778,13 @@
         ],
       });
       if (choice !== 'delete') return;
-      const prune = !!content?.querySelector?.('input')?.checked;
+      const prune = !!content?.querySelector?.('[data-atlas-delete-cleanup]')?.checked
+        || !!content?.querySelector?.('[data-atlas-delete-curated-cleanup]')?.checked;
+      const pruneCurated = !!content?.querySelector?.('[data-atlas-delete-curated-cleanup]')?.checked;
       const resp = await api()(`/atlas/findings/${encodeURIComponent(findingId)}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prune_source_run: prune }),
+        body: JSON.stringify({ prune_source_run: prune, prune_curated_source_run: pruneCurated }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       showToastSafe(prune ? 'Finding and related Atlas items deleted' : 'Finding deleted', 'success');
@@ -1527,6 +1801,78 @@
     const runId = String(run && (run.id || run.run_id) || '');
     if (!runId || typeof global.openHistoryRunDetails !== 'function') return;
     global.openHistoryRunDetails({ ...run, id: runId });
+  }
+
+  async function confirmCleanRunAtlas(run) {
+    const runId = String(run && (run.id || run.run_id) || '');
+    if (!runId || typeof global.showConfirm !== 'function') return;
+    try {
+      const previewResp = await api()(`/atlas/runs/${encodeURIComponent(runId)}/cleanup-preview`, { cache: 'no-store' });
+      if (!previewResp.ok) throw new Error(`HTTP ${previewResp.status}`);
+      const cleanup = (await previewResp.json()).cleanup || {};
+      const curated = Number(cleanup.curated_total || 0);
+      const removalNote = cleanup.has_cleanup
+        ? `This will remove ${cleanupLabel(cleanup)} that only came from this run.`
+        : 'No disposable same-run Atlas items were found.';
+      const content = document.createElement('div');
+      content.className = 'atlas-delete-cleanup-option';
+      const primaryNote = document.createElement('div');
+      primaryNote.className = 'atlas-muted';
+      primaryNote.textContent = removalNote;
+      content.appendChild(primaryNote);
+      if (curated > 0) {
+        const curatedLabel = document.createElement('label');
+        curatedLabel.className = 'form-check';
+        const curatedCheckbox = document.createElement('input');
+        curatedCheckbox.type = 'checkbox';
+        curatedCheckbox.checked = false;
+        curatedCheckbox.dataset.atlasCleanCurated = '1';
+        const curatedText = document.createElement('span');
+        curatedText.textContent = 'Also delete curated single-source Atlas items';
+        curatedLabel.append(curatedCheckbox, curatedText);
+        const curatedNote = document.createElement('div');
+        curatedNote.className = 'atlas-muted';
+        curatedNote.textContent = `${curatedCleanupLabel(cleanup)} will be kept unless this is checked. Curated means project-linked, project-visible, reviewed, labeled, or noted.`;
+        content.append(curatedLabel, curatedNote);
+      } else {
+        const keptNote = document.createElement('div');
+        keptNote.className = 'atlas-muted';
+        keptNote.textContent = 'Rows that still have other sources will stay in Atlas.';
+        content.appendChild(keptNote);
+      }
+      const choice = await global.showConfirm({
+        body: {
+          text: 'Clean this run from Atlas?',
+          note: 'The run transcript stays in History. Atlas source links from this run will be removed.',
+        },
+        content,
+        tone: 'danger',
+        refocusOnResolve: false,
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'clean', label: 'Clean Atlas', role: 'destructive' },
+        ],
+      });
+      if (choice !== 'clean') return;
+      const includeCurated = !!content.querySelector('[data-atlas-clean-curated]')?.checked;
+      const resp = await api()(`/atlas/runs/${encodeURIComponent(runId)}/cleanup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ include_curated: includeCurated }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const result = (await resp.json()).cleanup || {};
+      showToastSafe('Atlas cleaned for run', 'success');
+      if (Number(result.deleted_entities || 0) > 0) {
+        state.selectedId = '';
+        state.detail = null;
+      }
+      await refreshAtlas({ resetOffset: false });
+      if (state.selectedId) await loadDetail(state.selectedId, { renderLoading: false });
+    } catch (err) {
+      if (typeof global.logClientError === 'function') global.logClientError('failed to clean atlas run sources', err);
+      showToastSafe('Failed to clean Atlas for run', 'error');
+    }
   }
 
   function exportDownloadName(format) {
@@ -1561,6 +1907,7 @@
     if (tab.type) params.set('type', tab.type);
     if (state.query) params.set('q', state.query);
     if (state.projectId) params.set('project_id', state.projectId);
+    if (state.runId) params.set('run_id', state.runId);
     params.set('orphan_filter', state.orphanFilter);
     params.set('suppression_filter', state.suppressionFilter);
     try {
@@ -1641,6 +1988,7 @@
   function bindEvents() {
     closeBtn?.addEventListener('click', () => closeAtlas());
     refreshBtn?.addEventListener('click', () => refreshAtlas());
+    clearFiltersBtn?.addEventListener('click', () => clearAtlasFilters());
     prevBtn?.addEventListener('click', () => {
       state.offset = Math.max(0, state.offset - state.limit);
       refreshAtlas();
@@ -1658,6 +2006,23 @@
       state.selectedEntityIds.clear();
       clearTimeout(state.searchTimer);
       state.searchTimer = setTimeout(() => refreshAtlas({ resetOffset: true }), 180);
+    });
+    runFilterSearch?.addEventListener('input', () => {
+      state.runOptionsQuery = String(runFilterSearch.value || '').trim();
+      clearTimeout(state.runSearchTimer);
+      state.runSearchTimer = setTimeout(() => {
+        loadRunOptions({ query: state.runOptionsQuery, force: true });
+      }, 180);
+    });
+    runFilterSearch?.addEventListener('focus', () => {
+      loadRunOptions({ query: state.runOptionsQuery, force: !state.runOptionsLoaded });
+    });
+    runFilterSelect?.addEventListener('change', () => {
+      const selected = runFilterSelect.selectedOptions?.[0] || null;
+      applyRunFilter(
+        runFilterSelect.value,
+        selected?.dataset?.runCommand || selected?.textContent || '',
+      );
     });
     findingStatusFilter?.addEventListener('change', () => {
       state.findingStatus = String(findingStatusFilter.value || '');
@@ -1774,17 +2139,21 @@
     pageEntityDetail,
     selectFinding,
     refreshAtlas,
+    clearAtlasFilters,
     refreshIntel,
     addToActiveProject,
     removeProjectLink,
     saveMetadata,
     confirmDeleteEntity,
     confirmDeleteFinding,
+    confirmCleanRunAtlas,
     updateFindingReviewState,
     updateSuppression,
     openEntityFromFinding,
     openSourceRun,
     exportEntities,
+    loadRunOptions,
+    applyRunFilter,
     loadSavedViews,
     applySavedView,
     saveCurrentView,

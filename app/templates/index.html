@@ -481,6 +481,9 @@
           </div>
           <div class="atlas-filter-row">
             <div class="atlas-filter-controls">
+              <input id="atlas-run-filter-search" class="form-control form-control-compact atlas-run-filter-search" type="search" placeholder="search runs" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search runs for Atlas filter">
+              <select id="atlas-run-filter-select" class="form-select form-control-compact atlas-run-filter-select" aria-label="Filter Atlas by source run"></select>
+              <div id="atlas-run-filter-chip" class="atlas-run-filter-chip u-hidden"></div>
               <select id="atlas-finding-status-filter" class="form-select form-control-compact u-hidden" aria-label="Filter Atlas findings by status"></select>
               <select id="atlas-orphan-filter" class="form-select form-control-compact atlas-orphan-filter" aria-label="Filter Atlas rows by source run"></select>
               <select id="atlas-suppression-filter" class="form-select form-control-compact atlas-suppression-filter" aria-label="Filter Atlas rows by suppression state"></select>
@@ -494,6 +497,7 @@
                 </div>
               </div>
               <button id="atlas-refresh-btn" class="btn btn-secondary btn-compact" type="button">Refresh</button>
+              <button id="atlas-clear-filters-btn" class="btn btn-ghost btn-compact" type="button">Clear filters</button>
             </div>
           </div>
           <div class="atlas-saved-view-row">

@@ -509,6 +509,7 @@ describe('history panel actions', () => {
     activeProject = null,
     showConfirmImpl = vi.fn(() => Promise.resolve(null)),
     openMetadataEditorImpl = vi.fn(),
+    openAtlasImpl = vi.fn(() => Promise.resolve()),
     emitUiEvent = vi.fn(),
   } = {}) {
     document.body.innerHTML = `
@@ -715,6 +716,7 @@ describe('history panel actions', () => {
             if (typeof cmdInput.focus === 'function') cmdInput.focus()
           }),
           emitUiEvent,
+          openAtlas: openAtlasImpl,
           bindPressable,
           confirmHistAction: () => {},
           executeHistAction: () => {},
@@ -760,6 +762,7 @@ describe('history panel actions', () => {
       refocusComposerAfterAction,
       showConfirm: showConfirmImpl,
       openMetadataEditor: openMetadataEditorImpl,
+      openAtlas: openAtlasImpl,
       emitUiEvent,
     }
   }
@@ -815,7 +818,8 @@ describe('history panel actions', () => {
 
   it('clicking a history entry row opens run details without closing the panel', async () => {
     const clipboard = { writeText: vi.fn(() => Promise.resolve()) }
-    const { refreshHistoryPanel } = loadHistoryPanel({ clipboardImpl: clipboard })
+    const openAtlas = vi.fn(() => Promise.resolve())
+    const { refreshHistoryPanel } = loadHistoryPanel({ clipboardImpl: clipboard, openAtlasImpl: openAtlas })
     const historyPanel = document.getElementById('history-panel')
     const cmdInput = document.getElementById('cmd')
     historyPanel.classList.add('open')
@@ -854,16 +858,32 @@ describe('history panel actions', () => {
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await Promise.resolve()
     expect(clipboard.writeText).toHaveBeenCalledWith('ping darklab.sh')
+
+    document.querySelector('.history-run-action-menu-trigger').click()
+    document
+      .querySelector('[data-history-run-action="open-atlas"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+
+    expect(openAtlas).toHaveBeenCalledWith({
+      source: 'run-details',
+      tab: 'findings',
+      runId: 'run-1',
+      runLabel: 'ping darklab.sh',
+    })
   })
 
   it('shows remove from project in Run Details and can also unlink same-run entities', async () => {
     let linked = true
     const showConfirm = vi.fn((options = {}) => {
       const content = options.content
-      expect(content.textContent).toContain('Also remove 1 Atlas entity found only in this run from this project')
-      expect(content.textContent).toContain('1 curated entity will stay linked.')
-      const checkbox = content.querySelector('input')
-      checkbox.checked = true
+      expect(content.textContent).toContain('Also remove disposable same-run Atlas entities from this project')
+      expect(content.textContent).toContain('This will unlink 1 entity found only in this run.')
+      expect(content.textContent).toContain('2 related findings will no longer appear in this project.')
+      expect(content.textContent).toContain('Also remove curated same-run Atlas entities from this project')
+      expect(content.textContent).toContain('1 curated entity and 3 related findings will stay in this project unless this is checked.')
+      content.querySelector('[data-history-project-run-entities-scope="disposable"]').checked = true
+      content.querySelector('[data-history-project-run-entities-scope="curated"]').checked = true
       return Promise.resolve('remove')
     })
     const apiFetch = vi.fn((url, options = {}) => {
@@ -916,8 +936,14 @@ describe('history panel actions', () => {
             preview: {
               available: 2,
               removable: 1,
+              curated: 1,
               kept_curated: 1,
               removed: 0,
+              removed_curated: 0,
+              run_findings: 4,
+              removable_findings: 2,
+              curated_findings: 3,
+              kept_curated_findings: 3,
               run_count: 1,
             },
           }),
@@ -927,7 +953,10 @@ describe('history panel actions', () => {
         linked = false
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ ok: true, unlinked_entities: { removed: 1, kept_curated: 1 } }),
+          json: () => Promise.resolve({
+            ok: true,
+            unlinked_entities: { removed: 2, removed_curated: 1, kept_curated: 0 },
+          }),
         })
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
@@ -966,10 +995,127 @@ describe('history panel actions', () => {
     expect(showConfirm).toHaveBeenCalled()
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-active/links', expect.objectContaining({
       method: 'DELETE',
-      body: JSON.stringify({ entity_type: 'run', entity_id: 'run-linked', include_entities: true }),
+      body: JSON.stringify({
+        entity_type: 'run',
+        entity_id: 'run-linked',
+        include_entities: true,
+        include_curated_entities: true,
+      }),
     }))
     expect([...document.querySelectorAll('.history-run-action-menu [data-history-run-action]')].map(el => el.dataset.historyRunAction))
       .toContain('add-project')
+  })
+
+  it('uses Current Project attachment state for Run Details project actions when link metadata is missing', async () => {
+    let linked = true
+    const showConfirm = vi.fn((options = {}) => {
+      const content = options.content
+      expect(content?.textContent || '').toContain('Also remove disposable same-run Atlas entities from this project')
+      content.querySelector('[data-history-project-run-entities-scope="disposable"]').checked = true
+      return Promise.resolve('remove')
+    })
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            roots: ['katana'],
+            items: [{
+              id: 'run-active-linked',
+              type: 'run',
+              command: 'katana -u https://darklab.sh',
+              label: 'katana -u https://darklab.sh',
+              started: '2026-01-01T00:00:00Z',
+              created: '2026-01-01T00:00:00Z',
+              exit_code: 0,
+              project_links: [],
+            }],
+            runs: [],
+          }),
+        })
+      }
+      if (url === '/history/run-active-linked?json&preview=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            id: 'run-active-linked',
+            command: 'katana -u https://darklab.sh',
+            output: ['ok'],
+            exit_code: 0,
+          }),
+        })
+      }
+      if (url === '/entities/run/run-active-linked/findings') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ findings: [] }) })
+      }
+      if (url === '/projects/project-active/summary') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ runs: linked ? [{ id: 'run-active-linked' }] : [] }) })
+      }
+      if (url === '/projects/project-active/links/run-entities/remove-preview') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            preview: {
+              available: 1,
+              removable: 1,
+              curated: 0,
+              kept_curated: 0,
+              removed: 0,
+              removed_curated: 0,
+              run_findings: 0,
+              removable_findings: 1,
+              curated_findings: 0,
+              kept_curated_findings: 0,
+              run_count: 1,
+            },
+          }),
+        })
+      }
+      if (url === '/projects/project-active/links' && options.method === 'DELETE') {
+        linked = false
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, unlinked_entities: { removed: 0, kept_curated: 0 } }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+    })
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      apiFetchImpl: apiFetch,
+      activeProject: { id: 'project-active', name: 'Active scope' },
+      showConfirmImpl: showConfirm,
+    })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+    document.querySelector('#history-list .history-entry')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect([...document.querySelectorAll('.history-run-action-menu [data-history-run-action]')].map(el => el.dataset.historyRunAction))
+      .toEqual([
+        'copy-command',
+        'edit-metadata',
+        'open-atlas',
+        'remove-project',
+        'copy-run-id',
+      ])
+    expect(document.querySelector('[data-history-run-action="add-active-project"]')).toBeNull()
+    expect(document.querySelector('[data-history-run-action="add-project"]')).toBeNull()
+
+    document.querySelector('[data-history-run-action="remove-project"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-active/links', expect.objectContaining({
+      method: 'DELETE',
+      body: JSON.stringify({ entity_type: 'run', entity_id: 'run-active-linked', include_entities: true }),
+    }))
   })
 
   it('loads structured run findings into the run details findings tab', async () => {
@@ -1849,7 +1995,7 @@ describe('history panel actions', () => {
     const previews = [
       { has_cleanup: false, entities: 0, findings: 0, curated_total: 0 },
       { has_cleanup: true, entities: 1, findings: 0, curated_total: 0 },
-      { has_cleanup: true, entities: 1, findings: 1, curated_total: 2 },
+      { has_cleanup: true, entities: 1, findings: 1, curated_entities: 1, curated_findings: 1, curated_total: 2 },
     ]
     const apiFetch = vi.fn((url) => {
       if (typeof url === 'string' && url === '/history/run-1/atlas-cleanup-preview') {
@@ -1880,7 +2026,9 @@ describe('history panel actions', () => {
     await new Promise((resolve) => setImmediate(resolve))
     const curatedContent = showConfirm.mock.calls[2][0].content
     expect(curatedContent.querySelector('[data-history-atlas-cleanup]')).not.toBeNull()
-    expect(curatedContent.textContent).toContain('2 curated items will be kept.')
+    expect(curatedContent.querySelector('[data-history-atlas-cleanup-curated]')).not.toBeNull()
+    expect(curatedContent.textContent).toContain('Also delete curated single-source Atlas items')
+    expect(curatedContent.textContent).toContain('1 curated finding and 1 curated entity will be kept unless this is checked.')
   })
 
   it('copies the run id and links runs to active or selected projects from the history menu', async () => {

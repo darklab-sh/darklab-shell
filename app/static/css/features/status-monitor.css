@@ -35,6 +35,7 @@
   z-index: 320;
   background: var(--theme-overlay-backdrop-bg);
   backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
 }
 
 .status-monitor.u-hidden,

@@ -263,6 +263,12 @@ header .version {
   display: none;
 }
 
+body.modal-overlay-active .shell-prompt-caret,
+body.modal-overlay-active .wlc-cursor {
+  animation: none;
+  opacity: 1;
+}
+
 .shell-prompt-wrap:focus-within {
   border-color: transparent;
   box-shadow: none;

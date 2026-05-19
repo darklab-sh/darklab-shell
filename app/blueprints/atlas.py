@@ -21,6 +21,8 @@ from services.atlas.cleanup import (
     delete_atlas_cleanup_preview,
     delete_atlas_entities,
     delete_atlas_findings,
+    detach_atlas_run_sources,
+    public_cleanup_preview,
 )
 from services.atlas.lookup import (
     atlas_entities_export,
@@ -30,6 +32,7 @@ from services.atlas.lookup import (
     entity_detail,
     list_entities,
     list_findings,
+    list_source_runs,
 )
 from services.projects.contracts import (
     FINDING_REVIEW_STATES,
@@ -154,6 +157,8 @@ def _normalize_saved_view_payload(data, *, view_id=""):
         "finding_status": finding_status,
         "project_id": str(filter_or_payload("project_id") or "").strip()[:80],
         "project_name": str(filter_or_payload("project_name") or "").strip()[:120],
+        "run_id": str(filter_or_payload("run_id") or "").strip()[:120],
+        "run_label": str(filter_or_payload("run_label") or "").strip()[:240],
         "sort": str(filter_or_payload("sort") or "").strip()[:80],
     }
 
@@ -170,6 +175,8 @@ def _stored_saved_view(view, *, updated):
             "finding_status": view["finding_status"],
             "project_id": view["project_id"],
             "project_name": view["project_name"],
+            "run_id": view["run_id"],
+            "run_label": view["run_label"],
             "sort": view["sort"],
         },
         "updated_at": updated,
@@ -210,6 +217,7 @@ def atlas_index():
         return jsonify(atlas_summary(
             conn,
             session_id,
+            run_id=request.args.get("run_id") or "",
             orphan_filter=request.args.get("orphan_filter") or "hide",
             suppression_filter=request.args.get("suppression_filter") or "hide",
         ))
@@ -309,6 +317,20 @@ def atlas_saved_view_delete(view_id):
     return jsonify({"ok": True, "views": kept})
 
 
+@atlas_bp.route("/atlas/runs")
+def atlas_runs_list():
+    session_id = get_session_id()
+    limit = _parse_int(request.args.get("limit"), 30, minimum=1, maximum=50)
+    with db_connect() as conn:
+        return jsonify(list_source_runs(
+            conn,
+            session_id,
+            query=request.args.get("q") or "",
+            run_id=request.args.get("run_id") or "",
+            limit=limit,
+        ))
+
+
 @atlas_bp.route("/atlas/entities")
 def atlas_entities_list():
     session_id = get_session_id()
@@ -321,6 +343,7 @@ def atlas_entities_list():
             entity_type=request.args.get("type") or "",
             query=request.args.get("q") or "",
             project_id=request.args.get("project_id") or "",
+            run_id=request.args.get("run_id") or "",
             orphan_filter=request.args.get("orphan_filter") or "hide",
             suppression_filter=request.args.get("suppression_filter") or "hide",
             limit=limit,
@@ -342,6 +365,7 @@ def atlas_entities_export_download():
             entity_type=request.args.get("type") or "",
             query=request.args.get("q") or "",
             project_id=request.args.get("project_id") or "",
+            run_id=request.args.get("run_id") or "",
             orphan_filter=request.args.get("orphan_filter") or "hide",
             suppression_filter=request.args.get("suppression_filter") or "hide",
             limit=limit,
@@ -380,12 +404,54 @@ def atlas_findings_list():
             session_id,
             query=request.args.get("q") or "",
             project_id=request.args.get("project_id") or "",
+            run_id=request.args.get("run_id") or "",
             review_states=request.args.getlist("review_state"),
             orphan_filter=request.args.get("orphan_filter") or "hide",
             suppression_filter=request.args.get("suppression_filter") or "hide",
             limit=limit,
             offset=offset,
         ))
+
+
+@atlas_bp.route("/atlas/runs/<run_id>/cleanup-preview")
+def atlas_run_cleanup_preview_route(run_id):
+    session_id = get_session_id()
+    with db_connect() as conn:
+        owned = conn.execute(
+            "SELECT id FROM runs WHERE id = ? AND session_id = ?",
+            (run_id, session_id),
+        ).fetchone()
+        if not owned:
+            return jsonify({"error": "run not found"}), 404
+        preview = atlas_run_cleanup_preview(conn, session_id, [run_id])
+    return jsonify({"ok": True, "cleanup": public_cleanup_preview(preview)})
+
+
+@atlas_bp.route("/atlas/runs/<run_id>/cleanup", methods=["POST"])
+@limiter.limit(_atlas_write_limit)
+def atlas_run_cleanup(run_id):
+    session_id = get_session_id()
+    data = request.get_json(silent=True) or {}
+    include_curated = bool(data.get("include_curated")) if isinstance(data, dict) else False
+    with db_connect() as conn:
+        owned = conn.execute(
+            "SELECT id FROM runs WHERE id = ? AND session_id = ?",
+            (run_id, session_id),
+        ).fetchone()
+        if not owned:
+            return jsonify({"error": "run not found"}), 404
+        cleanup = detach_atlas_run_sources(conn, session_id, [run_id], include_curated=include_curated)
+        conn.commit()
+    log.info("ATLAS_RUN_CLEANED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "run_id": run_id,
+        "detached_entities": cleanup.get("detached_entities", 0),
+        "detached_findings": cleanup.get("detached_findings", 0),
+        "deleted_entities": cleanup.get("deleted_entities", 0),
+        "deleted_findings": cleanup.get("deleted_findings", 0),
+    })
+    return jsonify({"ok": True, "cleanup": cleanup})
 
 
 @atlas_bp.route("/atlas/findings/review", methods=["POST"])
@@ -583,6 +649,7 @@ def atlas_entity_delete(entity_id):
     session_id = get_session_id()
     data = request.get_json(silent=True) or {}
     prune_source_run = bool(data.get("prune_source_run")) if isinstance(data, dict) else False
+    prune_curated_source_run = bool(data.get("prune_curated_source_run")) if isinstance(data, dict) else False
     with db_connect() as conn:
         preview = atlas_entity_delete_preview(conn, session_id, entity_id)
         if preview is None:
@@ -596,6 +663,7 @@ def atlas_entity_delete(entity_id):
                 [source_run_id],
                 exclude_entity_ids=[entity_id],
                 exclude_finding_ids=preview.get("attached_finding_ids") or [],
+                include_curated=prune_curated_source_run,
             )
         deleted = delete_atlas_entities(conn, session_id, [entity_id])
         cleanup = delete_atlas_cleanup_preview(conn, session_id, sibling_cleanup or {})
@@ -735,6 +803,7 @@ def atlas_finding_delete(finding_id):
     session_id = get_session_id()
     data = request.get_json(silent=True) or {}
     prune_source_run = bool(data.get("prune_source_run")) if isinstance(data, dict) else False
+    prune_curated_source_run = bool(data.get("prune_curated_source_run")) if isinstance(data, dict) else False
     with db_connect() as conn:
         preview = atlas_finding_delete_preview(conn, session_id, finding_id)
         if preview is None:
@@ -747,6 +816,7 @@ def atlas_finding_delete(finding_id):
                 session_id,
                 [source_run_id],
                 exclude_finding_ids=[finding_id],
+                include_curated=prune_curated_source_run,
             )
         deleted_findings = delete_atlas_findings(conn, session_id, [finding_id])
         cleanup = delete_atlas_cleanup_preview(conn, session_id, sibling_cleanup or {})

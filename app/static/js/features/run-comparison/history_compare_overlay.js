@@ -56,6 +56,7 @@ function closeHistoryCompareOverlay() {
   overlay.classList.remove('open');
   overlay.classList.add('u-hidden');
   overlay.setAttribute('aria-hidden', 'true');
+  window.syncModalOverlayState?.();
   if (typeof refocusComposerAfterAction === 'function') {
     refocusComposerAfterAction({ preventScroll: true });
   }
@@ -86,6 +87,7 @@ function _openHistoryCompareOverlay() {
   overlay.classList.remove('u-hidden');
   overlay.classList.add('open');
   overlay.setAttribute('aria-hidden', 'false');
+  window.syncModalOverlayState?.();
   _queueHistoryCompareInitialFocus();
 }
 

@@ -786,6 +786,19 @@ body .welcome-status-loaded {
   margin-left: 1px;
   animation: wlc-blink 0.65s step-end infinite;
 }
+
+body.modal-overlay-active .welcome-operator-notice,
+body.modal-overlay-active .welcome-status-loading,
+body.modal-overlay-active .welcome-status-loaded,
+body.modal-overlay-active .wlc-cursor {
+  animation: none;
+}
+
+body.modal-overlay-active .welcome-status-loaded,
+body.modal-overlay-active .wlc-cursor {
+  opacity: 1;
+}
+
 @keyframes wlc-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 @keyframes welcome-soft-pulse {
   0%, 100% { opacity: 0.88; }

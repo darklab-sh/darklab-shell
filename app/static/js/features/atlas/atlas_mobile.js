@@ -96,8 +96,27 @@
 
   function tabCountFor(tab, state) {
     const api = controller.tabsApi || {};
-    if (api.countForTab) return clampCount(api.countForTab(tab, state.summary));
-    return '0';
+    if (!api.countForTab) return '0';
+    const filtered = api.countForTab(tab, state.summary);
+    const total = api.countForTab(tab, state.baseSummary || state.summary);
+    if (String(state.runId || '')) return `${clampCount(filtered)}/${clampCount(total)}`;
+    return clampCount(filtered);
+  }
+
+  function truncateRunFilterLabel(value) {
+    const text = String(value || '').trim() || 'run';
+    if (text.length <= 17) return text;
+    return `${text.slice(0, 14).trimEnd()}...`;
+  }
+
+  function runOptionLabel(run) {
+    const command = String(run && run.command || '').trim() || 'Run';
+    const entityCount = Number(run && run.entity_count || 0);
+    const findingCount = Number(run && run.finding_count || 0);
+    const counts = [];
+    if (entityCount) counts.push(`${entityCount.toLocaleString()} ent`);
+    if (findingCount) counts.push(`${findingCount.toLocaleString()} fnd`);
+    return counts.length ? `${command} (${counts.join(', ')})` : command;
   }
 
   function selectorValue(value) {
@@ -124,7 +143,7 @@
       label.textContent = tab.label;
       const count = document.createElement('span');
       count.className = 'atlas-tab-count';
-      count.textContent = tabCountFor(tab, state);
+      count.textContent = `(${tabCountFor(tab, state)})`;
       button.append(label, count);
       button.addEventListener('click', () => {
         if (typeof global.closeActionSheet === 'function') global.closeActionSheet({ restoreFocus: false });
@@ -149,10 +168,13 @@
   let mobileOrphanFilter = null;
   let mobileSuppressionFilter = null;
   let mobileFindingStatusFilter = null;
+  let mobileRunFilterSearch = null;
+  let mobileRunFilterSelect = null;
   let mobileSavedViewSelect = null;
   let orphanChipHost = null;
   let bulkStatusSelect = null;
   let searchTimer = null;
+  let runSearchTimer = null;
 
   function findingStates() {
     return Array.isArray(controller.findingStates) ? controller.findingStates : [
@@ -176,6 +198,7 @@
     if (String(state.findingStatus || '')) count += 1;
     if (String(state.orphanFilter || 'hide') !== 'hide') count += 1;
     if (String(state.suppressionFilter || 'hide') !== 'hide') count += 1;
+    if (String(state.runId || '')) count += 1;
     return count;
   }
 
@@ -309,6 +332,46 @@
     });
     mobileSuppressionFilter = suppressionSelect;
 
+    const runSearch = document.createElement('input');
+    runSearch.type = 'search';
+    runSearch.className = 'form-control form-control-compact atlas-mobile-run-filter-search';
+    runSearch.placeholder = 'search runs';
+    runSearch.autocomplete = 'off';
+    runSearch.setAttribute('autocapitalize', 'none');
+    runSearch.setAttribute('autocorrect', 'off');
+    runSearch.setAttribute('spellcheck', 'false');
+    runSearch.setAttribute('inputmode', 'text');
+    runSearch.setAttribute('aria-label', 'Search runs for Atlas filter');
+    runSearch.addEventListener('input', () => {
+      controller.state.runOptionsQuery = String(runSearch.value || '').trim();
+      clearTimeout(runSearchTimer);
+      runSearchTimer = setTimeout(() => {
+        Promise.resolve(controller.loadRunOptions?.({ query: controller.state.runOptionsQuery, force: true }))
+          .then(() => render(controller.state));
+      }, 180);
+    });
+    runSearch.addEventListener('focus', () => {
+      Promise.resolve(controller.loadRunOptions?.({
+        query: controller.state.runOptionsQuery,
+        force: !controller.state.runOptionsLoaded,
+      })).then(() => render(controller.state));
+    });
+    mobileRunFilterSearch = runSearch;
+
+    const runSelect = document.createElement('select');
+    runSelect.className = 'form-select form-control-compact atlas-mobile-run-filter-select';
+    runSelect.setAttribute('aria-label', 'Filter Atlas by source run');
+    runSelect.dataset.portalMenu = 'true';
+    runSelect.appendChild(option('Filter by run', ''));
+    runSelect.addEventListener('change', () => {
+      const selected = runSelect.selectedOptions?.[0] || null;
+      controller.applyRunFilter?.(
+        runSelect.value,
+        selected?.dataset?.runCommand || selected?.textContent || '',
+      );
+    });
+    mobileRunFilterSelect = runSelect;
+
     const findingSelect = document.createElement('select');
     findingSelect.className = 'form-select form-control-compact atlas-mobile-finding-status-filter';
     findingSelect.setAttribute('aria-label', 'Filter Atlas findings by status');
@@ -322,7 +385,7 @@
     });
     mobileFindingStatusFilter = findingSelect;
 
-    panel.append(savedViewRow, orphanSelect, suppressionSelect, findingSelect);
+    panel.append(savedViewRow, runSearch, runSelect, orphanSelect, suppressionSelect, findingSelect);
     filtersPanel = panel;
     filterRow.append(filterToggle, panel);
 
@@ -366,6 +429,37 @@
     if (mobileSuppressionFilter && mobileSuppressionFilter.value !== state.suppressionFilter) {
       mobileSuppressionFilter.value = state.suppressionFilter || 'hide';
       if (typeof global.syncAppSelect === 'function') global.syncAppSelect(mobileSuppressionFilter);
+    }
+    if (mobileRunFilterSearch && mobileRunFilterSearch.value !== state.runOptionsQuery) {
+      mobileRunFilterSearch.value = state.runOptionsQuery || '';
+    }
+    if (mobileRunFilterSelect) {
+      const optionRows = [...(state.runOptions || [])];
+      if (state.runId && !optionRows.some(run => String(run.id || '') === String(state.runId || ''))) {
+        optionRows.unshift({
+          id: state.runId,
+          run_id: state.runId,
+          command: state.runLabel || state.runId,
+          entity_count: 0,
+          finding_count: 0,
+        });
+      }
+      const values = ['', ...optionRows.map(run => String(run.id || ''))].join('\n');
+      const currentValues = Array.from(mobileRunFilterSelect.options || []).map(option => option.value).join('\n');
+      if (values !== currentValues) {
+        mobileRunFilterSelect.replaceChildren();
+        mobileRunFilterSelect.appendChild(option(state.runOptionsLoading ? 'Loading runs...' : 'Filter by run', ''));
+        optionRows.forEach((run) => {
+          const item = option(runOptionLabel(run), run.id || '');
+          item.dataset.runCommand = String(run.command || '');
+          mobileRunFilterSelect.appendChild(item);
+        });
+      } else if (mobileRunFilterSelect.options[0]) {
+        mobileRunFilterSelect.options[0].textContent = state.runOptionsLoading ? 'Loading runs...' : 'Filter by run';
+      }
+      mobileRunFilterSelect.value = state.runId || '';
+      mobileRunFilterSelect.disabled = !!state.runOptionsLoading;
+      if (typeof global.syncAppSelect === 'function') global.syncAppSelect(mobileRunFilterSelect);
     }
     if (mobileFindingStatusFilter) {
       const findingsActive = controller.currentTab().id === 'findings';
@@ -411,6 +505,12 @@
     }
     if (String(state.suppressionFilter || 'hide') === 'only') {
       chips.push(['suppressed only · clear', () => { controller.state.suppressionFilter = 'hide'; }]);
+    }
+    if (String(state.runId || '')) {
+      chips.push([`Run: ${truncateRunFilterLabel(state.runLabel || state.runId)} ×`, () => {
+        controller.state.runId = '';
+        controller.state.runLabel = '';
+      }]);
     }
     orphanChipHost.classList.toggle('u-hidden', !chips.length);
     chips.forEach(([label, action]) => {
@@ -960,6 +1060,7 @@
         onRemoveProjectLink: (link) => controller.removeProjectLink(link),
         onSaveMetadata: (payload) => controller.saveMetadata(payload),
         onSeeRun: (run) => controller.openSourceRun(run),
+        onCleanRunAtlas: (run) => controller.confirmCleanRunAtlas?.(run),
         onDeleteEntity: () => controller.confirmDeleteEntity(),
         onSuppressEntity: (entity) => controller.updateSuppression(entity, !entity.suppressed),
         onPageRuns: (offset) => controller.pageEntityDetail?.('runs', offset),

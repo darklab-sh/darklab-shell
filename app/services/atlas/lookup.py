@@ -44,6 +44,7 @@ ORPHAN_FILTERS = {"all", "hide", "only"}
 SUPPRESSION_FILTERS = {"all", "hide", "only"}
 ENTITY_DETAIL_RUN_LIMIT = 50
 ENTITY_DETAIL_FINDING_LIMIT = 50
+ATLAS_RUN_FILTER_LIMIT = 50
 
 
 def _sql_join(parts: tuple[str, ...]) -> str:
@@ -63,6 +64,19 @@ def _row_to_entity(row) -> dict[str, Any]:
         "suppressed_reason": (row["suppressed_reason"] if "suppressed_reason" in row.keys() else "") or "",
         "suppressed_at": (row["suppressed_at"] if "suppressed_at" in row.keys() else "") or "",
         "created": row["created"],
+    }
+
+
+def _row_to_source_run(row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "run_id": row["id"],
+        "command": row["command"] or "",
+        "started": row["started"],
+        "finished": row["finished"],
+        "exit_code": row["exit_code"],
+        "entity_count": int(row["entity_count"] or 0),
+        "finding_count": int(row["finding_count"] or 0),
     }
 
 
@@ -92,6 +106,110 @@ def _suppression_clause(alias: str) -> str:
         f"OR (? = 'hide' AND COALESCE({alias}.suppressed, FALSE) = FALSE) "
         f"OR (? = 'only' AND COALESCE({alias}.suppressed, FALSE) = TRUE)) "
     )
+
+
+def list_source_runs(
+    conn,
+    session_id: str,
+    *,
+    query: str = "",
+    run_id: str = "",
+    limit: int = ATLAS_RUN_FILTER_LIMIT,
+) -> dict[str, Any]:
+    """Return recent/searchable runs that currently contribute Atlas rows."""
+    search = str(query or "").strip()
+    selected_run_id = str(run_id or "").strip()
+    search_like = dialect_for_backend(DB_BACKEND).text_search_param(search) if search else ""
+    safe_limit = max(1, min(int(limit or ATLAS_RUN_FILTER_LIMIT), ATLAS_RUN_FILTER_LIMIT))
+    rows_sql = _sql_join((
+        "WITH source_run_ids AS (",
+        "  SELECT erl.run_id AS run_id ",
+        "  FROM entity_run_links erl ",
+        "  JOIN entities e ON e.id = erl.entity_id ",
+        "  WHERE e.session_id = ? ",
+        "  UNION ",
+        "  SELECT fo.run_id AS run_id ",
+        "  FROM findings_occurrences fo ",
+        "  JOIN findings f ON f.id = fo.finding_id ",
+        "  WHERE f.session_id = ? ",
+        "  UNION ",
+        "  SELECT f.run_id AS run_id FROM findings f WHERE f.session_id = ? AND COALESCE(f.run_id, '') != '' ",
+        "  UNION ",
+        "  SELECT f.first_run_id AS run_id FROM findings f WHERE f.session_id = ? AND COALESCE(f.first_run_id, '') != '' ",
+        "  UNION ",
+        "  SELECT f.last_run_id AS run_id FROM findings f WHERE f.session_id = ? AND COALESCE(f.last_run_id, '') != '' ",
+        "  UNION ",
+        "  SELECT ? AS run_id WHERE ? != ''",
+        "), candidate_runs AS (",
+        "  SELECT r.id, r.command, r.started, r.finished, r.exit_code ",
+        "  FROM runs r ",
+        "  JOIN source_run_ids source ON source.run_id = r.id ",
+        "  WHERE r.session_id = ? ",
+        "  AND (? = '' OR r.id = ? OR ",
+        dialect_for_backend(DB_BACKEND).text_search_expr("r.command"),
+        "  ) ",
+        "  ORDER BY CASE WHEN r.id = ? THEN 0 ELSE 1 END, r.started DESC, r.id DESC ",
+        "  LIMIT ?",
+        "), entity_counts AS (",
+        "  SELECT erl.run_id, COUNT(DISTINCT erl.entity_id) AS entity_count ",
+        "  FROM entity_run_links erl ",
+        "  JOIN candidate_runs candidate ON candidate.id = erl.run_id ",
+        "  JOIN entities e ON e.id = erl.entity_id ",
+        "  WHERE e.session_id = ? ",
+        "  GROUP BY erl.run_id",
+        "), finding_run_pairs AS (",
+        "  SELECT fo.run_id, fo.finding_id ",
+        "  FROM findings_occurrences fo ",
+        "  JOIN candidate_runs candidate ON candidate.id = fo.run_id ",
+        "  JOIN findings f ON f.id = fo.finding_id ",
+        "  WHERE f.session_id = ? ",
+        "  UNION ",
+        "  SELECT f.run_id, f.id FROM findings f JOIN candidate_runs candidate ON candidate.id = f.run_id ",
+        "  WHERE f.session_id = ? AND COALESCE(f.run_id, '') != '' ",
+        "  UNION ",
+        "  SELECT f.first_run_id, f.id FROM findings f JOIN candidate_runs candidate ON candidate.id = f.first_run_id ",
+        "  WHERE f.session_id = ? AND COALESCE(f.first_run_id, '') != '' ",
+        "  UNION ",
+        "  SELECT f.last_run_id, f.id FROM findings f JOIN candidate_runs candidate ON candidate.id = f.last_run_id ",
+        "  WHERE f.session_id = ? AND COALESCE(f.last_run_id, '') != ''",
+        "), finding_counts AS (",
+        "  SELECT run_id, COUNT(DISTINCT finding_id) AS finding_count ",
+        "  FROM finding_run_pairs ",
+        "  GROUP BY run_id",
+        ") ",
+        "SELECT candidate.id, candidate.command, candidate.started, candidate.finished, candidate.exit_code, ",
+        "COALESCE(entity_counts.entity_count, 0) AS entity_count, ",
+        "COALESCE(finding_counts.finding_count, 0) AS finding_count ",
+        "FROM candidate_runs candidate ",
+        "LEFT JOIN entity_counts ON entity_counts.run_id = candidate.id ",
+        "LEFT JOIN finding_counts ON finding_counts.run_id = candidate.id ",
+        "ORDER BY CASE WHEN candidate.id = ? THEN 0 ELSE 1 END, candidate.started DESC, candidate.id DESC",
+    ))
+    rows = conn.execute(
+        rows_sql,
+        [
+            session_id,
+            session_id,
+            session_id,
+            session_id,
+            session_id,
+            selected_run_id,
+            selected_run_id,
+            session_id,
+            search,
+            selected_run_id,
+            search_like,
+            selected_run_id,
+            safe_limit,
+            session_id,
+            session_id,
+            session_id,
+            session_id,
+            session_id,
+            selected_run_id,
+        ],
+    ).fetchall()
+    return {"runs": [_row_to_source_run(row) for row in rows], "limit": safe_limit}
 
 
 def _row_to_project_link(row) -> dict[str, Any]:
@@ -154,9 +272,41 @@ def _provider_order_sql() -> str:
     return dialect_for_backend(DB_BACKEND).case_insensitive_order("provider")
 
 
-def _atlas_search_clause(columns: list[str]) -> str:
+def _atlas_search_clause(columns: list[str], extra_exprs: tuple[str, ...] = ()) -> str:
     dialect = dialect_for_backend(DB_BACKEND)
-    return "AND (? = '' OR " + " OR ".join(dialect.text_search_expr(column) for column in columns) + ") "
+    expressions = [dialect.text_search_expr(column) for column in columns]
+    expressions.extend(extra_exprs)
+    return "AND (? = '' OR " + " OR ".join(expressions) + ") "
+
+
+def _metadata_search_expr(table_name: str, alias: str, owner_alias: str, entity_type: str, entity_id_sql: str) -> str:
+    column = "label" if table_name == "entity_labels" else "body"
+    return _sql_join((
+        "EXISTS (",
+        f"SELECT 1 FROM {table_name} {alias} ",  # nosec
+        f"WHERE {alias}.session_id = {owner_alias}.session_id ",
+        f"AND {alias}.entity_type = '{entity_type}' ",
+        f"AND {alias}.entity_id = {entity_id_sql} ",
+        "AND ",
+        dialect_for_backend(DB_BACKEND).text_search_expr(f"{alias}.{column}"),
+        ")",
+    ))
+
+
+def _entity_metadata_search_exprs(owner_alias: str, entity_id_sql: str) -> tuple[str, str]:
+    return (
+        _metadata_search_expr("entity_labels", "entity_search_label", owner_alias, "atlas_entity", entity_id_sql),
+        _metadata_search_expr("entity_notes", "entity_search_note", owner_alias, "atlas_entity", entity_id_sql),
+    )
+
+
+def _finding_metadata_search_exprs() -> tuple[str, str, str, str]:
+    return (
+        _metadata_search_expr("entity_labels", "finding_search_label", "f", "finding", "f.id"),
+        _metadata_search_expr("entity_notes", "finding_search_note", "f", "finding", "f.id"),
+        _metadata_search_expr("entity_labels", "finding_entity_search_label", "f", "atlas_entity", "e.id"),
+        _metadata_search_expr("entity_notes", "finding_entity_search_note", "f", "atlas_entity", "e.id"),
+    )
 
 
 def _load_json_dict(value: object) -> dict[str, Any]:
@@ -616,13 +766,22 @@ def atlas_summary(
     conn,
     session_id: str,
     *,
+    run_id: str = "",
     orphan_filter: str = "hide",
     suppression_filter: str = "hide",
 ) -> dict[str, Any]:
+    run_filter = str(run_id or "").strip()
     normalized_orphan_filter = _normalize_orphan_filter(orphan_filter)
     normalized_suppression_filter = _normalize_suppression_filter(suppression_filter)
     entity_counts_sql = _sql_join((
         "SELECT e.type, COUNT(*) AS count FROM entities e WHERE e.session_id = ? ",
+        "AND (? = '' OR EXISTS (",
+        "  SELECT 1 FROM entity_run_links filter_erl ",
+        "  JOIN runs filter_run ON filter_run.id = filter_erl.run_id ",
+        "  WHERE filter_erl.entity_id = e.id ",
+        "  AND filter_run.session_id = e.session_id ",
+        "  AND filter_erl.run_id = ?",
+        ")) ",
         _suppression_clause("e"),
         "AND (? = 'all' ",
         "OR (? = 'hide' AND EXISTS (",
@@ -641,6 +800,8 @@ def atlas_summary(
         entity_counts_sql,
         [
             session_id,
+            run_filter,
+            run_filter,
             *_suppression_params(normalized_suppression_filter),
             *_orphan_params(normalized_orphan_filter),
         ],
@@ -650,6 +811,13 @@ def atlas_summary(
         counts[str(row["type"])] = int(row["count"] or 0)
     finding_count_sql = _sql_join((
         "SELECT COUNT(*) AS count FROM findings f WHERE f.session_id = ? ",
+        "AND (? = '' OR EXISTS (",
+        "  SELECT 1 FROM findings_occurrences filter_run_fo ",
+        "  JOIN runs filter_run ON filter_run.id = filter_run_fo.run_id ",
+        "  WHERE filter_run_fo.finding_id = f.id ",
+        "  AND filter_run.session_id = f.session_id ",
+        "  AND filter_run_fo.run_id = ?",
+        ") OR f.run_id = ? OR f.first_run_id = ? OR f.last_run_id = ?) ",
         _suppression_clause("f"),
         "AND (? = 'all' ",
         "OR (? = 'hide' AND EXISTS (",
@@ -667,6 +835,11 @@ def atlas_summary(
         finding_count_sql,
         [
             session_id,
+            run_filter,
+            run_filter,
+            run_filter,
+            run_filter,
+            run_filter,
             *_suppression_params(normalized_suppression_filter),
             *_orphan_params(normalized_orphan_filter),
         ],
@@ -693,6 +866,7 @@ def list_findings(
     *,
     query: str = "",
     project_id: str = "",
+    run_id: str = "",
     review_states: list[str] | None = None,
     orphan_filter: str = "hide",
     suppression_filter: str = "hide",
@@ -701,13 +875,16 @@ def list_findings(
 ) -> dict[str, Any]:
     search = str(query or "").strip()
     search_like = dialect_for_backend(DB_BACKEND).text_search_param(search) if search else ""
-    search_clause = _atlas_search_clause([
+    search_columns = [
         "f.title",
         "f.raw_line",
         "f.tool_root",
         "e.canonical_value",
-    ])
+    ]
+    search_exprs = _finding_metadata_search_exprs()
+    search_clause = _atlas_search_clause(search_columns, search_exprs)
     project_filter = str(project_id or "").strip()
+    run_filter = str(run_id or "").strip()
     normalized_orphan_filter = _normalize_orphan_filter(orphan_filter)
     normalized_suppression_filter = _normalize_suppression_filter(suppression_filter)
     statuses = _normalize_finding_statuses(review_states)
@@ -715,12 +892,14 @@ def list_findings(
     params: list[Any] = [
         session_id,
         search,
-        search_like,
-        search_like,
-        search_like,
-        search_like,
+        *([search_like] * (len(search_columns) + len(search_exprs))),
         project_filter,
         project_filter,
+        run_filter,
+        run_filter,
+        run_filter,
+        run_filter,
+        run_filter,
         len(statuses),
         *status_params,
         *_suppression_params(normalized_suppression_filter),
@@ -739,6 +918,13 @@ def list_findings(
         "  AND filter_link.project_id = ? ",
         "  AND filter_project.session_id = f.session_id",
         ")) ",
+        "AND (? = '' OR EXISTS (",
+        "  SELECT 1 FROM findings_occurrences filter_run_fo ",
+        "  JOIN runs filter_run ON filter_run.id = filter_run_fo.run_id ",
+        "  WHERE filter_run_fo.finding_id = f.id ",
+        "  AND filter_run.session_id = f.session_id ",
+        "  AND filter_run_fo.run_id = ?",
+        ") OR f.run_id = ? OR f.first_run_id = ? OR f.last_run_id = ?) ",
         "AND (? = 0 OR f.status IN (?, ?, ?, ?, ?)) ",
         _suppression_clause("f"),
         "AND (? = 'all' ",
@@ -779,6 +965,13 @@ def list_findings(
         "  AND filter_link.project_id = ? ",
         "  AND filter_project.session_id = f.session_id",
         ")) ",
+        "AND (? = '' OR EXISTS (",
+        "  SELECT 1 FROM findings_occurrences filter_run_fo ",
+        "  JOIN runs filter_run ON filter_run.id = filter_run_fo.run_id ",
+        "  WHERE filter_run_fo.finding_id = f.id ",
+        "  AND filter_run.session_id = f.session_id ",
+        "  AND filter_run_fo.run_id = ?",
+        ") OR f.run_id = ? OR f.first_run_id = ? OR f.last_run_id = ?) ",
         "AND (? = 0 OR f.status IN (?, ?, ?, ?, ?)) ",
         _suppression_clause("f"),
         "AND (? = 'all' ",
@@ -842,6 +1035,7 @@ def list_entities(
     entity_type: str = "",
     query: str = "",
     project_id: str = "",
+    run_id: str = "",
     orphan_filter: str = "hide",
     suppression_filter: str = "hide",
     limit: int = 50,
@@ -852,8 +1046,11 @@ def list_entities(
         normalized_type = ""
     search = str(query or "").strip()
     search_like = dialect_for_backend(DB_BACKEND).text_search_param(search) if search else ""
-    search_clause = _atlas_search_clause(["e.canonical_value"])
+    search_columns = ["e.canonical_value"]
+    search_exprs = _entity_metadata_search_exprs("e", "e.id")
+    search_clause = _atlas_search_clause(search_columns, search_exprs)
     project_filter = str(project_id or "").strip()
+    run_filter = str(run_id or "").strip()
     normalized_orphan_filter = _normalize_orphan_filter(orphan_filter)
     normalized_suppression_filter = _normalize_suppression_filter(suppression_filter)
     common_params: list[Any] = [
@@ -861,9 +1058,11 @@ def list_entities(
         normalized_type,
         normalized_type,
         search,
-        search_like,
+        *([search_like] * (len(search_columns) + len(search_exprs))),
         project_filter,
         project_filter,
+        run_filter,
+        run_filter,
         *_suppression_params(normalized_suppression_filter),
         *_orphan_params(normalized_orphan_filter),
     ]
@@ -880,6 +1079,13 @@ def list_entities(
         "  AND filter_link.entity_id = e.id ",
         "  AND filter_link.project_id = ? ",
         "  AND filter_project.session_id = e.session_id",
+        ")) ",
+        "AND (? = '' OR EXISTS (",
+        "  SELECT 1 FROM entity_run_links filter_erl ",
+        "  JOIN runs filter_run ON filter_run.id = filter_erl.run_id ",
+        "  WHERE filter_erl.entity_id = e.id ",
+        "  AND filter_run.session_id = e.session_id ",
+        "  AND filter_erl.run_id = ?",
         ")) ",
         _suppression_clause("e"),
         "AND (? = 'all' ",
@@ -914,6 +1120,13 @@ def list_entities(
         "  AND filter_link.entity_id = e.id ",
         "  AND filter_link.project_id = ? ",
         "  AND filter_project.session_id = e.session_id",
+        ")) ",
+        "AND (? = '' OR EXISTS (",
+        "  SELECT 1 FROM entity_run_links filter_erl ",
+        "  JOIN runs filter_run ON filter_run.id = filter_erl.run_id ",
+        "  WHERE filter_erl.entity_id = e.id ",
+        "  AND filter_run.session_id = e.session_id ",
+        "  AND filter_erl.run_id = ?",
         ")) ",
         _suppression_clause("e"),
         "AND (? = 'all' ",
@@ -968,6 +1181,7 @@ def _query_export_entities(
     entity_type: str = "",
     query: str = "",
     project_id: str = "",
+    run_id: str = "",
     orphan_filter: str = "hide",
     suppression_filter: str = "hide",
     limit: int = 10000,
@@ -977,8 +1191,11 @@ def _query_export_entities(
         normalized_type = ""
     search = str(query or "").strip()
     search_like = dialect_for_backend(DB_BACKEND).text_search_param(search) if search else ""
-    search_clause = _atlas_search_clause(["e.canonical_value"])
+    search_columns = ["e.canonical_value"]
+    search_exprs = _entity_metadata_search_exprs("e", "e.id")
+    search_clause = _atlas_search_clause(search_columns, search_exprs)
     project_filter = str(project_id or "").strip()
+    run_filter = str(run_id or "").strip()
     normalized_orphan_filter = _normalize_orphan_filter(orphan_filter)
     normalized_suppression_filter = _normalize_suppression_filter(suppression_filter)
     page_limit = max(1, min(int(limit or 10000), 10000))
@@ -987,9 +1204,11 @@ def _query_export_entities(
         normalized_type,
         normalized_type,
         search,
-        search_like,
+        *([search_like] * (len(search_columns) + len(search_exprs))),
         project_filter,
         project_filter,
+        run_filter,
+        run_filter,
         *_suppression_params(normalized_suppression_filter),
         *_orphan_params(normalized_orphan_filter),
         page_limit,
@@ -1008,6 +1227,13 @@ def _query_export_entities(
         "  AND filter_link.entity_id = e.id ",
         "  AND filter_link.project_id = ? ",
         "  AND filter_project.session_id = e.session_id",
+        ")) ",
+        "AND (? = '' OR EXISTS (",
+        "  SELECT 1 FROM entity_run_links filter_erl ",
+        "  JOIN runs filter_run ON filter_run.id = filter_erl.run_id ",
+        "  WHERE filter_erl.entity_id = e.id ",
+        "  AND filter_run.session_id = e.session_id ",
+        "  AND filter_erl.run_id = ?",
         ")) ",
         _suppression_clause("e"),
         "AND (? = 'all' ",
@@ -1089,6 +1315,7 @@ def atlas_entities_export(
     entity_type: str = "",
     query: str = "",
     project_id: str = "",
+    run_id: str = "",
     orphan_filter: str = "hide",
     suppression_filter: str = "hide",
     limit: int = 10000,
@@ -1099,6 +1326,7 @@ def atlas_entities_export(
         entity_type=entity_type,
         query=query,
         project_id=project_id,
+        run_id=run_id,
         orphan_filter=orphan_filter,
         suppression_filter=suppression_filter,
         limit=limit,

@@ -553,6 +553,7 @@
     overlay.classList.remove('u-hidden');
     overlay.classList.add('open');
     overlay.setAttribute('aria-hidden', 'false');
+    global.syncModalOverlayState?.();
     _recordTourModalOpened();
     const schedule = typeof requestAnimationFrame === 'function'
       ? requestAnimationFrame
@@ -566,6 +567,7 @@
     _overlay.classList.remove('open');
     _overlay.classList.add('u-hidden');
     _overlay.setAttribute('aria-hidden', 'true');
+    global.syncModalOverlayState?.();
     if (options && options.skipRefocus) {
       _returnFocusEl = null;
       return;

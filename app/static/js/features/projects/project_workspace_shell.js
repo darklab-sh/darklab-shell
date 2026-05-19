@@ -10,6 +10,7 @@
       ctx.projectWorkspaceOverlay.classList.remove('u-hidden');
       ctx.projectWorkspaceOverlay.classList.add('open');
       ctx.projectWorkspaceOverlay.setAttribute('aria-hidden', 'false');
+      global.syncModalOverlayState?.();
     }
 
     function hideOverlay() {
@@ -17,6 +18,7 @@
       ctx.projectWorkspaceOverlay.classList.add('u-hidden');
       ctx.projectWorkspaceOverlay.classList.remove('open');
       ctx.projectWorkspaceOverlay.setAttribute('aria-hidden', 'true');
+      global.syncModalOverlayState?.();
     }
 
     function isOpen() {

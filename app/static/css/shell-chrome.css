@@ -702,6 +702,10 @@
     text-shadow: 0 0 8px color-mix(in srgb, var(--amber) 22%, transparent);
     animation: hud-status-pulse 1s ease-in-out infinite;
   }
+  body.modal-overlay-active .hud-cell .status-pill.running {
+    animation: none;
+    opacity: 1;
+  }
   @keyframes hud-status-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.6; }

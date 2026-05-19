@@ -40,7 +40,20 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-No open TODOs are currently tracked.
+- **Project workspace navigation polish**
+  - Add a terminal-native `project rename <name-or-id> <new-name>` command so CLI users can rename projects without opening the modal.
+  - Show run, finding, artifact, and package counts on project-list rows so project scale is visible before opening each project.
+  - Prefetch finding counts and severity distribution so tab labels can show useful state such as unreviewed/high counts without opening the tab.
+- **Evidence package export hardening**
+  - Add redacted text/JSON derivatives for safe artifact types before allowing raw artifact inclusion in redacted packages.
+  - Add richer redaction previews and per-item redaction warnings for package creation.
+  - Add async package build progress for large Full Archive exports so long builds do not feel like stalled requests.
+  - Move package HTML rendering toward shared Jinja autoescape paths so package output escaping is template-owned instead of manual per-call escaping.
+- **Interactive PTY lifecycle and operator visibility**
+  - Auto-displace prior live attaches when a new browser client attaches to the same PTY run. When `active_run_claim_owner` flips the internal ownership marker to a different `client_id`, publish a single `displaced` event on the PTY stream so the prior tab can close its modal cleanly and append one notice such as `[interactive PTY moved to another tab]`. Skip same-client reconnects so the event only fires when the live view genuinely moves to a different browser context.
+  - Surface snapshot age on the reattach payload. `_load_pty_snapshot` strips `created_at` before returning, so the frontend cannot tell whether the snapshot is fresh or 20+ seconds stale. Return the age and let the frontend show `[reattached - snapshot was Ns old]` when it crosses a threshold.
+  - Move `_PTY_INPUT_MAX_BYTES`, `_PTY_BUFFER_LIMIT`, `_PTY_CONTROL_POLL_SECONDS`, `_PTY_SNAPSHOT_FALLBACK_ENTRY_LIMIT`, and similar tunables to config so deploys can tune without a rebuild.
+  - Add PTY metrics covering concurrent PTY count, average and p95 duration, total input bytes, dropped input bytes, and control queue depth. Expose them through the existing `/diag` surface so operators have visibility comparable to other run paths.
 
 ## Known Issues
 
@@ -50,7 +63,7 @@ No known issues are currently tracked.
 
 ## Technical Debt
 
-No technical debt items are currently tracked.
+- **Project route boilerplate** — reduce repeated `projects.py` route boilerplate with small serialization/404 helpers.
 
 ---
 
@@ -59,8 +72,6 @@ No technical debt items are currently tracked.
 ### Atlas Enhancements
 - **Future**
   - Entity graph view (visual link map across hosts, domains, hashes, CVEs).
-  - Atlas FTS search across entity values, labels, and notes.
-  - Run-retaining Atlas cleanup controls for noisy runs: detach a run's entities from Atlas without deleting the run transcript and recalculate affected entity/finding counts.
   - Auto-promote rules — entities matching saved patterns auto-promote into a project.
   - Time-travel view: "what did the Atlas look like a week ago?" using retained snapshots.
   - Side-by-side entity comparison (their runs, findings, intel snapshots).
@@ -69,18 +80,12 @@ No technical debt items are currently tracked.
 
 ### Future Project Workspace enhancements
 - **Security and lifecycle**
-  - Validate `workspace_file` entity ownership during session migration, or document that labels/notes on workspace-file paths can drift when a migrated token lands in a session with a different file at the same path.
-  - Add a terminal-native `project rename <name-or-id> <new-name>` command so CLI users can rename projects without opening the modal.
   - Add parallel PATCH routes for partial project and target updates if the project workspace API ever becomes more than a trusted browser-only surface.
-- **Code organization**
-  - Reduce repeated `projects.py` route boilerplate with small serialization/404 helpers.
 - **Capture, tagging, and navigation**
   - Add a compact project switcher near the prompt with recently used projects and a Create New action.
-  - Show run, finding, artifact, and package counts on project-list rows so project scale is visible before opening each project.
 - **Future-state mobile polish**
   - Consider swipe gestures for target and finding rows only after overflow-menu interactions are shipped and tested.
 - **Findings and comparison**
-  - Prefetch finding counts and severity distribution so tab labels can show useful state such as unreviewed/high counts without opening the tab.
   - Extend comparison beyond run-to-run finding/artifact diffs to snapshots and package artifacts.
 - **Evidence packages**
   - Materialize evidence package archives at creation time if byte-for-byte repeat downloads become important.
@@ -89,17 +94,10 @@ No technical debt items are currently tracked.
   - Add richer target references in package exports, including derived relationships that are not directly visible in selected finding text.
   - Add richer provenance metadata and round-trip import hints for labels, notes, targets, findings, and packages.
   - Explore fuller direct template reuse for package run transcript pages without reintroducing app-hosted asset links.
-  - Add redacted text/JSON derivatives for safe artifact types before allowing raw artifact inclusion in redacted packages.
-  - Add richer redaction previews and per-item redaction warnings for package creation.
-  - Add async package build progress for large Full Archive exports so long builds do not feel like stalled requests.
   - Add generated re-package names that preserve the original selection while incrementing the package label or timestamp.
-  - Move package HTML rendering toward shared Jinja autoescape paths so package output escaping is template-owned instead of manual per-call escaping.
-- **Retention and mobile**
-  - Finish pruning/retention behavior for project-linked runs and run-scoped artifacts.
 
 ### Future interactive PTY enhancements
 - **Future lifecycle and resilience**
-  - Consider auto-displacing prior live attaches when a new browser client attaches to the same PTY run. When `active_run_claim_owner` flips the internal ownership marker to a different `client_id`, publish a single `displaced` event on the PTY stream so the prior tab can close its modal cleanly and append one notice such as `[interactive PTY moved to another tab]`. Skip same-client reconnects so the event only fires when the live view genuinely moves to a different browser context. With this in place, the remaining per-keystroke `[interactive PTY input ignored: ...]` notices in `_ptySendInput` could become rare edge-case failures instead of common transcript noise.
   - Revisit transport after real usage. The current pass uses Redis-brokered SSE plus narrow POST input/resize endpoints to avoid adding a WebSocket server dependency; WebSocket may still be useful if latency, throughput, or bidirectional control behavior becomes a real limitation.
 - **Future security**
   - Defer asciinema-style raw byte replay and input auditing until real usage shows they are needed.
@@ -111,10 +109,7 @@ No technical debt items are currently tracked.
   - Introduce a small PTY host interface object for browser tests. `pty.js` still reaches into many runner globals; a host object would make tests less brittle and reduce global-surface coupling.
   - Add broader browser unit coverage for PTY tab state transitions and disabled normal-terminal behaviors as future PTY features are added.
 - **Future polish and operational visibility**
-  - `_PTY_INPUT_MAX_BYTES`, `_PTY_BUFFER_LIMIT`, `_PTY_CONTROL_POLL_SECONDS`, `_PTY_SNAPSHOT_FALLBACK_ENTRY_LIMIT`, and similar tunables are module constants. Move to config so deploys can tune without a rebuild.
-  - Add metrics covering concurrent PTY count, average and p95 duration, total input bytes, dropped input bytes, and control queue depth. Expose them through the existing `/diag` surface so operators have visibility comparable to other run paths.
   - The reader loop polls Redis every 200 ms via `xread block=1` for control events. With many concurrent PTYs this is wasted ops. Switch the control channel to Redis Pub/Sub (or a longer block window) so idle PTYs cost zero ops while output latency stays unaffected.
-  - Surface snapshot age on the reattach payload. `_load_pty_snapshot` strips `created_at` before returning, so the frontend cannot tell whether the snapshot is fresh or 20+ seconds stale. Return the age and let the frontend show `[reattached - snapshot was Ns old]` when it crosses a threshold, so users know the screen they see may not match what the PTY is currently rendering.
   - Skip the unconditional `_store_pty_snapshot(run, force=True)` in `pty_run_snapshot` when the request hits the worker that owns the PTY. The route already returns the live in-memory payload to the caller, and the next reader-loop tick will publish to Redis naturally; the extra Redis SET costs one round-trip per attach for cross-worker freshness that is rarely consumed.
   - Consider pausing xterm rendering for hidden-tab PTYs. xterm.js running in a `display: none` panel still processes writes and grows scrollback (capped at 1000 lines, but still wasted CPU). Either drop incoming `output` chunks into the modal only when visible (queue and replay on tab focus) or accept the cost as small enough to ignore — worth measuring under a long-running ffuf in a backgrounded tab before spending engineering on it.
 

@@ -511,6 +511,12 @@ body.ts-clock .output .shell-prompt-wrap {
   animation: pulse 1s infinite;
 }
 
+body.modal-overlay-active .status-pill.running,
+body.modal-overlay-active .output-follow-btn.is-live {
+  animation: none;
+  opacity: 1;
+}
+
 .output-follow-btn.is-live:hover {
   color: var(--amber);
   border-color: var(--amber);
@@ -670,6 +676,7 @@ body.mobile-terminal-mode .output-follow-btn {
   align-items: center;
   justify-content: center;
   backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
 }
 .mobile-sheet-overlay.open,
 #shortcuts-overlay.open,
@@ -1352,6 +1359,10 @@ body.mobile-terminal-mode .output-follow-btn {
 
 .options-tab-panel[hidden] {
   display: none;
+}
+
+#options-panel-preferences .faq-item + .faq-item {
+  margin-top: 16px;
 }
 
 .options-section-heading {

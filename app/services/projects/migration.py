@@ -8,7 +8,36 @@ from services.projects.preferences import migrate_active_project_preference
 from services.projects.slugs import allocate_slug
 
 
-def migrate_project_workspace_session(conn, from_session_id, to_session_id):
+def _update_workspace_file_metadata(conn, from_session_id, to_session_id, table_name, migrated_file_paths):
+    paths = sorted({str(path or "").strip() for path in migrated_file_paths if str(path or "").strip()})
+    if not paths:
+        return 0
+    placeholders = ",".join("?" for _ in paths)
+    result = conn.execute(
+        f"UPDATE {table_name} SET session_id = ? "  # nosec
+        "WHERE session_id = ? AND entity_type = 'workspace_file' "
+        f"AND entity_id IN ({placeholders})",
+        [to_session_id, from_session_id, *paths],
+    )
+    return result.rowcount
+
+
+def _count_workspace_file_metadata(conn, session_id, table_name):
+    row = conn.execute(
+        f"SELECT COUNT(*) AS count FROM {table_name} "  # nosec
+        "WHERE session_id = ? AND entity_type = 'workspace_file'",
+        (session_id,),
+    ).fetchone()
+    return int(row["count"] or 0) if row else 0
+
+
+def migrate_project_workspace_session(
+    conn,
+    from_session_id,
+    to_session_id,
+    *,
+    migrated_workspace_file_paths=(),
+):
     """Move project workspace records between session IDs during token migration."""
     migrated_projects = 0
     project_rows = conn.execute(
@@ -38,13 +67,29 @@ def migrate_project_workspace_session(conn, from_session_id, to_session_id):
         "UPDATE entity_intel_snapshots SET session_id = ? WHERE session_id = ?",
         (to_session_id, from_session_id),
     )
+    source_workspace_file_labels = _count_workspace_file_metadata(conn, from_session_id, "entity_labels")
+    source_workspace_file_notes = _count_workspace_file_metadata(conn, from_session_id, "entity_notes")
     label_result = conn.execute(
-        "UPDATE entity_labels SET session_id = ? WHERE session_id = ?",
+        "UPDATE entity_labels SET session_id = ? WHERE session_id = ? AND entity_type != 'workspace_file'",
         (to_session_id, from_session_id),
     )
+    migrated_workspace_file_labels = _update_workspace_file_metadata(
+        conn,
+        from_session_id,
+        to_session_id,
+        "entity_labels",
+        migrated_workspace_file_paths,
+    )
     note_result = conn.execute(
-        "UPDATE entity_notes SET session_id = ? WHERE session_id = ?",
+        "UPDATE entity_notes SET session_id = ? WHERE session_id = ? AND entity_type != 'workspace_file'",
         (to_session_id, from_session_id),
+    )
+    migrated_workspace_file_notes = _update_workspace_file_metadata(
+        conn,
+        from_session_id,
+        to_session_id,
+        "entity_notes",
+        migrated_workspace_file_paths,
     )
     package_result = conn.execute(
         "UPDATE evidence_packages SET session_id = ? WHERE session_id = ?",
@@ -62,8 +107,10 @@ def migrate_project_workspace_session(conn, from_session_id, to_session_id):
         "migrated_entity_intel_snapshots": intel_result.rowcount,
         "migrated_findings": finding_result.rowcount,
         "migrated_finding_targets": 0,
-        "migrated_entity_labels": label_result.rowcount,
-        "migrated_entity_notes": note_result.rowcount,
+        "migrated_entity_labels": label_result.rowcount + migrated_workspace_file_labels,
+        "migrated_entity_notes": note_result.rowcount + migrated_workspace_file_notes,
+        "skipped_workspace_file_labels": source_workspace_file_labels - migrated_workspace_file_labels,
+        "skipped_workspace_file_notes": source_workspace_file_notes - migrated_workspace_file_notes,
         "migrated_evidence_packages": package_result.rowcount,
         "migrated_active_project_preference": migrated_active_project_preference,
     }

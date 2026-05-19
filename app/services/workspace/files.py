@@ -121,6 +121,8 @@ class WorkspaceMigrationResult:
     skipped_files: int = 0
     migrated_directories: int = 0
     skipped_directories: int = 0
+    migrated_file_paths: tuple[str, ...] = ()
+    skipped_file_paths: tuple[str, ...] = ()
 
 
 def _coerce_int(value: Any, default: int, *, minimum: int = 0) -> int:
@@ -982,6 +984,8 @@ def migrate_session_workspace(
     skipped_files = 0
     migrated_directories = 0
     skipped_directories = 0
+    migrated_file_paths: list[str] = []
+    skipped_file_paths: list[str] = []
 
     directories = sorted(
         (path for path in source.rglob("*") if path.is_dir()),
@@ -1011,11 +1015,13 @@ def migrate_session_workspace(
     )
     for source_file in files:
         rel = source_file.relative_to(source)
+        rel_path = rel.as_posix()
         target_file = destination / rel
         try:
             size = source_file.stat().st_size
         except OSError:
             skipped_files += 1
+            skipped_file_paths.append(rel_path)
             continue
         if (
             target_file.exists()
@@ -1025,16 +1031,19 @@ def migrate_session_workspace(
             or bytes_used + size > settings.quota_bytes
         ):
             skipped_files += 1
+            skipped_file_paths.append(rel_path)
             continue
         try:
             target_file.parent.mkdir(mode=WORKSPACE_DIR_MODE, parents=True, exist_ok=True)
             _chmod_workspace_dir(target_file.parent)
             shutil.move(str(source_file), str(target_file))
             migrated_files += 1
+            migrated_file_paths.append(rel_path)
             file_count += 1
             bytes_used += size
         except (OSError, shutil.Error):
             skipped_files += 1
+            skipped_file_paths.append(rel_path)
 
     _cleanup_empty_workspace_dirs(source)
     touch_session_workspace(to_session_id, cfg)
@@ -1043,6 +1052,8 @@ def migrate_session_workspace(
         skipped_files=skipped_files,
         migrated_directories=migrated_directories,
         skipped_directories=skipped_directories,
+        migrated_file_paths=tuple(migrated_file_paths),
+        skipped_file_paths=tuple(skipped_file_paths),
     )
 
 

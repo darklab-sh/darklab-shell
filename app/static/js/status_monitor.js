@@ -3120,6 +3120,7 @@
     monitorEl?.classList.toggle('status-monitor-modal', !mobile);
     scrimEl?.classList.remove('u-hidden');
     monitorEl?.classList.remove('u-hidden');
+    window.syncModalOverlayState?.();
     if (monitorEl) monitorEl.dataset.source = source;
     if (typeof pauseBackgroundRunStreamsForStatusMonitor === 'function') {
       pauseBackgroundRunStreamsForStatusMonitor();
@@ -3158,6 +3159,7 @@
     document.body.classList.remove('status-monitor-desktop-open');
     scrimEl?.classList.add('u-hidden');
     monitorEl?.classList.add('u-hidden');
+    window.syncModalOverlayState?.();
   }
 
   function isStatusMonitorOpen() {

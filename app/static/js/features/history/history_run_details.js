@@ -108,6 +108,7 @@ function closeHistoryRunOverlay() {
   overlay.classList.remove('open');
   overlay.classList.add('u-hidden');
   overlay.setAttribute('aria-hidden', 'true');
+  window.syncModalOverlayState?.();
   _historyRunModalToken += 1;
   _closeHistoryRunActionMenus();
 }
@@ -117,6 +118,7 @@ function _openHistoryRunOverlay() {
   overlay.classList.remove('u-hidden');
   overlay.classList.add('open');
   overlay.setAttribute('aria-hidden', 'false');
+  window.syncModalOverlayState?.();
 }
 
 function isHistoryRunOverlayOpen() {
@@ -754,7 +756,14 @@ async function _handleHistoryRunModalAction(action) {
     _historyEditEntityMetadata('run', run);
   } else if (action === 'open-atlas') {
     closeHistoryRunOverlay();
-    if (typeof openAtlas === 'function') void openAtlas({ source: 'run-details' });
+    if (typeof openAtlas === 'function') {
+      void openAtlas({
+        source: 'run-details',
+        tab: 'findings',
+        runId: run.id,
+        runLabel: run.command || run.label || run.id,
+      });
+    }
   } else if (action === 'add-active-project') {
     const projectState = _historyRunModalState.projectState;
     const project = projectState && projectState.project;
@@ -775,8 +784,8 @@ async function _handleHistoryRunModalAction(action) {
       const projectState = _historyRunModalState.projectState;
       if (projectState && projectState.project) {
         const activeProjectId = String(projectState.project.id || '');
-        const attached = typeof _historyRunProjectLinks === 'function'
-          && _historyRunProjectLinks(run).some(item => String(item.project?.id || '') === activeProjectId);
+        const attached = (Array.isArray(run.project_links) ? run.project_links : [])
+          .some(item => String(item && item.project_id || '') === activeProjectId);
         _historyRunModalState.projectState = { ...projectState, attached };
       }
       _renderHistoryRunModal();
@@ -790,8 +799,8 @@ async function _handleHistoryRunModalAction(action) {
       const projectState = _historyRunModalState.projectState;
       if (projectState && projectState.project) {
         const activeProjectId = String(projectState.project.id || '');
-        const attached = typeof _historyRunProjectLinks === 'function'
-          && _historyRunProjectLinks(run).some(item => String(item.project?.id || '') === activeProjectId);
+        const attached = (Array.isArray(run.project_links) ? run.project_links : [])
+          .some(item => String(item && item.project_id || '') === activeProjectId);
         _historyRunModalState.projectState = { ...projectState, attached };
       }
       _renderHistoryRunModal();

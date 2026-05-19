@@ -457,11 +457,15 @@ def projects_links_delete(project_id):
         return jsonify({"error": "project link not found"}), 404
     body: dict[str, object] = {"ok": True}
     unlinked_entity_count = 0
-    if data.get("include_entities") and data.get("entity_type") == "run":
+    if (
+        data.get("entity_type") == "run"
+        and (data.get("include_entities") or data.get("include_curated_entities"))
+    ):
         unlinked_entities = unlink_project_run_entities(
             session_id,
             project_id,
             [str(data.get("entity_id") or "")],
+            include_curated=bool(data.get("include_curated_entities")),
         )
         if unlinked_entities is not None:
             body["unlinked_entities"] = unlinked_entities

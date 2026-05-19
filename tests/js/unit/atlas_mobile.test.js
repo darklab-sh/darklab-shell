@@ -79,6 +79,13 @@ function createController(overrides = {}) {
     query: '',
     findingStatus: '',
     orphanFilter: 'hide',
+    suppressionFilter: 'hide',
+    runId: '',
+    runLabel: '',
+    runOptions: [{ id: 'run1', run_id: 'run1', command: 'nmap 107.178.109.44', entity_count: 1, finding_count: 1 }],
+    runOptionsQuery: '',
+    runOptionsLoading: false,
+    runOptionsLoaded: true,
     offset: 0,
     limit: 50,
     total: 1,
@@ -184,6 +191,12 @@ function createController(overrides = {}) {
     bulkUpdateFindings: vi.fn(),
     bulkDeleteSelectedItems: vi.fn(),
     exportEntities: vi.fn(),
+    loadRunOptions: vi.fn(() => Promise.resolve(state.runOptions)),
+    applyRunFilter: vi.fn((runId, runLabel) => {
+      state.runId = String(runId || '')
+      state.runLabel = String(runLabel || '')
+      renderer?.(state)
+    }),
     openSourceRun: vi.fn(),
     updateFindingReviewState: vi.fn(),
     openEntityFromFinding: vi.fn((finding) => {
@@ -247,8 +260,8 @@ describe('Mobile Atlas controller', () => {
 
     expect(document.body.classList.contains('atlas-mobile-ready')).toBe(true)
     expect(document.getElementById('atlas-mobile-root')?.classList.contains('u-hidden')).toBe(false)
-    expect(document.getElementById('atlas-mobile-tabs')?.textContent).toContain('Hosts/IPs1')
-    expect(document.getElementById('atlas-mobile-tabs')?.textContent).toContain('Domains999+')
+    expect(document.getElementById('atlas-mobile-tabs')?.textContent).toContain('Hosts/IPs(1)')
+    expect(document.getElementById('atlas-mobile-tabs')?.textContent).toContain('Domains(999+)')
     expect(document.getElementById('atlas-mobile-list')?.textContent).toContain('107.178.109.44')
     expect(mobile.currentView()).toBe('list')
 

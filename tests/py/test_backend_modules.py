@@ -635,7 +635,15 @@ class TestPostgresMigrations:
         sql = "\n".join(baseline.statements)
 
         assert baseline.version == "0001"
-        assert [migration.version for migration in MIGRATIONS] == ["0001", "0002", "0003", "0004", "0005", "0006"]
+        assert [migration.version for migration in MIGRATIONS] == [
+            "0001",
+            "0002",
+            "0003",
+            "0004",
+            "0005",
+            "0006",
+            "0007",
+        ]
         for table_name in (
             "runs",
             "run_output_artifacts",
@@ -676,13 +684,19 @@ class TestPostgresMigrations:
         atlas_detail_migration = MIGRATIONS[3]
         project_findings_migration = MIGRATIONS[4]
         atlas_suppression_migration = MIGRATIONS[5]
-        sql = "\n".join([*run_search_migration.statements, *atlas_search_migration.statements])
+        atlas_metadata_search_migration = MIGRATIONS[6]
+        sql = "\n".join([
+            *run_search_migration.statements,
+            *atlas_search_migration.statements,
+            *atlas_metadata_search_migration.statements,
+        ])
 
         assert run_search_migration.version == "0002"
         assert atlas_search_migration.version == "0003"
         assert atlas_detail_migration.version == "0004"
         assert project_findings_migration.version == "0005"
         assert atlas_suppression_migration.version == "0006"
+        assert atlas_metadata_search_migration.version == "0007"
         assert "CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public" in sql
         assert "public.gin_trgm_ops" in sql
         assert "command" in sql
@@ -691,6 +705,10 @@ class TestPostgresMigrations:
         assert "title" in sql
         assert "raw_line" in sql
         assert "tool_root" in sql
+        assert "entity_labels" in sql
+        assert "entity_notes" in sql
+        assert "label" in sql
+        assert "body" in sql
         assert "idx_entity_run_links_entity_seen" in "\n".join(atlas_detail_migration.statements)
         assert "idx_findings_session_run_seen" in "\n".join(project_findings_migration.statements)
         assert "idx_findings_occurrences_finding_seen" in "\n".join(project_findings_migration.statements)
@@ -7910,6 +7928,76 @@ class TestDatabaseInit:
             conn.close()
         assert label_count == 0
         assert note_count == 0
+
+    def test_retention_prunes_project_run_and_artifact_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started) "
+                "VALUES ('old-project-run', 'sess', 'nuclei old', datetime('now', '-100 days'))"
+            )
+            conn.execute(
+                "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                "VALUES ('prj-old-run', 'sess', 'Old Run', 'old-run', datetime('now'), datetime('now'))"
+            )
+            conn.execute(
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                "VALUES ('pl-old-run', 'prj-old-run', 'run', 'old-project-run', 'manual', datetime('now'))"
+            )
+            conn.execute(
+                "INSERT INTO run_file_artifacts (id, session_id, run_id, workspace_path, created) "
+                "VALUES ('rfa-old-run', 'sess', 'old-project-run', 'reports/old.json', datetime('now'))"
+            )
+            conn.execute(
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                "VALUES ('pl-old-artifact', 'prj-old-run', 'run_file_artifact', 'rfa-old-run', 'manual', datetime('now'))"
+            )
+            conn.execute(
+                "INSERT INTO entity_labels "
+                "(id, session_id, entity_type, entity_id, label, source, created) "
+                "VALUES ('lbl-old-artifact', 'sess', 'run_file_artifact', 'rfa-old-run', 'evidence', 'manual', datetime('now'))"
+            )
+            conn.execute(
+                "INSERT INTO entity_notes "
+                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "VALUES ('note-old-artifact', 'sess', 'run_file_artifact', 'rfa-old-run', "
+                "'Artifact note', datetime('now'), datetime('now'))"
+            )
+            conn.commit()
+            conn.close()
+            with mock.patch("core.database.DB_PATH", db_path):
+                with mock.patch("core.database.CFG", {"permalink_retention_days": 30}):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            rows = {
+                "run_links": conn.execute(
+                    "SELECT COUNT(*) FROM project_links WHERE entity_id = 'old-project-run'"
+                ).fetchone()[0],
+                "artifact_links": conn.execute(
+                    "SELECT COUNT(*) FROM project_links WHERE entity_id = 'rfa-old-run'"
+                ).fetchone()[0],
+                "artifacts": conn.execute(
+                    "SELECT COUNT(*) FROM run_file_artifacts WHERE id = 'rfa-old-run'"
+                ).fetchone()[0],
+                "artifact_labels": conn.execute(
+                    "SELECT COUNT(*) FROM entity_labels WHERE entity_type = 'run_file_artifact' "
+                    "AND entity_id = 'rfa-old-run'"
+                ).fetchone()[0],
+                "artifact_notes": conn.execute(
+                    "SELECT COUNT(*) FROM entity_notes WHERE entity_type = 'run_file_artifact' "
+                    "AND entity_id = 'rfa-old-run'"
+                ).fetchone()[0],
+            }
+            conn.close()
+        assert rows == {
+            "run_links": 0,
+            "artifact_links": 0,
+            "artifacts": 0,
+            "artifact_labels": 0,
+            "artifact_notes": 0,
+        }
 
     def test_zero_retention_does_not_prune(self):
         with tempfile.TemporaryDirectory() as tmp:

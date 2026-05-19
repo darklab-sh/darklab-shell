@@ -195,6 +195,83 @@ def _project_run_entity_link_stats(conn, project_id, entity_ids):
     return stats
 
 
+def _project_visible_finding_ids(conn, session_id, project_id, *, excluded_run_ids=None, excluded_entity_ids=None):
+    run_ids = [str(run_id or "") for run_id in (excluded_run_ids or []) if str(run_id or "")]
+    entity_ids = [str(entity_id or "") for entity_id in (excluded_entity_ids or []) if str(entity_id or "")]
+    run_exclusion_sql = ""
+    entity_exclusion_sql = ""
+    params = [project_id, session_id]
+    if run_ids:
+        placeholders = ",".join("?" for _ in run_ids)
+        run_exclusion_sql = f" AND l.entity_id NOT IN ({placeholders})"  # nosec
+        params.extend(run_ids)
+    params.extend([project_id, session_id])
+    if entity_ids:
+        placeholders = ",".join("?" for _ in entity_ids)
+        entity_exclusion_sql = f" AND l.entity_id NOT IN ({placeholders})"  # nosec
+        params.extend(entity_ids)
+    params.append(session_id)
+    rows = conn.execute(
+        "WITH project_runs AS ("
+        "  SELECT l.entity_id AS run_id FROM project_links l "
+        "  JOIN runs r ON r.id = l.entity_id "
+        "  WHERE l.project_id = ? AND l.entity_type = 'run' AND r.session_id = ?"
+        + run_exclusion_sql +  # nosec B608
+        "), project_entities AS ("
+        "  SELECT l.entity_id FROM project_links l "
+        "  JOIN entities e ON e.id = l.entity_id "
+        "  WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' AND e.session_id = ?"
+        + entity_exclusion_sql +  # nosec B608
+        ") "
+        "SELECT DISTINCT f.id FROM findings f "
+        "WHERE f.session_id = ? AND COALESCE(f.suppressed, FALSE) = FALSE AND ("
+        "  EXISTS ("
+        "    SELECT 1 FROM findings_occurrences scope_fo "
+        "    JOIN project_runs pr ON pr.run_id = scope_fo.run_id "
+        "    WHERE scope_fo.finding_id = f.id"
+        "  ) "
+        "  OR EXISTS ("
+        "    SELECT 1 FROM project_runs pr "
+        "    WHERE pr.run_id = f.run_id OR pr.run_id = f.first_run_id OR pr.run_id = f.last_run_id"
+        "  ) "
+        "  OR EXISTS ("
+        "    SELECT 1 FROM project_entities pe "
+        "    WHERE pe.entity_id = COALESCE(f.entity_id, f.target_id)"
+        "  )"
+        ")",
+        params,
+    ).fetchall()
+    return {str(row["id"]) for row in rows if row["id"]}
+
+
+def _attach_project_run_entity_unlink_finding_stats(conn, stats, session_id, project_id, run_ids, removable_ids, curated_ids):
+    current_finding_ids = _project_visible_finding_ids(conn, session_id, project_id)
+    after_run_finding_ids = _project_visible_finding_ids(
+        conn,
+        session_id,
+        project_id,
+        excluded_run_ids=run_ids,
+    )
+    after_removable_finding_ids = _project_visible_finding_ids(
+        conn,
+        session_id,
+        project_id,
+        excluded_run_ids=run_ids,
+        excluded_entity_ids=removable_ids,
+    )
+    after_curated_finding_ids = _project_visible_finding_ids(
+        conn,
+        session_id,
+        project_id,
+        excluded_run_ids=run_ids,
+        excluded_entity_ids=[*removable_ids, *curated_ids],
+    )
+    stats["run_findings"] = len(current_finding_ids - after_run_finding_ids)
+    stats["removable_findings"] = len(after_run_finding_ids - after_removable_finding_ids)
+    stats["curated_findings"] = len(after_removable_finding_ids - after_curated_finding_ids)
+    stats["kept_curated_findings"] = stats["curated_findings"]
+
+
 def preview_project_run_entity_links(session_id, project_id, data):
     run_ids = _normalize_project_run_ids_payload(data)
     with db_connect() as conn:
@@ -215,12 +292,18 @@ def preview_project_run_entity_links(session_id, project_id, data):
     return stats
 
 
-def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids):
+def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids, *, include_curated=False):
     stats = {
         "available": 0,
         "removable": 0,
+        "curated": 0,
         "kept_curated": 0,
         "removed": 0,
+        "removed_curated": 0,
+        "run_findings": 0,
+        "removable_findings": 0,
+        "curated_findings": 0,
+        "kept_curated_findings": 0,
         "run_count": len(run_ids),
     }
     if not run_ids:
@@ -296,6 +379,7 @@ def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids)
         ],
     ).fetchall()
     removable_ids = []
+    curated_ids = []
     for row in rows:
         stats["available"] += 1
         source_detail = str(row["source_detail"] or "").strip()
@@ -313,10 +397,26 @@ def _project_run_entity_unlink_candidates(conn, session_id, project_id, run_ids)
             not has_default_project_link,
         ))
         if is_curated:
-            stats["kept_curated"] += 1
+            curated_ids.append(str(row["id"]))
             continue
         removable_ids.append(str(row["id"]))
     stats["removable"] = len(removable_ids)
+    stats["curated"] = len(curated_ids)
+    stats["kept_curated"] = 0 if include_curated else len(curated_ids)
+    if include_curated:
+        removable_ids.extend(curated_ids)
+        stats["kept_curated_findings"] = 0
+    _attach_project_run_entity_unlink_finding_stats(
+        conn,
+        stats,
+        session_id,
+        project_id,
+        run_ids,
+        removable_ids if not include_curated else removable_ids[:stats["removable"]],
+        curated_ids,
+    )
+    if include_curated:
+        stats["kept_curated_findings"] = 0
     return stats, removable_ids
 
 
@@ -336,7 +436,7 @@ def preview_project_run_entity_unlinks(session_id, project_id, data):
     return stats
 
 
-def unlink_project_run_entities(session_id, project_id, run_ids):
+def unlink_project_run_entities(session_id, project_id, run_ids, *, include_curated=False):
     normalized_run_ids = []
     seen = set()
     for raw_run_id in run_ids:
@@ -355,7 +455,13 @@ def unlink_project_run_entities(session_id, project_id, run_ids):
             return None
         run_maps = _bulk_project_run_maps(conn, session_id, normalized_run_ids)
         owned_run_ids = [run_id for run_id in normalized_run_ids if run_id in run_maps["owned"]]
-        stats, removable_ids = _project_run_entity_unlink_candidates(conn, session_id, project_id, owned_run_ids)
+        stats, removable_ids = _project_run_entity_unlink_candidates(
+            conn,
+            session_id,
+            project_id,
+            owned_run_ids,
+            include_curated=include_curated,
+        )
         if removable_ids:
             placeholders = ",".join("?" for _ in removable_ids)
             result = conn.execute(
@@ -365,6 +471,8 @@ def unlink_project_run_entities(session_id, project_id, run_ids):
                 [project_id, *removable_ids],
             )
             stats["removed"] = max(0, int(result.rowcount or 0))
+            if include_curated:
+                stats["removed_curated"] = min(stats["curated"], max(0, stats["removed"] - stats["removable"]))
         conn.commit()
     return stats
 

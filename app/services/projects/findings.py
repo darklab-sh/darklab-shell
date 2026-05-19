@@ -261,7 +261,7 @@ def list_run_findings(session_id, run_id, *, limit=None, offset=0, include_total
             query_params.extend([safe_limit, safe_offset])
         rows = conn.execute(
             base_sql
-            + "SELECT f.id, f.session_id, f.entity_id, f.subject_key, f.signature_hash, f.severity, "  # nosec B608
+            + "SELECT f.id, f.session_id, f.entity_id, f.subject_key, f.signature_hash, f.severity, "  # nosec
             "f.kind, f.tool_root, f.first_run_id, f.last_run_id, f.first_seen_at, f.last_seen_at, "
             "f.occurrence_count, f.status, f.fingerprint, f.title, f.raw_line, f.created, "
             "d.run_id, d.line_number, d.snippet, d.run_occurrence_count "
@@ -325,7 +325,7 @@ def bulk_update_project_finding_review_states(session_id, project_id, data):
         if not project:
             return None
         placeholders = ",".join("?" for _ in finding_ids)
-        found_rows = conn.execute(  # nosec B608
+        found_rows = conn.execute(  # nosec
             "WITH project_runs AS ("
             "  SELECT l.entity_id AS run_id FROM project_links l "
             "  JOIN runs r ON r.id = l.entity_id "
@@ -337,7 +337,7 @@ def bulk_update_project_finding_review_states(session_id, project_id, data):
             ") "
             "SELECT f.id FROM findings f "
             "WHERE f.session_id = ? "
-            f"AND f.id IN ({placeholders}) "  # nosec B608
+            f"AND f.id IN ({placeholders}) " # nosec
             "AND ("
             "  EXISTS ("
             "    SELECT 1 FROM findings_occurrences scope_fo "
@@ -551,12 +551,12 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
         pre_collapse_params = list(params)
         if collapsed_groups:
             placeholders = ",".join("?" for _ in collapsed_groups)
-            where_clauses.append(group_label_expr + f" NOT IN ({placeholders})")  # nosec B608
+            where_clauses.append(group_label_expr + f" NOT IN ({placeholders})")  # nosec
             params.extend(collapsed_groups)
 
         def build_base_sql(active_where_clauses):
             return (  # nosec B608
-                "WITH project_runs AS ("  # nosec B608
+                "WITH project_runs AS ("  # nosec
                 "  SELECT l.entity_id AS run_id FROM project_links l "
                 "  JOIN runs r ON r.id = l.entity_id "
                 "  WHERE l.project_id = ? AND l.entity_type = 'run' AND r.session_id = ?"
@@ -597,8 +597,8 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
             page_sql = " LIMIT ? OFFSET ?"
             fetch_limit = page_limit + 1 if not include_total else page_limit
             query_params.extend([fetch_limit, safe_offset])
-        rows = conn.execute(  # nosec B608
-            base_sql  # nosec B608
+        rows = conn.execute(  # nosec
+            base_sql  # nosec
             + "SELECT f.id, f.session_id, COALESCE(f.entity_id, f.target_id) AS entity_id, "
             "f.subject_key, f.signature_hash, f.severity, f.kind, f.tool_root, "
             "f.first_run_id, f.last_run_id, f.first_seen_at, f.last_seen_at, "
@@ -649,8 +649,8 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
                     needed_group_labels.append(normalized_label)
             if needed_group_labels:
                 placeholders = ",".join("?" for _ in needed_group_labels)
-                group_rows = conn.execute(  # nosec B608
-                    build_base_sql(pre_collapse_where_clauses)  # nosec B608
+                group_rows = conn.execute(  # nosec
+                    build_base_sql(pre_collapse_where_clauses)  # nosec
                     + "SELECT "
                     + group_label_expr
                     + " AS group_label, COUNT(*) AS count, MAX(pf.sort_seen) AS group_sort_seen "
@@ -661,7 +661,7 @@ def list_project_findings(session_id, project_id, filters=None, *, limit=None, o
                     + " AND r.session_id = f.session_id "
                     "WHERE "
                     + group_label_expr
-                    + f" IN ({placeholders}) "  # nosec B608
+                    + f" IN ({placeholders}) "  # nosec
                     "GROUP BY 1 "
                     "ORDER BY MAX(pf.sort_seen) DESC, group_label ASC",
                     (*pre_collapse_params, *needed_group_labels),

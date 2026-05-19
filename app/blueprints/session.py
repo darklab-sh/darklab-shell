@@ -689,7 +689,12 @@ def session_migrate():
             "UPDATE user_workflows SET session_id = ? WHERE session_id = ?",
             (to_session_id, from_session_id),
         )
-        project_migration = migrate_project_workspace_session(conn, from_session_id, to_session_id)
+        project_migration = migrate_project_workspace_session(
+            conn,
+            from_session_id,
+            to_session_id,
+            migrated_workspace_file_paths=getattr(workspace_migration, "migrated_file_paths", ()),
+        )
         migrated_secrets = migrate_session_secrets(conn, from_session_id, to_session_id)
         migrated_recent_values = _migrate_recent_values(conn, from_session_id, to_session_id)
         conn.execute(

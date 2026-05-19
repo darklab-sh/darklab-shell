@@ -443,13 +443,40 @@
     }
     if (typeof acShow === 'function') acShow(acFiltered);
   };
+  function _isVisibleModalOverlay(el) {
+    if (!el || !el.classList) return false;
+    if (el.id === 'history-panel' || el.id === 'history-load-overlay') return false;
+    const isOverlay = el.classList.contains('modal-overlay')
+      || el.classList.contains('mobile-sheet-overlay')
+      || el.id === 'shortcuts-overlay'
+      || el.id === 'theme-overlay'
+      || el.classList.contains('status-monitor-scrim');
+    if (!isOverlay) return false;
+    if (el.classList.contains('u-hidden')) return false;
+    return el.classList.contains('open')
+      || (el.style && el.style.display && el.style.display !== 'none');
+  }
+
+  function _syncModalOverlayState() {
+    if (!global.document || !global.document.body) return false;
+    const overlays = global.document.querySelectorAll(
+      '.modal-overlay, .mobile-sheet-overlay, #shortcuts-overlay, #theme-overlay, .status-monitor-scrim',
+    );
+    const active = Array.prototype.some.call(overlays, _isVisibleModalOverlay);
+    global.document.body.classList.toggle('modal-overlay-active', active);
+    return active;
+  }
+
+  global.syncModalOverlayState = _syncModalOverlayState;
   global.showPanelOverlay = (el) => {
     if (el && el.classList) el.classList.add('open');
     if (el && el.dataset) el.dataset.interactionReady = '0';
+    _syncModalOverlayState();
   };
   global.hidePanelOverlay = (el) => {
     if (el && el.classList) el.classList.remove('open');
     if (el && el.dataset) delete el.dataset.interactionReady;
+    _syncModalOverlayState();
   };
   global.markInteractionSurfaceReady = (surface, overlay, card = null) => {
     if (overlay && overlay.dataset) overlay.dataset.interactionReady = '1';
@@ -512,9 +539,11 @@
   global.isPanelOverlayOpen = (el) => !!(el && el.classList && el.classList.contains('open'));
   global.showModalOverlay = (el, display = 'flex') => {
     if (el && el.style) el.style.display = display;
+    _syncModalOverlayState();
   };
   global.hideModalOverlay = (el) => {
     if (el && el.style) el.style.display = 'none';
+    _syncModalOverlayState();
   };
   global.showHistoryPanel = () => showPanelOverlay(historyPanel);
   global.hideHistoryPanel = () => {

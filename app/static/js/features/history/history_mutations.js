@@ -9,28 +9,49 @@ function _historyCleanupLabel(cleanup) {
     + `${entities.toLocaleString()} ${entities === 1 ? 'entity' : 'entities'}`;
 }
 
+function _historyCuratedCleanupLabel(cleanup) {
+  const entities = Number(cleanup?.curated_entities || 0);
+  const findings = Number(cleanup?.curated_findings || 0);
+  return `${findings.toLocaleString()} curated ${findings === 1 ? 'finding' : 'findings'} and `
+    + `${entities.toLocaleString()} curated ${entities === 1 ? 'entity' : 'entities'}`;
+}
+
 function _buildHistoryAtlasCleanupContent(cleanup) {
-  if (!cleanup?.has_cleanup) return null;
+  const curated = Number(cleanup?.curated_total || 0);
+  if (!cleanup?.has_cleanup && curated <= 0) return null;
   const wrap = document.createElement('div');
   wrap.className = 'modal-inline-field';
   const fieldset = document.createElement('div');
   fieldset.className = 'form-fieldset';
-  const label = document.createElement('label');
-  label.className = 'form-check';
-  const checkbox = document.createElement('input');
-  checkbox.type = 'checkbox';
-  checkbox.checked = true;
-  checkbox.dataset.historyAtlasCleanup = '1';
-  const text = document.createElement('span');
-  text.textContent = `Also remove ${_historyCleanupLabel(cleanup)} from Atlas`;
-  label.append(checkbox, text);
-  const note = document.createElement('div');
-  note.className = 'history-bulk-note';
-  const curated = Number(cleanup.curated_total || 0);
-  fieldset.append(label);
+  if (cleanup?.has_cleanup) {
+    const label = document.createElement('label');
+    label.className = 'form-check';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = true;
+    checkbox.dataset.historyAtlasCleanup = '1';
+    const text = document.createElement('span');
+    text.textContent = `Also remove ${_historyCleanupLabel(cleanup)} from Atlas`;
+    label.append(checkbox, text);
+    const note = document.createElement('div');
+    note.className = 'history-bulk-note';
+    note.textContent = 'These are disposable Atlas items only sourced by this run.';
+    fieldset.append(label, note);
+  }
   if (curated > 0) {
-    note.textContent = `${curated.toLocaleString()} curated ${curated === 1 ? 'item' : 'items'} will be kept.`;
-    fieldset.appendChild(note);
+    const curatedLabel = document.createElement('label');
+    curatedLabel.className = 'form-check';
+    const curatedCheckbox = document.createElement('input');
+    curatedCheckbox.type = 'checkbox';
+    curatedCheckbox.checked = false;
+    curatedCheckbox.dataset.historyAtlasCleanupCurated = '1';
+    const curatedText = document.createElement('span');
+    curatedText.textContent = 'Also delete curated single-source Atlas items';
+    curatedLabel.append(curatedCheckbox, curatedText);
+    const curatedNote = document.createElement('div');
+    curatedNote.className = 'history-bulk-note';
+    curatedNote.textContent = `${_historyCuratedCleanupLabel(cleanup)} will be kept unless this is checked. Curated means project-linked, project-visible, reviewed, labeled, or noted.`;
+    fieldset.append(curatedLabel, curatedNote);
   }
   wrap.appendChild(fieldset);
   return wrap;
@@ -85,7 +106,9 @@ function confirmHistAction(type, id, command, itemType = 'run') {
         return;
       }
       if (pendingHistAction && content) {
-        pendingHistAction.pruneAtlas = !!content.querySelector('[data-history-atlas-cleanup]')?.checked;
+        pendingHistAction.pruneCuratedAtlas = !!content.querySelector('[data-history-atlas-cleanup-curated]')?.checked;
+        pendingHistAction.pruneAtlas = !!content.querySelector('[data-history-atlas-cleanup]')?.checked
+          || pendingHistAction.pruneCuratedAtlas;
       }
       if (choice === 'nonfav') executeHistAction('clear-nonfav');
       else if (choice === 'all') executeHistAction();
@@ -105,11 +128,16 @@ function executeHistAction(type) {
   const command = pendingHistAction && pendingHistAction.command;
   const itemType = pendingHistAction && pendingHistAction.itemType;
   const pruneAtlas = !!(pendingHistAction && pendingHistAction.pruneAtlas);
+  const pruneCuratedAtlas = !!(pendingHistAction && pendingHistAction.pruneCuratedAtlas);
   pendingHistAction = null;
   if (action === 'delete') {
+    const params = new URLSearchParams();
+    if (pruneAtlas) params.set('prune_atlas', '1');
+    if (pruneCuratedAtlas) params.set('prune_curated_atlas', '1');
+    const query = params.toString();
     const deleteUrl = itemType === 'snapshot'
       ? `/share/${id}`
-      : `/history/${id}${pruneAtlas ? '?prune_atlas=1' : ''}`;
+      : `/history/${id}${query ? `?${query}` : ''}`;
     apiFetch(deleteUrl, { method: 'DELETE' }).then(() => {
       if (itemType === 'snapshot') {
         refreshHistoryPanel();

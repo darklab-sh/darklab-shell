@@ -91,10 +91,7 @@
 }
 
 .atlas-search-row,
-.atlas-filter-row,
-.atlas-filter-controls,
 .atlas-toolbar-actions,
-.atlas-saved-view-row,
 .atlas-bulk-selection-controls,
 .atlas-bulk-mutation-controls {
   display: flex;
@@ -104,37 +101,106 @@
 }
 
 .atlas-search-row input {
-  flex: 1 1 auto;
+  width: 100%;
   min-width: 0;
 }
 
 .atlas-filter-row {
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .atlas-filter-controls {
-  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+  gap: 8px;
+  width: 100%;
   min-width: 0;
+  max-width: 100%;
+}
+
+.atlas-filter-controls > .form-control,
+.atlas-filter-controls > .form-select,
+.atlas-filter-controls > .app-select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.atlas-filter-controls > .app-select .app-select-trigger {
+  width: 100%;
+  min-width: 0;
+}
+
+.atlas-run-filter-search {
+  min-width: 0;
+}
+
+.atlas-run-filter-select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.atlas-run-filter-select + .app-select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.atlas-run-filter-select + .app-select .app-select-trigger {
+  width: 100%;
 }
 
 .atlas-toolbar-actions {
-  flex: 0 1 auto;
-  justify-content: flex-end;
+  min-width: 0;
+  justify-content: flex-start;
+}
+
+.atlas-run-filter-chip {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  grid-column: 1 / -1;
+}
+
+.atlas-run-filter-chip.u-hidden {
+  display: none;
+}
+
+.atlas-run-filter-chip .chip {
+  max-width: min(260px, 100%);
+  min-height: 28px;
+  padding: 4px 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .atlas-saved-view-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(3, max-content);
+  align-items: center;
+  gap: 8px;
   min-width: 0;
+  max-width: 100%;
 }
 
 .atlas-saved-view-select {
-  width: auto;
-  min-width: 180px;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
 }
 
 .atlas-saved-view-select + .app-select {
-  flex: 0 1 240px;
-  min-width: 180px;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
 }
 
@@ -207,22 +273,57 @@
 }
 
 .atlas-orphan-filter {
-  width: auto;
+  width: 100%;
   min-width: 0;
   max-width: 100%;
 }
 
 .atlas-orphan-filter + .app-select {
-  flex: 0 0 auto;
-  width: max-content;
-  min-width: 142px;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
 }
 
 .atlas-orphan-filter + .app-select .app-select-trigger {
-  width: max-content;
-  min-width: 142px;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
+}
+
+.atlas-suppression-filter + .app-select,
+.atlas-finding-status-filter + .app-select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.atlas-suppression-filter + .app-select .app-select-trigger,
+.atlas-finding-status-filter + .app-select .app-select-trigger {
+  width: 100%;
+  min-width: 0;
+}
+
+.atlas-saved-view-prompt {
+  min-width: 0;
+  max-width: 100%;
+  margin-bottom: 14px;
+}
+
+.atlas-saved-view-prompt .form-field {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.atlas-saved-view-prompt .form-field span {
+  min-width: 0;
+}
+
+.atlas-saved-view-prompt .form-control {
+  width: 100%;
+  min-width: 0;
 }
 
 .atlas-finding-bulk-row {
@@ -300,6 +401,23 @@
 
 .atlas-row-suppression-action {
   align-self: center;
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 21px;
+  line-height: 1;
+}
+
+.atlas-row-suppression-action:hover,
+.atlas-row-suppression-action:focus-visible {
+  border-color: transparent;
+  background: var(--theme-button-ghost-hover-bg);
+  color: var(--green);
 }
 
 .atlas-entity-row.is-selected {
@@ -680,6 +798,12 @@
   color: var(--text);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.atlas-source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .atlas-source-action {
