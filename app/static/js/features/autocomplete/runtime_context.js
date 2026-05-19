@@ -584,6 +584,7 @@ function _runtimeProjectContext(baseSpec = {}) {
     }
   };
   setProjectHints('use', _runtimeProjectRefHints(['active']));
+  setProjectHints('rename', _runtimeProjectRefHints());
   setProjectHints('archive', _runtimeProjectRefHints(['active']));
   setProjectHints('unarchive', _runtimeProjectRefHints(['archived']));
   setProjectHints('delete', _runtimeProjectRefHints());

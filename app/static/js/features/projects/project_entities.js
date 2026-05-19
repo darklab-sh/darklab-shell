@@ -64,6 +64,10 @@
   function createProjectEntitiesController(context) {
     const ctx = context || {};
     const pages = new Map();
+    const countPages = new Map();
+    const countHistory = new Map();
+    const countTextHistory = new Map();
+    const countLoads = new Map();
     const pageLimit = 50;
 
     function activeTab() {
@@ -82,6 +86,7 @@
         countsByType: {},
         limit: pageLimit,
         offset: 0,
+        filterKey: '',
         loading: false,
         loaded: false,
         error: '',
@@ -98,8 +103,60 @@
       state.loaded = false;
     }
 
+    function appendEntityFilters(params, projectId) {
+      const normalizedProjectId = String(projectId || '');
+      const summary = ctx.getSummary?.(normalizedProjectId);
+      const targetFilters = typeof ctx.projectTargetFilterSet === 'function'
+        ? ctx.projectTargetFilterSet(normalizedProjectId)
+        : new Set();
+      const targets = typeof ctx.projectTargetItems === 'function' ? ctx.projectTargetItems(summary) : [];
+      const availableTargets = new Set(
+        (Array.isArray(targets) ? targets : [])
+          .map(target => String(target && target.id || ''))
+          .filter(Boolean),
+      );
+      targetFilters.forEach((targetId) => {
+        if (targetId && availableTargets.has(targetId)) params.append('target_id', targetId);
+      });
+      const runFilters = typeof ctx.projectRunFilterSet === 'function'
+        ? ctx.projectRunFilterSet(normalizedProjectId)
+        : new Set();
+      runFilters.forEach((runId) => {
+        if (runId) params.append('run_id', runId);
+      });
+    }
+
+    function entityFilterScopeKey(projectId) {
+      const params = new URLSearchParams();
+      appendEntityFilters(params, projectId);
+      params.sort?.();
+      return params.toString();
+    }
+
+    function entityFiltersActive(projectId) {
+      return !!entityFilterScopeKey(projectId);
+    }
+
+    function entityFilterParams(projectId, state) {
+      const normalizedProjectId = String(projectId || '');
+      const pageState = state || page(normalizedProjectId);
+      const params = new URLSearchParams({
+        limit: String(pageState.limit || pageLimit),
+        offset: String(pageState.offset || 0),
+      });
+      const type = activeType();
+      if (type) params.set('type', type);
+      appendEntityFilters(params, normalizedProjectId);
+      params.sort?.();
+      return params;
+    }
+
     function resetPages() {
       pages.clear();
+      countPages.clear();
+      countHistory.clear();
+      countTextHistory.clear();
+      countLoads.clear();
     }
 
     function linkedIds(projectId) {
@@ -117,11 +174,47 @@
       const normalized = String(projectId || '');
       if (!normalized) {
         pages.clear();
+        countPages.clear();
+        countHistory.clear();
+        countTextHistory.clear();
+        countLoads.clear();
         return;
       }
       [...pages.keys()].forEach((key) => {
         if (key.startsWith(`${normalized}:`)) pages.delete(key);
       });
+      countPages.delete(normalized);
+      [...countLoads.keys()].forEach((key) => {
+        if (key.startsWith(`${normalized}:`)) countLoads.delete(key);
+      });
+    }
+
+    function rememberedCountText(projectId, scopeKey, type) {
+      return countTextHistory.get(String(projectId || ''))?.get(`${scopeKey}:${type}`) || '';
+    }
+
+    function rememberCountText(projectId, scopeKey, type, text) {
+      const normalizedProjectId = String(projectId || '');
+      if (!normalizedProjectId || !scopeKey || !type) return;
+      if (!countTextHistory.has(normalizedProjectId)) countTextHistory.set(normalizedProjectId, new Map());
+      countTextHistory.get(normalizedProjectId).set(`${scopeKey}:${type}`, String(text || ''));
+    }
+
+    function rememberCountPage(projectId, entry) {
+      const normalizedProjectId = String(projectId || '');
+      if (!normalizedProjectId || !entry || !entry.key) return;
+      countPages.set(normalizedProjectId, entry);
+      if (!countHistory.has(normalizedProjectId)) countHistory.set(normalizedProjectId, new Map());
+      countHistory.get(normalizedProjectId).set(entry.key, entry.countsByType || {});
+    }
+
+    function countPageForScope(projectId) {
+      const normalizedProjectId = String(projectId || '');
+      const scopeKey = entityFilterScopeKey(normalizedProjectId);
+      const cached = countPages.get(normalizedProjectId);
+      if (cached && cached.key === scopeKey) return cached.countsByType || {};
+      const historicalCounts = countHistory.get(normalizedProjectId)?.get(scopeKey);
+      return historicalCounts || null;
     }
 
     function selectedIds() {
@@ -159,11 +252,52 @@
 
     function counts(summary) {
       const projectId = String(summary?.project?.id || ctx.getSelectedProjectId?.() || '');
-      const loadedCounts = page(projectId).countsByType;
-      if (loadedCounts && Object.keys(loadedCounts).length) return loadedCounts;
+      const cachedCounts = countPageForScope(projectId);
+      if (cachedCounts) return cachedCounts;
       return summary && summary.entity_counts && typeof summary.entity_counts === 'object'
         ? summary.entity_counts
         : _entityCounts(summary);
+    }
+
+    function totalCounts(summary) {
+      return summary && summary.entity_counts && typeof summary.entity_counts === 'object'
+        ? summary.entity_counts
+        : _entityCounts(summary);
+    }
+
+    function typeCountText(projectId, summary, type) {
+      const total = Number(totalCounts(summary)[type] || 0);
+      if (!entityFiltersActive(projectId)) return total.toLocaleString();
+      const scopeKey = entityFilterScopeKey(projectId);
+      ensureFilteredCounts(projectId);
+      const countsByType = countPageForScope(projectId);
+      if (!countsByType) {
+        const remembered = rememberedCountText(projectId, scopeKey, type);
+        if (remembered) return remembered;
+        return `${total.toLocaleString()}/${total.toLocaleString()}`;
+      }
+      const filtered = Number(countsByType[type] || 0);
+      const text = `${filtered.toLocaleString()}/${total.toLocaleString()}`;
+      rememberCountText(projectId, scopeKey, type, text);
+      return text;
+    }
+
+    function tabCountText(projectId, summary, total) {
+      const totalCount = Number(total || summary?.counts?.entities || 0);
+      if (!entityFiltersActive(projectId)) return totalCount.toLocaleString();
+      const scopeKey = entityFilterScopeKey(projectId);
+      ensureFilteredCounts(projectId);
+      const countsByType = countPageForScope(projectId);
+      if (!countsByType) {
+        const remembered = rememberedCountText(projectId, scopeKey, '__all__');
+        if (remembered) return remembered;
+        return `${totalCount.toLocaleString()}/${totalCount.toLocaleString()}`;
+      }
+      const filtered = Object.values(countsByType)
+        .reduce((sum, count) => sum + Number(count || 0), 0);
+      const text = `${filtered.toLocaleString()}/${totalCount.toLocaleString()}`;
+      rememberCountText(projectId, scopeKey, '__all__', text);
+      return text;
     }
 
     function activeType() {
@@ -179,6 +313,44 @@
 
     function pagedItemsForActiveTab(projectId) {
       return page(projectId).entities || [];
+    }
+
+    function ensureFilteredCounts(projectId) {
+      const normalizedProjectId = String(projectId || ctx.getSelectedProjectId?.() || '');
+      if (!normalizedProjectId || !entityFiltersActive(normalizedProjectId)) return null;
+      const scopeKey = entityFilterScopeKey(normalizedProjectId);
+      const cached = countPages.get(normalizedProjectId);
+      if (cached && cached.key === scopeKey) return cached;
+      const loadKey = `${normalizedProjectId}:${scopeKey}`;
+      if (countLoads.has(loadKey)) return countLoads.get(loadKey);
+      const params = new URLSearchParams({ limit: '1', offset: '0' });
+      appendEntityFilters(params, normalizedProjectId);
+      params.sort?.();
+      const request = ctx.apiFetch(`/projects/${encodeURIComponent(normalizedProjectId)}/entities?${params.toString()}`, {
+        cache: 'no-store',
+      })
+        .then(async (resp) => {
+          if (!resp.ok) throw await ctx.projectResponseError(resp, 'Could not load project entity counts.');
+          const data = await resp.json();
+          if (entityFilterScopeKey(normalizedProjectId) !== scopeKey) return null;
+          const next = {
+            key: scopeKey,
+            countsByType: data.counts_by_type && typeof data.counts_by_type === 'object' ? data.counts_by_type : {},
+          };
+          rememberCountPage(normalizedProjectId, next);
+          ctx.renderProjectExplorer?.();
+          if (ctx.mobileView?.() === 'detail') ctx.renderProjectMobileDetail?.();
+          return next;
+        })
+        .catch((err) => {
+          if (typeof ctx.logClientError === 'function') ctx.logClientError('failed to load project entity counts', err);
+          return null;
+        })
+        .finally(() => {
+          countLoads.delete(loadKey);
+        });
+      countLoads.set(loadKey, request);
+      return request;
     }
 
     async function load(projectId, options = {}) {
@@ -199,12 +371,10 @@
         || page(normalizedProjectId) !== state
         || state.loadSeq !== requestId
       );
-      const params = new URLSearchParams({
-        limit: String(state.limit),
-        offset: String(state.offset),
-      });
+      const params = entityFilterParams(normalizedProjectId, state);
       const type = activeType();
-      if (type) params.set('type', type);
+      const nextFilterKey = params.toString();
+      const nextScopeKey = entityFilterScopeKey(normalizedProjectId);
       try {
         const resp = await ctx.apiFetch(`/projects/${encodeURIComponent(normalizedProjectId)}/entities?${params.toString()}`, {
           cache: 'no-store',
@@ -217,13 +387,24 @@
         state.limit = Number(data.limit || pageLimit);
         state.offset = Number(data.offset || 0);
         state.countsByType = data.counts_by_type && typeof data.counts_by_type === 'object' ? data.counts_by_type : {};
+        state.filterKey = nextFilterKey;
+        if (!entityFiltersActive(normalizedProjectId)) {
+          rememberCountPage(normalizedProjectId, {
+            key: nextScopeKey,
+            countsByType: state.countsByType,
+          });
+        }
         const fallbackSummary = ctx.getSummary?.(normalizedProjectId);
         const fallbackEntities = _entityItems(fallbackSummary)
           .filter(entity => !type || String(entity && entity.type || '') === type);
-        if (!state.entities.length && fallbackEntities.length) {
+        if (!entityFiltersActive(normalizedProjectId) && !state.entities.length && fallbackEntities.length) {
           state.entities = fallbackEntities.slice(state.offset, state.offset + state.limit);
           state.total = fallbackEntities.length;
           state.countsByType = _entityCounts(fallbackSummary);
+          rememberCountPage(normalizedProjectId, {
+            key: nextScopeKey,
+            countsByType: state.countsByType,
+          });
         }
         state.loaded = true;
         return state;
@@ -290,7 +471,6 @@
       wrap.className = 'project-entity-type-tabs tab-strip';
       wrap.setAttribute('role', 'tablist');
       wrap.setAttribute('aria-label', 'Project entity types');
-      const entityCounts = counts(summary);
       tabs().forEach((tab) => {
         const btn = document.createElement('button');
         btn.type = 'button';
@@ -306,7 +486,7 @@
         label.textContent = tab.label;
         const count = document.createElement('span');
         count.className = 'project-entity-type-tab-count';
-        count.textContent = Number(entityCounts[tab.type] || 0).toLocaleString();
+        count.textContent = typeCountText(projectId, summary, tab.type);
         btn.append(label, count);
         ctx.bindProjectRuntimePressable?.(btn);
         wrap.appendChild(btn);
@@ -537,9 +717,12 @@
 
     function renderEntities(container, projectId, summary) {
       const state = page(projectId);
+      const filterKey = entityFilterParams(projectId, state).toString();
       const visibleEntities = pagedItemsForActiveTab(projectId, summary);
       const totalEntities = Number(summary?.counts?.entities || 0);
-      const activeTotal = Number(state.total || counts(summary)[activeType()] || 0);
+      const activeTotal = state.loaded
+        ? Number(state.total || 0)
+        : Number(counts(summary)[activeType()] || 0);
       const currentSelected = selectedIds();
       currentSelected.forEach((entityId) => {
         if (!visibleEntities.some(entity => String(entity && entity.id || '') === entityId)) {
@@ -552,8 +735,8 @@
         container.appendChild(ctx.emptyProjectPanel('No Atlas entities are linked to this project yet.'));
         return;
       }
-      if (!state.loaded && !state.loading) {
-        load(projectId).catch(() => {});
+      if ((!state.loaded || state.filterKey !== filterKey) && !state.loading) {
+        load(projectId, { offset: state.filterKey === filterKey ? state.offset : 0 }).catch(() => {});
       }
       if (state.loading && !visibleEntities.length) {
         container.appendChild(ctx.emptyProjectPanel('Loading project entities...'));
@@ -628,15 +811,18 @@
       const state = page(projectId);
       const visibleEntities = pagedItemsForActiveTab(projectId, summary);
       const totalEntities = Number(summary?.counts?.entities || 0);
-      const activeTotal = Number(state.total || counts(summary)[activeType()] || 0);
+      const activeTotal = state.loaded
+        ? Number(state.total || 0)
+        : Number(counts(summary)[activeType()] || 0);
       if (!totalEntities) {
         fragment.appendChild(ctx.projectMobileEmptyPanel('No Atlas entities are linked to this project yet.', [
           ctx.makeProjectButton('Add entity', 'open-entity-picker', projectId, 'primary'),
         ]));
         return fragment;
       }
-      if (!state.loaded && !state.loading) {
-        load(projectId).catch(() => {});
+      const filterKey = entityFilterParams(projectId, state).toString();
+      if ((!state.loaded || state.filterKey !== filterKey) && !state.loading) {
+        load(projectId, { offset: state.filterKey === filterKey ? state.offset : 0 }).catch(() => {});
       }
       if (state.loading && !visibleEntities.length) {
         fragment.appendChild(ctx.emptyProjectPanel('Loading project entities...'));
@@ -804,6 +990,8 @@
       byId,
       load,
       invalidate,
+      ensureFilteredCounts,
+      tabCountText,
       chips,
       renderTypeTabs,
       renderEntities,

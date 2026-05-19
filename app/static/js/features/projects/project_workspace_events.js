@@ -603,8 +603,10 @@
       if (entityTabBtn) {
         event.preventDefault();
         event.stopPropagation();
+        const projectId = String(entityTabBtn.dataset.projectId || selectedProjectId() || '');
         ctx.entitiesController?.().setActiveTab(entityTabBtn.dataset.projectEntityTab || 'ip');
         ctx.entitiesController?.().clearSelection();
+        await Promise.resolve(ctx.entitiesController?.().ensureFilteredCounts(projectId));
         ctx.renderProjectExplorer();
         if (mobileView() === 'detail') ctx.renderProjectMobileDetail();
         return;

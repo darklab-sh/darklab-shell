@@ -1082,6 +1082,7 @@ describe('autocomplete helpers', () => {
     expect(getAutocompleteMatches('project link run ', 17).map(item => item.value)).toEqual(['last', '<run-id>'])
     expect(getAutocompleteMatches('project link run run-1 ', 23)).toEqual([])
     expect(getAutocompleteMatches('project use ', 12).map(item => item.value)).toEqual(['active-case'])
+    expect(getAutocompleteMatches('project rename ', 15).map(item => item.value)).toEqual(['active-case', 'archived-case'])
     expect(getAutocompleteMatches('project archive ', 16).map(item => item.value)).toEqual(['active-case'])
     expect(getAutocompleteMatches('project unarchive ', 18).map(item => item.value)).toEqual(['archived-case'])
     expect(getAutocompleteMatches('project delete ', 15).map(item => item.value)).toEqual(['active-case', 'archived-case'])

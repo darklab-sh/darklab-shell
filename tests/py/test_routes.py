@@ -794,6 +794,11 @@ class TestProjectRoutes:
         use_lines, _ = execute_builtin_command("project use cli-case", cli_session)
         assert "active project is CLI Case" in use_lines[0]["text"]
 
+        rename_lines, _ = execute_builtin_command("project rename cli-case CLI Case Renamed", cli_session)
+        assert "renamed CLI Case Renamed" in rename_lines[0]["text"]
+        renamed_current, _ = execute_builtin_command("project current", cli_session)
+        assert "CLI Case Renamed" in "\n".join(line["text"] for line in renamed_current)
+
         tab_one_run = self._seed_run(
             cli_session,
             "sleep 10",
@@ -824,22 +829,22 @@ class TestProjectRoutes:
         remove_target_lines, _ = execute_builtin_command("project target remove darklab.sh", cli_session)
         assert remove_target_lines[0]["text"] == "project: target removed darklab.sh"
 
-        archive_lines, _ = execute_builtin_command("project archive cli-case", cli_session)
-        assert "archived CLI Case" in archive_lines[0]["text"]
+        archive_lines, _ = execute_builtin_command("project archive cli-case-renamed", cli_session)
+        assert "archived CLI Case Renamed" in archive_lines[0]["text"]
 
         archived_current, _ = execute_builtin_command("project current", cli_session)
         assert archived_current[0]["text"].startswith("No active project.")
 
-        unarchive_lines, _ = execute_builtin_command("project unarchive cli-case", cli_session)
-        assert "unarchived CLI Case" in unarchive_lines[0]["text"]
+        unarchive_lines, _ = execute_builtin_command("project unarchive cli-case-renamed", cli_session)
+        assert "unarchived CLI Case Renamed" in unarchive_lines[0]["text"]
 
         unarchived_current, _ = execute_builtin_command("project current", cli_session)
         assert unarchived_current[0]["text"].startswith("No active project.")
 
-        delete_lines, _ = execute_builtin_command("project delete cli-case", cli_session)
-        assert "deleted CLI Case" in delete_lines[0]["text"]
+        delete_lines, _ = execute_builtin_command("project delete cli-case-renamed", cli_session)
+        assert "deleted CLI Case Renamed" in delete_lines[0]["text"]
         deleted_list_lines, _ = execute_builtin_command("project list --all", cli_session)
-        assert "cli-case" not in "\n".join(line["text"] for line in deleted_list_lines)
+        assert "cli-case-renamed" not in "\n".join(line["text"] for line in deleted_list_lines)
 
     def test_active_project_rejects_cross_session_and_clears_stale_projects(self):
         client = get_client()
@@ -1510,6 +1515,16 @@ class TestProjectRoutes:
             "notes": 5,
             "packages": 0,
         }
+        assert summary["finding_summary"] == {
+            "review_states": {"new": 3},
+            "severities": {"high": 1, "info": 2},
+        }
+        counted_list = json.loads(client.get(
+            "/projects?include_archived=1&include_counts=1&limit=10&offset=0",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        counted_project = next(item for item in counted_list["projects"] if item["id"] == project["id"])
+        assert counted_project["finding_summary"] == summary["finding_summary"]
         assert summary["artifacts"] == []
         assert summary["entities"] == []
         assert summary["entity_counts"] == {}
@@ -5908,9 +5923,11 @@ class TestAtlasRoutes:
     def test_project_summary_surfaces_all_linked_atlas_entities(self):
         client = get_client()
         session_id = self._session_id()
-        _, recorded = self._seed_entity_run(session_id)
+        run_id, recorded = self._seed_entity_run(session_id)
+        other_run_id, other_recorded = self._seed_domain_finding_run(session_id, "unrelated.test")
         domain_id = next(item["id"] for item in recorded if item["type"] == "domain")
         cve_id = next(item["id"] for item in recorded if item["type"] == "cve")
+        other_domain_id = next(item["id"] for item in other_recorded if item["type"] == "domain")
         project_resp = client.post(
             "/projects",
             json={"name": "Entity Case"},
@@ -5933,9 +5950,15 @@ class TestAtlasRoutes:
 
         bulk_resp = client.post(
             f"/projects/{project['id']}/links",
-            json={"entity_type": "atlas_entity", "entity_ids": [domain_id, cve_id]},
+            json={"entity_type": "atlas_entity", "entity_ids": [domain_id, cve_id, other_domain_id]},
             headers={"X-Session-ID": session_id},
         )
+        for linked_run_id in (run_id, other_run_id):
+            client.post(
+                f"/projects/{project['id']}/links",
+                json={"entity_type": "run", "entity_id": linked_run_id},
+                headers={"X-Session-ID": session_id},
+            )
         summary_resp = client.get(
             f"/projects/{project['id']}/summary",
             headers={"X-Session-ID": session_id},
@@ -5944,22 +5967,34 @@ class TestAtlasRoutes:
             f"/projects/{project['id']}/entities?type=cve&limit=1&offset=0",
             headers={"X-Session-ID": session_id},
         )
+        run_filtered_resp = client.get(
+            f"/projects/{project['id']}/entities?run_id={run_id}&limit=10&offset=0",
+            headers={"X-Session-ID": session_id},
+        )
+        target_filtered_resp = client.get(
+            f"/projects/{project['id']}/entities?target_id={domain_id}&limit=10&offset=0",
+            headers={"X-Session-ID": session_id},
+        )
         data = json.loads(summary_resp.data)
         entity_page = json.loads(entities_resp.data)
+        run_filtered = json.loads(run_filtered_resp.data)
+        target_filtered = json.loads(target_filtered_resp.data)
 
         assert bulk_resp.status_code == 200
-        assert json.loads(bulk_resp.data)["counts"]["added"] == 2
+        assert json.loads(bulk_resp.data)["counts"]["added"] == 3
         assert summary_resp.status_code == 200
         assert entities_resp.status_code == 200
-        assert data["counts"]["targets"] == 1
-        assert data["counts"]["entities"] == 2
+        assert run_filtered_resp.status_code == 200
+        assert target_filtered_resp.status_code == 200
+        assert data["counts"]["targets"] == 2
+        assert data["counts"]["entities"] == 3
         assert data["entities"] == []
-        assert data["entity_counts"]["domain"] == 1
+        assert data["entity_counts"]["domain"] == 2
         assert data["entity_counts"]["cve"] == 1
-        assert {item["id"] for item in data["targets"]} == {domain_id}
+        assert {item["id"] for item in data["targets"]} == {domain_id, other_domain_id}
         assert entity_page["total"] == 1
         assert entity_page["limit"] == 1
-        assert entity_page["counts_by_type"]["domain"] == 1
+        assert entity_page["counts_by_type"]["domain"] == 2
         assert entity_page["counts_by_type"]["cve"] == 1
         entities = {item["id"]: item for item in entity_page["entities"]}
         assert set(entities) == {cve_id}
@@ -5967,6 +6002,10 @@ class TestAtlasRoutes:
         assert entities[cve_id]["intel_provider_count"] == 1
         assert entities[cve_id]["intel_providers"] == ["nvd"]
         assert entities[cve_id]["intel_last_refreshed"]
+        assert {item["id"] for item in run_filtered["entities"]} == {domain_id, cve_id}
+        assert run_filtered["counts_by_type"] == {"cve": 1, "domain": 1}
+        assert {item["id"] for item in target_filtered["entities"]} == {domain_id, cve_id}
+        assert target_filtered["counts_by_type"] == {"cve": 1, "domain": 1}
 
     def test_project_findings_include_linked_entity_findings_without_linked_run(self):
         client = get_client()

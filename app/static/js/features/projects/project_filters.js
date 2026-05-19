@@ -520,7 +520,7 @@
     }
 
     function targetFilterableProjectTab(tab = ctx.projectWorkspaceTab?.()) {
-      return ['runs', 'findings', 'artifacts'].includes(tab);
+      return ['runs', 'entities', 'findings', 'artifacts'].includes(tab);
     }
 
     function clearAllFilters(projectId = '') {
@@ -729,31 +729,35 @@
         sortControl = sortWrap;
       }
 
-      const labelOptions = findingLabelOptions(projectId).map(labelText => filterOption({
-        labelText,
-        value: labelText,
-        checked: selectedLabels.has(labelText),
-        dataset: { projectFindingLabelFilterOption: '1', projectId },
-      }));
-      controls.appendChild(filterDropdown('Filter by label', selectedLabels.size, labelOptions));
+      const activeProjectTab = ctx.projectWorkspaceTab();
+      const showMetadataFilters = activeProjectTab !== 'entities';
+      if (showMetadataFilters) {
+        const labelOptions = findingLabelOptions(projectId).map(labelText => filterOption({
+          labelText,
+          value: labelText,
+          checked: selectedLabels.has(labelText),
+          dataset: { projectFindingLabelFilterOption: '1', projectId },
+        }));
+        controls.appendChild(filterDropdown('Filter by label', selectedLabels.size, labelOptions));
 
-      const noteWrap = document.createElement('label');
-      noteWrap.className = 'project-finding-sort-control project-finding-note-state-control';
-      const noteSelect = document.createElement('select');
-      noteSelect.className = 'form-select project-finding-note-state-select';
-      noteSelect.dataset.projectFindingNoteState = '1';
-      noteSelect.dataset.projectId = projectId;
-      noteSelect.setAttribute('aria-label', 'Filter findings by notes');
-      const currentNoteState = findingNoteStateValue(projectId);
-      ctx.projectFindingNoteStateOptions.forEach(({ value, label: labelText }) => {
-        const option = document.createElement('option');
-        option.value = value;
-        option.textContent = labelText;
-        option.selected = value === currentNoteState;
-        noteSelect.appendChild(option);
-      });
-      noteWrap.appendChild(noteSelect);
-      controls.appendChild(noteWrap);
+        const noteWrap = document.createElement('label');
+        noteWrap.className = 'project-finding-sort-control project-finding-note-state-control';
+        const noteSelect = document.createElement('select');
+        noteSelect.className = 'form-select project-finding-note-state-select';
+        noteSelect.dataset.projectFindingNoteState = '1';
+        noteSelect.dataset.projectId = projectId;
+        noteSelect.setAttribute('aria-label', 'Filter findings by notes');
+        const currentNoteState = findingNoteStateValue(projectId);
+        ctx.projectFindingNoteStateOptions.forEach(({ value, label: labelText }) => {
+          const option = document.createElement('option');
+          option.value = value;
+          option.textContent = labelText;
+          option.selected = value === currentNoteState;
+          noteSelect.appendChild(option);
+        });
+        noteWrap.appendChild(noteSelect);
+        controls.appendChild(noteWrap);
+      }
       if (sortControl) controls.appendChild(sortControl);
       wrap.appendChild(controls);
 
@@ -810,16 +814,18 @@
           clearAttr: 'projectFindingScopeFilterClear',
         }));
       });
-      selectedLabels.forEach((labelValue) => {
-        chips.appendChild(filterChip({
-          projectId,
-          label: `label: ${labelValue}`,
-          value: labelValue,
-          clearAttr: 'projectFindingLabelFilterClear',
-        }));
-      });
+      if (showMetadataFilters) {
+        selectedLabels.forEach((labelValue) => {
+          chips.appendChild(filterChip({
+            projectId,
+            label: `label: ${labelValue}`,
+            value: labelValue,
+            clearAttr: 'projectFindingLabelFilterClear',
+          }));
+        });
+      }
       const noteState = findingNoteStateValue(projectId);
-      if (noteState !== 'all') {
+      if (showMetadataFilters && noteState !== 'all') {
         const option = ctx.projectFindingNoteStateOptions.find(item => item.value === noteState);
         chips.appendChild(filterChip({
           projectId,
@@ -840,7 +846,8 @@
       }
       const hasFilters = selectedTargets.size || selectedRuns.size || selectedStatuses.size
         || selectedCommands.size || selectedSeverities.size || selectedScopes.size
-        || selectedLabels.size || noteState !== 'all' || orphanState !== 'hide';
+        || (showMetadataFilters && (selectedLabels.size || noteState !== 'all'))
+        || orphanState !== 'hide';
       if (hasFilters) {
         const clearAll = document.createElement('button');
         clearAll.type = 'button';

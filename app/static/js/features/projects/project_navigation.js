@@ -8,6 +8,37 @@
     const ctx = context || {};
     const mobileTabEdgeOptions = { wrapSelector: '.project-mobile-tabs-wrap' };
 
+    function formatCompactCount(value) {
+      const count = Number(value || 0);
+      if (!Number.isFinite(count) || count <= 0) return '0';
+      if (count >= 1000000) return `${(count / 1000000).toFixed(count >= 10000000 ? 0 : 1)}m`;
+      if (count >= 1000) return `${(count / 1000).toFixed(count >= 10000 ? 0 : 1)}k`;
+      return String(count);
+    }
+
+    function projectFindingSummary(summary) {
+      return summary && summary.finding_summary && typeof summary.finding_summary === 'object'
+        ? summary.finding_summary
+        : null;
+    }
+
+    function findingStateCount(summary, group, keys) {
+      const source = projectFindingSummary(summary)?.[group];
+      if (!source || typeof source !== 'object') return 0;
+      return keys.reduce((total, key) => total + Number(source[key] || 0), 0);
+    }
+
+    function findingTabSummaryText(summary, totalCount) {
+      const findingSummary = projectFindingSummary(summary);
+      if (!findingSummary) return String(totalCount);
+      const unreviewed = findingStateCount(summary, 'review_states', ['new']);
+      const highSignal = findingStateCount(summary, 'severities', ['critical', 'high']);
+      const parts = [String(totalCount)];
+      if (unreviewed > 0) parts.push(`${formatCompactCount(unreviewed)} new`);
+      if (highSignal > 0) parts.push(`${formatCompactCount(highSignal)} high`);
+      return parts.join(' · ');
+    }
+
     function tabCountText(projectId, summary, tabId, total) {
       const totalCount = Number(total || 0);
       const targetFiltersActive = ctx.projectTargetFilterActive(projectId, summary);
@@ -15,7 +46,7 @@
 
       if (tabId === 'findings') {
         if (!ctx.projectFindingServerFiltersActive(projectId, summary)) {
-          return String(totalCount);
+          return findingTabSummaryText(summary, totalCount);
         }
         const page = ctx.projectFindingPagination?.(projectId, summary) || {};
         const filteredTotal = Number(page.total || ctx.filteredProjectFindings(projectId, summary).length);
@@ -27,6 +58,13 @@
         if (!targetFiltersActive && !runFiltersActive) return String(totalCount);
         if (targetFiltersActive && !ctx.projectFindingsLoaded(projectId)) return String(totalCount);
         return `${ctx.filteredProjectRuns(projectId, summary).length}/${totalCount}`;
+      }
+
+      if (tabId === 'entities') {
+        if (typeof ctx.projectEntityTabCountText === 'function') {
+          return ctx.projectEntityTabCountText(projectId, summary, totalCount);
+        }
+        return String(totalCount);
       }
 
       if (tabId === 'artifacts') {
@@ -48,7 +86,7 @@
       return [
         { id: 'details', label: 'Details' },
         { id: 'runs', label: 'Runs', count: clamp(counts.runs) },
-        { id: 'entities', label: 'Entities', count: clamp(counts.entities) },
+        { id: 'entities', label: 'Entities', count: tabCountText(projectId, summary, 'entities', counts.entities) },
         { id: 'findings', label: 'Findings', count: clamp(counts.findings) },
         ctx.projectArtifactsVisible()
           ? { id: 'artifacts', label: 'Artifacts', count: clamp(counts.artifacts) }

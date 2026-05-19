@@ -379,6 +379,15 @@ commands:
         current:
           description: "Show the active project"
           closes: true
+        rename:
+          description: "Rename a project"
+          arguments:
+            - value: "<name-or-id>"
+              hint_only: true
+              description: "Project name, slug, or id"
+            - value: "<new-name>"
+              hint_only: true
+              description: "New project name"
         clear:
           description: "Clear the active project"
           closes: true

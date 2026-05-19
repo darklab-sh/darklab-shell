@@ -113,9 +113,17 @@ def _project_rows_to_list_projects(conn, session_id, rows, *, include_counts=Fal
     _attach_project_notes(conn, session_id, projects)
     _attach_project_labels(conn, session_id, projects)
     if include_counts:
-        counts_by_project = _project_list_counts(conn, session_id, [project["id"] for project in projects])
+        counts_by_project, finding_summaries_by_project = _project_list_metrics(
+            conn,
+            session_id,
+            [project["id"] for project in projects],
+        )
         for project in projects:
             project["counts"] = counts_by_project.get(project["id"], _empty_project_counts())
+            project["finding_summary"] = finding_summaries_by_project.get(
+                project["id"],
+                _empty_project_finding_summary(),
+            )
     return projects
 
 
@@ -133,11 +141,29 @@ def _empty_project_counts():
     }
 
 
-def _project_list_counts(conn, session_id, project_ids):
+def _empty_project_finding_summary():
+    return {
+        "review_states": {},
+        "severities": {},
+    }
+
+
+def _add_finding_summary_count(summary, *, review_state, severity, count):
+    safe_count = int(count or 0)
+    if safe_count <= 0:
+        return
+    state = str(review_state or "new").strip().lower() or "new"
+    severity_name = str(severity or "info").strip().lower() or "info"
+    summary["review_states"][state] = int(summary["review_states"].get(state, 0)) + safe_count
+    summary["severities"][severity_name] = int(summary["severities"].get(severity_name, 0)) + safe_count
+
+
+def _project_list_metrics(conn, session_id, project_ids):
     ids = [str(project_id) for project_id in project_ids if project_id]
     counts = {project_id: _empty_project_counts() for project_id in ids}
+    finding_summaries = {project_id: _empty_project_finding_summary() for project_id in ids}
     if not ids:
-        return counts
+        return counts, finding_summaries
     dialect = dialect_for_backend(DB_BACKEND)
     project_filter_sql, project_filter_params = dialect.in_clause("l.project_id", ids)
     package_filter_sql, package_filter_params = dialect.in_clause("project_id", ids)
@@ -191,8 +217,10 @@ def _project_list_counts(conn, session_id, project_ids):
         counts[str(row["project_id"])]["packages"] = int(row["count"] or 0)
 
     for row in conn.execute(
-        "SELECT project_id, COUNT(DISTINCT finding_id) AS count FROM ("  # nosec
-        "SELECT l.project_id, fo.finding_id "
+        "SELECT project_id, review_state, severity, COUNT(DISTINCT finding_id) AS count FROM ("  # nosec
+        "SELECT l.project_id, fo.finding_id, "
+        "COALESCE(NULLIF(f.status, ''), 'new') AS review_state, "
+        "COALESCE(NULLIF(f.severity, ''), 'info') AS severity "
         "FROM project_links l "
         "JOIN runs r ON r.id = l.entity_id "
         "JOIN findings_occurrences fo ON fo.run_id = r.id "
@@ -201,7 +229,9 @@ def _project_list_counts(conn, session_id, project_ids):
         "WHERE " + project_filter_sql + " AND l.entity_type = 'run' "
         "AND r.session_id = ? AND r.run_kind = ? "
         "UNION "
-        "SELECT l.project_id, f.id AS finding_id "
+        "SELECT l.project_id, f.id AS finding_id, "
+        "COALESCE(NULLIF(f.status, ''), 'new') AS review_state, "
+        "COALESCE(NULLIF(f.severity, ''), 'info') AS severity "
         "FROM project_links l "
         "JOIN runs r ON r.id = l.entity_id "
         "JOIN findings f ON f.session_id = ? "
@@ -210,14 +240,16 @@ def _project_list_counts(conn, session_id, project_ids):
         "WHERE " + project_filter_sql + " AND l.entity_type = 'run' "
         "AND r.session_id = ? AND r.run_kind = ? "
         "UNION "
-        "SELECT l.project_id, f.id AS finding_id "
+        "SELECT l.project_id, f.id AS finding_id, "
+        "COALESCE(NULLIF(f.status, ''), 'new') AS review_state, "
+        "COALESCE(NULLIF(f.severity, ''), 'info') AS severity "
         "FROM project_links l "
         "JOIN entities e ON e.id = l.entity_id "
         "JOIN findings f ON f.entity_id = e.id AND f.session_id = ? "
         "WHERE " + project_filter_sql + " AND l.entity_type = 'atlas_entity' "
         "AND e.session_id = ? AND COALESCE(e.suppressed, FALSE) = FALSE "
         "AND COALESCE(f.suppressed, FALSE) = FALSE"
-        ") grouped_findings GROUP BY project_id",
+        ") grouped_findings GROUP BY project_id, review_state, severity",
         (
             session_id,
             *project_filter_params,
@@ -232,7 +264,15 @@ def _project_list_counts(conn, session_id, project_ids):
             session_id,
         ),
     ).fetchall():
-        counts[str(row["project_id"])]["findings"] = int(row["count"] or 0)
+        project_id = str(row["project_id"])
+        count = int(row["count"] or 0)
+        counts[project_id]["findings"] += count
+        _add_finding_summary_count(
+            finding_summaries[project_id],
+            review_state=row["review_state"],
+            severity=row["severity"],
+            count=count,
+        )
 
     for row in conn.execute(
         "SELECT entity_id AS project_id, COUNT(*) AS count FROM entity_labels "  # nosec
@@ -250,7 +290,7 @@ def _project_list_counts(conn, session_id, project_ids):
     ).fetchall():
         counts[str(row["project_id"])]["notes"] = int(row["count"] or 0)
 
-    return counts
+    return counts, finding_summaries
 
 
 def list_projects(session_id, *, include_archived=False):
@@ -353,7 +393,7 @@ def _project_run_count_maps(conn, session_id, run_ids):
     return finding_counts, artifact_counts
 
 
-def _project_atlas_entity_select_sql(*, target_only=False, entity_type=""):
+def _project_atlas_entity_select_sql(*, target_only=False, entity_type="", extra_where=""):
     type_filter = "AND e.type IN ('domain', 'ip', 'url') " if target_only else ""
     if entity_type:
         type_filter += "AND e.type = ? "
@@ -395,6 +435,7 @@ def _project_atlas_entity_select_sql(*, target_only=False, entity_type=""):
         "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' AND e.session_id = ? "
         "AND COALESCE(e.suppressed, FALSE) = FALSE "
         + type_filter
+        + (extra_where + " " if extra_where else "")
         + "ORDER BY e.type ASC, " + value_order_expr
     )
 
@@ -512,6 +553,7 @@ def get_project_summary(session_id, project_id):
         entity_counts_by_type = _project_entity_counts_by_type(conn, session_id, project_id)
         artifact_id_rows = []
         finding_rows = []
+        finding_summary = _empty_project_finding_summary()
         run_rows = []
         if run_ids:
             placeholders = ",".join("?" for _ in run_ids)
@@ -550,7 +592,10 @@ def get_project_summary(session_id, project_id):
                 finding_clauses.append(f"f.entity_id IN ({entity_placeholders})")  # nosec
                 finding_params.extend(entity_ids)
             finding_rows = conn.execute(
-                "SELECT DISTINCT f.id FROM findings f WHERE f.session_id = ? "
+                "SELECT DISTINCT f.id, "
+                "COALESCE(NULLIF(f.status, ''), 'new') AS review_state, "
+                "COALESCE(NULLIF(f.severity, ''), 'info') AS severity "
+                "FROM findings f WHERE f.session_id = ? "
                 "AND COALESCE(f.suppressed, FALSE) = FALSE AND ("  # nosec
                 + " OR ".join(finding_clauses)
                 + ")",
@@ -558,6 +603,13 @@ def get_project_summary(session_id, project_id):
             ).fetchall()
         artifact_ids = [row["id"] for row in artifact_id_rows]
         finding_ids = [row["id"] for row in finding_rows]
+        for row in finding_rows:
+            _add_finding_summary_count(
+                finding_summary,
+                review_state=row["review_state"],
+                severity=row["severity"],
+                count=1,
+            )
         target_ids = [row["id"] for row in target_rows]
         package_rows = conn.execute(
             "SELECT id FROM evidence_packages WHERE session_id = ? AND project_id = ?",
@@ -620,6 +672,7 @@ def get_project_summary(session_id, project_id):
             "notes": note_count,
             "packages": len(package_ids),
         },
+        "finding_summary": finding_summary,
     }
 
 
@@ -634,7 +687,51 @@ def _project_entity_page_payload(entities, total, limit, offset, counts_by_type=
     )
 
 
-def list_project_entities(session_id, project_id, *, entity_type="", limit=50, offset=0):
+def _project_entity_filter_clause(conn, session_id, project_id, filters):
+    filters = filters if isinstance(filters, dict) else {}
+    run_ids = set(_metadata_filter_values(filters, "run_id", MAX_ENTITY_ID_LEN))
+    target_ids = _metadata_filter_values(filters, "target_id", MAX_ENTITY_ID_LEN)
+    target_run_ids = _project_target_filter_run_ids(conn, session_id, project_id, target_ids)
+    candidate_run_ids = None
+    if run_ids:
+        candidate_run_ids = set(run_ids)
+    if target_run_ids is not None:
+        candidate_run_ids = set(target_run_ids) if candidate_run_ids is None else candidate_run_ids.intersection(target_run_ids)
+    if candidate_run_ids is None and not target_ids:
+        return "", []
+    if candidate_run_ids is not None and not candidate_run_ids and not target_ids:
+        return "AND 1 = 0", []
+
+    clauses = []
+    params = []
+    if candidate_run_ids:
+        ordered_run_ids = sorted(candidate_run_ids)
+        run_placeholders = ",".join("?" for _ in ordered_run_ids)
+        clauses.append(
+            "EXISTS ("
+            "SELECT 1 FROM entity_run_links filtered_erl "
+            "JOIN project_links filtered_run_link "
+            "  ON filtered_run_link.project_id = ? "
+            " AND filtered_run_link.entity_type = 'run' "
+            " AND filtered_run_link.entity_id = filtered_erl.run_id "
+            "JOIN runs filtered_run ON filtered_run.id = filtered_erl.run_id "
+            "WHERE filtered_erl.entity_id = e.id "
+            "AND filtered_run.session_id = ? "
+            "AND filtered_run.run_kind = ? "
+            f"AND filtered_erl.run_id IN ({run_placeholders})"  # nosec
+            ")"
+        )
+        params.extend([project_id, session_id, RUN_KIND_EXTERNAL, *ordered_run_ids])
+    if target_ids:
+        target_placeholders = ",".join("?" for _ in target_ids)
+        clauses.append(f"e.id IN ({target_placeholders})")  # nosec
+        params.extend(target_ids)
+    if not clauses:
+        return "AND 1 = 0", []
+    return "AND (" + " OR ".join(clauses) + ")", params
+
+
+def list_project_entities(session_id, project_id, filters=None, *, entity_type="", limit=50, offset=0):
     safe_limit, safe_offset = _normalize_page_window(limit, offset)
     normalized_type = _trim_text(entity_type, 32).lower()
     with db_connect() as conn:
@@ -644,15 +741,26 @@ def list_project_entities(session_id, project_id, *, entity_type="", limit=50, o
         ).fetchone()
         if not project_row:
             return None
-        counts_by_type = _project_entity_counts_by_type(conn, session_id, project_id)
+        filter_sql, filter_params = _project_entity_filter_clause(conn, session_id, project_id, filters)
+        counts_by_type = {}
+        for row in conn.execute(
+            "SELECT e.type, COUNT(*) AS count "  # nosec
+            "FROM project_links l JOIN entities e ON e.id = l.entity_id "
+            "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' "
+            "AND e.session_id = ? AND COALESCE(e.suppressed, FALSE) = FALSE "
+            + filter_sql
+            + " GROUP BY e.type",
+            (project_id, session_id, *filter_params),
+        ).fetchall():
+            counts_by_type[str(row["type"] or "")] = int(row["count"] or 0)
         total = int(counts_by_type.get(normalized_type, 0)) if normalized_type else sum(counts_by_type.values())
         params = [project_id, session_id]
         if normalized_type:
             params.append(normalized_type)
         rows = conn.execute(
-            _project_atlas_entity_select_sql(entity_type=normalized_type)
+            _project_atlas_entity_select_sql(entity_type=normalized_type, extra_where=filter_sql)
             + " LIMIT ? OFFSET ?",
-            (*params, safe_limit, safe_offset),
+            (*params, *filter_params, safe_limit, safe_offset),
         ).fetchall()
         entities = _project_entity_rows_to_items(conn, session_id, rows)
     return _project_entity_page_payload(entities, total, safe_limit, safe_offset, counts_by_type)

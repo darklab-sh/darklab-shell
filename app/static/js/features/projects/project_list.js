@@ -106,12 +106,14 @@
       }
       const countsWrap = document.createElement('div');
       countsWrap.className = 'project-workspace-counts';
-      ctx.projectCountEntries(summary).slice(0, 4).forEach((item) => {
-        const chip = document.createElement('span');
-        chip.className = 'project-workspace-count';
-        chip.textContent = `${item.value} ${item.label}`;
-        countsWrap.appendChild(chip);
-      });
+      ctx.projectCountEntries(summary)
+        .filter(item => ['runs', 'findings', 'artifacts', 'packages'].includes(item.id))
+        .forEach((item) => {
+          const chip = document.createElement('span');
+          chip.className = 'project-workspace-count';
+          chip.textContent = `${item.value} ${item.label}`;
+          countsWrap.appendChild(chip);
+        });
       main.append(title, countsWrap);
       ctx.appendProjectLabelChips(main, project, { className: 'project-workspace-label-chips' });
       row.appendChild(main);

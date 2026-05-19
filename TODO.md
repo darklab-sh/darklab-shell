@@ -40,10 +40,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-- **Project workspace navigation polish**
-  - Add a terminal-native `project rename <name-or-id> <new-name>` command so CLI users can rename projects without opening the modal.
-  - Show run, finding, artifact, and package counts on project-list rows so project scale is visible before opening each project.
-  - Prefetch finding counts and severity distribution so tab labels can show useful state such as unreviewed/high counts without opening the tab.
 - **Evidence package export hardening**
   - Add redacted text/JSON derivatives for safe artifact types before allowing raw artifact inclusion in redacted packages.
   - Add richer redaction previews and per-item redaction warnings for package creation.

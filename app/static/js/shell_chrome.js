@@ -894,6 +894,9 @@
       projectMobileContentRow: _projectMobileContentRow,
       projectMobileActionMenu: _projectMobileActionMenu,
       entityMetadataChips: _entityMetadataChips,
+      projectTargetItems: _projectTargetItems,
+      projectTargetFilterSet: _projectTargetFilterSet,
+      projectRunFilterSet: _projectRunFilterSet,
       projectResponseError: _projectResponseError,
       projectWorkspaceRequest: _projectWorkspaceRequest,
       refreshProjectWorkspace,
@@ -1201,6 +1204,9 @@
       projectTargetFilterActive: _projectTargetFilterActive,
       projectRunFilterActive: _projectRunFilterActive,
       projectFindingsLoaded: _projectFindingsLoaded,
+      projectEntityTabCountText: (projectId, summary, total) => (
+        _projectEntitiesController().tabCountText(projectId, summary, total)
+      ),
       projectFindingPagination: _projectFindingPagination,
       projectFindingServerFiltersActive: _projectFindingServerFiltersActive,
       filteredProjectFindings: _filteredProjectFindings,

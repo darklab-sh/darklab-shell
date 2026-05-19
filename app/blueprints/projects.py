@@ -322,9 +322,14 @@ def projects_runs_list(project_id):
 @projects_bp.route("/projects/<project_id>/entities")
 def projects_entities_list(project_id):
     session_id = get_session_id()
+    filters = {
+        "run_id": request.args.getlist("run_id"),
+        "target_id": request.args.getlist("target_id"),
+    }
     entities = list_project_entities(
         session_id,
         project_id,
+        filters,
         entity_type=request.args.get("type") or "",
         limit=_parse_int(request.args.get("limit"), 50, minimum=1, maximum=200),
         offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),

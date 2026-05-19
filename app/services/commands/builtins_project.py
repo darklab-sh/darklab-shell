@@ -26,6 +26,7 @@ def _project_usage() -> list[dict[str, str]]:
         output_line("  project list [--all]", "builtin-help-row"),
         output_line("  project create <name>", "builtin-help-row"),
         output_line("  project use <name-or-id>", "builtin-help-row"),
+        output_line("  project rename <name-or-id> <new-name>", "builtin-help-row"),
         output_line("  project current", "builtin-help-row"),
         output_line("  project clear", "builtin-help-row"),
         output_line("  project archive <name-or-id>", "builtin-help-row"),
@@ -269,6 +270,21 @@ def run_builtin_project(command: str, session_id: str, *, tab_id: str = "") -> l
                 return [output_line(f"project: not found: {ref}")]
             active = cast(dict[str, object], active)
             return [output_line(f"project: active project is {_project_display_name(active)}", "builtin-success")]
+        if subcommand == "rename":
+            if len(parts) < 4:
+                return [output_line("Usage: project rename <name-or-id> <new-name>")]
+            ref = parts[2].strip()
+            new_name = " ".join(parts[3:]).strip()
+            if not ref or not new_name:
+                return [output_line("Usage: project rename <name-or-id> <new-name>")]
+            project = _resolve_project_ref(session_id, ref, include_archived=True)
+            if not project:
+                return [output_line(f"project: not found: {ref}")]
+            renamed = update_project(session_id, str(project["id"]), {"name": new_name})
+            if not renamed:
+                return [output_line(f"project: not found: {ref}")]
+            renamed = cast(dict[str, object], renamed)
+            return [output_line(f"project: renamed {_project_display_name(renamed)}", "builtin-success")]
         if subcommand == "clear":
             cleared = clear_active_project(session_id)
             return [output_line(

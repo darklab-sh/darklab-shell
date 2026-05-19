@@ -10,6 +10,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Project workspace navigation polish** — Project list rows now show run, finding, artifact, and package scale at a glance, and Project finding tabs can surface prefetched new/high signal counts before the Findings tab is opened.
+  - **Why:** operators should be able to pick the right project and spot triage-heavy work without paying the cost of opening every project section first.
+  - **What:** added `project rename <name-or-id> <new-name>` for terminal-native renames, carried lightweight finding review/severity summaries in project list and summary payloads, and updated the Projects modal list/tab labels to use that prefetched state.
+  - **Tests:** updated Project route, autocomplete, and shell chrome unit coverage for CLI rename, list-row scale counts, and finding-state tab labels.
 - **Atlas source-run filtering** — Atlas can now open or search/select a source run and filter every Atlas tab to that run.
   - **Why:** when a run has thousands of deduped findings, opening the global Atlas queue makes it too easy to lose the run context the operator started from.
   - **What:** Atlas summary, entity tabs, entity exports, and the Findings queue accept a current-session `run_id` filter, Run Details passes the run id and command label, the Atlas toolbar can search/select runs that contribute Atlas rows, saved views remember the run scope, and Atlas shows a clearable run chip while that source-run scope is active. The run dropdown query now builds a bounded source-run candidate set first, then counts entities/findings only for the returned options.
@@ -380,6 +384,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Project Entities respects shared project filters** — the Projects modal Entities tab now participates in the shared target/run filter bar, loads filtered entity pages from the server, updates outer and entity-type tab counts as `filtered/total` even when filters are applied from another tab, and hides stale pagination rows when filters return no entities.
+  - **Tests:** added route coverage for run- and target-filtered project entities plus shell chrome coverage that verifies cross-tab filtered entity counts and zero-result entity sub-tabs.
 - **Postgres migration smoke coverage stays aligned** — the isolated-schema Postgres migration smoke test now expects the current `0001` through `0007` migration registry.
   - **Tests:** reran the focused Postgres migration smoke through `scripts/run_postgres_tests.sh`.
 - **Run Details project actions respect Current Project state** — runs opened from Atlas now show **remove from project** when the Current Project card confirms the run is attached, even if the opened run payload did not include embedded project-link metadata.

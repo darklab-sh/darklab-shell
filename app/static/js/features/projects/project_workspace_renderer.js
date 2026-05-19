@@ -32,7 +32,7 @@
       const projectId = String(project.id || '');
       const [header, tabs] = ctx.renderProjectHeader(project, summary);
       const activeTab = ctx.workspaceTab();
-      const filterBar = ['runs', 'findings', 'artifacts'].includes(activeTab)
+      const filterBar = ['runs', 'entities', 'findings', 'artifacts'].includes(activeTab)
         ? ctx.renderProjectFilterBar(projectId, summary)
         : null;
       body.append(header);

@@ -603,7 +603,12 @@ describe('shell chrome project workspace', () => {
       { id: 'project-3', name: 'zulu.test', status: 'active' },
       { id: 'project-2', name: 'example.net', status: 'active' },
       { id: 'project-1', name: 'darklab.sh', status: 'active' },
-      { id: 'project-4', name: 'alpha.test', status: 'active' },
+      {
+        id: 'project-4',
+        name: 'alpha.test',
+        status: 'active',
+        counts: { runs: 2, entities: 99, findings: 3, artifacts: 4, packages: 5 },
+      },
     ]
     const apiFetch = vi.fn((url, options = {}) => {
       if (url === '/projects/active' && options.method === 'POST') {
@@ -634,7 +639,11 @@ describe('shell chrome project workspace', () => {
           ok: true,
           json: () => Promise.resolve({
             project,
-            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, notes: 0 },
+            counts: { runs: 0, findings: 3, artifacts: 0, packages: 0, targets: 0, notes: 0 },
+            finding_summary: {
+              review_states: { new: 2 },
+              severities: { high: 1, info: 2 },
+            },
             runs: [],
             targets: [],
             artifacts: [],
@@ -656,6 +665,12 @@ describe('shell chrome project workspace', () => {
       .map(row => row.dataset.projectId)
     expect(rowText('project-1')).toContain('active')
     expect(rowText('project-2')).not.toContain('active')
+    expect(rowText('project-4')).toContain('2 runs')
+    expect(rowText('project-4')).toContain('3 findings')
+    expect(rowText('project-4')).toContain('4 artifacts')
+    expect(rowText('project-4')).toContain('5 packages')
+    expect(rowText('project-4')).not.toContain('99 entities')
+    expect(document.querySelector('[data-project-tab="findings"]')?.textContent).toBe('Findings (3 · 2 new · 1 high)')
     expect(orderedProjectIds()).toEqual(['project-1', 'project-4', 'project-2', 'project-3'])
 
     document.querySelector('[data-project-action="select"][data-project-id="project-2"]').click()
@@ -2355,6 +2370,44 @@ describe('shell chrome project workspace', () => {
           json: () => Promise.resolve({ ok: true }),
         })
       }
+      if (String(url).startsWith('/projects/project-1/entities')) {
+        const params = new URL(`https://example.test${url}`).searchParams
+        const entityRuns = new Map([
+          ['entity-ip', ['run-1']],
+          ['entity-cve', ['run-1']],
+        ])
+        const entityTargets = new Map([
+          ['entity-ip', ['target-1']],
+          ['entity-cve', ['target-1']],
+        ])
+        const matchesAny = (itemValues, values) => {
+          if (!values.length) return true
+          return itemValues.some(itemValue => values.includes(String(itemValue || '')))
+        }
+        const filtered = projectEntities
+          .filter(entity => !params.get('type') || String(entity.type || '') === params.get('type'))
+          .filter(entity => matchesAny(entityRuns.get(entity.id) || [], params.getAll('run_id')))
+          .filter(entity => matchesAny(entityTargets.get(entity.id) || [], params.getAll('target_id')))
+        const countSource = projectEntities
+          .filter(entity => matchesAny(entityRuns.get(entity.id) || [], params.getAll('run_id')))
+          .filter(entity => matchesAny(entityTargets.get(entity.id) || [], params.getAll('target_id')))
+        const countsByType = countSource.reduce((counts, entity) => {
+          const type = String(entity.type || '')
+          counts[type] = Number(counts[type] || 0) + 1
+          return counts
+        }, {})
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            entities: filtered,
+            total: filtered.length,
+            limit: Number(params.get('limit') || 50),
+            offset: Number(params.get('offset') || 0),
+            has_more: false,
+            counts_by_type: countsByType,
+          }),
+        })
+      }
       if (url === '/projects/project-1/findings/review' && options.method === 'POST') {
         const payload = JSON.parse(options.body)
         return Promise.resolve({
@@ -2674,6 +2727,21 @@ describe('shell chrome project workspace', () => {
     ])
     shell.showToast.mockClear()
 
+    document.querySelector('[data-project-tab="runs"]').click()
+    await tick()
+    const runTabSecondRunFilter = document.querySelector('[data-project-run-filter-option][value="run-2"]')
+    expect(runTabSecondRunFilter).not.toBeNull()
+    runTabSecondRunFilter.checked = true
+    runTabSecondRunFilter.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    await tick()
+    expect(document.querySelector('[data-project-tab="entities"]')?.textContent).toBe('Entities (0/2)')
+    const runTabSecondRunFilterActive = document.querySelector('[data-project-run-filter-option][value="run-2"]')
+    expect(runTabSecondRunFilterActive).not.toBeNull()
+    runTabSecondRunFilterActive.checked = false
+    runTabSecondRunFilterActive.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+
     document.querySelector('[data-project-tab="entities"]').click()
     await tick()
     expect(document.querySelector('.project-entity-type-tab.is-active .project-entity-type-tab-label')?.textContent).toBe('Hosts/IPs')
@@ -2681,10 +2749,53 @@ describe('shell chrome project workspace', () => {
     expect(document.getElementById('project-explorer-body').textContent).toContain('107.178.109.44')
     expect(document.getElementById('project-explorer-body').textContent).toContain('Shodan')
     expect(document.querySelector('[data-project-action="refresh-project-entity-intel"]')).toBeNull()
+    const entityRunFilter = document.querySelector('[data-project-run-filter-option][value="run-1"]')
+    expect(entityRunFilter).not.toBeNull()
+    entityRunFilter.checked = true
+    entityRunFilter.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    await tick()
+    expect(apiFetch.mock.calls.some(([url]) => (
+      String(url).startsWith('/projects/project-1/entities?')
+      && String(url).includes('run_id=run-1')
+    ))).toBe(true)
+    expect(document.querySelector('[data-project-tab="entities"]')?.textContent).toBe('Entities (2/2)')
+    expect(document.querySelector('.project-entity-type-tab.is-active .project-entity-type-tab-count')?.textContent).toBe('1/1')
+
+    const activeEntityRunFilter = document.querySelector('[data-project-run-filter-option][value="run-1"]')
+    const secondEntityRunFilter = document.querySelector('[data-project-run-filter-option][value="run-2"]')
+    expect(activeEntityRunFilter).not.toBeNull()
+    expect(secondEntityRunFilter).not.toBeNull()
+    activeEntityRunFilter.checked = false
+    activeEntityRunFilter.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    const onlySecondEntityRunFilter = document.querySelector('[data-project-run-filter-option][value="run-2"]')
+    expect(onlySecondEntityRunFilter).not.toBeNull()
+    onlySecondEntityRunFilter.checked = true
+    onlySecondEntityRunFilter.dispatchEvent(new Event('change', { bubbles: true }))
+    document.querySelector('[data-project-entity-tab="domain"]').click()
+    await tick()
+    await tick()
+    expect(document.querySelector('.project-entity-type-tab.is-active .project-entity-type-tab-label')?.textContent).toBe('Domains')
+    expect(document.querySelector('.project-entity-type-tab.is-active .project-entity-type-tab-count')?.textContent).toBe('0/0')
+    expect(document.querySelector('.project-entity-pagination')).toBeNull()
+
+    const emptyEntityRunFilter = document.querySelector('[data-project-run-filter-option][value="run-2"]')
+    const restoredEntityRunFilter = document.querySelector('[data-project-run-filter-option][value="run-1"]')
+    expect(emptyEntityRunFilter).not.toBeNull()
+    expect(restoredEntityRunFilter).not.toBeNull()
+    emptyEntityRunFilter.checked = false
+    emptyEntityRunFilter.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    const freshRestoredEntityRunFilter = document.querySelector('[data-project-run-filter-option][value="run-1"]')
+    expect(freshRestoredEntityRunFilter).not.toBeNull()
+    freshRestoredEntityRunFilter.checked = true
+    freshRestoredEntityRunFilter.dispatchEvent(new Event('change', { bubbles: true }))
     document.querySelector('[data-project-entity-tab="cve"]').click()
     await tick()
+    await tick()
     expect(document.querySelector('.project-entity-type-tab.is-active .project-entity-type-tab-label')?.textContent).toBe('CVEs')
-    expect(document.querySelector('.project-entity-type-tab.is-active .project-entity-type-tab-count')?.textContent).toBe('1')
+    expect(document.querySelector('.project-entity-type-tab.is-active .project-entity-type-tab-count')?.textContent).toBe('1/1')
     expect(document.getElementById('project-explorer-body').textContent).toContain('CVE-2025-49113')
     expect(document.getElementById('project-explorer-body').textContent).toContain('intel: NVD')
     document.querySelector('[data-project-action="toggle-project-entity-select"]').click()
@@ -2814,9 +2925,11 @@ describe('shell chrome project workspace', () => {
       && String(url).includes('label=retest')
     ))).toBe(true)
     expect(document.querySelector('[data-project-tab="findings"]')?.textContent).toBe('Findings (1/3)')
-    expect(document.querySelector('.project-target-filter-chip')?.textContent).toContain('label: retest')
-    expect(document.querySelector('.project-target-filter-chip')?.classList.contains('chip-removable')).toBe(true)
-    expect(document.querySelector('.project-target-filter-chip')?.classList.contains('btn')).toBe(false)
+    const retestChip = Array.from(document.querySelectorAll('.project-target-filter-chip'))
+      .find(chip => chip.textContent.includes('label: retest'))
+    expect(retestChip).toBeTruthy()
+    expect(retestChip?.classList.contains('chip-removable')).toBe(true)
+    expect(retestChip?.classList.contains('btn')).toBe(false)
     expect(document.querySelector('.project-explorer-item')?.classList.contains('panel-row')).toBe(true)
     expect(document.getElementById('project-explorer-body').textContent).toContain('missing security header')
     expect(document.getElementById('project-explorer-body').textContent).not.toContain('web port responded')
