@@ -1386,7 +1386,15 @@ class TestRunStreaming:
         )
         preview = json.loads(preview_resp.data)
         assert preview_resp.status_code == 200
+        assert preview["atlas_entity_count"] >= 1
+        assert preview["atlas_finding_count"] >= 1
         assert any(entry["text"] == "80/tcp open http" for entry in preview["output_entries"])
+
+        history_resp = client.get("/history", headers={"X-Session-ID": session_id})
+        history = json.loads(history_resp.data)
+        history_run = next(item for item in history["runs"] if item["id"] == run_id)
+        assert history_run["atlas_entity_count"] >= 1
+        assert history_run["atlas_finding_count"] >= 1
 
     def test_completed_run_skips_active_project_when_auto_link_disabled(self):
         client = get_client()

@@ -222,7 +222,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 
 | Method | Endpoint | Description |
 | -------- | ---------- | ------------- |
-| `GET` | `/history` | Returns paginated current-session history items with run/snapshot/run-subtype filters, linked-run project filters, command/output search, starred-only filtering, labels/notes, and command-root summaries. |
+| `GET` | `/history` | Returns paginated current-session history items with run/snapshot/run-subtype filters, linked-run project filters, command/output search, starred-only filtering, labels/notes, Atlas entity/finding counts for source runs, and command-root summaries. |
 | `DELETE` | `/history` | Deletes all run history for the current session and removes matching full-output artifacts. |
 | `POST` | `/history/bulk-delete` | Deletes selected completed current-session runs, returning per-run results while rejecting running or missing runs without failing the whole request. |
 | `GET` | `/history/commands` | Returns newest distinct command strings for prompt history, desktop recents, and mobile recents. |
@@ -232,7 +232,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/history/<run_id>/compare-candidates` | Returns ranked previous current-session runs for the History drawer's compare launcher. |
 | `GET` | `/history/compare` | Compares two current-session runs, optionally scoped by `project_id` / `baseline_label`, and returns metadata deltas, bounded output hunks, totals, limits, and finding/artifact object diffs. |
 | `GET` | `/history/compare/lines` | Returns bounded filtered-output slices for lazy expansion of folded comparison hunks, using `left`/`right` run ids, `side`, `start`/`end`, and optional `project_id` scoping. |
-| `GET` | `/history/<run_id>` | Serves an implicit-bearer styled run permalink, or raw JSON with `?json`; uses full-output artifacts when available unless `?preview=1` is set. |
+| `GET` | `/history/<run_id>` | Serves an implicit-bearer styled run permalink, or raw JSON with `?json`; uses full-output artifacts when available unless `?preview=1` is set, and includes same-session Atlas counts for source runs. |
 | `GET` | `/history/<run_id>/atlas-cleanup-preview` | Previews disposable and curated single-source Atlas rows that can be removed with a run delete. |
 | `DELETE` | `/history/<run_id>` | Deletes one current-session run and its matching full-output artifact; `prune_atlas=1` removes disposable Atlas rows only linked to that run, and `prune_curated_atlas=1` also removes curated single-source rows. |
 | `POST` | `/share` | Saves a tab snapshot, omits raw-only intel response bodies, optionally applies share redaction, and returns a snapshot permalink URL. |

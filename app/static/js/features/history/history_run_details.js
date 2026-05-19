@@ -7,15 +7,28 @@ let _historyRunModalState = {
   details: null,
   findings: null,
   findingsPagination: null,
+  entitySummary: null,
+  entitySummaryLoaded: false,
+  entities: null,
+  entitiesPagination: null,
+  activeEntityTab: 'ip',
   projectState: null,
   activeTab: 'summary',
   loadingDetails: false,
   loadingFindings: false,
+  loadingEntitySummary: false,
+  loadingEntities: false,
   loadingProject: false,
   error: '',
 };
 let _historyRunModalToken = 0;
 const HISTORY_RUN_FINDINGS_PAGE_LIMIT = 50;
+const HISTORY_RUN_ENTITIES_PAGE_LIMIT = 50;
+
+function _historyRunCountLabel(count, singular, plural) {
+  const numeric = Math.max(0, Number(count || 0));
+  return `${numeric.toLocaleString()} ${numeric === 1 ? singular : plural}`;
+}
 
 function _historyRunSelectorValue(value) {
   if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') {
@@ -45,6 +58,7 @@ function _ensureHistoryRunOverlay() {
         <button type="button" class="tab-strip-item history-run-tab" data-history-run-tab="summary" role="tab">Summary</button>
         <button type="button" class="tab-strip-item history-run-tab" data-history-run-tab="output" role="tab">Output</button>
         <button type="button" class="tab-strip-item history-run-tab" data-history-run-tab="findings" role="tab">Findings</button>
+        <button type="button" class="tab-strip-item history-run-tab" data-history-run-tab="entities" role="tab">Entities</button>
         <button type="button" class="tab-strip-item history-run-tab" data-history-run-tab="artifacts" role="tab">Artifacts</button>
       </div>
       <div id="history-run-body" class="history-run-body surface-body nice-scroll"></div>
@@ -74,6 +88,24 @@ function _ensureHistoryRunOverlay() {
     if (findingsPage) {
       e.preventDefault();
       _setHistoryRunFindingsPage(findingsPage.dataset.historyRunFindingsPage || '');
+      return;
+    }
+    const entityTab = e.target.closest?.('[data-history-run-entity-tab]');
+    if (entityTab) {
+      e.preventDefault();
+      _setHistoryRunEntityTab(entityTab.dataset.historyRunEntityTab || '');
+      return;
+    }
+    const entityPage = e.target.closest?.('[data-history-run-entities-page]');
+    if (entityPage) {
+      e.preventDefault();
+      _setHistoryRunEntitiesPage(entityPage.dataset.historyRunEntitiesPage || '');
+      return;
+    }
+    const entityRow = e.target.closest?.('[data-history-run-entity-id]');
+    if (entityRow) {
+      e.preventDefault();
+      _openHistoryRunEntityInAtlas(entityRow.dataset.historyRunEntityId || '');
       return;
     }
     const action = e.target.closest?.('[data-history-run-action]');
@@ -203,6 +235,82 @@ function _historyRunCanOpenAtlas(run = _historyRunPrimary()) {
   return String(run?.run_kind || 'external') !== 'builtin';
 }
 
+function _historyRunEntityTabs() {
+  const atlasTabs = window.DarklabAtlasTabs && Array.isArray(window.DarklabAtlasTabs.tabs)
+    ? window.DarklabAtlasTabs.tabs
+    : [
+        { id: 'ip', label: 'Hosts/IPs', type: 'ip', countKey: 'ip' },
+        { id: 'domain', label: 'Domains', type: 'domain', countKey: 'domain' },
+        { id: 'hash', label: 'Hashes', type: 'hash', countKey: 'hash' },
+        { id: 'cve', label: 'CVEs', type: 'cve', countKey: 'cve' },
+        { id: 'url', label: 'URLs', type: 'url', countKey: 'url' },
+      ];
+  return atlasTabs.filter(tab => tab && tab.id !== 'findings' && tab.type);
+}
+
+function _historyRunActiveEntityTab() {
+  const tabs = _historyRunEntityTabs();
+  const activeId = String(_historyRunModalState.activeEntityTab || '');
+  return tabs.find(tab => tab.id === activeId) || tabs[0] || { id: 'ip', label: 'Hosts/IPs', type: 'ip', countKey: 'ip' };
+}
+
+function _historyRunEntityCount(type) {
+  const summary = _historyRunModalState.entitySummary || {};
+  const counts = summary.counts && typeof summary.counts === 'object' ? summary.counts : {};
+  return Math.max(0, Number(counts[String(type || '')] || 0));
+}
+
+function _historyRunEntityTotal(run = _historyRunPrimary()) {
+  const summary = _historyRunModalState.entitySummary || {};
+  if (_historyRunModalState.entitySummaryLoaded) return Math.max(0, Number(summary.total || 0));
+  return Math.max(0, Number(run.atlas_entity_count || 0));
+}
+
+function _historyRunEntityLabel(type) {
+  if (window.DarklabAtlasTabs && typeof window.DarklabAtlasTabs.labelForType === 'function') {
+    return window.DarklabAtlasTabs.labelForType(type);
+  }
+  const found = _historyRunEntityTabs().find(tab => tab.type === String(type || ''));
+  return found ? found.label : 'Entities';
+}
+
+function _historyRunEntityPage() {
+  return _historyRunModalState.entitiesPagination || {
+    limit: HISTORY_RUN_ENTITIES_PAGE_LIMIT,
+    offset: 0,
+    total: 0,
+    has_more: false,
+    loaded: false,
+  };
+}
+
+function _historyRunEntityRow(entity) {
+  const rowApi = window.DarklabAtlasEntityRow || {};
+  const tab = _historyRunActiveEntityTab();
+  if (typeof rowApi.renderAtlasEntityRow === 'function') {
+    const row = rowApi.renderAtlasEntityRow({
+      entity,
+      text: value => String(value ?? '').trim(),
+      countLabel: _historyRunCountLabel,
+    });
+    row.dataset.historyRunEntityId = String(entity && entity.id || '');
+    row.title = 'Open this entity in Atlas';
+    return row;
+  }
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'history-run-list-item history-run-entity-row';
+  row.dataset.historyRunEntityId = String(entity && entity.id || '');
+  const title = document.createElement('div');
+  title.className = 'history-run-list-title';
+  title.textContent = entity.canonical_value || entity.id || _historyRunEntityLabel(tab.type);
+  const meta = document.createElement('div');
+  meta.className = 'history-run-list-meta';
+  meta.textContent = `${_historyRunCountLabel(entity.occurrence_count || 0, 'hit', 'hits')} · ${_historyRunCountLabel(entity.run_count || 0, 'run', 'runs')}`;
+  row.append(title, meta);
+  return row;
+}
+
 function _historyRunActionMenu() {
   const wrap = document.createElement('div');
   wrap.className = 'history-run-action-menu-wrap save-menu-wrap';
@@ -294,6 +402,7 @@ function _renderHistoryRunSummary(body, run) {
     _historyRunMetaRow('Duration', _historyElapsedLabel(run)),
     _historyRunMetaRow('Lines', run.output_line_count ? Number(run.output_line_count).toLocaleString() : ''),
     _historyRunMetaRow('Findings / Occurrences', `${uniqueFindingLabel} / ${occurrenceLabel}`),
+    _historyRunMetaRow('Entities', _historyRunEntityTotal(run).toLocaleString()),
     _historyRunMetaRow(
       'Artifacts',
       Number(run.artifact_count || (Array.isArray(run.artifacts) ? run.artifacts.length : 0) || 0).toLocaleString(),
@@ -499,6 +608,91 @@ function _renderHistoryRunFindingsPagination(findings) {
   return wrap;
 }
 
+function _renderHistoryRunEntityTabs(body) {
+  const tabs = _historyRunEntityTabs();
+  if (!tabs.length) return;
+  const strip = document.createElement('div');
+  strip.className = 'history-run-entity-tabs tab-strip';
+  strip.setAttribute('role', 'tablist');
+  strip.setAttribute('aria-label', 'Run Atlas entity types');
+  const activeId = _historyRunActiveEntityTab().id;
+  tabs.forEach((tab) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'tab-strip-item history-run-entity-tab';
+    button.classList.toggle('is-active', tab.id === activeId);
+    button.dataset.historyRunEntityTab = tab.id;
+    button.setAttribute('role', 'tab');
+    button.setAttribute('aria-selected', tab.id === activeId ? 'true' : 'false');
+    button.textContent = `${tab.label} (${_historyRunEntityCount(tab.type).toLocaleString()})`;
+    strip.appendChild(button);
+  });
+  body.appendChild(strip);
+}
+
+function _renderHistoryRunEntities(body) {
+  _renderHistoryRunEntityTabs(body);
+  if (_historyRunModalState.loadingEntities && _historyRunModalState.entities == null) {
+    const loading = document.createElement('div');
+    loading.className = 'history-run-empty';
+    loading.textContent = 'Loading Atlas entities...';
+    body.appendChild(loading);
+    return;
+  }
+  const entities = Array.isArray(_historyRunModalState.entities) ? _historyRunModalState.entities : [];
+  const pager = _renderHistoryRunEntitiesPagination(entities);
+  if (!entities.length) {
+    const empty = document.createElement('div');
+    empty.className = 'history-run-empty';
+    const tab = _historyRunActiveEntityTab();
+    empty.textContent = `No ${_historyRunEntityLabel(tab.type).toLowerCase()} recorded for this run.`;
+    body.appendChild(empty);
+    if (pager) body.appendChild(pager);
+    return;
+  }
+  if (pager) body.appendChild(pager);
+  const list = document.createElement('div');
+  list.className = 'history-run-entity-list';
+  entities.forEach(entity => list.appendChild(_historyRunEntityRow(entity)));
+  body.appendChild(list);
+  if (pager) body.appendChild(_renderHistoryRunEntitiesPagination(entities));
+}
+
+function _renderHistoryRunEntitiesPagination(entities) {
+  const pagination = _historyRunEntityPage();
+  const limit = Math.max(1, Number(pagination.limit || HISTORY_RUN_ENTITIES_PAGE_LIMIT));
+  const offset = Math.max(0, Number(pagination.offset || 0));
+  const total = Math.max(0, Number(pagination.total || entities.length || 0));
+  if (total <= limit && offset === 0) return null;
+  const start = total && entities.length ? offset + 1 : 0;
+  const end = total && entities.length ? Math.min(total, offset + entities.length) : 0;
+  const wrap = document.createElement('div');
+  wrap.className = 'history-run-entities-pagination history-pagination';
+  const summary = document.createElement('div');
+  summary.className = 'history-pagination-summary';
+  summary.textContent = `${start}-${end} of ${total.toLocaleString()} entities`;
+  const controls = document.createElement('div');
+  controls.className = 'history-pagination-controls';
+  const prev = document.createElement('button');
+  prev.type = 'button';
+  prev.className = 'btn btn-secondary btn-compact';
+  prev.dataset.historyRunEntitiesPage = 'prev';
+  prev.disabled = offset <= 0 || _historyRunModalState.loadingEntities;
+  prev.textContent = 'Previous';
+  const status = document.createElement('span');
+  status.className = 'history-pagination-status';
+  status.textContent = `Page ${Math.floor(offset / limit) + 1}`;
+  const next = document.createElement('button');
+  next.type = 'button';
+  next.className = 'btn btn-secondary btn-compact';
+  next.dataset.historyRunEntitiesPage = 'next';
+  next.disabled = offset + entities.length >= total || _historyRunModalState.loadingEntities;
+  next.textContent = 'Next';
+  controls.append(prev, status, next);
+  wrap.append(summary, controls);
+  return wrap;
+}
+
 function _renderHistoryRunArtifacts(body, run) {
   const artifacts = Array.isArray(run.artifacts) ? run.artifacts : [];
   if (_historyRunModalState.loadingDetails && !artifacts.length) {
@@ -557,6 +751,11 @@ function _renderHistoryRunModal() {
       : 0;
     findingsTab.textContent = count ? `Findings (${count})` : 'Findings';
   }
+  const entitiesTab = overlay.querySelector('[data-history-run-tab="entities"]');
+  if (entitiesTab) {
+    const count = _historyRunEntityTotal(run);
+    entitiesTab.textContent = count ? `Entities (${count})` : 'Entities';
+  }
   const artifactsTab = overlay.querySelector('[data-history-run-tab="artifacts"]');
   if (artifactsTab) {
     const count = Number(run.artifact_count || (Array.isArray(run.artifacts) ? run.artifacts.length : 0) || 0);
@@ -573,6 +772,7 @@ function _renderHistoryRunModal() {
   }
   if (_historyRunModalState.activeTab === 'output') _renderHistoryRunOutput(body, run);
   else if (_historyRunModalState.activeTab === 'findings') _renderHistoryRunFindings(body);
+  else if (_historyRunModalState.activeTab === 'entities') _renderHistoryRunEntities(body);
   else if (_historyRunModalState.activeTab === 'artifacts') _renderHistoryRunArtifacts(body, run);
   else _renderHistoryRunSummary(body, run);
 }
@@ -656,6 +856,132 @@ function _setHistoryRunFindingsPage(direction) {
   _loadHistoryRunFindings(run.id, _historyRunModalToken, { offset: nextOffset });
 }
 
+async function _loadHistoryRunEntitySummary(runId, token) {
+  _historyRunModalState.loadingEntitySummary = true;
+  _renderHistoryRunModal();
+  const query = new URLSearchParams({
+    run_id: String(runId || ''),
+    orphan_filter: 'hide',
+    suppression_filter: 'hide',
+  });
+  try {
+    const resp = await apiFetch(`/atlas?${query}`, { cache: 'no-store' });
+    if (resp.ok === false) throw new Error(`HTTP ${resp.status}`);
+    const payload = await resp.json();
+    if (token !== _historyRunModalToken) return;
+    _historyRunModalState.entitySummary = payload && typeof payload === 'object' ? payload : { total: 0, counts: {} };
+    _historyRunModalState.entitySummaryLoaded = true;
+  } catch (_) {
+    if (token === _historyRunModalToken) {
+      _historyRunModalState.entitySummary = { total: 0, counts: {} };
+      _historyRunModalState.entitySummaryLoaded = true;
+      _historyRunModalState.error = 'Could not load run Atlas entity counts.';
+    }
+  } finally {
+    if (token === _historyRunModalToken) {
+      _historyRunModalState.loadingEntitySummary = false;
+      _renderHistoryRunModal();
+    }
+  }
+}
+
+async function _loadHistoryRunEntities(runId, token, { offset = 0 } = {}) {
+  _historyRunModalState.loadingEntities = true;
+  _renderHistoryRunModal();
+  const tab = _historyRunActiveEntityTab();
+  const limit = HISTORY_RUN_ENTITIES_PAGE_LIMIT;
+  const query = new URLSearchParams({
+    run_id: String(runId || ''),
+    type: String(tab.type || ''),
+    limit: String(limit),
+    offset: String(Math.max(0, Number(offset || 0))),
+    orphan_filter: 'hide',
+    suppression_filter: 'hide',
+  });
+  try {
+    const resp = await apiFetch(`/atlas/entities?${query}`, { cache: 'no-store' });
+    if (resp.ok === false) throw new Error(`HTTP ${resp.status}`);
+    const payload = await resp.json();
+    if (token !== _historyRunModalToken) return;
+    _historyRunModalState.entities = Array.isArray(payload.entities) ? payload.entities : [];
+    _historyRunModalState.entitiesPagination = {
+      limit: Math.max(1, Number(payload.limit || limit)),
+      offset: Math.max(0, Number(payload.offset || offset || 0)),
+      total: Math.max(0, Number(payload.total || _historyRunModalState.entities.length || 0)),
+      has_more: !!payload.has_more,
+      loaded: true,
+    };
+  } catch (_) {
+    if (token === _historyRunModalToken) {
+      _historyRunModalState.entities = [];
+      _historyRunModalState.entitiesPagination = {
+        limit,
+        offset: 0,
+        total: 0,
+        has_more: false,
+        loaded: true,
+      };
+      _historyRunModalState.error = 'Could not load run Atlas entities.';
+    }
+  } finally {
+    if (token === _historyRunModalToken) {
+      _historyRunModalState.loadingEntities = false;
+      _renderHistoryRunModal();
+    }
+  }
+}
+
+function _setHistoryRunEntityTab(tabId) {
+  const run = _historyRunPrimary();
+  if (!run || !run.id || _historyRunModalState.loadingEntities) return;
+  const tabs = _historyRunEntityTabs();
+  const next = tabs.find(tab => tab.id === String(tabId || ''));
+  if (!next || next.id === _historyRunActiveEntityTab().id) return;
+  _historyRunModalState.activeEntityTab = next.id;
+  _historyRunModalState.entities = null;
+  _historyRunModalState.entitiesPagination = {
+    limit: HISTORY_RUN_ENTITIES_PAGE_LIMIT,
+    offset: 0,
+    total: 0,
+    has_more: false,
+    loaded: false,
+  };
+  _renderHistoryRunModal();
+  _loadHistoryRunEntities(run.id, _historyRunModalToken);
+}
+
+function _setHistoryRunEntitiesPage(direction) {
+  const run = _historyRunPrimary();
+  if (!run || !run.id || _historyRunModalState.loadingEntities) return;
+  const pagination = _historyRunEntityPage();
+  const entities = Array.isArray(_historyRunModalState.entities) ? _historyRunModalState.entities : [];
+  const limit = Math.max(1, Number(pagination.limit || HISTORY_RUN_ENTITIES_PAGE_LIMIT));
+  const currentOffset = Math.max(0, Number(pagination.offset || 0));
+  const total = Math.max(0, Number(pagination.total || entities.length || 0));
+  const maxOffset = Math.max(0, Math.floor(Math.max(0, total - 1) / limit) * limit);
+  const nextOffset = direction === 'prev'
+    ? Math.max(0, currentOffset - limit)
+    : Math.min(maxOffset, currentOffset + limit);
+  if (nextOffset === currentOffset) return;
+  _loadHistoryRunEntities(run.id, _historyRunModalToken, { offset: nextOffset });
+}
+
+function _openHistoryRunEntityInAtlas(entityId) {
+  const run = _historyRunPrimary();
+  const entity = (Array.isArray(_historyRunModalState.entities) ? _historyRunModalState.entities : [])
+    .find(item => String(item && item.id || '') === String(entityId || ''));
+  if (!run || !run.id || !entity || typeof openAtlas !== 'function') return;
+  closeHistoryRunOverlay();
+  void openAtlas({
+    source: 'run-details',
+    tab: _historyRunActiveEntityTab().id,
+    runId: run.id,
+    runLabel: run.command || run.label || run.id,
+    entityValue: entity.canonical_value || '',
+    forceView: 'detail',
+  });
+}
+
 async function _loadHistoryRunProjectState(runId, token) {
   _historyRunModalState.loadingProject = true;
   _renderHistoryRunModal();
@@ -700,10 +1026,23 @@ function openHistoryRunDetails(run) {
       occurrence_total: 0,
       loaded: false,
     },
+    entitySummary: null,
+    entitySummaryLoaded: false,
+    entities: null,
+    entitiesPagination: {
+      limit: HISTORY_RUN_ENTITIES_PAGE_LIMIT,
+      offset: 0,
+      total: 0,
+      has_more: false,
+      loaded: false,
+    },
+    activeEntityTab: _historyRunEntityTabs()[0]?.id || 'ip',
     projectState: null,
     activeTab: 'summary',
     loadingDetails: false,
     loadingFindings: false,
+    loadingEntitySummary: false,
+    loadingEntities: false,
     loadingProject: false,
     error: '',
   };
@@ -711,6 +1050,8 @@ function openHistoryRunDetails(run) {
   _renderHistoryRunModal();
   _loadHistoryRunDetails(run.id, token);
   _loadHistoryRunFindings(run.id, token);
+  _loadHistoryRunEntitySummary(run.id, token);
+  _loadHistoryRunEntities(run.id, token);
   _loadHistoryRunProjectState(run.id, token);
 }
 

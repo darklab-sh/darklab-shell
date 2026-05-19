@@ -840,6 +840,7 @@ describe('history panel actions', () => {
       'Summary',
       'Output',
       'Findings',
+      'Entities',
       'Artifacts',
     ])
     const runActions = [...document.querySelector('.history-run-actions').children].map(el => el.textContent)

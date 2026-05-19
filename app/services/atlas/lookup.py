@@ -80,6 +80,66 @@ def _row_to_source_run(row) -> dict[str, Any]:
     }
 
 
+def atlas_counts_by_run(conn, session_id: str, run_ids: list[str]) -> dict[str, dict[str, int]]:
+    ids = list(dict.fromkeys(str(run_id or "").strip() for run_id in run_ids if str(run_id or "").strip()))
+    counts = {
+        run_id: {"atlas_entity_count": 0, "atlas_finding_count": 0}
+        for run_id in ids
+    }
+    if not ids:
+        return counts
+    dialect = dialect_for_backend(DB_BACKEND)
+    run_filter_sql, run_filter_params = dialect.in_clause("id", ids)
+    rows_sql = _sql_join((
+        "WITH candidate_runs AS (",
+        "  SELECT id FROM runs WHERE session_id = ? AND ",
+        run_filter_sql,
+        "), entity_counts AS (",
+        "  SELECT erl.run_id, COUNT(DISTINCT erl.entity_id) AS entity_count ",
+        "  FROM entity_run_links erl ",
+        "  JOIN candidate_runs candidate ON candidate.id = erl.run_id ",
+        "  JOIN entities e ON e.id = erl.entity_id ",
+        "  WHERE e.session_id = ? ",
+        "  GROUP BY erl.run_id",
+        "), finding_run_pairs AS (",
+        "  SELECT fo.run_id, fo.finding_id ",
+        "  FROM findings_occurrences fo ",
+        "  JOIN candidate_runs candidate ON candidate.id = fo.run_id ",
+        "  JOIN findings f ON f.id = fo.finding_id ",
+        "  WHERE f.session_id = ? ",
+        "  UNION ",
+        "  SELECT f.run_id, f.id FROM findings f JOIN candidate_runs candidate ON candidate.id = f.run_id ",
+        "  WHERE f.session_id = ? AND COALESCE(f.run_id, '') != '' ",
+        "  UNION ",
+        "  SELECT f.first_run_id, f.id FROM findings f JOIN candidate_runs candidate ON candidate.id = f.first_run_id ",
+        "  WHERE f.session_id = ? AND COALESCE(f.first_run_id, '') != '' ",
+        "  UNION ",
+        "  SELECT f.last_run_id, f.id FROM findings f JOIN candidate_runs candidate ON candidate.id = f.last_run_id ",
+        "  WHERE f.session_id = ? AND COALESCE(f.last_run_id, '') != ''",
+        "), finding_counts AS (",
+        "  SELECT run_id, COUNT(DISTINCT finding_id) AS finding_count ",
+        "  FROM finding_run_pairs ",
+        "  GROUP BY run_id",
+        ") ",
+        "SELECT candidate.id AS run_id, ",
+        "COALESCE(entity_counts.entity_count, 0) AS entity_count, ",
+        "COALESCE(finding_counts.finding_count, 0) AS finding_count ",
+        "FROM candidate_runs candidate ",
+        "LEFT JOIN entity_counts ON entity_counts.run_id = candidate.id ",
+        "LEFT JOIN finding_counts ON finding_counts.run_id = candidate.id",
+    ))
+    rows = conn.execute(
+        rows_sql,
+        [session_id, *run_filter_params, session_id, session_id, session_id, session_id, session_id],
+    ).fetchall()
+    for row in rows:
+        run_id = str(row["run_id"] or "")
+        if run_id in counts:
+            counts[run_id]["atlas_entity_count"] = int(row["entity_count"] or 0)
+            counts[run_id]["atlas_finding_count"] = int(row["finding_count"] or 0)
+    return counts
+
+
 def _normalize_orphan_filter(value: str | None) -> str:
     orphan_filter = str(value or "hide").strip().lower()
     return orphan_filter if orphan_filter in ORPHAN_FILTERS else "hide"

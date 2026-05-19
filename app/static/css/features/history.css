@@ -392,6 +392,13 @@ body #history-panel { background: var(--theme-chrome-bg); }
 .history-entry-artifacts {
   color: var(--cyan);
 }
+.history-entry-atlas {
+  margin-top: 5px;
+  color: var(--cyan);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.35;
+}
 .history-entry-meta .exit-ok { color: var(--green); }
 .history-entry-meta .exit-fail { color: var(--red); }
 .history-entry-meta .exit-neutral { color: var(--muted); }
@@ -505,6 +512,13 @@ body #history-panel { background: var(--theme-chrome-bg); }
 
 .history-run-tabs {
   --tab-strip-padding: 6px 20px 0;
+}
+
+.history-run-entity-tabs {
+  --tab-strip-padding: 0;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
 }
 
 .history-run-body {
@@ -697,6 +711,25 @@ body #history-panel { background: var(--theme-chrome-bg); }
 .history-run-list {
   display: grid;
   gap: 8px;
+}
+
+.history-run-entity-list {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.history-run-entity-list .atlas-entity-row {
+  background: var(--theme-chrome-row-bg);
+}
+
+.history-run-entity-list .atlas-entity-row:last-child {
+  border-bottom: 0;
+}
+
+.history-run-entity-row {
+  width: 100%;
+  text-align: left;
 }
 
 .history-run-list-title {

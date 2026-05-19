@@ -38,6 +38,7 @@ from services.atlas.cleanup import (
     delete_atlas_cleanup_preview,
     public_cleanup_preview,
 )
+from services.atlas.lookup import atlas_counts_by_run
 from services.projects.comparisons import compare_project_runs
 from services.projects.contracts import (
     BULK_AUDIT_FAILURE_LIMIT,
@@ -767,6 +768,20 @@ def _run_metadata_counts_by_run(conn, run_ids):
     return counts
 
 
+def _run_atlas_counts_by_run(conn, session_id, run_ids):
+    ids = [str(run_id) for run_id in run_ids if run_id]
+    counts = {
+        run_id: {"atlas_entity_count": 0, "atlas_finding_count": 0}
+        for run_id in ids
+    }
+    if not ids:
+        return counts
+    required_tables = ("runs", "entities", "entity_run_links", "findings", "findings_occurrences")
+    if not all(_history_table_exists(conn, table_name) for table_name in required_tables):
+        return counts
+    return atlas_counts_by_run(conn, session_id, ids)
+
+
 def _entity_labels_by_entity_ids(conn, entity_type, entity_ids):
     ids = [str(entity_id) for entity_id in entity_ids if entity_id]
     if not ids:
@@ -1041,6 +1056,7 @@ def get_history():
         artifacts_by_run = _run_file_artifacts_by_run(conn, [item["id"] for item in paged_runs])
         project_links_by_run = _project_links_by_run(conn, session_id, [item["id"] for item in paged_runs])
         metadata_counts_by_run = _run_metadata_counts_by_run(conn, [item["id"] for item in paged_runs])
+        atlas_counts = _run_atlas_counts_by_run(conn, session_id, [item["id"] for item in paged_runs])
         labels_by_run = _entity_labels_by_entity_ids(conn, "run", [item["id"] for item in paged_runs])
         notes_by_run = _entity_notes_by_entity_ids(conn, "run", [item["id"] for item in paged_runs])
         labels_by_snapshot = _entity_labels_by_entity_ids(conn, "snapshot", [item["id"] for item in paged_snapshots])
@@ -1056,6 +1072,10 @@ def get_history():
                 "finding_count": 0,
                 "label_count": 0,
                 "note_count": 0,
+            }))
+            item.update(atlas_counts.get(str(item["id"]), {
+                "atlas_entity_count": 0,
+                "atlas_finding_count": 0,
             }))
         for item in paged_snapshots:
             item["labels"] = labels_by_snapshot.get(str(item["id"]), [])
@@ -1513,6 +1533,7 @@ def get_run(run_id):
         artifacts_by_run = _run_file_artifacts_by_run(conn, [run_id])
         metadata_counts_by_run = _run_metadata_counts_by_run(conn, [run_id])
         include_private_metadata = str(run.get("session_id") or "") == str(session_id or "")
+        atlas_counts = _run_atlas_counts_by_run(conn, session_id, [run_id]) if include_private_metadata else {}
         findings_by_run = _run_findings_by_run(conn, [run_id]) if include_private_metadata else {}
         labels_by_run = _run_labels_by_run(conn, [run_id]) if include_private_metadata else {}
         notes_by_run = _run_notes_by_run(conn, [run_id]) if include_private_metadata else {}
@@ -1533,6 +1554,10 @@ def get_run(run_id):
         "finding_count": 0,
         "label_count": 0,
         "note_count": 0,
+    }))
+    run.update(atlas_counts.get(str(run_id), {
+        "atlas_entity_count": 0,
+        "atlas_finding_count": 0,
     }))
     run["preview_notice"] = _preview_notice(run) if not is_full_view else None
     log.info("RUN_VIEWED", extra={

@@ -10,6 +10,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **History and Run Details Atlas counts** — History rows and Run Details now expose the Atlas entities and deduped findings connected to external source runs.
+  - **Why:** large runs should show their Atlas footprint before opening Atlas or Projects, and Run Details should let operators inspect generated entities without leaving the run context.
+  - **What:** added batched Atlas entity/finding counts to History payloads, added a Run Details Entities summary card and paged entity-type tabs, and wired entity rows back to Atlas with the current run scope.
+  - **Tests:** added run-finalization route coverage for History/Run Details Atlas counts and reran focused History, Atlas lookup, and shell chrome checks.
 - **Project workspace navigation polish** — Project list rows now show run, finding, artifact, and package scale at a glance, and Project finding tabs can surface prefetched new/high signal counts before the Findings tab is opened.
   - **Why:** operators should be able to pick the right project and spot triage-heavy work without paying the cost of opening every project section first.
   - **What:** added `project rename <name-or-id> <new-name>` for terminal-native renames, carried lightweight finding review/severity summaries in project list and summary payloads, and updated the Projects modal list/tab labels to use that prefetched state.

@@ -1450,7 +1450,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestRunStreaming.test_run_returns_500_when_spawn_fails` | Checks that run returns 500 when spawn fails. |
 | `TestRunStreaming.test_run_persists_completed_run_to_history` | Checks that run persists completed run to history. |
 | `TestRunStreaming.test_completed_run_links_to_active_project` | Verifies completed server-owned runs link to the current active project. |
-| `TestRunStreaming.test_active_project_entity_link_failure_keeps_run_finalization` | Verifies active-project Atlas entity link failures roll back partial project links without losing the completed run transcript, findings, or Atlas entities. |
+| `TestRunStreaming.test_active_project_entity_link_failure_keeps_run_finalization` | Verifies active-project Atlas entity link failures roll back partial project links without losing the completed run transcript, findings, Atlas entities, or source-run Atlas counts. |
 | `TestRunStreaming.test_completed_run_skips_active_project_when_auto_link_disabled` | Verifies completed external runs stay out of the active project when automatic project capture is disabled. |
 | `TestRunStreaming.test_run_filters_output_through_synthetic_grep` | Checks that a synthetic grep run streams and persists only matching lines. |
 | `TestRunStreaming.test_run_supports_invert_match_synthetic_grep` | Checks that synthetic grep supports `-v` invert matching. |

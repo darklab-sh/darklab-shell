@@ -69,6 +69,11 @@ function _historyExitClass(exitCode) {
   return _historyCore.exitClass(exitCode);
 }
 
+function _historyCountLabel(count, singular, plural) {
+  const numeric = Math.max(0, Number(count || 0));
+  return `${numeric.toLocaleString()} ${numeric === 1 ? singular : plural}`;
+}
+
 function _historyElapsedSeconds(run) {
   return _historyCore.elapsedSeconds(run);
 }
@@ -213,6 +218,18 @@ function _createHistoryEntry(run, isStarred, options = {}) {
   exitEl.textContent = _historyExitLabel(run.exit_code);
   meta.appendChild(exitEl);
   entry.appendChild(meta);
+
+  const isExternalRun = String(run.run_kind || 'external') !== 'builtin';
+  if (isExternalRun) {
+    const atlasEntityCount = Number(run.atlas_entity_count || 0);
+    const atlasFindingCount = Number(run.atlas_finding_count || 0);
+    if (atlasEntityCount > 0 || atlasFindingCount > 0) {
+      const atlasMeta = document.createElement('div');
+      atlasMeta.className = 'history-entry-atlas';
+      atlasMeta.textContent = `Atlas: ${_historyCountLabel(atlasEntityCount, 'entity', 'entities')} · ${_historyCountLabel(atlasFindingCount, 'finding', 'findings')}`;
+      entry.appendChild(atlasMeta);
+    }
+  }
 
   const actions = document.createElement('div');
   actions.className = 'history-actions';
