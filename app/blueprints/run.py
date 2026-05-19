@@ -47,7 +47,6 @@ from services.commands.builtins import (
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from core.process import (
     active_run_belongs_to_session,
-    active_run_claim_owner,
     active_run_register,
     active_run_remove,
     active_run_touch_owner,
@@ -98,6 +97,7 @@ from services.session.variables import SessionVariableError, expand_session_vari
 from services.workspace.files import WorkspaceDisabled, session_workspace_dir
 from services.pty.service import (
     PtyDependencyError,
+    claim_pty_stream_owner,
     notify_pty_killed_event,
     pty_broker_available,
     pty_broker_unavailable_reason,
@@ -1807,7 +1807,7 @@ def stream_interactive_pty_run(run_id):
     owner_client_id = _active_run_owner_value(request.headers.get("X-Client-ID", ""))
     owner_tab_id = _active_run_owner_value(request.args.get("tab_id", ""))
     if owner_client_id and pty_run_belongs_to_session(run_id, session_id):
-        active_run_claim_owner(run_id, owner_client_id, owner_tab_id)
+        claim_pty_stream_owner(run_id, session_id, owner_client_id, owner_tab_id)
 
     def generate():
         for item in stream_pty_events(run_id, session_id, after=after_id):

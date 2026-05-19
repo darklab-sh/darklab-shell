@@ -41,6 +41,7 @@ from services.runs.broker import (
     broker_unavailable_reason,
     memory_store_snapshot,
 )
+from services import metrics as app_metrics
 
 log = logging.getLogger("shell")
 
@@ -109,6 +110,16 @@ _DIAG_CONFIG_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "heartbeat_interval_seconds",
         "high_volume_output_line_threshold",
         "high_volume_output_status_interval_lines",
+        "interactive_pty_buffer_limit",
+        "interactive_pty_control_poll_seconds",
+        "interactive_pty_heartbeat_seconds",
+        "interactive_pty_input_max_bytes",
+        "interactive_pty_snapshot_min_publish_seconds",
+        "interactive_pty_snapshot_fallback_entry_limit",
+        "interactive_pty_snapshot_publish_bytes",
+        "interactive_pty_snapshot_publish_seconds",
+        "interactive_pty_stream_fetch_count",
+        "interactive_pty_stream_maxlen",
         "max_output_lines",
         "max_tabs",
     )),
@@ -650,6 +661,16 @@ def diag():
         "high_volume_output_status_interval_lines": CFG.get("high_volume_output_status_interval_lines"),
         "max_output_lines":           CFG.get("max_output_lines"),
         "max_tabs":                   CFG.get("max_tabs"),
+        "interactive_pty_buffer_limit": CFG.get("interactive_pty_buffer_limit"),
+        "interactive_pty_control_poll_seconds": CFG.get("interactive_pty_control_poll_seconds"),
+        "interactive_pty_heartbeat_seconds": CFG.get("interactive_pty_heartbeat_seconds"),
+        "interactive_pty_input_max_bytes": CFG.get("interactive_pty_input_max_bytes"),
+        "interactive_pty_snapshot_min_publish_seconds": CFG.get("interactive_pty_snapshot_min_publish_seconds"),
+        "interactive_pty_snapshot_fallback_entry_limit": CFG.get("interactive_pty_snapshot_fallback_entry_limit"),
+        "interactive_pty_snapshot_publish_bytes": CFG.get("interactive_pty_snapshot_publish_bytes"),
+        "interactive_pty_snapshot_publish_seconds": CFG.get("interactive_pty_snapshot_publish_seconds"),
+        "interactive_pty_stream_fetch_count": CFG.get("interactive_pty_stream_fetch_count"),
+        "interactive_pty_stream_maxlen": CFG.get("interactive_pty_stream_maxlen"),
         "persist_full_run_output":    CFG.get("persist_full_run_output"),
         "full_output_max_mb":         CFG.get("full_output_max_mb"),
         "history_panel_limit":        CFG.get("history_panel_limit"),
@@ -707,6 +728,9 @@ def diag():
             **fallback_pid_snapshot(),
         }
     result["broker"] = broker_info
+
+    # ── Interactive PTY ──────────────────────────────────────────────────────
+    result["pty"] = app_metrics.pty_metrics_snapshot()
 
     # ── Vendor assets ─────────────────────────────────────────────────────────
     # In-process HEAD probes against the served URLs — file-existence on its

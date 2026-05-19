@@ -24,6 +24,7 @@ from typing import Any, Iterator, cast
 
 from config import CFG, SCANNER_PREFIX
 from core.process import (
+    active_run_claim_owner_transition,
     active_run_owned_by,
     active_run_register,
     active_run_remove,
@@ -97,6 +98,61 @@ def _coerce_non_negative_int(value: object, default: int) -> int:
     return number if number >= 0 else default
 
 
+def _cfg_positive_int(key: str, default: int) -> int:
+    return max(1, _coerce_non_negative_int(CFG.get(key), default))
+
+
+def _cfg_positive_float(key: str, default: float) -> float:
+    value = CFG.get(key)
+    if value is None or isinstance(value, bool):
+        return default
+    try:
+        number = float(cast(str | int | float, value))
+    except (TypeError, ValueError):
+        return default
+    return number if number > 0 else default
+
+
+def _pty_buffer_limit() -> int:
+    return _cfg_positive_int("interactive_pty_buffer_limit", _PTY_BUFFER_LIMIT)
+
+
+def _pty_input_max_bytes() -> int:
+    return _cfg_positive_int("interactive_pty_input_max_bytes", _PTY_INPUT_MAX_BYTES)
+
+
+def _pty_heartbeat_seconds() -> float:
+    return _cfg_positive_float("interactive_pty_heartbeat_seconds", _PTY_HEARTBEAT_SECONDS)
+
+
+def _pty_control_poll_seconds() -> float:
+    return _cfg_positive_float("interactive_pty_control_poll_seconds", _PTY_CONTROL_POLL_SECONDS)
+
+
+def _pty_stream_fetch_count() -> int:
+    return _cfg_positive_int("interactive_pty_stream_fetch_count", _PTY_STREAM_FETCH_COUNT)
+
+
+def _pty_stream_maxlen() -> int:
+    return _cfg_positive_int("interactive_pty_stream_maxlen", _PTY_STREAM_MAXLEN)
+
+
+def _pty_snapshot_publish_bytes() -> int:
+    return _cfg_positive_int("interactive_pty_snapshot_publish_bytes", _PTY_SNAPSHOT_PUBLISH_BYTES)
+
+
+def _pty_snapshot_publish_seconds() -> float:
+    return _cfg_positive_float("interactive_pty_snapshot_publish_seconds", _PTY_SNAPSHOT_PUBLISH_SECONDS)
+
+
+def _pty_snapshot_min_publish_seconds() -> float:
+    return _cfg_positive_float("interactive_pty_snapshot_min_publish_seconds", _PTY_SNAPSHOT_MIN_PUBLISH_SECONDS)
+
+
+def _pty_snapshot_fallback_entry_limit() -> int:
+    return _cfg_positive_int("interactive_pty_snapshot_fallback_entry_limit", _PTY_SNAPSHOT_FALLBACK_ENTRY_LIMIT)
+
+
 class PtyDependencyError(RuntimeError):
     """Raised when an enabled PTY run cannot meet required dependencies."""
 
@@ -133,7 +189,7 @@ class PtyRun:
     terminal_capture: PtyTerminalCapture
     owner_tab_id: str = ""
     completion_callback: Callable[["PtyRun", str, int, Sequence[dict[str, str]]], dict[str, object]] | None = None
-    events: deque[PtyEvent] = field(default_factory=lambda: deque(maxlen=_PTY_BUFFER_LIMIT))
+    events: deque[PtyEvent] = field(default_factory=lambda: deque(maxlen=_pty_buffer_limit()))
     seq: int = 0
     closed: bool = False
     exit_code: int | None = None
@@ -431,12 +487,13 @@ def _load_active_pty_meta_for_session(run_id: str, session_id: str) -> tuple[dic
 def _limited_snapshot_entries(entries: Sequence[dict[str, str]], ansi_snapshot: str) -> list[dict[str, str]]:
     if ansi_snapshot:
         return []
-    if len(entries) <= _PTY_SNAPSHOT_FALLBACK_ENTRY_LIMIT:
+    fallback_entry_limit = _pty_snapshot_fallback_entry_limit()
+    if len(entries) <= fallback_entry_limit:
         return [dict(entry) for entry in entries]
     return [{
         "text": "[earlier PTY snapshot entries omitted; terminal snapshot resumes visually]",
         "cls": "notice",
-    }, *[dict(entry) for entry in entries[-_PTY_SNAPSHOT_FALLBACK_ENTRY_LIMIT:]]]
+    }, *[dict(entry) for entry in entries[-fallback_entry_limit:]]]
 
 
 def _pty_snapshot_payload_from_run(run: PtyRun, *, distributed: bool = False) -> dict[str, Any]:
@@ -470,13 +527,13 @@ def _store_pty_snapshot(run: PtyRun, *, force: bool = False) -> None:
         if run.capture_event_id == run.snapshot_published_event_id:
             return
         if (
-            now - run.snapshot_last_published < _PTY_SNAPSHOT_MIN_PUBLISH_SECONDS
+            now - run.snapshot_last_published < _pty_snapshot_min_publish_seconds()
             and run.snapshot_published_event_id != "0-0"
         ):
             return
         if (
-            run.snapshot_pending_bytes < _PTY_SNAPSHOT_PUBLISH_BYTES
-            and now - run.snapshot_last_published < _PTY_SNAPSHOT_PUBLISH_SECONDS
+            run.snapshot_pending_bytes < _pty_snapshot_publish_bytes()
+            and now - run.snapshot_last_published < _pty_snapshot_publish_seconds()
             and run.snapshot_published_event_id != "0-0"
         ):
             return
@@ -514,6 +571,14 @@ def _load_pty_snapshot(run_id: str, session_id: str) -> dict[str, Any] | None:
     if not isinstance(payload, dict) or payload.get("session_id") != session_id:
         return None
     response = dict(payload)
+    try:
+        created_at = float(response.get("created_at", 0) or 0)
+    except (TypeError, ValueError):
+        created_at = 0
+    if created_at:
+        response["snapshot_age_seconds"] = round(max(0.0, time.time() - created_at), 3)
+    else:
+        response["snapshot_age_seconds"] = None
     response.pop("session_id", None)
     response.pop("created_at", None)
     return response
@@ -537,6 +602,30 @@ def notify_pty_killed_event(run_id: str, session_id: str, payload: dict[str, Any
     return True
 
 
+def claim_pty_stream_owner(run_id: str, session_id: str, owner_client_id: str = "", owner_tab_id: str = "") -> bool:
+    if not owner_client_id or not pty_run_belongs_to_session(run_id, session_id):
+        return False
+    transition = active_run_claim_owner_transition(run_id, owner_client_id, owner_tab_id)
+    if not transition.get("claimed"):
+        return False
+    if not transition.get("changed_client"):
+        return True
+    payload = {
+        "text": "[interactive PTY moved to another tab]",
+        "displaced_client_id": str(transition.get("previous_client_id", "") or ""),
+        "displaced_tab_id": str(transition.get("previous_tab_id", "") or ""),
+        "owner_client_id": owner_client_id,
+        "owner_tab_id": owner_tab_id,
+    }
+    if redis_client:
+        publish_pty_event(run_id, "displaced", payload)
+        return True
+    run = get_pty_run(run_id, session_id)
+    if run:
+        run.append_event("displaced", payload)
+    return True
+
+
 def publish_pty_event(run_id: str, event_type: str, payload: dict[str, Any] | None = None) -> str:
     if not redis_client:
         raise RuntimeError("Redis is not available for PTY events")
@@ -546,7 +635,7 @@ def publish_pty_event(run_id: str, event_type: str, payload: dict[str, Any] | No
     event_id = _coerce_text(redis_client.xadd(
         _stream_key(run_id),
         {"payload": json.dumps(data, separators=(",", ":"))},
-        maxlen=_PTY_STREAM_MAXLEN,
+        maxlen=_pty_stream_maxlen(),
         approximate=True,
     ))
     redis_client.expire(_stream_key(run_id), _completed_ttl() if event_type in {"exit", "error"} else _active_ttl())
@@ -590,7 +679,7 @@ def _apply_pty_controls(run: PtyRun) -> None:
             if not run.allow_input:
                 continue
             raw = str(control.get("data", "") or "").encode("utf-8", errors="replace")
-            if raw and len(raw) <= _PTY_INPUT_MAX_BYTES:
+            if raw and len(raw) <= _pty_input_max_bytes():
                 try:
                     os.write(run.master_fd, raw)
                 except OSError:
@@ -629,7 +718,7 @@ def _reader_loop(run: PtyRun, client_ip: str) -> None:
                     })
                     _terminate_run(run)
 
-            ready, _, _ = select.select([run.master_fd], [], [], _PTY_CONTROL_POLL_SECONDS)
+            ready, _, _ = select.select([run.master_fd], [], [], _pty_control_poll_seconds())
             if ready:
                 try:
                     chunk = os.read(run.master_fd, 4096)
@@ -646,7 +735,7 @@ def _reader_loop(run: PtyRun, client_ip: str) -> None:
             if run.proc.poll() is not None:
                 break
             now = time.time()
-            if now - last_heartbeat >= _PTY_HEARTBEAT_SECONDS:
+            if now - last_heartbeat >= _pty_heartbeat_seconds():
                 run.append_event("heartbeat", {})
                 last_heartbeat = now
 
@@ -875,12 +964,9 @@ def pty_run_snapshot(run_id: str, session_id: str) -> tuple[bool, str, dict[str,
                 return False, _PTY_STALE_MESSAGE, None
             snapshot = _load_pty_snapshot(run_id, session_id)
             if snapshot is not None:
-                try:
-                    created_at = float(snapshot.get("created_at", 0) or 0)
-                except (TypeError, ValueError):
-                    created_at = 0
-                if created_at:
-                    app_metrics.PTY_SNAPSHOT_AGE.observe(max(0.0, time.time() - created_at))
+                snapshot_age = snapshot.get("snapshot_age_seconds")
+                if isinstance(snapshot_age, (int, float)):
+                    app_metrics.PTY_SNAPSHOT_AGE.observe(max(0.0, float(snapshot_age)))
                 return True, "", snapshot
             if redis_client:
                 return False, "PTY snapshot is not available yet", None
@@ -888,6 +974,7 @@ def pty_run_snapshot(run_id: str, session_id: str) -> tuple[bool, str, dict[str,
         return False, "Run not found", None
     with run.snapshot_lock:
         snapshot = _pty_snapshot_payload_from_run(run)
+    snapshot["snapshot_age_seconds"] = 0
     _store_pty_snapshot(run, force=True)
     return True, "", snapshot
 
@@ -911,7 +998,7 @@ def write_pty_input(
     if not text:
         return True, ""
     raw = text.encode("utf-8", errors="replace")
-    if len(raw) > _PTY_INPUT_MAX_BYTES:
+    if len(raw) > _pty_input_max_bytes():
         app_metrics.PTY_INPUT_DROPPED_BYTES.labels("oversize").inc(len(raw))
         return False, "Input is too large for this interactive run"
     if redis_client:
@@ -967,7 +1054,7 @@ def _stream_local_pty_events(run: PtyRun, after: str = "0-0") -> Iterator[str]:
             if not events and run.closed:
                 return
             if not events:
-                run.condition.wait(timeout=_PTY_HEARTBEAT_SECONDS)
+                run.condition.wait(timeout=_pty_heartbeat_seconds())
                 events = [event for event in run.events if event.seq > cursor]
             if not events:
                 yield "event: heartbeat\ndata: {}\n\n"
@@ -1001,7 +1088,7 @@ def stream_pty_events(run_id: str, session_id: str, after: str = "0-0") -> Itera
     while True:
         rows = cast(
             list[tuple[Any, list[tuple[Any, dict[str, Any]]]]],
-            redis_client.xread({_stream_key(run_id): current_id}, count=_PTY_STREAM_FETCH_COUNT, block=block_ms),
+            redis_client.xread({_stream_key(run_id): current_id}, count=_pty_stream_fetch_count(), block=block_ms),
         )
         if not rows:
             meta = _load_pty_meta_for_session(run_id, session_id)

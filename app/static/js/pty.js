@@ -7,6 +7,7 @@ const PTY_MIN_ROWS = 10;
 const PTY_MIN_COLS = 40;
 const PTY_INPUT_MAX_BYTES = 4096;
 const PTY_INPUT_BATCH_MS = 16;
+const PTY_STALE_SNAPSHOT_NOTICE_SECONDS = 5;
 const _ptyModalState = {
   sessions: new Map(),
   activeSession: null,
@@ -445,6 +446,10 @@ function _ptySendInput(runId, data, tabId = '') {
     timer: window.setTimeout(() => _ptyFlushInputQueue(runId, tabId), PTY_INPUT_BATCH_MS),
   };
   _ptyModalState.pendingInput.set(key, pending);
+}
+
+function _ptyCurrentClientId() {
+  return typeof CLIENT_ID !== 'undefined' ? String(CLIENT_ID || '') : '';
 }
 
 function _ptyConfirmSessionKill(session) {
@@ -895,6 +900,10 @@ function _prepareAttachedInteractivePtyTab(run, tabId) {
   if (typeof appendCommandEcho === 'function') appendCommandEcho(command, tabId);
   if (typeof appendLine === 'function') {
     appendLine('[reattached to active interactive PTY]', 'notice', tabId);
+    const snapshotAge = Number(run && run.snapshot_age_seconds);
+    if (Number.isFinite(snapshotAge) && snapshotAge >= PTY_STALE_SNAPSHOT_NOTICE_SECONDS) {
+      appendLine(`[reattached - snapshot was ${Math.round(snapshotAge)}s old]`, 'notice', tabId);
+    }
   }
   if (typeof setTabStatus === 'function') setTabStatus(tabId, 'running');
   if (tabId === activeTabId && typeof setStatus === 'function') setStatus('running');
@@ -902,6 +911,43 @@ function _prepareAttachedInteractivePtyTab(run, tabId) {
   if (typeof _setRunButtonDisabled === 'function') _setRunButtonDisabled(true);
   if (typeof syncActiveRunTimer === 'function' && tabId === activeTabId) syncActiveRunTimer(tabId);
   return tab;
+}
+
+function _ptyDisplaceSession(tabId, session, msg = {}) {
+  if (msg && msg.displaced_client_id && msg.displaced_client_id !== _ptyCurrentClientId()) return false;
+  if (msg && msg.displaced_tab_id && msg.displaced_tab_id !== tabId) return false;
+  const tab = typeof getTab === 'function' ? getTab(tabId) : null;
+  if (tab) {
+    tab.runId = null;
+    tab.reconnectedRun = false;
+    tab.lastEventId = '';
+    tab.attachMode = '';
+    tab.interactivePtyActive = false;
+    tab.ptyTerminal = null;
+  }
+  if (session && session.screen && session.screen.dataset) session.screen.dataset.ptyActive = '0';
+  if (session && session.term) session.term.options.disableStdin = true;
+  _ptyDisposeResizeHandlers(session);
+  if (session && session.term && typeof session.term.dispose === 'function') {
+    session.term.dispose();
+  }
+  if (session && session.runId) _ptyModalState.sessions.delete(session.runId);
+  if (session) {
+    session.detached = true;
+    if (_ptyModalState.activeSession === session) _ptyModalState.activeSession = null;
+    _ptyStopModalTimer(session);
+    _ptySetModalStatus('moved', 'fail', session);
+    _ptyCloseModal({ force: true }, session);
+  }
+  if (typeof appendLine === 'function') {
+    appendLine(msg.text || '[interactive PTY moved to another tab]', 'notice', tabId);
+  }
+  if (typeof setTabStatus === 'function') setTabStatus(tabId, 'idle');
+  if (tabId === activeTabId && typeof setStatus === 'function') setStatus('idle');
+  if (typeof _setRunButtonDisabled === 'function') _setRunButtonDisabled(false);
+  if (typeof hideTabKillBtn === 'function') hideTabKillBtn(tabId);
+  if (typeof startPollingActiveRunsAfterReload === 'function') startPollingActiveRunsAfterReload();
+  return true;
 }
 
 async function attachInteractivePtyCommand(runOrRunId, tabId = '') {
@@ -1137,6 +1183,8 @@ async function _ptyReadStream(streamUrl, tabId, session) {
       } else if (msg.type === 'exit') {
         await _ptyFinalize(tabId, session, msg);
         return;
+      } else if (msg.type === 'displaced') {
+        if (_ptyDisplaceSession(tabId, session, msg)) return;
       }
     }
   }

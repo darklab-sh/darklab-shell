@@ -13,6 +13,7 @@ const {
   _loadPtyScriptOnce,
   _ptyApplyLiveTheme,
   _ptyCloseModal,
+  _ptyDisplaceSession,
   _ptyOpenModal,
   _ptyPostResize,
   _ptySendInput,
@@ -35,6 +36,7 @@ const {
   '_loadPtyScriptOnce',
   '_ptyApplyLiveTheme',
   '_ptyCloseModal',
+  '_ptyDisplaceSession',
   '_ptyOpenModal',
   '_ptyPostResize',
   '_ptySendInput',
@@ -53,6 +55,7 @@ describe('interactive PTY terminal', () => {
     delete globalThis.Terminal
     delete globalThis.FitAddon
     delete globalThis.APP_CONFIG
+    delete globalThis.CLIENT_ID
     delete globalThis.appendLine
     delete globalThis.appendLines
     delete globalThis.addToRecentPreview
@@ -683,6 +686,7 @@ describe('interactive PTY terminal', () => {
             snapshot_format: 'ansi',
             ansi_snapshot: '\x1b[0m\x1b[2J\x1b[H\x1b[1mhop 1 darklab.sh\x1b[0m\x1b[1;1H',
             snapshot_truncated: false,
+            snapshot_age_seconds: 12.4,
           }),
         }
       }
@@ -702,6 +706,7 @@ describe('interactive PTY terminal', () => {
     }, 'tab-1')).resolves.toBe(true)
 
     expect(globalThis.appendLine).toHaveBeenCalledWith('[reattached to active interactive PTY]', 'notice', 'tab-1')
+    expect(globalThis.appendLine).toHaveBeenCalledWith('[reattached - snapshot was 12s old]', 'notice', 'tab-1')
     expect(writes.join('')).toContain('\x1b[1mhop 1 darklab.sh')
     expect(writes.join('')).not.toContain('[reattached - earlier formatting lost]')
     expect(globalThis.apiFetch).toHaveBeenCalledWith('/pty/runs/run-pty/snapshot')
@@ -803,6 +808,69 @@ describe('interactive PTY terminal', () => {
     expect(refreshWorkspaceFileCache).toHaveBeenCalledTimes(1)
     expect(maybeMountDeferredPrompt).toHaveBeenCalledWith('tab-1')
     expect(refocusComposerAfterAction).toHaveBeenCalledWith({ preventScroll: true })
+  })
+
+  it('closes only the displaced PTY owner when a different browser takes over', () => {
+    const disposed = vi.fn()
+    const appendLine = vi.fn()
+    const hideTabKillBtn = vi.fn()
+    const startPollingActiveRunsAfterReload = vi.fn()
+    globalThis.CLIENT_ID = 'client-old'
+    globalThis.appendLine = appendLine
+    globalThis.setStatus = vi.fn()
+    globalThis.setTabStatus = vi.fn((tabId, status) => {
+      const tab = globalThis.tabs.find(item => item.id === tabId)
+      if (tab) tab.st = status
+    })
+    globalThis._setRunButtonDisabled = vi.fn()
+    globalThis.hideTabKillBtn = hideTabKillBtn
+    globalThis.startPollingActiveRunsAfterReload = startPollingActiveRunsAfterReload
+    globalThis.tabs = [{
+      id: 'tab-1',
+      st: 'running',
+      runId: 'run-1',
+      historyRunId: 'run-1',
+      interactivePtyActive: true,
+      ptyTerminal: {},
+    }]
+    globalThis.activeTabId = 'tab-1'
+    globalThis.getTab = (tabId) => globalThis.tabs.find(tab => tab.id === tabId)
+
+    const screen = document.createElement('div')
+    screen.dataset.ptyActive = '1'
+    const session = {
+      runId: 'run-1',
+      screen,
+      term: { options: { disableStdin: false }, dispose: disposed },
+      resizeDisposable: { dispose: vi.fn() },
+    }
+
+    expect(_ptyDisplaceSession('tab-1', session, {
+      type: 'displaced',
+      text: '[interactive PTY moved to another tab]',
+      displaced_client_id: 'client-other',
+      displaced_tab_id: 'tab-1',
+    })).toBe(false)
+    expect(globalThis.tabs[0].interactivePtyActive).toBe(true)
+
+    expect(_ptyDisplaceSession('tab-1', session, {
+      type: 'displaced',
+      text: '[interactive PTY moved to another tab]',
+      displaced_client_id: 'client-old',
+      displaced_tab_id: 'tab-1',
+    })).toBe(true)
+
+    const tab = globalThis.tabs[0]
+    expect(tab.runId).toBeNull()
+    expect(tab.interactivePtyActive).toBe(false)
+    expect(tab.ptyTerminal).toBeNull()
+    expect(tab.st).toBe('idle')
+    expect(session.term.options.disableStdin).toBe(true)
+    expect(screen.dataset.ptyActive).toBe('0')
+    expect(disposed).toHaveBeenCalledTimes(1)
+    expect(appendLine).toHaveBeenCalledWith('[interactive PTY moved to another tab]', 'notice', 'tab-1')
+    expect(hideTabKillBtn).toHaveBeenCalledWith('tab-1')
+    expect(startPollingActiveRunsAfterReload).toHaveBeenCalledTimes(1)
   })
 
   it('appends the saved PTY final frame before the exit status line', async () => {

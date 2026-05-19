@@ -456,6 +456,18 @@
     </table>
   </section>
 
+  {# ── Interactive PTY ──────────────────────────────────────────────────── #}
+  <section class="diag-section s-pty">
+    <div class="diag-section-title">Interactive PTY</div>
+    <table class="diag-table">
+      <tr><td>active</td><td>{{ data.pty.active }}</td></tr>
+      <tr><td>completed</td><td>{{ data.pty.completed_count }}</td></tr>
+      <tr><td>duration</td><td>avg {{ data.pty.average_seconds }}s <span class="diag-muted">· p95 {{ data.pty.p95_seconds }}s</span></td></tr>
+      <tr><td>input</td><td>{{ '{:,}'.format(data.pty.input_bytes) }} bytes <span class="diag-muted">· {{ '{:,}'.format(data.pty.dropped_input_bytes) }} dropped</span></td></tr>
+      <tr><td>control queue</td><td>{{ data.pty.control_queue_depth }}</td></tr>
+    </table>
+  </section>
+
   {# ── Config ────────────────────────────────────────────────────────────── #}
   <section class="diag-section s-config">
     <div class="diag-section-title">Config</div>

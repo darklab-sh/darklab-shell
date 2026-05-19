@@ -596,6 +596,82 @@ def record_completed_pty(command: object, exit_code: object, elapsed_seconds: fl
     PTY_DURATION.labels(tool).observe(max(0.0, float(elapsed_seconds or 0.0)))
 
 
+def _metric_sample_value(sample: object) -> float:
+    raw_value = getattr(sample, "value", 0.0)
+    if raw_value is None:
+        return 0.0
+    return float(raw_value)
+
+
+def _metric_sample_total(metric: Any, sample_name: str) -> float:
+    total = 0.0
+    try:
+        families = metric.collect()
+    except Exception:
+        return 0.0
+    for family in families:
+        for sample in getattr(family, "samples", []) or []:
+            if getattr(sample, "name", "") == sample_name:
+                try:
+                    total += _metric_sample_value(sample)
+                except (TypeError, ValueError):
+                    continue
+    return total
+
+
+def _pty_duration_summary() -> dict[str, float]:
+    count = _metric_sample_total(PTY_DURATION, "darklab_pty_duration_seconds_count")
+    total = _metric_sample_total(PTY_DURATION, "darklab_pty_duration_seconds_sum")
+    buckets: dict[float, float] = {}
+    try:
+        families = PTY_DURATION.collect()
+    except Exception:
+        families = []
+    for family in families:
+        for sample in getattr(family, "samples", []) or []:
+            if getattr(sample, "name", "") != "darklab_pty_duration_seconds_bucket":
+                continue
+            labels = getattr(sample, "labels", {}) or {}
+            raw_le = labels.get("le")
+            if raw_le is None:
+                continue
+            try:
+                le = float(raw_le)
+                value = _metric_sample_value(sample)
+            except (TypeError, ValueError):
+                continue
+            buckets[le] = buckets.get(le, 0.0) + value
+    p95 = 0.0
+    if count > 0 and buckets:
+        threshold = count * 0.95
+        for le in sorted(buckets):
+            if buckets[le] >= threshold:
+                p95 = le
+                break
+    return {
+        "average_seconds": round(total / count, 3) if count > 0 else 0.0,
+        "p95_seconds": round(p95, 3),
+        "completed_count": int(count),
+    }
+
+
+def pty_metrics_snapshot() -> dict[str, object]:
+    duration = _pty_duration_summary()
+    return {
+        "active": int(_metric_sample_total(PTY_ACTIVE, "darklab_pty_active")),
+        "input_bytes": int(_metric_sample_total(PTY_INPUT_BYTES, "darklab_pty_input_bytes_total")),
+        "dropped_input_bytes": int(_metric_sample_total(
+            PTY_INPUT_DROPPED_BYTES,
+            "darklab_pty_input_dropped_bytes_total",
+        )),
+        "control_queue_depth": int(_metric_sample_total(
+            PTY_CONTROL_QUEUE_DEPTH,
+            "darklab_pty_control_queue_depth",
+        )),
+        **duration,
+    }
+
+
 def record_run_finalize_error(stage: str) -> None:
     stage_label = stage if stage in {"capture", "db_write", "artifact_write", "entity_materialize"} else "db_write"
     RUN_FINALIZE_ERRORS.labels(stage_label).inc()

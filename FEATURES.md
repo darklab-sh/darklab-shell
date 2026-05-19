@@ -843,8 +843,10 @@ wget -q -O /dev/null --server-response https://example.com
 
 - Commands with registry-owned interactive metadata, currently `nc --interactive`, `telnet --interactive`, `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`, are reserved for the PTY route instead of normal `/runs`.
 - The browser opens a tab-scoped xterm.js modal, preloads the terminal assets, starts the PTY through `/pty/runs`, and sends keyboard input and terminal resizes through bounded POST routes.
+- If the same PTY run is opened from another browser client, the previous live owner closes cleanly and adds an `[interactive PTY moved to another tab]` notice instead of leaving two live terminals fighting for the same run.
 - Completed PTY runs append a saved static transcript and exit status back into the parent shell tab, then persist through the normal history/search/finding path. Registry transcript modes decide whether a tool saves the final visible frame or scrollback-style findings.
-- Reload recovery and Status Monitor Attach use bounded ANSI snapshots. Redis-backed deployments can serve output streams, input/resize control, and reattach snapshots from any worker without sticky routing; single-worker local development can run without Redis when configured.
+- Reload recovery and Status Monitor Attach use bounded ANSI snapshots and show when a restored snapshot was already stale. Redis-backed deployments can serve output streams, input/resize control, and reattach snapshots from any worker without sticky routing; single-worker local development can run without Redis when configured.
+- `/diag` includes PTY operator metrics for active terminals, completed duration, input volume, dropped input, and queued controls.
 
 **Limits:** disabled by default, desktop-only, and restricted to commands that explicitly declare PTY behavior in the command registry. PTY runs have a configured max runtime and per-session concurrency cap. Multi-worker deployments require Redis unless `run_broker_require_redis` is intentionally relaxed for local development.
 

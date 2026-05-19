@@ -513,17 +513,19 @@ def active_run_touch_owner(run_id: str, owner_client_id: str = "", owner_tab_id:
         return True
 
 
-def active_run_claim_owner(run_id: str, owner_client_id: str = "", owner_tab_id: str = "") -> bool:
-    """Make this browser/tab the current owner for an active run."""
+def active_run_claim_owner_transition(run_id: str, owner_client_id: str = "", owner_tab_id: str = "") -> dict[str, object]:
+    """Make this browser/tab the current owner and return ownership transition details."""
     if not run_id or not owner_client_id:
-        return False
+        return {"claimed": False, "changed_client": False}
 
     if redis_client:
         meta_key = f"procmeta:{run_id}"
         raw = redis_client.get(meta_key)
         payload = _load_active_run_payload(raw)
         if not payload:
-            return False
+            return {"claimed": False, "changed_client": False}
+        previous_client_id = str(payload.get("owner_client_id", "") or "")
+        previous_tab_id = str(payload.get("owner_tab_id", "") or "")
         payload["owner_client_id"] = owner_client_id
         payload["owner_tab_id"] = owner_tab_id
         payload["owner_last_seen"] = time.time()
@@ -531,16 +533,37 @@ def active_run_claim_owner(run_id: str, owner_client_id: str = "", owner_tab_id:
         session_id = str(payload.get("session_id", "") or "")
         if session_id:
             redis_client.expire(f"sessionprocs:{session_id}", _PID_TTL)
-        return True
+        return {
+            "claimed": True,
+            "changed_client": bool(previous_client_id and previous_client_id != owner_client_id),
+            "previous_client_id": previous_client_id,
+            "previous_tab_id": previous_tab_id,
+            "owner_client_id": owner_client_id,
+            "owner_tab_id": owner_tab_id,
+        }
 
     with _pid_lock:
         payload = _active_run_meta.get(run_id)
         if not payload:
-            return False
+            return {"claimed": False, "changed_client": False}
+        previous_client_id = str(payload.get("owner_client_id", "") or "")
+        previous_tab_id = str(payload.get("owner_tab_id", "") or "")
         payload["owner_client_id"] = owner_client_id
         payload["owner_tab_id"] = owner_tab_id
         payload["owner_last_seen"] = time.time()
-        return True
+        return {
+            "claimed": True,
+            "changed_client": bool(previous_client_id and previous_client_id != owner_client_id),
+            "previous_client_id": previous_client_id,
+            "previous_tab_id": previous_tab_id,
+            "owner_client_id": owner_client_id,
+            "owner_tab_id": owner_tab_id,
+        }
+
+
+def active_run_claim_owner(run_id: str, owner_client_id: str = "", owner_tab_id: str = "") -> bool:
+    """Make this browser/tab the current owner for an active run."""
+    return bool(active_run_claim_owner_transition(run_id, owner_client_id, owner_tab_id).get("claimed"))
 
 
 def active_run_owned_by(run_id: str, owner_client_id: str = "", owner_tab_id: str = "") -> bool:

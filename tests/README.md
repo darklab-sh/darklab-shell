@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,902
+- behavior tests: 2,910
 - docs/inventory meta-tests: 32
-- `pytest`: 1508 (1476 behavior + 32 meta)
-- `vitest`: 1177
+- `pytest`: 1512 (1480 behavior + 32 meta)
+- `vitest`: 1178
 - `playwright`: 252
-- total: 2,937
+- total: 2,942
 
 This document is organized in two parts:
 
@@ -566,6 +566,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestActiveRunMetadata.test_active_runs_for_session_reports_owner_liveness_for_client` | Verifies that active-run metadata reports owner client, tab, liveness, and same-client state. |
 | `TestActiveRunMetadata.test_active_runs_for_session_refreshes_matching_owner_liveness` | Verifies that active-run listings refresh same-client owner liveness so Status Monitor polling keeps run control alive. |
 | `TestActiveRunMetadata.test_active_run_touch_owner_refreshes_liveness` | Verifies that owner heartbeats refresh liveness only for the owning client and tab. |
+| `TestActiveRunMetadata.test_active_run_claim_owner_reports_changed_client` | Verifies that owner claims report whether a PTY stream moved to a different browser client. |
 | `TestActiveRunMetadata.test_active_run_owner_metadata_remains_provenance_only` | Verifies that active-run owner metadata remains origin/liveness information rather than a reassignment permission model. |
 | `TestActiveRunMetadata.test_pid_pop_for_session_is_the_active_run_permission_boundary` | Verifies that active-run PID lookup is scoped to the requesting session. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_dead_pid` | Checks that active-run metadata is pruned when the stored process no longer exists. |
@@ -578,6 +579,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPtyBrokerService.test_pty_input_and_resize_queue_through_redis_without_local_run` | Verifies that PTY input and resize requests enqueue Redis control events without needing the local worker that owns the PTY file descriptor. |
 | `TestPtyBrokerService.test_pty_stream_replays_redis_output_events_for_any_worker` | Verifies that Redis-backed PTY output can be streamed by any web worker. |
 | `TestPtyBrokerService.test_pty_snapshot_loads_distributed_redis_snapshot_without_local_run` | Verifies that PTY reattach snapshots can be served from Redis by a worker that does not own the PTY file descriptor. |
+| `TestPtyBrokerService.test_pty_snapshot_reports_age_for_distributed_reattach` | Verifies that Redis-backed PTY snapshots report their age so the browser can show stale reattach notices. |
+| `TestPtyBrokerService.test_pty_owner_claim_publishes_displaced_event_for_previous_client` | Verifies that a new browser-client PTY attach publishes one displacement event for the previous owner tab. |
 | `TestPtyBrokerService.test_pty_snapshot_prunes_stale_redis_state_without_active_process` | Verifies that stale Redis PTY metadata, snapshots, control streams, and output streams are pruned when no active process remains. |
 | `TestPtyBrokerService.test_pty_snapshot_publish_rate_is_capped_even_after_byte_threshold` | Verifies that high-throughput PTY output cannot force Redis snapshot publishes more often than the minimum publish interval. |
 | `TestPtyBrokerService.test_pty_stream_reports_stale_run_before_heartbeating_forever` | Verifies that stale PTY streams emit a terminal error instead of heartbeating forever after the process metadata disappears. |
@@ -1157,6 +1160,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestDiagRoute.test_response_has_expected_top_level_keys` | Checks that response has expected top level keys. |
 | `TestDiagRoute.test_app_section_has_version_and_name` | Checks that app section has version and name. |
 | `TestDiagRoute.test_config_section_contains_operational_keys` | Checks that config section contains operational keys. |
+| `TestDiagRoute.test_pty_section_contains_operator_metrics` | Checks that diagnostics include active PTY count, completed durations, input bytes, dropped bytes, and control queue depth. |
 | `TestDiagRoute.test_every_config_key_belongs_to_a_group` | Drift guard: every key emitted into `result['config']` must be listed in exactly one `_DIAG_CONFIG_GROUPS` entry, otherwise it would render nowhere on the page. |
 | `TestDiagRoute.test_html_response_renders_config_group_labels` | Checks that the HTML diag page renders each config group label and the `.diag-config-group-label` styling hook. |
 | `TestDiagRoute.test_db_section_ok_and_has_counts` | Checks that database section ok and has counts. |
@@ -2362,6 +2366,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `reattaches an active PTY from a snapshot and follows the live stream` | Verifies that PTY reattach writes the plain-text snapshot to a fresh xterm and resumes streaming from the supplied event id. |
 | `does not create a PTY reattach tab when the snapshot is unavailable` | Verifies that failed PTY snapshot fetches report the error without consuming a new tab. |
 | `finalizes PTY tabs like normal completed runs` | Verifies that completed interactive PTY tabs update recent commands, history refreshes, workspace cache, and last-exit state like normal runs. |
+| `closes only the displaced PTY owner when a different browser takes over` | Verifies that PTY displacement events close the targeted owner tab without affecting other clients or tabs. |
 | `appends the saved PTY final frame before the exit status line` | Verifies that modal PTY completion loads the saved final screen into the parent transcript before appending the exit status line. |
 | `marks a PTY tab detached when the stream ends without an exit event but the run is still active` | Verifies that a dropped PTY stream keeps the run marked active, preserves Kill, and starts the saved-result polling path. |
 | `marks a PTY tab failed when the stream ends and the run is not active` | Verifies that a stale PTY stream finalizes the tab as failed instead of treating an unknown exit as success. |

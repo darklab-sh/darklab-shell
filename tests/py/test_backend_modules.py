@@ -5184,6 +5184,35 @@ class TestActiveRunMetadata:
         assert run["owner_last_seen"] == 1101.0
         assert run["owner_stale"] is False
 
+    def test_active_run_claim_owner_reports_changed_client(self):
+        with (
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process, "_pid_start_time", return_value=None),
+            mock.patch.object(process.time, "time", return_value=1000.0),
+        ):
+            process.active_run_register(
+                "run-owned",
+                12345,
+                "session-1",
+                "ping darklab.sh",
+                "2026-01-01T00:00:00Z",
+                owner_client_id="client-1",
+                owner_tab_id="tab-1",
+            )
+
+        with mock.patch.object(process.time, "time", return_value=1100.0):
+            same_client = process.active_run_claim_owner_transition("run-owned", "client-1", "tab-2")
+            changed_client = process.active_run_claim_owner_transition("run-owned", "client-2", "tab-9")
+
+        assert same_client["claimed"] is True
+        assert same_client["changed_client"] is False
+        assert changed_client["claimed"] is True
+        assert changed_client["changed_client"] is True
+        assert changed_client["previous_client_id"] == "client-1"
+        assert changed_client["previous_tab_id"] == "tab-2"
+        assert changed_client["owner_client_id"] == "client-2"
+        assert changed_client["owner_tab_id"] == "tab-9"
+
     def test_active_run_owner_metadata_remains_provenance_only(self):
         with (
             mock.patch.object(process, "_pid_is_alive", return_value=True),
@@ -5535,6 +5564,109 @@ class TestPtyBrokerService:
         assert snapshot["ansi_snapshot"].endswith("redis snapshot\x1b[1;1H")
         assert snapshot["after_event_id"] == "1770000000000-2"
         assert snapshot["entries"] == []
+        assert isinstance(snapshot["snapshot_age_seconds"], float | int)
+
+    def test_pty_snapshot_reports_age_for_distributed_reattach(self):
+        fake = process._FakeRedisClient()
+        run_id = "pty-run-snapshot-age"
+        fake.set(
+            pty_service._meta_key(run_id),
+            json.dumps({
+                "run_id": run_id,
+                "session_id": "session-1",
+                "command": "mtr --interactive darklab.sh",
+                "started": "2026-01-01T00:00:00Z",
+                "rows": 24,
+                "cols": 100,
+                "closed": False,
+            }),
+        )
+        fake.set(
+            pty_service._snapshot_key(run_id),
+            json.dumps({
+                "session_id": "session-1",
+                "run_id": run_id,
+                "command": "mtr --interactive darklab.sh",
+                "started": "2026-01-01T00:00:00Z",
+                "rows": 24,
+                "cols": 100,
+                "after_event_id": "1770000000000-2",
+                "entries": [],
+                "snapshot_format": "plain",
+                "ansi_snapshot": "",
+                "snapshot_truncated": False,
+                "created_at": 100.0,
+            }),
+        )
+
+        with mock.patch.object(pty_service, "redis_client", fake), \
+             mock.patch.object(
+                 pty_service,
+                 "active_runs_for_session",
+                 return_value=[{"run_id": run_id, "run_type": "pty"}],
+             ), \
+             mock.patch.object(pty_service.time, "time", return_value=112.25):
+            ok, message, snapshot = pty_service.pty_run_snapshot(run_id, "session-1")
+
+        assert ok is True
+        assert message == ""
+        assert snapshot is not None
+        assert snapshot["snapshot_age_seconds"] == 12.25
+
+    def test_pty_owner_claim_publishes_displaced_event_for_previous_client(self):
+        fake = process._FakeRedisClient()
+        run_id = "pty-run-displaced"
+        fake.set(
+            pty_service._meta_key(run_id),
+            json.dumps({
+                "run_id": run_id,
+                "session_id": "session-1",
+                "command": "mtr --interactive darklab.sh",
+                "started": "2026-01-01T00:00:00Z",
+                "rows": 24,
+                "cols": 100,
+                "closed": False,
+            }),
+        )
+
+        with mock.patch.object(process, "redis_client", fake), \
+             mock.patch.object(pty_service, "redis_client", fake), \
+             mock.patch.object(
+                 pty_service,
+                 "active_runs_for_session",
+                 return_value=[{"run_id": run_id, "run_type": "pty"}],
+             ):
+            process.active_run_register(
+                run_id,
+                4242,
+                "session-1",
+                "mtr --interactive darklab.sh",
+                "2026-01-01T00:00:00Z",
+                owner_client_id="client-1",
+                owner_tab_id="tab-1",
+                run_type="pty",
+            )
+            assert pty_service.claim_pty_stream_owner(run_id, "session-1", "client-1", "tab-2") is True
+            rows = fake.xread({pty_service._stream_key(run_id): "0-0"}, count=10)
+            assert rows == []
+
+            assert pty_service.claim_pty_stream_owner(run_id, "session-1", "client-2", "tab-9") is True
+            rows = fake.xread({pty_service._stream_key(run_id): "0-0"}, count=10)
+
+        payloads = [
+            json.loads(fields["payload"])
+            for _key, stream_rows in rows
+            for _event_id, fields in stream_rows
+        ]
+        assert payloads == [{
+            "text": "[interactive PTY moved to another tab]",
+            "displaced_client_id": "client-1",
+            "displaced_tab_id": "tab-2",
+            "owner_client_id": "client-2",
+            "owner_tab_id": "tab-9",
+            "type": "displaced",
+            "created_at": payloads[0]["created_at"],
+        }]
 
     def test_pty_snapshot_prunes_stale_redis_state_without_active_process(self):
         fake = process._FakeRedisClient()

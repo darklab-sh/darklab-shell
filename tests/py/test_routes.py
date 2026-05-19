@@ -3365,7 +3365,7 @@ class TestDiagRoute:
         client = self._allowed_client()
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
-        assert set(data.keys()) >= {"app", "config", "db", "redis", "assets", "tools"}
+        assert set(data.keys()) >= {"app", "config", "db", "redis", "broker", "pty", "assets", "tools"}
 
     def test_app_section_has_version_and_name(self):
         client = self._allowed_client()
@@ -3384,9 +3384,28 @@ class TestDiagRoute:
         cfg = data["config"]
         for key in ("rate_limit_enabled", "command_timeout_seconds", "max_output_lines",
                     "high_volume_output_line_threshold", "high_volume_output_status_interval_lines",
+                    "interactive_pty_input_max_bytes", "interactive_pty_control_poll_seconds",
                     "persist_full_run_output", "permalink_retention_days",
                     "share_redaction_enabled", "custom_redaction_rule_count"):
             assert key in cfg, f"missing config key: {key}"
+
+    def test_pty_section_contains_operator_metrics(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+            body = client.get("/diag").get_data(as_text=True)
+        pty = data["pty"]
+        for key in (
+            "active",
+            "completed_count",
+            "average_seconds",
+            "p95_seconds",
+            "input_bytes",
+            "dropped_input_bytes",
+            "control_queue_depth",
+        ):
+            assert key in pty
+        assert "Interactive PTY" in body
 
     def test_every_config_key_belongs_to_a_group(self):
         """Drift guard: every key emitted into result['config'] must be

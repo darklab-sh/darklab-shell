@@ -452,7 +452,7 @@ class TestInteractivePtyRuns:
 
         with mock.patch("blueprints.run.pty_run_belongs_to_session", return_value=True), \
              mock.patch("blueprints.run.stream_pty_events", return_value=iter(['data: {"type":"heartbeat"}\n\n'])), \
-             mock.patch("blueprints.run.active_run_claim_owner") as claim_owner, \
+             mock.patch("blueprints.run.claim_pty_stream_owner") as claim_owner, \
              mock.patch("blueprints.run.active_run_touch_owner") as touch_owner:
             resp = client.get(
                 "/pty/runs/pty-run-owner/stream?tab_id=tab-1",
@@ -464,12 +464,12 @@ class TestInteractivePtyRuns:
 
         assert resp.status_code == 200
         assert b"heartbeat" in resp.data
-        claim_owner.assert_called_once_with("pty-run-owner", "client-1", "tab-1")
+        claim_owner.assert_called_once_with("pty-run-owner", "sess-pty-owner", "client-1", "tab-1")
         touch_owner.assert_called_once_with("pty-run-owner", "client-1", "tab-1")
 
         with mock.patch("blueprints.run.pty_run_belongs_to_session", return_value=False), \
              mock.patch("blueprints.run.stream_pty_events", return_value=iter(['data: {"type":"error"}\n\n'])), \
-             mock.patch("blueprints.run.active_run_claim_owner") as rejected_claim_owner:
+             mock.patch("blueprints.run.claim_pty_stream_owner") as rejected_claim_owner:
             resp = client.get(
                 "/pty/runs/pty-run-other/stream?tab_id=tab-1",
                 headers={

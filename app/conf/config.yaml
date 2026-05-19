@@ -582,6 +582,42 @@
 # Server default if unset: 4
 # interactive_pty_max_concurrent_per_session: 4
 
+# Maximum number of recent PTY events retained in local single-worker mode.
+# Server default if unset: 512
+# interactive_pty_buffer_limit: 512
+
+# Maximum UTF-8 bytes accepted in one interactive PTY input/control event.
+# Server default if unset: 4096
+# interactive_pty_input_max_bytes: 4096
+
+# How often an idle local PTY stream emits a heartbeat, in seconds.
+# Server default if unset: 15
+# interactive_pty_heartbeat_seconds: 15
+
+# How often a PTY reader checks queued input/resize control events, in seconds.
+# Server default if unset: 0.2
+# interactive_pty_control_poll_seconds: 0.2
+
+# Maximum Redis PTY events read per stream poll.
+# Server default if unset: 100
+# interactive_pty_stream_fetch_count: 100
+
+# Approximate maximum Redis PTY stream length per active run.
+# Server default if unset: 5000
+# interactive_pty_stream_maxlen: 5000
+
+# PTY snapshot publish thresholds. Larger byte/second values reduce Redis
+# writes; smaller values make cross-worker reattach snapshots fresher.
+# Server defaults if unset: 8192 bytes, 1 second, minimum 0.2 seconds.
+# interactive_pty_snapshot_publish_bytes: 8192
+# interactive_pty_snapshot_publish_seconds: 1
+# interactive_pty_snapshot_min_publish_seconds: 0.2
+
+# Maximum plain fallback entries returned when an ANSI PTY snapshot is not
+# available.
+# Server default if unset: 200
+# interactive_pty_snapshot_fallback_entry_limit: 200
+
 # ── Welcome Animation ─────────────────────────────────────────────────────────
 
 # Base delay between each typed character in the welcome animation (milliseconds).

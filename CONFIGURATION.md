@@ -207,6 +207,16 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `interactive_pty_enabled` | `false` | Enables the guarded interactive PTY path for allowlisted tools such as `nc --interactive`, `telnet --interactive`, `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`. Multi-worker deployments require Redis so PTY output, input, and resize events can be brokered across workers; without Redis this mode is limited to `WEB_CONCURRENCY=1` |
 | `interactive_pty_max_runtime_seconds` | `900` | Maximum lifetime for an interactive PTY command before the server terminates it |
 | `interactive_pty_max_concurrent_per_session` | `4` | Maximum number of active interactive PTY commands one browser session can run at the same time |
+| `interactive_pty_buffer_limit` | `512` | Maximum in-memory PTY events kept per local active run before older live events are dropped from the local fallback buffer |
+| `interactive_pty_input_max_bytes` | `4096` | Maximum UTF-8 bytes accepted in one PTY input request before pasted or typed input is truncated |
+| `interactive_pty_heartbeat_seconds` | `15` | Idle heartbeat interval for PTY event streams |
+| `interactive_pty_control_poll_seconds` | `0.2` | How often the PTY owner checks for queued input and resize events |
+| `interactive_pty_stream_fetch_count` | `100` | Maximum Redis PTY stream entries read per fetch while serving a PTY event stream |
+| `interactive_pty_stream_maxlen` | `5000` | Approximate maximum Redis PTY output-stream entries retained per active run |
+| `interactive_pty_snapshot_publish_bytes` | `8192` | Output-byte threshold that makes the PTY owner refresh the shared terminal snapshot |
+| `interactive_pty_snapshot_publish_seconds` | `1` | Maximum interval between shared PTY snapshot refreshes while output continues |
+| `interactive_pty_snapshot_min_publish_seconds` | `0.2` | Minimum interval between shared PTY snapshot refreshes, even during heavy output bursts |
+| `interactive_pty_snapshot_fallback_entry_limit` | `200` | Maximum plain-text fallback entries returned when an ANSI terminal snapshot is unavailable |
 | `welcome_char_ms` | `18` | Base delay between each typed character in the welcome animation, in milliseconds. Lower means faster typing |
 | `welcome_jitter_ms` | `12` | Random extra delay added per character, in milliseconds. `0` means perfectly even typing; higher values feel more organic |
 | `welcome_post_cmd_ms` | `650` | Pause after a welcome command finishes typing, before the next visual step begins |
