@@ -228,6 +228,7 @@ def load_config(conf_dir=None):
         "max_entity_labels_per_entity": 20,
         "max_entity_notes_per_session": 2000,
         "evidence_package_max_mb":    25,
+        "evidence_package_max_uncompressed_mb": 500,
         "evidence_package_max_artifacts": 100,
         "evidence_package_download_rate_limit_per_minute": 10,
         "evidence_package_download_rate_limit_per_second": 2,

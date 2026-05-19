@@ -2613,7 +2613,20 @@ describe('shell chrome project workspace', () => {
           }),
         })
       }
-      if (url === '/projects/project-1/packages/pkg-1/download') {
+      if (url === '/projects/project-1/packages/pkg-1/download-jobs' && options.method === 'POST') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            job: {
+              id: 'epj_1234567890abcdef12345678',
+              status: 'complete',
+              message: 'Archive ready',
+            },
+          }),
+        })
+      }
+      if (url === '/projects/project-1/packages/pkg-1/download-jobs/epj_1234567890abcdef12345678/download') {
         return Promise.resolve({
           ok: true,
           blob: () => packageDownloadBlob,
@@ -3245,13 +3258,20 @@ describe('shell chrome project workspace', () => {
     await tick()
     await tick()
     expect(apiFetch).toHaveBeenCalledWith(
-      '/projects/project-1/packages/pkg-1/download',
+      '/projects/project-1/packages/pkg-1/download-jobs',
+      { method: 'POST', cache: 'no-store' },
+    )
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/projects/project-1/packages/pkg-1/download-jobs/epj_1234567890abcdef12345678/download',
       { cache: 'no-store' },
     )
     expect(packageDownloadButton.disabled).toBe(true)
     expect(packageDownloadButton.classList.contains('is-preparing')).toBe(true)
     expect(packageDownloadButton.getAttribute('aria-busy')).toBe('true')
-    expect(packageDownloadButton.textContent).toBe('Preparing...')
+    expect(packageDownloadButton.textContent).toBe('Preparing archive...')
+    expect(document.getElementById('project-workspace-message').textContent).toContain(
+      'Preparing package archive',
+    )
     expect(globalThis.URL.createObjectURL).not.toHaveBeenCalled()
     resolvePackageDownloadBlob(new Blob(['package zip'], { type: 'application/zip' }))
     await tick()
@@ -3322,6 +3342,32 @@ describe('shell chrome project workspace', () => {
     expect(document.getElementById('project-package-wizard-overlay').classList.contains('open')).toBe(true)
     expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Preset')
     expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Evidence')
+    const fullPreset = document.querySelector('input[name="project-package-preset"][value="full"]')
+    fullPreset.checked = true
+    fullPreset.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    document.querySelector('[data-project-action="package-wizard-next"]').click()
+    await tick()
+    expect(document.querySelector('[data-project-package-selection="transcript"][value="run-1"]').checked).toBe(true)
+    expect(document.querySelector('[data-project-package-selection="transcript"][value="run-2"]').checked).toBe(true)
+    document.querySelector(
+      '[data-project-action="package-wizard-bulk-selection"][data-bulk-kind="transcript"][data-bulk-mode="clear"]',
+    ).click()
+    await tick()
+    expect(document.querySelector('[data-project-package-selection="transcript"][value="run-1"]').checked).toBe(false)
+    expect(document.querySelector('[data-project-package-selection="transcript"][value="run-2"]').checked).toBe(false)
+    document.querySelector(
+      '[data-project-action="package-wizard-bulk-selection"][data-bulk-kind="transcript"][data-bulk-mode="select"]',
+    ).click()
+    await tick()
+    expect(document.querySelector('[data-project-package-selection="transcript"][value="run-1"]').checked).toBe(true)
+    expect(document.querySelector('[data-project-package-selection="transcript"][value="run-2"]').checked).toBe(true)
+    document.querySelector('[data-project-action="package-wizard-back"]').click()
+    await tick()
+    const evidencePreset = document.querySelector('input[name="project-package-preset"][value="evidence"]')
+    evidencePreset.checked = true
+    evidencePreset.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
     const packageLabels = document.querySelector('[data-project-package-field="labels"]')
     const packageNotes = document.querySelector('[data-project-package-field="notes"]')
     expect(packageLabels).not.toBeNull()
@@ -3335,6 +3381,36 @@ describe('shell chrome project workspace', () => {
     expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Include')
     expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Findings (2)')
     expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Artifacts (1)')
+    expect(document.querySelectorAll('.project-package-bulk-menu')).toHaveLength(2)
+    const firstBulkMenu = document.querySelector('.project-package-bulk-menu')
+    firstBulkMenu.open = true
+    firstBulkMenu.dispatchEvent(new FocusEvent('focusout', {
+      bubbles: true,
+      relatedTarget: document.querySelector('[data-project-action="package-wizard-next"]'),
+    }))
+    expect(firstBulkMenu.open).toBe(false)
+    document.querySelector(
+      '[data-project-action="package-wizard-bulk-selection"][data-bulk-kind="finding"][data-bulk-mode="clear"]',
+    ).click()
+    await tick()
+    expect(document.querySelector('[data-project-package-selection="finding"][value="finding-1"]').checked).toBe(false)
+    expect(document.querySelector('[data-project-package-selection="finding"][value="finding-2"]').checked).toBe(false)
+    document.querySelector(
+      '[data-project-action="package-wizard-bulk-selection"][data-bulk-kind="finding"][data-bulk-mode="select"]',
+    ).click()
+    await tick()
+    expect(document.querySelector('[data-project-package-selection="finding"][value="finding-1"]').checked).toBe(true)
+    expect(document.querySelector('[data-project-package-selection="finding"][value="finding-2"]').checked).toBe(true)
+    document.querySelector(
+      '[data-project-action="package-wizard-bulk-selection"][data-bulk-kind="target"][data-bulk-mode="clear"]',
+    ).click()
+    await tick()
+    expect(document.querySelector('[data-project-package-selection="target"][value="target-1"]').checked).toBe(false)
+    document.querySelector(
+      '[data-project-action="package-wizard-bulk-selection"][data-bulk-kind="target"][data-bulk-mode="select"]',
+    ).click()
+    await tick()
+    expect(document.querySelector('[data-project-package-selection="target"][value="target-1"]').checked).toBe(true)
     expectProjectPressablesBound(['.project-package-run-toggle'])
     expect(document.querySelector('[data-project-package-selection="artifact"][value="artifact-2"]').checked).toBe(false)
     let run2Group = document.querySelector('[data-project-package-selection="run"][value="run-2"]')
@@ -3387,7 +3463,7 @@ describe('shell chrome project workspace', () => {
     expect(document.querySelector('.project-package-preview-json')?.textContent).toContain('"artifacts": 1')
     expect(document.querySelector('.project-package-preview-json')?.textContent).toContain('"estimated_archive"')
     expect(document.querySelector('.project-package-preview-json')?.textContent).toContain('"transcript_run_ids"')
-    expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Estimated package size before compression')
+    expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Best-guess ZIP size')
     document.querySelector('[data-project-action="package-wizard-next"]').click()
     await tick()
     await tick()

@@ -343,6 +343,9 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | `POST` | `/projects/<project_id>/packages` | Creates a draft evidence package manifest from current project records, with optional package labels/notes. |
 | `GET` | `/projects/<project_id>/packages/<package_id>` | Returns one draft evidence package manifest. |
 | `GET` | `/projects/<project_id>/packages/<package_id>/download` | Downloads one draft evidence package archive. |
+| `POST` | `/projects/<project_id>/packages/<package_id>/download-jobs` | Starts a polled evidence package archive build job. |
+| `GET` | `/projects/<project_id>/packages/<package_id>/download-jobs/<job_id>` | Returns the current archive build job status. |
+| `GET` | `/projects/<project_id>/packages/<package_id>/download-jobs/<job_id>/download` | Downloads a completed archive build job and cleans up the temporary archive. |
 | `DELETE` | `/projects/<project_id>/packages/<package_id>` | Deletes one draft evidence package manifest. |
 | `GET` | `/projects/<project_id>/artifacts` | Lists project-linked run artifacts in bounded pages with optional run and target filters. |
 | `GET` | `/projects/<project_id>/artifacts/<artifact_id>/preview` | Returns text preview content for one project-linked run artifact. |
@@ -716,7 +719,7 @@ flowchart TB
 - The infrastructure/helper layer owns shared concerns like request metadata, persistence, process tracking, permalink shaping, artifact storage, and the Flask-Limiter singleton.
 - `commands.py` and `builtin_commands.py` stay logically adjacent to the run path but remain separate from the Flask factory so command policy and shell-helper behavior can be tested in isolation.
 - The HTTP layer owns the actual request/response surface across assets/content, run streaming, history/share, session-token/session-state APIs, workspace-file APIs, and project workspace APIs. `app.py` remains a thin factory that composes logging, limiter setup, blueprint registration, and request hooks.
-- Project workspace service code keeps active project helpers in `services.projects.active`, run-file artifact ingestion/checksum/availability helpers in `services.projects.artifacts`, project run comparison helpers in `services.projects.comparisons`, project create/update/delete helpers in `services.projects.crud`, project/run finding ingestion, query, and review helpers in `services.projects.findings`, project link and run-entity link helpers in `services.projects.links`, metadata helpers in `services.projects.metadata`, session migration helpers in `services.projects.migration`, row/payload shaping helpers in `services.projects.models`, evidence package create/delete/archive helpers in `services.projects.package_archive`, evidence package export rendering helpers in `services.projects.package_rendering`, evidence package manifest/redaction helpers in `services.projects.packages`, preference helpers in `services.projects.preferences`, project list/summary/entity/run/artifact query helpers in `services.projects.queries`, slug allocation helpers in `services.projects.slugs`, project target validation/discovery/mutation helpers in `services.projects.targets`, and shared ID/timestamp/quota helpers in `services.projects.utils`. `services.projects.workspace` stays as a compatibility export layer for callers while the project service split settles.
+- Project workspace service code keeps active project helpers in `services.projects.active`, run-file artifact ingestion/checksum/availability helpers in `services.projects.artifacts`, project run comparison helpers in `services.projects.comparisons`, project create/update/delete helpers in `services.projects.crud`, project/run finding ingestion, query, and review helpers in `services.projects.findings`, project link and run-entity link helpers in `services.projects.links`, metadata helpers in `services.projects.metadata`, session migration helpers in `services.projects.migration`, row/payload shaping helpers in `services.projects.models`, evidence package create/delete/archive helpers in `services.projects.package_archive`, evidence package archive build job helpers in `services.projects.package_jobs`, evidence package export rendering helpers in `services.projects.package_rendering`, evidence package manifest/redaction helpers in `services.projects.packages`, preference helpers in `services.projects.preferences`, project list/summary/entity/run/artifact query helpers in `services.projects.queries`, slug allocation helpers in `services.projects.slugs`, project target validation/discovery/mutation helpers in `services.projects.targets`, and shared ID/timestamp/quota helpers in `services.projects.utils`. `services.projects.workspace` stays as a compatibility export layer for callers while the project service split settles.
 
 ### Backend Runtime Boundaries
 
@@ -874,7 +877,7 @@ Workspace-aware validation in **Run Lifecycle** rewrites declared file and direc
 
 Project workspace tables are the relationship foundation for case-style grouping. Projects link to completed runs and Atlas entities instead of copying them, so source records can remain usable outside any project and can belong to more than one project when that is useful. Snapshots and manually selected workspace files remain in their share/history/files surfaces and are not project-linked. Run-owned artifacts stay attached to their source run and surface in project views through linked runs; findings surface through linked runs or linked Atlas entities so entity-first triage and project triage stay aligned.
 
-`project_links` is a generic membership table `(project_id, entity_type, entity_id)` shared across `run` and `atlas_entity` entity types — there is no parallel per-feature membership table. Atlas-entity links also carry target-list metadata such as source, confidence, review state, and source detail so the Projects modal can keep its target workflow without a separate target table. Evidence packages (`evidence_packages`) record draft package manifests scoped to a project and session, capture redaction mode and artifact-inclusion preference, and export the manifest plus any still-available selected workspace artifacts as a downloadable archive. Project-level labels and notes use the generic `entity_labels` / `entity_notes` tables with `entity_type='project'`.
+`project_links` is a generic membership table `(project_id, entity_type, entity_id)` shared across `run` and `atlas_entity` entity types — there is no parallel per-feature membership table. Atlas-entity links also carry target-list metadata such as source, confidence, review state, and source detail so the Projects modal can keep its target workflow without a separate target table. Evidence packages (`evidence_packages`) record draft package manifests scoped to a project and session, capture redaction mode and artifact-inclusion preference, and export the manifest plus still-available selected workspace artifacts as raw files for raw packages or redacted text/JSON derivatives for redacted packages. Package builds enforce both a final ZIP-size cap and a larger expanded-content cap before compression, so highly compressible transcript packages can still export while runaway selections stay bounded. Long archive downloads can be built through filesystem-backed package jobs under the app data directory so the browser can poll progress before downloading the completed ZIP. Project-level labels and notes use the generic `entity_labels` / `entity_notes` tables with `entity_type='project'`.
 
 The full route surface is enumerated in **HTTP Route Inventory →  → Project Routes**. Schema shapes for `projects`, `project_links`, and `evidence_packages` live in **State And Persistence →  → Database**. Atlas entity linkage from the project side is covered in **Atlas and Entity Model**.
 
@@ -1463,10 +1466,10 @@ Current totals:
 
 - behavior tests: 2,902
 - docs/inventory meta-tests: 32
-- `pytest`: 1507 (1475 behavior + 32 meta)
+- `pytest`: 1508 (1476 behavior + 32 meta)
 - `vitest`: 1177
 - `playwright`: 252
-- total: 2,936
+- total: 2,937
 
 ### Testing Architecture
 

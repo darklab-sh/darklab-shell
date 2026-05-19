@@ -53,6 +53,12 @@ from services.projects.package_archive import (
     create_evidence_package,
     delete_evidence_package,
 )
+from services.projects.package_jobs import (
+    discard_evidence_package_archive_job,
+    evidence_package_archive_for_job,
+    get_evidence_package_archive_job,
+    start_evidence_package_archive_job,
+)
 from services.projects.queries import (
     get_evidence_package,
     get_project,
@@ -656,6 +662,75 @@ def projects_packages_download(project_id, package_id):
             os.unlink(archive_path)
         except OSError:
             pass
+
+    return response
+
+
+@projects_bp.route("/projects/<project_id>/packages/<package_id>/download-jobs", methods=["POST"])
+@limiter.limit(_evidence_package_download_limit)
+def projects_packages_download_job_create(project_id, package_id):
+    session_id = get_session_id()
+    if get_evidence_package(session_id, project_id, package_id) is None:
+        return jsonify({"error": "package not found"}), 404
+    job = start_evidence_package_archive_job(session_id, project_id, package_id, cfg=CFG)
+    job_id = str(job.get("id") or "") if isinstance(job, dict) else ""
+    log.info("EVIDENCE_PACKAGE_BUILD_JOB_STARTED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "project_id": project_id,
+        "package_id": package_id,
+        "job_id": job_id,
+    })
+    return jsonify({"ok": True, "job": job}), 202
+
+
+@projects_bp.route("/projects/<project_id>/packages/<package_id>/download-jobs/<job_id>")
+def projects_packages_download_job_get(project_id, package_id, job_id):
+    session_id = get_session_id()
+    job = get_evidence_package_archive_job(session_id, project_id, package_id, job_id)
+    if job is None:
+        return jsonify({"error": "package build job not found"}), 404
+    return jsonify({"job": job})
+
+
+@projects_bp.route("/projects/<project_id>/packages/<package_id>/download-jobs/<job_id>/download")
+@limiter.limit(_evidence_package_download_limit)
+def projects_packages_download_job_file(project_id, package_id, job_id):
+    session_id = get_session_id()
+    archive = evidence_package_archive_for_job(session_id, project_id, package_id, job_id)
+    if archive is None:
+        return jsonify({"error": "package build job not found"}), 404
+    status = archive.get("status")
+    if status != "complete":
+        status_code = 409 if status not in {"failed"} else 400
+        return jsonify({"error": archive.get("error") or "package archive is not ready", "status": status}), status_code
+    metrics_value = archive.get("metrics")
+    metrics = metrics_value if isinstance(metrics_value, dict) else {}
+    log_extra = {
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "project_id": project_id,
+        "package_id": package_id,
+        "job_id": job_id,
+        "archive_bytes": int(archive.get("archive_bytes") or 0),
+        "skipped_artifacts": int(archive.get("skipped_artifacts") or 0),
+    }
+    log_extra.update(metrics)
+    log.info("EVIDENCE_PACKAGE_BUILD_JOB_DOWNLOADED", extra=log_extra)
+    try:
+        response = send_file(
+            archive["path"],
+            mimetype=archive["mimetype"],
+            as_attachment=True,
+            download_name=archive["filename"],
+        )
+    except Exception:
+        discard_evidence_package_archive_job(job_id)
+        raise
+
+    @response.call_on_close
+    def _cleanup_evidence_package_archive_job():
+        discard_evidence_package_archive_job(job_id)
 
     return response
 

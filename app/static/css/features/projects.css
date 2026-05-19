@@ -2496,11 +2496,17 @@ button.project-explorer-item:focus-visible,
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 
 
 .project-package-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 5px 9px;
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -2508,6 +2514,25 @@ button.project-explorer-item:focus-visible,
   background: var(--surface);
   font-family: var(--font-mono);
   font-size: 11px;
+}
+
+
+
+.project-package-step-number {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1;
+}
+
+
+
+.project-package-step-label {
+  line-height: 1.1;
 }
 
 
@@ -2592,6 +2617,12 @@ button.project-explorer-item:focus-visible,
   font-family: var(--font-ui);
   font-size: 12px;
   line-height: 1.35;
+}
+
+
+
+.project-package-wizard-note.is-warning {
+  color: var(--amber);
 }
 
 
@@ -2682,6 +2713,73 @@ button.project-explorer-item:focus-visible,
 
 
 
+.project-package-selection-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 3px;
+  overflow: visible;
+}
+
+
+
+.project-package-selection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  overflow: visible;
+}
+
+
+
+.project-package-bulk-menu {
+  position: relative;
+  overflow: visible;
+}
+
+
+
+.project-package-bulk-menu > summary {
+  list-style: none;
+}
+
+
+
+.project-package-bulk-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+
+
+.project-package-bulk-menu-trigger::after {
+  content: ' ▾';
+  color: var(--muted);
+}
+
+
+
+.project-package-bulk-menu-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  display: none;
+  min-width: 150px;
+  padding: 4px;
+}
+
+
+
+.project-package-bulk-menu[open] .project-package-bulk-menu-list {
+  display: grid;
+  gap: 2px;
+}
+
+
+
 .project-package-run-selection {
   display: grid;
   gap: 7px;
@@ -2692,7 +2790,7 @@ button.project-explorer-item:focus-visible,
 
 .project-package-run-header {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -2700,6 +2798,12 @@ button.project-explorer-item:focus-visible,
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--theme-chrome-row-bg);
+}
+
+
+
+.project-package-run-header > .project-package-selection-row {
+  min-width: 0;
 }
 
 

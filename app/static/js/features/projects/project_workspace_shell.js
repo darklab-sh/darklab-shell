@@ -34,7 +34,7 @@
       return true;
     }
 
-    function setMessage(text = '', { error = false } = {}) {
+    function setMessage(text = '', { error = false, toast = true } = {}) {
       if (!ctx.projectWorkspaceMessage) return;
       let messageText = ctx.projectWorkspaceMessage.querySelector('.project-workspace-message-text');
       if (!messageText) {
@@ -49,7 +49,7 @@
         dismiss.textContent = '\u2715';
         ctx.projectWorkspaceMessage.append(messageText, dismiss);
       }
-      if (text && !error && showWorkspaceToast(text)) {
+      if (text && !error && toast && showWorkspaceToast(text)) {
         messageText.textContent = '';
         ctx.projectWorkspaceMessage.classList.add('u-hidden');
         ctx.projectWorkspaceMessage.classList.remove('is-error');

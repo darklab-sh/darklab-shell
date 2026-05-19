@@ -5,6 +5,7 @@ Evidence package helpers for project workspaces.
 from __future__ import annotations
 
 import json
+from pathlib import PurePosixPath
 import re
 
 import config as _config
@@ -22,6 +23,32 @@ from services.projects.contracts import (
 from services.projects.utils import cfg_int as _cfg_int
 from services.projects.utils import cfg_mb_bytes as _cfg_mb_bytes
 from services.projects.utils import trim_text as _trim_text
+
+
+_TEXT_ARTIFACT_PREVIEW_TYPES = {"text", "json", "markdown", "csv", "log", "xml", "yaml", "yml"}
+_TEXT_ARTIFACT_EXTENSIONS = {
+    ".csv",
+    ".htm",
+    ".html",
+    ".json",
+    ".jsonl",
+    ".log",
+    ".md",
+    ".ndjson",
+    ".txt",
+    ".xml",
+    ".yaml",
+    ".yml",
+}
+_TEXT_ARTIFACT_CONTENT_MARKERS = (
+    "text/",
+    "application/json",
+    "application/ld+json",
+    "application/xml",
+    "application/x-ndjson",
+    "application/yaml",
+    "application/x-yaml",
+)
 
 
 def row_to_evidence_package(row):
@@ -62,7 +89,7 @@ def normalize_evidence_package_payload(data):
     if redaction_mode not in {"raw", "redacted"}:
         raise ProjectWorkspaceError("package redaction mode must be raw or redacted")
     include_artifacts = bool(data.get("include_artifacts"))
-    if redaction_mode == "redacted" or not bool(_config.CFG.get("workspace_enabled", False)):
+    if not bool(_config.CFG.get("workspace_enabled", False)):
         include_artifacts = False
     labels = []
     raw_labels = data.get("labels")
@@ -94,6 +121,44 @@ def normalize_evidence_package_payload(data):
         "labels": labels,
         "notes": _trim_text(data.get("notes"), MAX_ENTITY_NOTE_BODY_LEN),
     }
+
+
+def redacted_artifact_derivative_reason(artifact):
+    """Return a reason when an artifact cannot be included as a redacted derivative."""
+    if not isinstance(artifact, dict):
+        return "Artifact metadata is unavailable."
+    status = str(artifact.get("file_status") or "available")
+    if status != "available":
+        return str(artifact.get("file_status_detail") or "Artifact is unavailable or changed.")
+    preview_type = str(artifact.get("preview_type") or "").strip().lower()
+    if preview_type in _TEXT_ARTIFACT_PREVIEW_TYPES:
+        return ""
+    content_type = str(artifact.get("content_type") or "").strip().lower()
+    if content_type and any(marker in content_type for marker in _TEXT_ARTIFACT_CONTENT_MARKERS):
+        return ""
+    workspace_path = str(artifact.get("workspace_path") or artifact.get("display_name") or "")
+    suffix = PurePosixPath(workspace_path.replace("\\", "/")).suffix.lower()
+    if suffix in _TEXT_ARTIFACT_EXTENSIONS:
+        return ""
+    return "Artifact is not a text or JSON type that can be safely redacted."
+
+
+def redacted_artifact_derivative_warnings(selected_artifacts):
+    warnings = []
+    for artifact in selected_artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        reason = redacted_artifact_derivative_reason(artifact)
+        if not reason:
+            continue
+        warnings.append({
+            "kind": "artifact",
+            "id": artifact.get("id") or "",
+            "label": artifact.get("display_name") or artifact.get("workspace_path") or artifact.get("id") or "",
+            "workspace_path": artifact.get("workspace_path") or "",
+            "reason": reason,
+        })
+    return warnings
 
 
 def normalized_package_selection_ids(selection, key, allowed_ids):
@@ -130,22 +195,92 @@ def _estimate_package_run_line_count(run):
         return 0
 
 
+def _estimate_package_run_full_output_bytes(run):
+    for key in ("full_output_byte_size", "full_output_bytes", "output_artifact_byte_size"):
+        try:
+            value = int((run or {}).get(key) or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value > 0:
+            return value
+    return 0
+
+
+def _estimate_transcript_html_bytes(line_count, max_lines):
+    capped_lines = min(max(0, line_count), max(1, max_lines))
+    return 8192 + capped_lines * 240
+
+
+def _estimate_transcript_text_companion_bytes(run, line_count):
+    if line_count <= 0:
+        return 0
+    full_output_bytes = _estimate_package_run_full_output_bytes(run)
+    if full_output_bytes > 0:
+        return max(line_count, int(full_output_bytes * 0.65))
+    return line_count * 48
+
+
+def _estimate_text_zip_bytes(value):
+    safe_value = max(0, value)
+    if not safe_value:
+        return 0
+    return max(1024, int(safe_value * 0.4))
+
+
 def estimate_evidence_package_archive(selected_runs, selected_findings, selected_artifacts, selected_targets, payload):
     max_lines = _cfg_int("max_output_lines", 5000) or 5000
     max_archive_bytes = _cfg_mb_bytes("evidence_package_max_mb", 25)
-    raw_artifacts_enabled = bool(payload.get("include_artifacts"))
+    max_uncompressed_archive_bytes = _cfg_mb_bytes("evidence_package_max_uncompressed_mb", 500)
+    redaction_mode = str(payload.get("redaction_mode") or "raw")
+    include_artifacts = bool(payload.get("include_artifacts"))
+    raw_artifacts_enabled = include_artifacts and redaction_mode != "redacted"
+    redacted_artifacts_enabled = include_artifacts and redaction_mode == "redacted"
     raw_artifact_bytes = 0
+    redacted_artifact_bytes = 0
+    redacted_artifact_count_estimate = 0
     skipped_artifact_count_estimate = 0
-    if raw_artifacts_enabled:
+    artifact_warnings = []
+    if raw_artifacts_enabled or redacted_artifacts_enabled:
         for artifact in selected_artifacts:
             status = str((artifact or {}).get("file_status") or "available")
             if status != "available":
                 skipped_artifact_count_estimate += 1
+                artifact_warnings.append({
+                    "kind": "artifact",
+                    "id": (artifact or {}).get("id") or "",
+                    "label": (artifact or {}).get("display_name") or (artifact or {}).get("workspace_path") or "",
+                    "workspace_path": (artifact or {}).get("workspace_path") or "",
+                    "reason": (artifact or {}).get("file_status_detail") or "Artifact is unavailable or changed.",
+                })
                 continue
             try:
-                raw_artifact_bytes += max(0, int((artifact or {}).get("byte_size") or 0))
+                artifact_bytes = max(0, int((artifact or {}).get("byte_size") or 0))
             except (TypeError, ValueError):
                 skipped_artifact_count_estimate += 1
+                artifact_warnings.append({
+                    "kind": "artifact",
+                    "id": (artifact or {}).get("id") or "",
+                    "label": (artifact or {}).get("display_name") or (artifact or {}).get("workspace_path") or "",
+                    "workspace_path": (artifact or {}).get("workspace_path") or "",
+                    "reason": "Artifact size is unavailable.",
+                })
+                continue
+            if raw_artifacts_enabled:
+                raw_artifact_bytes += artifact_bytes
+                continue
+            reason = redacted_artifact_derivative_reason(artifact)
+            if reason:
+                skipped_artifact_count_estimate += 1
+                artifact_warnings.append({
+                    "kind": "artifact",
+                    "id": (artifact or {}).get("id") or "",
+                    "label": (artifact or {}).get("display_name") or (artifact or {}).get("workspace_path") or "",
+                    "workspace_path": (artifact or {}).get("workspace_path") or "",
+                    "reason": reason,
+                })
+                continue
+            redacted_artifact_bytes += artifact_bytes
+            redacted_artifact_count_estimate += 1
 
     transcript_html_bytes = 0
     transcript_text_companion_bytes = 0
@@ -161,9 +296,9 @@ def estimate_evidence_package_archive(selected_runs, selected_findings, selected
     ]
     for run in transcript_runs:
         line_count = _estimate_package_run_line_count(run)
-        transcript_html_bytes += 4096 + min(line_count, max_lines) * 120
+        transcript_html_bytes += _estimate_transcript_html_bytes(line_count, max_lines)
         if line_count > max_lines:
-            transcript_text_companion_bytes += line_count * 96
+            transcript_text_companion_bytes += _estimate_transcript_text_companion_bytes(run, line_count)
 
     metadata_seed = {
         "runs": selected_runs,
@@ -179,16 +314,34 @@ def estimate_evidence_package_archive(selected_runs, selected_findings, selected
     except (TypeError, ValueError):
         metadata_bytes = 0
     metadata_bytes += 16 * 1024
-    estimated_uncompressed_bytes = (
+    required_archive_bytes = (
         raw_artifact_bytes
+        + redacted_artifact_bytes
         + transcript_html_bytes
-        + transcript_text_companion_bytes
         + metadata_bytes
     )
+    estimated_uncompressed_bytes = required_archive_bytes + transcript_text_companion_bytes
+    estimated_compressed_archive_bytes = (
+        raw_artifact_bytes
+        + _estimate_text_zip_bytes(redacted_artifact_bytes)
+        + _estimate_text_zip_bytes(transcript_html_bytes)
+        + _estimate_text_zip_bytes(metadata_bytes)
+    )
+    estimated_compressed_archive_bytes_with_optional_companions = (
+        estimated_compressed_archive_bytes
+        + _estimate_text_zip_bytes(transcript_text_companion_bytes)
+    )
     return {
-        "estimated_uncompressed_bytes": estimated_uncompressed_bytes,
-        "estimated_archive_bytes": estimated_uncompressed_bytes,
+        "estimated_uncompressed_bytes": required_archive_bytes,
+        "estimated_archive_bytes": required_archive_bytes,
+        "estimated_uncompressed_bytes_with_optional_companions": estimated_uncompressed_bytes,
+        "estimated_compressed_archive_bytes": estimated_compressed_archive_bytes,
+        "estimated_compressed_archive_bytes_with_optional_companions": (
+            estimated_compressed_archive_bytes_with_optional_companions
+        ),
         "raw_artifact_bytes": raw_artifact_bytes,
+        "redacted_artifact_bytes": redacted_artifact_bytes,
+        "redacted_artifact_count_estimate": redacted_artifact_count_estimate,
         "transcript_html_bytes": transcript_html_bytes,
         "transcript_text_companion_bytes": transcript_text_companion_bytes,
         "metadata_bytes": metadata_bytes,
@@ -196,8 +349,14 @@ def estimate_evidence_package_archive(selected_runs, selected_findings, selected
         "selected_transcript_count": len(transcript_runs),
         "selected_artifact_count": len(selected_artifacts),
         "skipped_artifact_count_estimate": skipped_artifact_count_estimate,
+        "artifact_warnings": artifact_warnings,
         "max_archive_bytes": max_archive_bytes,
-        "note": "Pre-build estimate before ZIP compression; final download enforces archive caps and drift checks.",
+        "max_compressed_archive_bytes": max_archive_bytes,
+        "max_uncompressed_archive_bytes": max_uncompressed_archive_bytes,
+        "note": (
+            "Best-guess pre-build estimate before ZIP compression; "
+            "final download enforces ZIP, expanded-content, and drift checks."
+        ),
     }
 
 
@@ -254,12 +413,21 @@ def evidence_manifest_from_summary(summary, payload, findings=None):
     selected_findings = _filter_package_items(findings, finding_ids)
     selected_artifacts = _filter_package_items(summary.get("artifacts", []), artifact_ids)
     selected_targets = _filter_package_items(summary.get("targets", []), target_ids)
+    include_raw_artifacts = bool(payload["include_artifacts"] and payload["redaction_mode"] != "redacted")
+    include_redacted_artifact_derivatives = bool(
+        payload["include_artifacts"] and payload["redaction_mode"] == "redacted"
+    )
     output_options = {
         "manifest_json": True,
         "index_html": True,
         "transcripts_html": bool(transcript_run_ids),
-        "raw_artifacts": bool(payload["include_artifacts"]),
+        "raw_artifacts": include_raw_artifacts,
+        "redacted_artifact_derivatives": include_redacted_artifact_derivatives,
     }
+    artifact_warnings = (
+        redacted_artifact_derivative_warnings(selected_artifacts)
+        if include_redacted_artifact_derivatives else []
+    )
     project_payload = {
         "id": summary["project"]["id"],
         "name": summary["project"]["name"],
@@ -301,6 +469,7 @@ def evidence_manifest_from_summary(summary, payload, findings=None):
         "findings": selected_findings,
         "targets": selected_targets,
         "artifacts": selected_artifacts,
+        "artifact_warnings": artifact_warnings,
         "redaction_mode": payload["redaction_mode"],
         "include_artifacts": payload["include_artifacts"],
     }

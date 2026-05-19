@@ -559,8 +559,12 @@ def get_project_summary(session_id, project_id):
             placeholders = ",".join("?" for _ in run_ids)
             run_rows = conn.execute(
                 "SELECT r.id, r.command, r.started, r.finished, r.exit_code, r.output_line_count, "
+                "r.full_output_available, r.full_output_truncated, "
+                "art.byte_size AS output_artifact_byte_size, "
+                "art.line_count AS output_artifact_line_count, "
                 "l.created, l.source AS link_source "
                 "FROM project_links l JOIN runs r ON r.id = l.entity_id "
+                "LEFT JOIN run_output_artifacts art ON art.run_id = r.id "
                 "WHERE l.project_id = ? AND l.entity_type = 'run' AND r.session_id = ? "
                 "AND r.run_kind = ? "
                 "ORDER BY r.started DESC, l.created DESC",
@@ -923,8 +927,12 @@ def list_project_runs(session_id, project_id, *, limit=50, offset=0):
         total = int(total_row["count"] or 0) if total_row else 0
         rows = conn.execute(
             "SELECT r.id, r.command, r.started, r.finished, r.exit_code, r.output_line_count, "
+            "r.full_output_available, r.full_output_truncated, "
+            "art.byte_size AS output_artifact_byte_size, "
+            "art.line_count AS output_artifact_line_count, "
             "l.created, l.source AS link_source "
             "FROM project_links l JOIN runs r ON r.id = l.entity_id "
+            "LEFT JOIN run_output_artifacts art ON art.run_id = r.id "
             "WHERE l.project_id = ? AND l.entity_type = 'run' AND r.session_id = ? "
             "AND r.run_kind = ? "
             "ORDER BY r.started DESC, l.created DESC "

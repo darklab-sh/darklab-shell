@@ -189,8 +189,9 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `max_entity_labels_per_session` | `5000` | Server-side only. Maximum entity labels one session can create |
 | `max_entity_labels_per_entity` | `20` | Server-side only. Maximum labels attached to a single supported entity |
 | `max_entity_notes_per_session` | `2000` | Server-side only. Maximum one-note-per-entity records one session can create |
-| `evidence_package_max_mb` | `25 MB` | Server-side only. Maximum uncompressed evidence package archive size before download is rejected |
-| `evidence_package_max_artifacts` | `100` | Server-side only. Maximum workspace artifacts included in one evidence package archive |
+| `evidence_package_max_mb` | `25 MB` | Maximum final ZIP size for an evidence package download. The package wizard shows a best-guess ZIP estimate before the archive is built, and the server enforces the actual compressed size before returning the file |
+| `evidence_package_max_uncompressed_mb` | `500 MB` | Maximum expanded evidence package content before ZIP compression. This keeps very large transcript or artifact selections bounded even when the final ZIP would compress well |
+| `evidence_package_max_artifacts` | `100` | Maximum workspace artifacts included in one evidence package archive. The package wizard also uses this value when presenting archive constraints |
 | `evidence_package_download_rate_limit_per_minute` | `10` | Server-side only. Per-session evidence package download limit per minute |
 | `evidence_package_download_rate_limit_per_second` | `2` | Server-side only. Per-session evidence package download burst limit per second |
 | `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` means disabled |

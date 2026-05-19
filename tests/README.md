@@ -24,10 +24,10 @@ Current totals:
 
 - behavior tests: 2,902
 - docs/inventory meta-tests: 32
-- `pytest`: 1507 (1475 behavior + 32 meta)
+- `pytest`: 1508 (1476 behavior + 32 meta)
 - `vitest`: 1177
 - `playwright`: 252
-- total: 2,936
+- total: 2,937
 
 This document is organized in two parts:
 
@@ -1103,6 +1103,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestProjectRoutes.test_redacted_evidence_package_redacts_manifest_and_transcripts` | Verifies redacted evidence packages redact manifests, static pages, and run transcripts while excluding raw artifacts. |
 | `TestProjectRoutes.test_project_workspace_write_quotas_return_conflict` | Verifies project workspace quotas return conflict responses without blocking idempotent writes. |
 | `TestProjectRoutes.test_evidence_package_download_enforces_size_limit` | Verifies evidence package downloads refuse archives that exceed the configured size cap. |
+| `TestProjectRoutes.test_evidence_package_download_job_builds_and_downloads_archive` | Verifies polled evidence package archive jobs report completion and download the completed ZIP. |
 | `TestProjectRoutes.test_project_artifacts_are_explicitly_disabled_when_files_are_disabled` | Verifies project artifact summaries, preview/download routes, and package manifests report Files-disabled artifacts explicitly while allowing transcript-only packages. |
 | `TestProjectRoutes.test_rejects_cross_session_or_unsupported_project_links` | Verifies project links reject cross-session source records, built-in runs, and unsupported entity types. |
 | `TestClientLogRoute.test_accepts_client_error_payload` | Checks that the client log route accepts browser error reports without colliding with reserved logging fields. |

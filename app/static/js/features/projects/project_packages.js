@@ -7,6 +7,8 @@
   function createProjectPackagesController(context) {
     const ctx = context || {};
     let wizard = null;
+    const downloadTimers = new WeakMap();
+    const packageJobPollMs = 750;
 
     function selectedProjectId() {
       return String(ctx.getSelectedProjectId?.() || '');
@@ -107,13 +109,16 @@
       const runIds = runs.map(run => String(run.id || '')).filter(Boolean);
       const findingRunIds = new Set(findingItems.map(finding => String(finding.run_id || '')).filter(Boolean));
       const redactionMode = normalizedPreset === 'redacted' ? 'redacted' : 'raw';
-      const includeArtifacts = normalizedPreset !== 'summary' && redactionMode !== 'redacted' && ctx.projectFilesEnabled();
+      const includeArtifacts = normalizedPreset !== 'summary' && ctx.projectFilesEnabled();
       const selectedFindings = findingItems.filter(finding => (
         normalizedPreset === 'full' || String(finding.review_state || 'new') !== 'false_positive'
       ));
-      const selectedTranscriptRunIds = normalizedPreset === 'summary'
-        ? []
-        : runIds.filter(runId => findingRunIds.has(runId));
+      let selectedTranscriptRunIds = [];
+      if (normalizedPreset === 'full') {
+        selectedTranscriptRunIds = runIds;
+      } else if (normalizedPreset !== 'summary') {
+        selectedTranscriptRunIds = runIds.filter(runId => findingRunIds.has(runId));
+      }
       return {
         preset: normalizedPreset,
         step: 1,
@@ -256,9 +261,9 @@
         ? 'redacted'
         : 'raw';
       const options = manifest.options && typeof manifest.options === 'object' ? manifest.options : {};
-      const includeArtifacts = redactionMode === 'redacted' || !ctx.projectFilesEnabled()
+      const includeArtifacts = !ctx.projectFilesEnabled()
         ? false
-        : Boolean(pkg?.include_artifacts ?? options.raw_artifacts);
+        : Boolean(pkg?.include_artifacts ?? options.raw_artifacts ?? options.redacted_artifact_derivatives);
       const selectedRunIds = manifestIds(manifest, 'run_ids', ctx.projectRunItems(summary));
       wizard = {
         projectId: String(projectId || ''),
@@ -359,6 +364,40 @@
       return wrap;
     }
 
+    function bulkSelectionMenu(label, mode, projectId) {
+      const details = document.createElement('details');
+      details.className = 'project-package-bulk-menu';
+      const summary = document.createElement('summary');
+      summary.className = 'btn btn-secondary btn-compact project-package-bulk-menu-trigger';
+      summary.textContent = label;
+      summary.setAttribute('role', 'button');
+      details.appendChild(summary);
+      const menu = document.createElement('div');
+      menu.className = 'project-package-bulk-menu-list dropdown-surface';
+      menu.setAttribute('role', 'menu');
+      [
+        ['transcript', 'Transcripts'],
+        ['finding', 'Findings'],
+        ['target', 'Targets'],
+      ].forEach(([kind, itemLabel]) => {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'dropdown-item dropdown-item-compact';
+        item.dataset.projectAction = 'package-wizard-bulk-selection';
+        item.dataset.projectId = projectId;
+        item.dataset.bulkMode = mode;
+        item.dataset.bulkKind = kind;
+        item.textContent = itemLabel;
+        menu.appendChild(item);
+      });
+      details.appendChild(menu);
+      details.addEventListener('focusout', (event) => {
+        const nextFocus = event.relatedTarget;
+        if (!nextFocus || !details.contains(nextFocus)) details.open = false;
+      });
+      return details;
+    }
+
     function runChildIds(runId, projectId, summary) {
       const normalizedRunId = String(runId || '');
       const findings = ctx.projectFindingItems(projectId)
@@ -423,7 +462,9 @@
         toggle.className = 'toggle-btn project-package-run-toggle';
         toggle.dataset.projectPackageRunToggle = runId;
         toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-        toggle.textContent = collapsed ? 'Show selections' : 'Hide selections';
+        toggle.setAttribute('aria-label', collapsed ? 'Show selections' : 'Hide selections');
+        toggle.title = collapsed ? 'Show selections' : 'Hide selections';
+        toggle.textContent = '▾';
         ctx.bindProjectRuntimePressable?.(toggle);
         header.appendChild(toggle);
         runWrap.appendChild(header);
@@ -561,6 +602,21 @@
               reason: artifact.file_status_detail || 'Artifact is unavailable or changed.',
             });
           });
+        if (wizard.redactionMode === 'redacted') {
+          ctx.projectArtifactItems(summary)
+            .filter(artifact => wizard.selection.artifactIds.has(String(artifact.id || '')))
+            .filter(artifact => ctx.projectArtifactStatus(artifact) === 'available')
+            .map(artifact => ({ artifact, reason: redactedArtifactWarning(artifact) }))
+            .filter(item => item.reason)
+            .forEach(({ artifact, reason }) => {
+              skipped.push({
+                kind: 'artifact',
+                id: String(artifact.id || ''),
+                label: artifact.display_name || artifact.workspace_path || artifact.id,
+                reason,
+              });
+            });
+        }
         missingIds('artifact', projectId, summary).forEach((id) => {
           const config = kindConfig('artifact');
           skipped.push({
@@ -572,6 +628,25 @@
         });
       }
       return skipped;
+    }
+
+    function redactedArtifactWarning(artifact) {
+      const previewType = String(artifact && artifact.preview_type || '').trim().toLowerCase();
+      if (['text', 'json', 'markdown', 'csv', 'log', 'xml', 'yaml', 'yml'].includes(previewType)) return '';
+      const contentType = String(artifact && artifact.content_type || '').trim().toLowerCase();
+      const contentMarkers = [
+        'text/',
+        'application/json',
+        'application/ld+json',
+        'application/xml',
+        'application/x-ndjson',
+        'application/yaml',
+        'application/x-yaml',
+      ];
+      if (contentType && contentMarkers.some(marker => contentType.includes(marker))) return '';
+      const path = String(artifact && (artifact.workspace_path || artifact.display_name) || '').toLowerCase();
+      if (/\.(csv|html?|jsonl?|log|md|ndjson|txt|xml|ya?ml)$/.test(path)) return '';
+      return 'Artifact is not a text or JSON type that can be safely redacted.';
     }
 
     function renderMissingSelection(section, kind, projectId, summary) {
@@ -593,7 +668,13 @@
       steps.forEach((label, index) => {
         const item = document.createElement('li');
         item.className = 'project-package-step' + (wizard.step === index + 1 ? ' is-active' : '');
-        item.textContent = label;
+        const number = document.createElement('span');
+        number.className = 'project-package-step-number';
+        number.textContent = String(index + 1);
+        const text = document.createElement('span');
+        text.className = 'project-package-step-label';
+        text.textContent = label;
+        item.append(number, text);
         stepper.appendChild(item);
       });
       wrap.appendChild(stepper);
@@ -669,10 +750,22 @@
       ];
       const runSection = document.createElement('section');
       runSection.className = 'project-package-selection-section';
-      const runHeading = document.createElement('h3');
       const runCount = ctx.projectRunItems(summary).length;
+      const runHeadingRow = document.createElement('div');
+      runHeadingRow.className = 'project-package-selection-heading';
+      const runHeading = document.createElement('h3');
       runHeading.textContent = `Runs (${runCount})`;
-      runSection.appendChild(runHeading);
+      runHeadingRow.appendChild(runHeading);
+      if (runCount) {
+        const controls = document.createElement('div');
+        controls.className = 'project-package-selection-actions';
+        controls.append(
+          bulkSelectionMenu('Select all', 'select', projectId),
+          bulkSelectionMenu('Clear', 'clear', projectId),
+        );
+        runHeadingRow.appendChild(controls);
+      }
+      runSection.appendChild(runHeadingRow);
       const runMissingIds = missingIds('run', projectId, summary);
       const transcriptMissingIds = missingIds('transcript', projectId, summary);
       const findingMissingIds = missingIds('finding', projectId, summary);
@@ -751,17 +844,19 @@
       const artifactsInput = document.createElement('input');
       artifactsInput.type = 'checkbox';
       artifactsInput.checked = !!wizard.includeArtifacts;
-      artifactsInput.disabled = wizard.redactionMode === 'redacted' || !ctx.projectFilesEnabled();
+      artifactsInput.disabled = !ctx.projectFilesEnabled();
       artifactsInput.dataset.projectPackageIncludeArtifacts = '1';
       const artifactsText = document.createElement('span');
       artifactsText.className = 'project-package-selection-text';
       const artifactsStrong = document.createElement('strong');
-      artifactsStrong.textContent = 'Include selected raw artifacts';
+      artifactsStrong.textContent = wizard.redactionMode === 'redacted'
+        ? 'Include selected artifact derivatives'
+        : 'Include selected raw artifacts';
       const artifactsSmall = document.createElement('small');
       artifactsSmall.textContent = !ctx.projectFilesEnabled()
         ? 'Raw artifact files are unavailable because Files are disabled on this instance.'
         : (wizard.redactionMode === 'redacted'
-          ? 'Redacted packages exclude raw artifacts because file contents are not sanitized yet.'
+          ? 'Text and JSON artifacts are sanitized into derivative files; binary or unknown types are skipped.'
           : 'Static HTML, Markdown, and selected raw artifacts are included in the archive.');
       artifactsText.append(artifactsStrong, artifactsSmall);
       artifactsLabel.append(artifactsInput, artifactsText);
@@ -800,7 +895,8 @@
         preset: wizard.preset,
         options: {
           manifest_json: true,
-          raw_artifacts: !!wizard.includeArtifacts,
+          raw_artifacts: !!wizard.includeArtifacts && wizard.redactionMode !== 'redacted',
+          redacted_artifact_derivatives: !!wizard.includeArtifacts && wizard.redactionMode === 'redacted',
           index_html: true,
           transcripts_html: wizard.selection.transcriptRunIds.size > 0,
         },
@@ -837,17 +933,33 @@
         .filter(finding => wizard.selection.findingIds.has(String(finding.id || '')));
       const selectedTargets = ctx.projectTargetItems(summary)
         .filter(target => wizard.selection.targetIds.has(String(target.id || '')));
-      const rawArtifactBytes = wizard.includeArtifacts
+      const rawArtifactBytes = wizard.includeArtifacts && wizard.redactionMode !== 'redacted'
         ? selectedArtifacts
           .filter(artifact => ctx.projectArtifactStatus(artifact) === 'available')
           .reduce((total, artifact) => total + Math.max(0, Number(artifact.byte_size || 0)), 0)
         : 0;
+      const redactedArtifactItems = wizard.includeArtifacts && wizard.redactionMode === 'redacted'
+        ? selectedArtifacts
+          .filter(artifact => ctx.projectArtifactStatus(artifact) === 'available')
+          .filter(artifact => !redactedArtifactWarning(artifact))
+        : [];
+      const redactedArtifactBytes = redactedArtifactItems
+        .reduce((total, artifact) => total + Math.max(0, Number(artifact.byte_size || 0)), 0);
       const skippedArtifactCountEstimate = wizard.includeArtifacts
-        ? selectedArtifacts.filter(artifact => ctx.projectArtifactStatus(artifact) !== 'available').length
+        ? selectedArtifacts.filter(artifact => (
+          ctx.projectArtifactStatus(artifact) !== 'available'
+          || (wizard.redactionMode === 'redacted' && !!redactedArtifactWarning(artifact))
+        )).length
         : 0;
-      const transcriptHtmlBytes = selectedTranscriptRuns.reduce((total, run) => (
-        total + 4096 + Math.max(0, Number(run.output_line_count || 0)) * 120
-      ), 0);
+      const maxLines = Math.max(1, Number(global.APP_CONFIG?.max_output_lines || 5000));
+      const transcriptHtmlBytes = selectedTranscriptRuns.reduce((total, run) => {
+        const lineCount = Math.max(0, Number(run.output_line_count || 0));
+        return total + estimateTranscriptHtmlBytes(lineCount, maxLines);
+      }, 0);
+      const transcriptTextCompanionBytes = selectedTranscriptRuns.reduce((total, run) => {
+        const lineCount = Math.max(0, Number(run.output_line_count || 0));
+        return total + (lineCount > maxLines ? estimateTranscriptTextCompanionBytes(run, lineCount) : 0);
+      }, 0);
       const metadataBytes = Math.max(
         16 * 1024,
         JSON.stringify({
@@ -857,18 +969,42 @@
           targets: selectedTargets.length,
         }).length + 16 * 1024,
       );
-      const estimatedUncompressedBytes = rawArtifactBytes + transcriptHtmlBytes + metadataBytes;
+      const requiredArchiveBytes = rawArtifactBytes
+        + redactedArtifactBytes
+        + transcriptHtmlBytes
+        + metadataBytes;
+      const estimatedUncompressedBytes = requiredArchiveBytes + transcriptTextCompanionBytes;
+      const maxArchiveBytes = Math.max(0, Number(global.APP_CONFIG?.evidence_package_max_mb || 0)) * 1024 * 1024;
+      const maxUncompressedArchiveBytes = Math.max(
+        0,
+        Number(global.APP_CONFIG?.evidence_package_max_uncompressed_mb || 0),
+      ) * 1024 * 1024;
+      const estimatedCompressedArchiveBytes = rawArtifactBytes
+        + estimateTextZipBytes(redactedArtifactBytes)
+        + estimateTextZipBytes(transcriptHtmlBytes)
+        + estimateTextZipBytes(metadataBytes);
+      const estimatedCompressedArchiveBytesWithOptionalCompanions = estimatedCompressedArchiveBytes
+        + estimateTextZipBytes(transcriptTextCompanionBytes);
       return {
-        estimated_uncompressed_bytes: estimatedUncompressedBytes,
-        estimated_archive_bytes: estimatedUncompressedBytes,
+        estimated_uncompressed_bytes: requiredArchiveBytes,
+        estimated_archive_bytes: requiredArchiveBytes,
+        estimated_uncompressed_bytes_with_optional_companions: estimatedUncompressedBytes,
+        estimated_compressed_archive_bytes: estimatedCompressedArchiveBytes,
+        estimated_compressed_archive_bytes_with_optional_companions: estimatedCompressedArchiveBytesWithOptionalCompanions,
+        max_archive_bytes: maxArchiveBytes,
+        max_compressed_archive_bytes: maxArchiveBytes,
+        max_uncompressed_archive_bytes: maxUncompressedArchiveBytes,
         raw_artifact_bytes: rawArtifactBytes,
+        redacted_artifact_bytes: redactedArtifactBytes,
+        redacted_artifact_count_estimate: redactedArtifactItems.length,
         transcript_html_bytes: transcriptHtmlBytes,
+        transcript_text_companion_bytes: transcriptTextCompanionBytes,
         metadata_bytes: metadataBytes,
         selected_run_count: selectedRuns.length,
         selected_transcript_count: selectedTranscriptRuns.length,
         selected_artifact_count: selectedArtifacts.length,
         skipped_artifact_count_estimate: skippedArtifactCountEstimate,
-        note: 'Pre-build estimate before ZIP compression; final download enforces archive caps and drift checks.',
+        note: 'Best-guess pre-build estimate before ZIP compression; final download enforces ZIP, expanded-content, and drift checks.',
       };
     }
 
@@ -877,13 +1013,56 @@
       const estimate = preview.estimated_archive || {};
       const note = document.createElement('p');
       note.className = 'project-package-wizard-note';
-      note.textContent = `Estimated package size before compression: ${ctx.formatBytes(estimate.estimated_uncompressed_bytes || 0)}.`;
+      const zipCapText = Number(estimate.max_compressed_archive_bytes || estimate.max_archive_bytes || 0) > 0
+        ? ` ZIP cap: ${ctx.formatBytes(estimate.max_compressed_archive_bytes || estimate.max_archive_bytes)}.`
+        : '';
+      const expandedCapText = Number(estimate.max_uncompressed_archive_bytes || 0) > 0
+        ? ` Expanded cap: ${ctx.formatBytes(estimate.max_uncompressed_archive_bytes)}.`
+        : '';
+      note.textContent = `Best-guess ZIP size: ${ctx.formatBytes(estimate.estimated_compressed_archive_bytes || 0)}. `
+        + `Expanded content: ${ctx.formatBytes(estimate.estimated_uncompressed_bytes || 0)}.`
+        + `${zipCapText}${expandedCapText}`;
       wrap.appendChild(note);
+      if (Number(estimate.transcript_html_bytes || 0) > 0 || Number(estimate.transcript_text_companion_bytes || 0) > 0) {
+        const transcriptEstimate = document.createElement('p');
+        transcriptEstimate.className = 'project-package-wizard-note';
+        transcriptEstimate.textContent = `Transcript HTML estimate: ${ctx.formatBytes(estimate.transcript_html_bytes || 0)}`
+          + (Number(estimate.transcript_text_companion_bytes || 0) > 0
+            ? ` Some capped transcripts can also produce full-text fallback files, up to ${ctx.formatBytes(estimate.transcript_text_companion_bytes || 0)} total; those fallback files are added only when they fit.`
+            : '.');
+        wrap.appendChild(transcriptEstimate);
+      }
+      if (Number(estimate.transcript_text_companion_bytes || 0) > 0) {
+        const optionalEstimate = document.createElement('p');
+        optionalEstimate.className = 'project-package-wizard-note';
+        optionalEstimate.textContent = `Worst-case with every fallback text file: about ${ctx.formatBytes(estimate.estimated_compressed_archive_bytes_with_optional_companions || 0)} zipped, ${ctx.formatBytes(estimate.estimated_uncompressed_bytes_with_optional_companions || 0)} expanded.`;
+        wrap.appendChild(optionalEstimate);
+      }
+      if (Number(estimate.max_compressed_archive_bytes || estimate.max_archive_bytes || 0) > 0
+        && Number(estimate.estimated_compressed_archive_bytes || 0) > Number(estimate.max_compressed_archive_bytes || estimate.max_archive_bytes || 0)) {
+        const overLimit = document.createElement('p');
+        overLimit.className = 'project-package-wizard-note is-warning';
+        overLimit.textContent = 'This selection may exceed the configured ZIP cap. Clear some transcripts or artifacts before creating the package.';
+        wrap.appendChild(overLimit);
+      }
+      if (Number(estimate.max_uncompressed_archive_bytes || 0) > 0
+        && Number(estimate.estimated_archive_bytes || 0) > Number(estimate.max_uncompressed_archive_bytes || 0)) {
+        const overLimit = document.createElement('p');
+        overLimit.className = 'project-package-wizard-note is-warning';
+        overLimit.textContent = 'This selection exceeds the expanded-content cap. Clear some transcripts or artifacts before creating the package.';
+        wrap.appendChild(overLimit);
+      }
       if (Number(estimate.skipped_artifact_count_estimate || 0) > 0) {
         const skipped = document.createElement('p');
         skipped.className = 'project-package-wizard-note';
-        skipped.textContent = `${estimate.skipped_artifact_count_estimate} selected artifact(s) are currently unavailable or changed and may be skipped.`;
+        skipped.textContent = `${estimate.skipped_artifact_count_estimate} selected artifact(s) are unavailable, changed, or not safe to redact and may be skipped.`;
         wrap.appendChild(skipped);
+      }
+      if (wizard.includeArtifacts && wizard.redactionMode === 'redacted') {
+        const derivatives = document.createElement('p');
+        derivatives.className = 'project-package-wizard-note';
+        derivatives.textContent = `${estimate.redacted_artifact_count_estimate || 0} selected text/JSON artifact(s) will be exported as redacted derivatives.`;
+        wrap.appendChild(derivatives);
       }
       if (Array.isArray(preview.skipped_preview) && preview.skipped_preview.length) {
         const skippedWrap = document.createElement('div');
@@ -955,6 +1134,8 @@
           manifest_json: true,
           index_html: true,
           transcripts_html: wizard.selection.transcriptRunIds.size > 0,
+          raw_artifacts: !!wizard.includeArtifacts && wizard.redactionMode !== 'redacted',
+          redacted_artifact_derivatives: !!wizard.includeArtifacts && wizard.redactionMode === 'redacted',
         },
         selection: {
           run_ids: Array.from(wizard.selection.runIds),
@@ -1002,27 +1183,124 @@
       ctx.setProjectWorkspaceMessage?.('Package created.');
     }
 
+    function waitForPackageJobPoll() {
+      return new Promise(resolve => setTimeout(resolve, packageJobPollMs));
+    }
+
+    async function readJsonResponse(resp, fallbackMessage) {
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(data.error || fallbackMessage);
+      }
+      return data;
+    }
+
+    function packageJobMessage(job) {
+      const message = String(job && job.message || '').trim();
+      if (!message) return 'Preparing package archive.';
+      return message.endsWith('.') ? message : `${message}.`;
+    }
+
+    function estimateTextZipBytes(value) {
+      const safeValue = Math.max(0, Number(value || 0));
+      if (!safeValue) return 0;
+      return Math.max(1024, Math.round(safeValue * 0.4));
+    }
+
+    function estimateRunFullOutputBytes(run) {
+      const keys = ['full_output_byte_size', 'full_output_bytes', 'output_artifact_byte_size'];
+      for (const key of keys) {
+        const value = Math.max(0, Number(run?.[key] || 0));
+        if (value > 0) return value;
+      }
+      return 0;
+    }
+
+    function estimateTranscriptHtmlBytes(lineCount, maxLines) {
+      const cappedLines = Math.min(Math.max(0, Number(lineCount || 0)), Math.max(1, Number(maxLines || 1)));
+      return 8192 + cappedLines * 240;
+    }
+
+    function estimateTranscriptTextCompanionBytes(run, lineCount) {
+      const safeLineCount = Math.max(0, Number(lineCount || 0));
+      if (!safeLineCount) return 0;
+      const fullOutputBytes = estimateRunFullOutputBytes(run);
+      if (fullOutputBytes > 0) return Math.max(safeLineCount, Math.round(fullOutputBytes * 0.65));
+      return safeLineCount * 48;
+    }
+
+    async function waitForPackageJob(projectId, packageId, job) {
+      let current = job && typeof job === 'object' ? job : {};
+      while (String(current.status || '') !== 'complete') {
+        if (String(current.status || '') === 'failed') {
+          throw new Error(current.error || 'Unable to build package archive.');
+        }
+        ctx.setProjectWorkspaceMessage?.(`Preparing package archive: ${packageJobMessage(current)}`, { toast: false });
+        await waitForPackageJobPoll();
+        const resp = await ctx.apiFetch(
+          `/projects/${encodeURIComponent(projectId)}/packages/${encodeURIComponent(packageId)}/download-jobs/${encodeURIComponent(current.id || '')}`,
+          { cache: 'no-store' },
+        );
+        const data = await readJsonResponse(resp, 'Unable to check package archive status.');
+        current = data.job || {};
+      }
+      return current;
+    }
+
     async function downloadPackage(projectId, pkg) {
       const packageId = String(pkg && pkg.id || '').trim();
-      const resp = await ctx.apiFetch(
-        `/projects/${encodeURIComponent(projectId)}/packages/${encodeURIComponent(packageId)}/download`,
+      const startResp = await ctx.apiFetch(
+        `/projects/${encodeURIComponent(projectId)}/packages/${encodeURIComponent(packageId)}/download-jobs`,
+        { method: 'POST', cache: 'no-store' },
+      );
+      const startData = await readJsonResponse(startResp, 'Unable to start package archive build.');
+      const job = await waitForPackageJob(projectId, packageId, startData.job || {});
+      const downloadResp = await ctx.apiFetch(
+        `/projects/${encodeURIComponent(projectId)}/packages/${encodeURIComponent(packageId)}/download-jobs/${encodeURIComponent(job.id || '')}/download`,
         { cache: 'no-store' },
       );
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
+      if (!downloadResp.ok) {
+        const data = await downloadResp.json().catch(() => ({}));
         throw new Error(data.error || 'Unable to download package.');
       }
-      const blob = await resp.blob();
+      const blob = await downloadResp.blob();
       ctx.downloadBlobAsAttachment(blob, packageDownloadName(pkg), 'Package download started.');
+    }
+
+    function packageBuildStatusText(elapsedSeconds) {
+      const elapsed = Math.max(0, Number(elapsedSeconds || 0));
+      if (elapsed < 1) return 'Preparing archive...';
+      if (elapsed < 15) return `Preparing archive... ${elapsed}s`;
+      return `Still building archive... ${elapsed}s`;
+    }
+
+    function clearDownloadTimer(button) {
+      const timer = downloadTimers.get(button);
+      if (timer) clearInterval(timer);
+      downloadTimers.delete(button);
     }
 
     function setDownloadBusy(button, busy) {
       if (!button) return;
+      clearDownloadTimer(button);
       button.disabled = !!busy;
       button.classList.toggle('is-preparing', !!busy);
       button.setAttribute('aria-busy', busy ? 'true' : 'false');
-      button.textContent = busy ? 'Preparing...' : 'Download';
-      if (!busy) button.removeAttribute('aria-busy');
+      if (!busy) {
+        button.textContent = 'Download';
+        button.removeAttribute('aria-busy');
+        return;
+      }
+      const started = Date.now();
+      const update = () => {
+        button.textContent = packageBuildStatusText(Math.floor((Date.now() - started) / 1000));
+      };
+      update();
+      downloadTimers.set(button, setInterval(update, 1000));
+      ctx.setProjectWorkspaceMessage?.(
+        'Preparing package archive. Large Full Archive exports can take a little while.',
+        { toast: false },
+      );
     }
 
     function renderMobilePackagesTab(projectId, summary) {
@@ -1103,7 +1381,7 @@
       if (field === 'redaction_mode') {
         const mode = String(packageField.value || 'raw') === 'redacted' ? 'redacted' : 'raw';
         wizard.redactionMode = mode;
-        if (mode === 'redacted' || !ctx.projectFilesEnabled()) wizard.includeArtifacts = false;
+        if (!ctx.projectFilesEnabled()) wizard.includeArtifacts = false;
         wizard.notice = '';
         renderWizardModal();
       }
@@ -1198,6 +1476,38 @@
           wizard.notice = '';
         }
         renderWizardModal();
+        return true;
+      }
+      if (
+        action === 'package-wizard-transcripts-all'
+        || action === 'package-wizard-transcripts-clear'
+        || action === 'package-wizard-bulk-selection'
+      ) {
+        if (wizard) {
+          const mode = action === 'package-wizard-transcripts-clear' ? 'clear' : String(btn.dataset.bulkMode || 'select');
+          const kind = action.startsWith('package-wizard-transcripts') ? 'transcript' : String(btn.dataset.bulkKind || '');
+          const selected = setFor(kind);
+          if (mode === 'select') {
+            const summary = summaryFor(projectId);
+            if (kind === 'transcript') {
+              setFor('run').forEach(runId => selected.add(String(runId || '')));
+            } else if (kind === 'finding') {
+              ctx.projectFindingItems(projectId).forEach(finding => {
+                const id = String(finding?.id || '');
+                if (id) selected.add(id);
+              });
+            } else if (kind === 'target') {
+              ctx.projectTargetItems(summary).forEach(target => {
+                const id = String(target?.id || '');
+                if (id) selected.add(id);
+              });
+            }
+          } else {
+            selected.clear();
+          }
+          wizard.notice = '';
+        }
+        renderWizardModal({ scrollTop: wizardScrollTop() });
         return true;
       }
       if (action === 'package-wizard-next') {

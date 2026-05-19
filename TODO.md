@@ -40,11 +40,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-- **Evidence package export hardening**
-  - Add redacted text/JSON derivatives for safe artifact types before allowing raw artifact inclusion in redacted packages.
-  - Add richer redaction previews and per-item redaction warnings for package creation.
-  - Add async package build progress for large Full Archive exports so long builds do not feel like stalled requests.
-  - Move package HTML rendering toward shared Jinja autoescape paths so package output escaping is template-owned instead of manual per-call escaping.
 - **Interactive PTY lifecycle and operator visibility**
   - Auto-displace prior live attaches when a new browser client attaches to the same PTY run. When `active_run_claim_owner` flips the internal ownership marker to a different `client_id`, publish a single `displaced` event on the PTY stream so the prior tab can close its modal cleanly and append one notice such as `[interactive PTY moved to another tab]`. Skip same-client reconnects so the event only fires when the live view genuinely moves to a different browser context.
   - Surface snapshot age on the reattach payload. `_load_pty_snapshot` strips `created_at` before returning, so the frontend cannot tell whether the snapshot is fresh or 20+ seconds stale. Return the age and let the frontend show `[reattached - snapshot was Ns old]` when it crosses a threshold.

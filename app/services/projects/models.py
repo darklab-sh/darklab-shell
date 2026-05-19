@@ -51,6 +51,14 @@ def row_to_project_run(row):
         item["finding_count"] = int(row["finding_count"] or 0)
     if "artifact_count" in keys:
         item["artifact_count"] = int(row["artifact_count"] or 0)
+    if "full_output_available" in keys:
+        item["full_output_available"] = bool(row["full_output_available"])
+    if "full_output_truncated" in keys:
+        item["full_output_truncated"] = bool(row["full_output_truncated"])
+    if "output_artifact_byte_size" in keys:
+        item["full_output_byte_size"] = int(row["output_artifact_byte_size"] or 0)
+    if "output_artifact_line_count" in keys:
+        item["full_output_line_count"] = int(row["output_artifact_line_count"] or 0)
     return item
 
 

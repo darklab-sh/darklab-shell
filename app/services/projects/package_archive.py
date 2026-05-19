@@ -13,7 +13,10 @@ import zipfile
 from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
 from core.redaction import apply_redaction_rules
-from services.projects.artifacts import artifact_snapshot_mismatch_reason as _artifact_snapshot_mismatch_reason
+from services.projects.artifacts import (
+    artifact_snapshot_mismatch_reason as _artifact_snapshot_mismatch_reason,
+    row_to_run_file_artifact as _row_to_run_file_artifact,
+)
 from services.projects.contracts import (
     EvidencePackageTooLarge,
     MAX_ENTITY_ID_LEN,
@@ -52,6 +55,7 @@ from services.projects.packages import (
     package_archive_name as _package_archive_name,
     package_manifest_without_private_notes as _package_manifest_without_private_notes,
     package_redaction_rules as _package_redaction_rules,
+    redacted_artifact_derivative_reason as _redacted_artifact_derivative_reason,
     redact_package_manifest as _redact_package_manifest,
 )
 from services.projects.queries import (
@@ -78,14 +82,36 @@ def _write_bounded_archive_entry(
     name,
     payload_bytes,
     projected_bytes,
-    max_archive_bytes,
-    message="evidence package exceeds configured size limit",
+    max_uncompressed_archive_bytes,
+    message="evidence package expanded content exceeds configured size limit",
 ):
     new_total = projected_bytes + len(payload_bytes)
-    if max_archive_bytes and new_total > max_archive_bytes:
+    if max_uncompressed_archive_bytes and new_total > max_uncompressed_archive_bytes:
         raise EvidencePackageTooLarge(message)
     archive.writestr(name, payload_bytes)
     return new_total
+
+
+def _redacted_artifact_bytes(resolved, redaction_rules):
+    payload = resolved.read_bytes()
+    if b"\x00" in payload:
+        raise ProjectWorkspaceError("Artifact appears to be binary and cannot be safely redacted.")
+    text = payload.decode("utf-8", errors="replace")
+    redacted = apply_redaction_rules(text, redaction_rules)
+    return redacted.encode("utf-8")
+
+
+def _raw_artifact_row_for_archive(session_id, artifact_id):
+    if not str(artifact_id or "").strip():
+        return None
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+            "detected_by, content_type, preview_type, content_sha256, created "
+            "FROM run_file_artifacts WHERE session_id = ? AND id = ?",
+            (session_id, artifact_id),
+        ).fetchone()
+    return _row_to_run_file_artifact(row)
 
 
 def _package_selected_id_count(manifest, key):
@@ -109,17 +135,22 @@ def _evidence_package_estimated_archive_bytes(manifest):
     return 0
 
 
-def _raise_if_estimated_archive_too_large(manifest, max_archive_bytes):
-    if not max_archive_bytes:
+def _raise_if_estimated_archive_too_large(manifest, max_uncompressed_archive_bytes):
+    if not max_uncompressed_archive_bytes:
         return
     estimated_bytes = _evidence_package_estimated_archive_bytes(manifest)
-    if estimated_bytes > max_archive_bytes:
-        raise EvidencePackageTooLarge("evidence package estimate exceeds configured size limit")
+    if estimated_bytes > max_uncompressed_archive_bytes:
+        raise EvidencePackageTooLarge("evidence package expanded content estimate exceeds configured size limit")
 
 
-def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=None):
+def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=None, progress_callback=None, archive_dir=None):
     build_started = time.perf_counter()
     timings = {}
+
+    def _progress(phase, message):
+        if not callable(progress_callback):
+            return
+        progress_callback(phase, message)
 
     def _elapsed_ms(started):
         return int(round((time.perf_counter() - started) * 1000))
@@ -127,10 +158,12 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
     def _record_timing(name, started):
         timings[f"{name}_ms"] = _elapsed_ms(started)
 
+    _progress("loading", "Loading package")
     package = get_evidence_package(session_id, project_id, package_id)
     if package is None:
         return None
     metadata_started = time.perf_counter()
+    _progress("metadata", "Collecting package metadata")
     generated_at = _now()
     manifest = dict(package.get("manifest") or {})
     redaction_rules = _package_redaction_rules(package.get("redaction_mode"), cfg=cfg)
@@ -180,16 +213,19 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
         "manifest": render_manifest,
     }
     manifest_bytes = json.dumps(export_manifest, indent=2, sort_keys=True).encode("utf-8") + b"\n"
-    max_archive_bytes = _cfg_mb_bytes("evidence_package_max_mb", 25, cfg=cfg)
-    _raise_if_estimated_archive_too_large(manifest, max_archive_bytes)
+    max_compressed_archive_bytes = _cfg_mb_bytes("evidence_package_max_mb", 25, cfg=cfg)
+    max_uncompressed_archive_bytes = _cfg_mb_bytes("evidence_package_max_uncompressed_mb", 500, cfg=cfg)
+    _raise_if_estimated_archive_too_large(manifest, max_uncompressed_archive_bytes)
     _record_timing("metadata", metadata_started)
     skipped_artifacts = []
     skipped_items = []
+    redacted_artifacts = []
     artifact_archive_paths = {}
     temp_file = tempfile.NamedTemporaryFile(
         prefix="darklab-evidence-package-",
         suffix=".zip",
         delete=False,
+        dir=archive_dir,
     )
     archive_path = temp_file.name
     temp_file.close()
@@ -197,12 +233,13 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
     try:
         with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             core_started = time.perf_counter()
+            _progress("core", "Writing package manifest")
             projected_bytes = _write_bounded_archive_entry(
                 archive,
                 "manifest.json",
                 manifest_bytes,
                 0,
-                max_archive_bytes,
+                max_uncompressed_archive_bytes,
                 "evidence package manifest exceeds configured size limit",
             )
             css_bytes = (_package_css() + "\n").encode("utf-8")
@@ -211,52 +248,105 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                 "assets/package.css",
                 css_bytes,
                 projected_bytes,
-                max_archive_bytes,
+                max_uncompressed_archive_bytes,
                 "evidence package CSS snapshot exceeds configured size limit",
             )
             _record_timing("core_entries", core_started)
             artifacts_started = time.perf_counter()
+            _progress("artifacts", "Collecting package artifacts")
             if package["include_artifacts"]:
                 artifacts = manifest.get("artifacts")
                 artifact_items = artifacts if isinstance(artifacts, list) else []
                 max_artifacts = _cfg_int("evidence_package_max_artifacts", 100, cfg=cfg)
                 if max_artifacts and len(artifact_items) > max_artifacts:
                     raise EvidencePackageTooLarge("evidence package artifact count exceeds configured limit")
+                redacted_artifact_mode = package.get("redaction_mode") == "redacted"
                 for artifact in artifact_items:
                     if not isinstance(artifact, dict):
                         continue
-                    workspace_path = _trim_text(artifact.get("workspace_path"), MAX_ENTITY_ID_LEN)
+                    archive_artifact = artifact
+                    if redacted_artifact_mode:
+                        raw_artifact = _raw_artifact_row_for_archive(session_id, artifact.get("id"))
+                        if raw_artifact:
+                            archive_artifact = raw_artifact
+                    public_workspace_path = _trim_text(artifact.get("workspace_path"), MAX_ENTITY_ID_LEN)
+                    workspace_path = public_workspace_path
+                    if redacted_artifact_mode:
+                        workspace_path = _trim_text(archive_artifact.get("workspace_path"), MAX_ENTITY_ID_LEN)
+                        if not public_workspace_path:
+                            public_workspace_path = apply_redaction_rules(workspace_path, redaction_rules)
                     if not workspace_path:
                         continue
                     try:
-                        declared_size = max(0, int(artifact.get("byte_size") or 0))
+                        declared_size = max(0, int(archive_artifact.get("byte_size") or 0))
                     except (TypeError, ValueError):
                         declared_size = 0
-                    if max_archive_bytes and declared_size and projected_bytes + declared_size > max_archive_bytes:
+                    if (
+                        max_uncompressed_archive_bytes
+                        and declared_size
+                        and projected_bytes + declared_size > max_uncompressed_archive_bytes
+                    ):
                         raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
                     try:
                         resolved = resolve_workspace_path(session_id, workspace_path, cfg)
                         if not resolved.is_file():
                             raise ProjectWorkspaceError("artifact file is not available")
-                        mismatch_reason = _artifact_snapshot_mismatch_reason(artifact, resolved)
+                        mismatch_reason = _artifact_snapshot_mismatch_reason(archive_artifact, resolved)
                         if mismatch_reason:
                             raise ProjectWorkspaceError(mismatch_reason)
-                        projected_bytes += resolved.stat().st_size
-                        if max_archive_bytes and projected_bytes > max_archive_bytes:
-                            raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
-                        zip_path = _package_zip_artifact_path(workspace_path, used_paths)
-                        archive.write(resolved, arcname=zip_path)
+                        if redacted_artifact_mode:
+                            derivative_reason = _redacted_artifact_derivative_reason(archive_artifact)
+                            if derivative_reason:
+                                raise ProjectWorkspaceError(derivative_reason)
+                            derivative_bytes = _redacted_artifact_bytes(resolved, redaction_rules)
+                            zip_path = _package_zip_artifact_path(
+                                public_workspace_path,
+                                used_paths,
+                                root="artifacts-redacted",
+                            )
+                            projected_bytes = _write_bounded_archive_entry(
+                                archive,
+                                zip_path,
+                                derivative_bytes,
+                                projected_bytes,
+                                max_uncompressed_archive_bytes,
+                            )
+                            redacted_artifacts.append({
+                                "id": archive_artifact.get("id") or "",
+                                "workspace_path": public_workspace_path,
+                                "display_name": artifact.get("display_name") or public_workspace_path,
+                                "archive_path": zip_path,
+                                "source_byte_size": declared_size,
+                                "byte_size": len(derivative_bytes),
+                            })
+                        else:
+                            projected_bytes += resolved.stat().st_size
+                            if max_uncompressed_archive_bytes and projected_bytes > max_uncompressed_archive_bytes:
+                                raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
+                            zip_path = _package_zip_artifact_path(public_workspace_path, used_paths)
+                            archive.write(resolved, arcname=zip_path)
                         artifact_archive_paths[str(artifact.get("id") or "")] = zip_path
                     except (OSError, ProjectWorkspaceError, WorkspaceError) as exc:
                         skipped_artifact = {
                             "kind": "artifact",
                             "id": artifact.get("id") or "",
-                            "label": artifact.get("display_name") or workspace_path,
-                            "workspace_path": workspace_path,
+                            "label": artifact.get("display_name") or public_workspace_path,
+                            "workspace_path": public_workspace_path,
                             "reason": str(exc),
                         }
                         skipped_artifacts.append(skipped_artifact)
                         skipped_items.append(skipped_artifact)
+            if redacted_artifacts:
+                redacted_artifact_bytes = (
+                    json.dumps({"artifacts": redacted_artifacts}, indent=2, sort_keys=True) + "\n"
+                ).encode("utf-8")
+                projected_bytes = _write_bounded_archive_entry(
+                    archive,
+                    "redacted-artifacts.json",
+                    redacted_artifact_bytes,
+                    projected_bytes,
+                    max_uncompressed_archive_bytes,
+                )
             if skipped_artifacts:
                 skipped_bytes = (
                     json.dumps({"artifacts": skipped_artifacts}, indent=2, sort_keys=True) + "\n"
@@ -266,11 +356,12 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                     "skipped-artifacts.json",
                     skipped_bytes,
                     projected_bytes,
-                    max_archive_bytes,
+                    max_uncompressed_archive_bytes,
                 )
             _record_timing("artifacts", artifacts_started)
 
             run_pages_started = time.perf_counter()
+            _progress("runs", "Rendering run transcripts")
             run_pages = {}
             run_text_paths = {}
             run_ids = []
@@ -313,7 +404,7 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                         "reason": str(cap_notice.get("text") or "").strip("[]"),
                     })
                     companion_bytes = _package_run_text_bytes(companion_entries, redaction_rules)
-                    if max_archive_bytes and projected_bytes + len(companion_bytes) > max_archive_bytes:
+                    if max_uncompressed_archive_bytes and projected_bytes + len(companion_bytes) > max_uncompressed_archive_bytes:
                         skipped_items.append({
                             "kind": "transcript_companion",
                             "id": run_id,
@@ -328,7 +419,7 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                             transcript_text_path,
                             companion_bytes,
                             projected_bytes,
-                            max_archive_bytes,
+                            max_uncompressed_archive_bytes,
                         )
                 run_page = _render_package_run_html(
                     run,
@@ -346,18 +437,19 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                     run_path,
                     run_page_bytes,
                     projected_bytes,
-                    max_archive_bytes,
+                    max_uncompressed_archive_bytes,
                 )
             _record_timing("run_pages", run_pages_started)
 
             findings_started = time.perf_counter()
+            _progress("findings", "Writing findings exports")
             findings_json_bytes = _package_findings_json_bytes(render_manifest, generated_at, run_pages)
             projected_bytes = _write_bounded_archive_entry(
                 archive,
                 "findings/findings.json",
                 findings_json_bytes,
                 projected_bytes,
-                max_archive_bytes,
+                max_uncompressed_archive_bytes,
             )
             findings_markdown_bytes = _package_findings_markdown_bytes(render_manifest, run_pages)
             projected_bytes = _write_bounded_archive_entry(
@@ -365,18 +457,19 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                 "findings/findings.md",
                 findings_markdown_bytes,
                 projected_bytes,
-                max_archive_bytes,
+                max_uncompressed_archive_bytes,
             )
             _record_timing("findings", findings_started)
 
             targets_started = time.perf_counter()
+            _progress("targets", "Writing target exports")
             targets_json_bytes = _package_targets_json_bytes(render_manifest, generated_at)
             projected_bytes = _write_bounded_archive_entry(
                 archive,
                 "targets/targets.json",
                 targets_json_bytes,
                 projected_bytes,
-                max_archive_bytes,
+                max_uncompressed_archive_bytes,
             )
             targets_markdown_bytes = _package_targets_markdown_bytes(render_manifest)
             projected_bytes = _write_bounded_archive_entry(
@@ -384,18 +477,19 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                 "targets/targets.md",
                 targets_markdown_bytes,
                 projected_bytes,
-                max_archive_bytes,
+                max_uncompressed_archive_bytes,
             )
             _record_timing("targets", targets_started)
 
             notes_started = time.perf_counter()
+            _progress("notes", "Writing labels and notes")
             labels_json_bytes = _package_labels_json_bytes(label_items, generated_at)
             projected_bytes = _write_bounded_archive_entry(
                 archive,
                 "metadata/labels.json",
                 labels_json_bytes,
                 projected_bytes,
-                max_archive_bytes,
+                max_uncompressed_archive_bytes,
             )
             notes_json_bytes = _package_notes_json_bytes(
                 note_items,
@@ -407,7 +501,7 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                 "notes/entity-notes.json",
                 notes_json_bytes,
                 projected_bytes,
-                max_archive_bytes,
+                max_uncompressed_archive_bytes,
             )
             notes_markdown_bytes = _package_notes_markdown_bytes(
                 note_items,
@@ -419,7 +513,7 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                 "notes/entity-notes.md",
                 notes_markdown_bytes,
                 projected_bytes,
-                max_archive_bytes,
+                max_uncompressed_archive_bytes,
             )
             if _entity_note_body(render_manifest.get("project") if isinstance(render_manifest, dict) else {}):
                 project_notes_bytes = _package_project_notes_markdown_bytes(render_manifest, generated_at)
@@ -428,11 +522,12 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                     "notes/project.md",
                     project_notes_bytes,
                     projected_bytes,
-                    max_archive_bytes,
+                    max_uncompressed_archive_bytes,
                 )
             _record_timing("notes", notes_started)
 
             index_started = time.perf_counter()
+            _progress("index", "Rendering package index")
             index_page = _render_package_index_html(
                 render_package,
                 render_manifest,
@@ -448,10 +543,11 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                 "index.html",
                 index_bytes,
                 projected_bytes,
-                max_archive_bytes,
+                max_uncompressed_archive_bytes,
             )
             _record_timing("index", index_started)
             readme_started = time.perf_counter()
+            _progress("readme", "Writing package README")
             readme = _render_package_readme(
                 render_package,
                 render_manifest,
@@ -467,7 +563,7 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                 "README.md",
                 readme_bytes,
                 projected_bytes,
-                max_archive_bytes,
+                max_uncompressed_archive_bytes,
             )
             _record_timing("readme", readme_started)
             skipped_items_started = time.perf_counter()
@@ -480,10 +576,11 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                     "skipped-items.json",
                     skipped_item_bytes,
                     projected_bytes,
-                    max_archive_bytes,
+                    max_uncompressed_archive_bytes,
                 )
             _record_timing("skipped_items", skipped_items_started)
             zip_finalize_started = time.perf_counter()
+            _progress("finalizing", "Finalizing archive")
         _record_timing("zip_finalize", zip_finalize_started)
     except Exception:
         try:
@@ -492,14 +589,24 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
             pass
         raise
     final_archive_bytes = os.path.getsize(archive_path)
+    if max_compressed_archive_bytes and final_archive_bytes > max_compressed_archive_bytes:
+        try:
+            os.unlink(archive_path)
+        except OSError:
+            pass
+        raise EvidencePackageTooLarge("evidence package ZIP exceeds configured size limit")
+    _progress("complete", "Archive ready")
     metrics = {
         **timings,
         "duration_ms": _elapsed_ms(build_started),
         "projected_bytes": projected_bytes,
         "archive_bytes": final_archive_bytes,
-        "max_archive_bytes": max_archive_bytes,
+        "max_archive_bytes": max_compressed_archive_bytes,
+        "max_compressed_archive_bytes": max_compressed_archive_bytes,
+        "max_uncompressed_archive_bytes": max_uncompressed_archive_bytes,
         "skipped_artifacts": len(skipped_artifacts),
         "skipped_items": len(skipped_items),
+        "redacted_artifacts": len(redacted_artifacts),
         "selected_runs": _package_selected_id_count(manifest, "run_ids"),
         "selected_transcripts": _package_selected_id_count(manifest, "transcript_run_ids"),
         "selected_findings": _package_selected_id_count(manifest, "finding_ids"),

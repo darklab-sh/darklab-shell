@@ -835,8 +835,8 @@
     return _projectWorkspaceShellController().isOpen();
   }
 
-  function _setProjectWorkspaceMessage(text = '', { error = false } = {}) {
-    _projectWorkspaceShellController().setMessage(text, { error });
+  function _setProjectWorkspaceMessage(text = '', { error = false, toast = true } = {}) {
+    _projectWorkspaceShellController().setMessage(text, { error, toast });
   }
 
   async function _projectResponseError(resp, fallback) {

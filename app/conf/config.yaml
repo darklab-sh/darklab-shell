@@ -187,9 +187,14 @@
 # Server default if unset: 2000
 # max_entity_notes_per_session: 2000
 #
-# Evidence package archive size cap in megabytes. Set to 0 for unlimited.
+# Evidence package final ZIP size cap in megabytes. Set to 0 for unlimited.
 # Server default if unset: 25
 # evidence_package_max_mb: 25
+#
+# Evidence package expanded-content cap before ZIP compression, in megabytes.
+# Set to 0 for unlimited.
+# Server default if unset: 500
+# evidence_package_max_uncompressed_mb: 500
 #
 # Maximum number of workspace artifacts included in one evidence package. Set
 # to 0 for unlimited.

@@ -2388,7 +2388,7 @@ class TestProjectRoutes:
             {"run_id": third_run_id, "status": "rejected", "reason": "policy_blocked"},
         ]
 
-    def test_redacted_evidence_package_redacts_manifest_and_transcripts(self):
+    def test_redacted_evidence_package_redacts_manifest_and_transcripts(self, tmp_path):
         client = get_client()
         session_id = self._session_id("project-package-redacted")
         project = self._create_project(client, session_id)
@@ -2399,6 +2399,11 @@ class TestProjectRoutes:
         )
         assert project_note.status_code == 200
         run_id = "run-" + uuid.uuid4().hex
+        workspace_cfg = {"workspace_enabled": True, "workspace_root": str(tmp_path / "workspaces")}
+        artifact_body = b"Authorization: Bearer abc123 from https://secret.darklab.sh and 192.168.1.5\n"
+        with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+            artifact_path = resolve_workspace_path(session_id, "reports/secrets.txt", shell_app.CFG, ensure_parent=True)
+            artifact_path.write_bytes(artifact_body)
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
@@ -2437,9 +2442,11 @@ class TestProjectRoutes:
             )
             conn.execute(
                 "INSERT INTO run_file_artifacts "
-                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
-                "VALUES (?, ?, ?, 'reports/secrets.txt', 'secrets.txt', 'output', 12, 'workspace_flag', datetime('now'))",
-                (f"rfa_{run_id}", session_id, run_id),
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, "
+                "content_type, preview_type, content_sha256, created) "
+                "VALUES (?, ?, ?, 'reports/secrets.txt', 'secrets.txt', 'output', ?, "
+                "'workspace_flag', 'text/plain', 'text', ?, datetime('now'))",
+                (f"rfa_{run_id}", session_id, run_id, len(artifact_body), hashlib.sha256(artifact_body).hexdigest()),
             )
             for note_id, entity_type, entity_id, body in (
                 (f"note_run_{run_id}", "run", run_id, "Run private note should stay out"),
@@ -2470,39 +2477,44 @@ class TestProjectRoutes:
             )
             conn.commit()
 
-        package_resp = client.post(
-            f"/projects/{project['id']}/packages",
-            json={
-                "name": "Redacted Evidence",
-                "notes": "Package private note should stay out",
-                "redaction_mode": "redacted",
-                "include_artifacts": True,
-                "selection": {
-                    "run_ids": [run_id],
-                    "finding_ids": [f"fnd_{run_id}"],
-                    "artifact_ids": [f"rfa_{run_id}"],
-                    "target_ids": [target_id],
+        with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+            package_resp = client.post(
+                f"/projects/{project['id']}/packages",
+                json={
+                    "name": "Redacted Evidence",
+                    "notes": "Package private note should stay out",
+                    "redaction_mode": "redacted",
+                    "include_artifacts": True,
+                    "selection": {
+                        "run_ids": [run_id],
+                        "finding_ids": [f"fnd_{run_id}"],
+                        "artifact_ids": [f"rfa_{run_id}"],
+                        "target_ids": [target_id],
+                    },
                 },
-            },
-            headers={"X-Session-ID": session_id},
-        )
+                headers={"X-Session-ID": session_id},
+            )
         assert package_resp.status_code == 201
         package = json.loads(package_resp.data)["package"]
         assert package["redaction_mode"] == "redacted"
-        assert package["include_artifacts"] is False
+        assert package["include_artifacts"] is True
         assert package["manifest"]["redaction_mode"] == "redacted"
-        assert package["manifest"]["include_artifacts"] is False
+        assert package["manifest"]["include_artifacts"] is True
         assert package["manifest"]["options"]["raw_artifacts"] is False
+        assert package["manifest"]["options"]["redacted_artifact_derivatives"] is True
+        assert package["manifest"]["artifact_warnings"] == []
+        assert package["manifest"]["estimated_archive"]["redacted_artifact_count_estimate"] == 1
         assert "note" not in package["manifest"]["project"]
         assert "Project private note" not in json.dumps(package["manifest"])
         assert "Bearer abc123" not in json.dumps(package)
         assert "secret.darklab.sh" not in json.dumps(package)
         assert "192.168.1.5" not in json.dumps(package)
 
-        package_download = client.get(
-            f"/projects/{project['id']}/packages/{package['id']}/download",
-            headers={"X-Session-ID": session_id},
-        )
+        with mock.patch.dict(shell_app.CFG, workspace_cfg, clear=False):
+            package_download = client.get(
+                f"/projects/{project['id']}/packages/{package['id']}/download",
+                headers={"X-Session-ID": session_id},
+            )
         assert package_download.status_code == 200
         with zipfile.ZipFile(io.BytesIO(package_download.data)) as archive:
             names = set(archive.namelist())
@@ -2520,6 +2532,9 @@ class TestProjectRoutes:
             assert "notes/project.md" not in names
             assert f"runs/{run_id}.html" in names
             assert not any(name.startswith("artifacts/") for name in names)
+            redacted_artifact_path = next(name for name in names if name.startswith("artifacts-redacted/"))
+            assert "secrets.txt" not in redacted_artifact_path
+            assert "redacted-artifacts.json" in names
             notes_json = json.loads(archive.read("notes/entity-notes.json"))
             assert notes_json["include_private_notes"] is False
             assert notes_json["count"] == 0
@@ -2536,9 +2551,12 @@ class TestProjectRoutes:
                     "metadata/labels.json",
                     "notes/entity-notes.json",
                     "notes/entity-notes.md",
+                    redacted_artifact_path,
                     f"runs/{run_id}.html",
                 )
             )
+            redacted_artifacts = json.loads(archive.read("redacted-artifacts.json"))
+            assert redacted_artifacts["artifacts"][0]["archive_path"] == redacted_artifact_path
         assert "Bearer abc123" not in package_text
         assert "secret.darklab.sh" not in package_text
         assert "192.168.1.5" not in package_text
@@ -2666,9 +2684,10 @@ class TestProjectRoutes:
             "workspace_enabled": True,
             "workspace_root": str(tmp_path / "workspaces"),
             "evidence_package_max_mb": 1,
+            "evidence_package_max_uncompressed_mb": 5,
         }, clear=False):
             artifact_path = resolve_workspace_path(session_id, "reports/big.txt", shell_app.CFG, ensure_parent=True)
-            artifact_path.write_bytes(b"x" * (1024 * 1024 + 1))
+            artifact_path.write_bytes(os.urandom(1024 * 1024 + 1))
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute(
                     "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, 'cat reports/big.txt', datetime('now'))",
@@ -2691,14 +2710,63 @@ class TestProjectRoutes:
                 json={"name": "Oversize", "include_artifacts": True},
                 headers={"X-Session-ID": session_id},
             ).data)["package"]
-            with mock.patch("services.projects.package_archive.tempfile.NamedTemporaryFile") as named_temp:
-                resp = client.get(
-                    f"/projects/{project['id']}/packages/{package['id']}/download",
-                    headers={"X-Session-ID": session_id},
-                )
-            named_temp.assert_not_called()
+            resp = client.get(
+                f"/projects/{project['id']}/packages/{package['id']}/download",
+                headers={"X-Session-ID": session_id},
+            )
         assert resp.status_code == 413
-        assert "size limit" in json.loads(resp.data)["error"]
+        assert "ZIP exceeds configured size limit" in json.loads(resp.data)["error"]
+
+    def test_evidence_package_download_job_builds_and_downloads_archive(self):
+        client = get_client()
+        session_id = self._session_id("project-package-job")
+        project = self._create_project(client, session_id)
+        run_id = self._seed_run(session_id, "nuclei -u https://darklab.sh")
+        self._link_run(client, session_id, project["id"], run_id)
+        package = json.loads(client.post(
+            f"/projects/{project['id']}/packages",
+            json={
+                "name": "Async Evidence",
+                "selection": {
+                    "run_ids": [run_id],
+                    "transcript_run_ids": [run_id],
+                    "finding_ids": [],
+                    "artifact_ids": [],
+                    "target_ids": [],
+                },
+            },
+            headers={"X-Session-ID": session_id},
+        ).data)["package"]
+
+        job_resp = client.post(
+            f"/projects/{project['id']}/packages/{package['id']}/download-jobs",
+            headers={"X-Session-ID": session_id},
+        )
+        assert job_resp.status_code == 202
+        job = json.loads(job_resp.data)["job"]
+        assert job["status"] in {"queued", "running", "complete"}
+        deadline = time.time() + 5
+        while job["status"] not in {"complete", "failed"} and time.time() < deadline:
+            time.sleep(0.02)
+            status_resp = client.get(
+                f"/projects/{project['id']}/packages/{package['id']}/download-jobs/{job['id']}",
+                headers={"X-Session-ID": session_id},
+            )
+            assert status_resp.status_code == 200
+            job = json.loads(status_resp.data)["job"]
+        assert job["status"] == "complete"
+        assert job["archive_bytes"] > 0
+
+        download_resp = client.get(
+            f"/projects/{project['id']}/packages/{package['id']}/download-jobs/{job['id']}/download",
+            headers={"X-Session-ID": session_id},
+        )
+        assert download_resp.status_code == 200
+        assert "attachment" in download_resp.headers["Content-Disposition"]
+        with zipfile.ZipFile(io.BytesIO(download_resp.data)) as archive:
+            assert "manifest.json" in archive.namelist()
+            assert f"runs/{run_id}.html" in archive.namelist()
+        download_resp.close()
 
     def test_project_artifacts_are_explicitly_disabled_when_files_are_disabled(self):
         client = get_client()
@@ -2912,8 +2980,10 @@ class TestConfigRoute:
         for key in (
             "app_name", "project_readme", "prompt_username", "prompt_domain", "default_theme",
             "max_tabs", "max_output_lines", "high_volume_output_line_threshold",
-            "high_volume_output_status_interval_lines", "workspace_enabled",
-            "interactive_pty_commands", "tour_chapters",
+            "high_volume_output_status_interval_lines", "evidence_package_max_mb",
+            "evidence_package_max_uncompressed_mb", "evidence_package_max_artifacts",
+            "workspace_enabled", "interactive_pty_commands",
+            "tour_chapters",
         ):
             assert key in data
         assert "share_redaction_enabled" in data
