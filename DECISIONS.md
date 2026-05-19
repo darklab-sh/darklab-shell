@@ -467,6 +467,7 @@ Confirmations were originally per-surface: the kill flow, history clear, history
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance

@@ -176,8 +176,8 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **1519 pytest + 1180 Vitest + 252 Playwright = 2,951 tests**.
-That total includes 2,919 behavior tests plus 32 docs/inventory meta-tests.
+Current totals: **1558 pytest + 1180 Vitest + 252 Playwright = 2,990 tests**.
+That total includes 2,956 behavior tests plus 32 docs/inventory meta-tests.
 
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration
@@ -392,6 +392,7 @@ Keep the summary factual. Do not bury risk or incomplete validation.
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance

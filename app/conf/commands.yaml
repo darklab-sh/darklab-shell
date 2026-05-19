@@ -3080,6 +3080,7 @@ commands:
         - nmap -sS
         - nmap -O
         - nmap --privileged
+        - nmap -o
         - nmap -oN
         - nmap -oX
         - nmap -oG
@@ -3102,6 +3103,10 @@ commands:
         value: separate_or_attached
         format: xml
       - flag: -oG
+        mode: write
+        value: separate_or_attached
+        format: text
+      - flag: -o
         mode: write
         value: separate_or_attached
         format: text
@@ -3204,6 +3209,13 @@ commands:
           suggest:
             - value: targets.txt
               description: Session file containing one target per line
+        - value: -o
+          description: Write normal output to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nmap-web.txt
+              description: Save scan output for the Files panel
         - value: -oN
           description: Write normal output to a session file
           takes_value: true

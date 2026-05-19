@@ -39,75 +39,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-- **Headless API and CLI client**
-  - Goal
-    - Ship a stable REST surface plus a thin `darklab` CLI so runs, history, and artifacts are reachable from CI pipelines and local scripts without driving the browser shell. Authenticates with the existing `tok_` session-token model; reuses the run broker, history service, allowlist, deny-prefix, registry rewrite, and per-session rate-limit bucket so headless callers cannot bypass any browser-path constraint.
-  - REST surface (`app/blueprints/api_v1.py`, mounted at `/api/v1`)
-    - `POST /api/v1/runs` — start a run. Body `{"command": "...", "project_id": null}`. Returns `{"id": "...", "status": "running", "stream_url": "...", "history_url": "..."}`.
-    - `GET /api/v1/runs/<id>` — current status, exit code when complete, byte/line counts.
-    - `GET /api/v1/runs/<id>/stream` — SSE output stream reusing the run broker SSE path so multi-worker reattach already works; CLI consumes via `text/event-stream`.
-    - `POST /api/v1/runs/<id>/cancel` — same termination semantics as the browser cancel button.
-    - `GET /api/v1/history` — cursor-paginated. Query params `cursor`, `limit` (capped at 100), `project_id`, `q`, `since`, `until`.
-    - `GET /api/v1/history/<id>` — run record with redaction honored.
-    - `GET /api/v1/history/<id>/output` — raw transcript text or `?format=json` for the structured envelope used by the browser.
-    - `GET /api/v1/history/<id>/artifacts` — list workspace artifacts; `GET /api/v1/history/<id>/artifacts/<name>` streams raw bytes with `Content-Disposition`.
-    - `GET /api/v1/projects`, `GET /api/v1/projects/<id>`, `GET /api/v1/projects/<id>/findings`, `GET /api/v1/projects/<id>/packages` — read-only first pass; write paths land in a follow-up so the MVP stays small.
-    - `GET /api/v1/openapi.json` — hand-written static schema served from the blueprint, validated by a CI test that loads it through `openapi-spec-validator`.
-    - `GET /api/v1/health` — unauthenticated liveness probe (no session lookup, no DB hit beyond a `SELECT 1`).
-  - Auth and rate limits
-    - Accept the token in `Authorization: Bearer tok_...` (canonical for headless) and fall back to `X-Session-ID: tok_...` so existing browser-style callers keep working during rollout.
-    - Validate against `session_tokens`; reject anonymous UUID sessions on `/api/v1/*` so headless callers are always bound to a durable, revocable token.
-    - Reuse the existing per-session rate-limit bucket; do not introduce a second bucket so CLI traffic cannot escalate beyond the browser ceiling.
-    - Exempt the blueprint from CSRF (token-bearing requests don't need it) but require the auth header on every route except `/api/v1/health` and `/api/v1/openapi.json`.
-  - Validation and safety
-    - Command validation reuses `_validate_command_for_run` (allowlist, deny-prefix, registry rewrite, variable expansion) so the headless path cannot run anything the browser cannot.
-    - Reject interactive PTY commands on the v1 surface — PTY is browser-specific (xterm.js renderer, modal lifecycle); revisit if a demand emerges.
-    - Mask the same fields as the browser when serializing run/history records (`SHODAN_API_KEY`, etc.).
-  - CLI client (`tools/darklab_cli/`)
-    - Tiny standalone Python package with its own `pyproject.toml`; talks to the server only via the REST blueprint, no shared imports with the Flask runtime.
-    - Commands
-      - `darklab run "<cmd>"` — POST, then follow the SSE stream and print lines to stdout; exits with the run's exit code.
-      - `darklab tail <id>` — attach to an in-flight run's SSE stream.
-      - `darklab history [--project ...] [--since ...] [--limit N]` — table or `--ndjson` machine output.
-      - `darklab show <id>` — run record plus first/last N output lines.
-      - `darklab download <id> [--artifact NAME | --workspace] [--out DIR]` — pull one artifact or zip the run workspace.
-      - `darklab cancel <id>` — POST cancel.
-      - `darklab whoami` — token-info round-trip for smoke testing.
-    - Configuration via env (`DARKLAB_API_URL`, `DARKLAB_TOKEN`) with optional `~/.config/darklab/config.toml` fallback; `--api-url` / `--token` CLI flags override.
-    - Distribution: in-repo first, `pip install ./tools/darklab_cli`; PyPI publish is a follow-up once the surface settles.
-  - Streaming and output shape
-    - SSE is the canonical run-output transport; the CLI synthesizes line-oriented output from the stream.
-    - For machine consumers that prefer line-delimited JSON, expose `GET /api/v1/runs/<id>/stream?format=ndjson` returning the same broker events as one JSON object per line; the CLI offers `darklab run --ndjson` to pass that through unchanged.
-  - Tests (`tests/py/`)
-    - `test_api_v1_runs.py` — start/cancel/status round-trip, auth rejection matrix, allowlist rejection mirrors browser behavior, rate-limit bucket shared with browser session, openapi schema validates.
-    - `test_api_v1_history.py` — cursor pagination, redaction parity with browser history endpoints, artifact download MIME and `Content-Disposition`.
-    - `test_api_v1_stream.py` — SSE reattach across workers (already exercised for the browser path; reuse fixtures), `?format=ndjson` shape.
-    - `tools/darklab_cli/tests/` — CLI argparse routing, env/config precedence, exit-code passthrough, `--ndjson` mode against a stub server.
-  - Docs
-    - New `docs/api.md` covering auth, the full endpoint table, SSE event shapes, error codes, and a curl quickstart.
-    - New CONFIGURATION.md section pointing at `DARKLAB_API_URL` / `DARKLAB_TOKEN` and the CLI install path.
-    - CHANGELOG entry under v2.0 Added; v2.0 merge-request and release-notes drafts updated; ARCHITECTURE.md gains a short "Headless API surface" bullet pointing at the blueprint and broker reuse.
-  - Open Decisions
-    - **Token header transport** — `Authorization: Bearer` only, `X-Session-ID` only, or both?
-      - *Recommended:* accept both, with `Authorization: Bearer` documented as canonical. Bearer is conventional for headless clients and `curl`/CI tooling; keeping `X-Session-ID` as a fallback avoids a second token-distribution path during the v2.0 rollout. Cheap to drop the fallback later if it goes unused.
-    - **Token scope model** — one `tok_` token grants both browser and CLI, or separate API-only tokens (e.g. `api_...` prefix with a capability column)?
-      - *Recommended:* single `tok_` token for v1. Splitting capabilities adds a UI surface, a migration, and a new revocation path before there is any evidence a single operator needs separate browser vs CLI credentials. Revisit if and when multi-operator or fine-grained-scope demand appears.
-    - **Rate limit policy** — shared bucket with the browser path, or separate CLI bucket?
-      - *Recommended:* shared. Splitting buckets would let an operator double their effective ceiling by switching transports, which defeats the bucket's purpose. A shared bucket also makes debugging simpler — one number to reason about.
-    - **Streaming default** — SSE only, NDJSON only, or both?
-      - *Recommended:* both, SSE default. SSE matches the existing broker without translation and works in browsers; NDJSON is what most CLIs and shell pipelines want. `?format=ndjson` is a thin server-side adapter, not a parallel stream implementation.
-    - **CLI distribution** — in-repo only, PyPI from v1, or both?
-      - *Recommended:* in-repo only for v1. Publishing to PyPI commits to a maintenance cadence and a public name; better to let the CLI surface settle against real usage first. Document `pip install ./tools/darklab_cli` and revisit PyPI as a follow-up once the v1 surface has shipped unchanged for a release or two.
-    - **Project write surface** — read-only projects in v1, or full CRUD?
-      - *Recommended:* read-only in v1. Project mutation has more nuance (link ownership, target dedup, finding promotion); shipping read-only lets headless callers consume engagement data immediately while the write surface is designed deliberately, not derived from the browser endpoints under deadline pressure.
-    - **PTY runs** — expose interactive PTYs through the API, or reject?
-      - *Recommended:* reject in v1 with a clear error. xterm.js framing, control-stream draining, and modal lifecycle are browser concerns; modeling them as a generic API would either bloat the surface or quietly diverge from browser behavior. Revisit when a concrete headless-PTY use case appears.
-    - **Workflows** — first-class endpoint or out of scope for v1?
-      - *Recommended:* out of scope for v1; the CLI can compose runs locally if needed. Adding `/api/v1/workflows` cleanly requires a stable workflow-run record shape, and the existing browser workflow surface is still evolving — promote when it lands in CHANGELOG as stable.
-    - **API versioning lifetime** — pin `/api/v1` and never break it, or allow additive-only changes within v1 plus a `v2` for breaking changes?
-      - *Recommended:* additive-only within `v1`, with breaking changes deferred to `v2`. Document the contract in `docs/api.md`. A CI test diffs `openapi.json` against a checked-in baseline and fails on removals or signature changes so breakage is loud, not accidental.
-    - **OpenAPI source of truth** — hand-written JSON file, or generated from Flask routes via a library (e.g. `apispec`, `flask-smorest`)?
-      - *Recommended:* hand-written for v1, validated in CI. The endpoint count is small, a generator pulls in a dependency that affects the whole blueprint style, and the spec doubles as the contract test fixture. Switch to generation later only if the route count outgrows hand maintenance.
+No open TODOs are currently tracked.
 
 ## Known Issues
 
@@ -117,11 +49,35 @@ No known issues are currently tracked.
 
 ## Technical Debt
 
-No technical debt is currently tracked.
+- **Promote shared run/history API helpers out of browser blueprints.**
+  - `app/blueprints/api_v1.py` intentionally reuses private helpers from `blueprints.run` and `blueprints.history` to keep v1 behavior aligned with the browser path.
+  - Once the API surface settles, move the shared run-start, stream, history-output, and history-count pieces into service modules so browser routes and `/api/v1` routes both depend on stable service boundaries instead of private route helpers.
 
 ---
 
 ## Feature Enhancements
+
+### API / CLI Enhancements
+- **`GET /api/v1/atlas` family.**
+  - The single biggest missing read surface. Mirror the desktop Atlas overlay with the same filters: `?run_id=`, `?entity_type=`, `?suppression=`, `?q=`, plus list/detail for entities and findings. Operators automating triage with the CLI want this before they want write APIs. Pair with `darklab atlas list / entity / finding` commands.
+- **`GET /api/v1/projects/<id>/runs` and `/api/v1/projects/<id>/entities`.**
+  - Symmetric with the existing `/findings` and `/packages` sub-routes; cheap because the underlying queries already exist. Without these, the project endpoints are inconsistent in shape.
+- **`POST /api/v1/runs/<id>/wait` (with `?timeout=`).**
+  - Synchronous block-until-complete for shell scripts. Avoids the SSE/NDJSON parsing dance for the common "run and report exit code" idiom. Returns the same payload as `GET /runs/<id>` once the run is terminal, or 408 on timeout. CLI: `darklab run --wait` flag, or `darklab show --wait` polls.
+- **`GET /api/v1/runs/<id>/output?range=N-M`.**
+  - Range slicing without grabbing full output. Big for CI scripts that pull tail lines from huge scans. Backwards-compatible — without `range=` everything works as today.
+- **Output search across runs.**
+  - `GET /api/v1/history/search?q=...&context=N` returning `{run_id, line_number, line, context_before, context_after}`. The browser has this via FTS; exposing it would close one of the biggest gaps versus operators piping `grep` against permalinks.
+- **Smallest-possible write surface for project links.**
+  - `POST /api/v1/runs/<id>/projects/<project_id>` to link a completed run to a project, `DELETE` to unlink. No project mutation needed; this is what CI integration scripts will reach for first.
+- **Webhook receiver / `POST /api/v1/intel/<provider>` passthrough.**
+  - Not for v1.1, but worth scoping — once outbound notifications land, the headless API becomes the natural place to receive `pull-request-merged` / `engagement-kicked-off` webhooks that auto-create projects.
+- **CLI: `darklab logs <run_id>` and `darklab grep <pattern>`.**
+  - Thin wrappers over `output` + `history/search`. Operator-shaped commands that make the CLI feel like a tool rather than an HTTP client.
+- **CLI: `darklab session token-info / revoke`.**
+  - Token lifecycle from the CLI, gated on the current token having a `tok_` scope. Avoids forcing operators back to the browser to manage their own keys.
+- **CLI: `darklab run --link-project NAME` accepts project *name*, resolves to id locally.**
+  - Operators don't memorize project ids. A small local lookup against `darklab projects` is fine.
 
 ### Atlas Enhancements
 - **Future**

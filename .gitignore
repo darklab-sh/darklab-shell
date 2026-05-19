@@ -9,6 +9,11 @@ __pycache__/
 *.pyo
 .pytest_cache/
 
+# Python package build artifacts generated under tools/
+tools/*/build/
+tools/*/dist/
+tools/*/src/*.egg-info/
+
 # Vendor JS files are committed as a fallback for local/docker-compose runs.
 # The Dockerfile overwrites them with the latest version at image build time.
 # Ignore any other files that may accumulate in the vendor directory.

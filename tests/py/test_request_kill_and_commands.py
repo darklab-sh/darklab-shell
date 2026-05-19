@@ -405,6 +405,35 @@ class TestIsCommandAllowedEdges:
         assert "Invalid file path: /../../scan.txt" in absolute_denied.reason
         assert "Command not allowed" not in absolute_denied.reason
 
+    def test_workspace_file_flags_treat_root_paths_as_workspace_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": tmp,
+                "workspace_quota_mb": 1,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+            from services.workspace.files import resolve_workspace_path, write_workspace_text_file
+            write_workspace_text_file("session-1", "urls.txt", "https://ip.darklab.sh\n", cfg)
+
+            result = validate_command(
+                "katana -list /urls.txt -d 1 -silent -o /katana-urls.txt",
+                session_id="session-1",
+                cfg=cfg,
+            )
+            expected_read = str(resolve_workspace_path("session-1", "urls.txt", cfg))
+            expected_write = str(resolve_workspace_path("session-1", "katana-urls.txt", cfg))
+
+        assert result.allowed, result.reason
+        assert result.workspace_reads == ["urls.txt"]
+        assert result.workspace_writes == ["katana-urls.txt"]
+        assert expected_read in result.exec_command
+        assert expected_write in result.exec_command
+        assert " -o /katana-urls.txt" not in result.exec_command
+
     def test_workspace_disabled_keeps_declared_file_flags_denied(self):
         registry = {
             "commands": [
@@ -525,6 +554,11 @@ class TestIsCommandAllowedEdges:
                     "katana -list urls.txt -o katana.txt",
                     ["urls.txt"],
                     ["katana.txt"],
+                ),
+                (
+                    "nmap -sV -p 1-1000 ip.darklab.sh -o nmap-output.txt",
+                    [],
+                    ["nmap-output.txt"],
                 ),
                 (
                     "amass enum -df domains.txt -timeout 10",

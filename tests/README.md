@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,919
+- behavior tests: 2,955
 - docs/inventory meta-tests: 32
-- `pytest`: 1519 (1487 behavior + 32 meta)
+- `pytest`: 1558 (1526 behavior + 32 meta)
 - `vitest`: 1180
 - `playwright`: 252
-- total: 2,951
+- total: 2,990
 
 This document is organized in two parts:
 
@@ -363,6 +363,49 @@ Practical note:
 Use this appendix as the exhaustive reference for the checked-in suites. The test names come directly from the source, and the descriptions are intentionally concise so the appendix can stay accurate as the code evolves.
 
 ### Pytest
+
+#### `test_api_v1.py`
+
+| Test | Description |
+| --- | --- |
+| `test_api_v1_rejects_missing_and_anonymous_auth` | Verifies `/api/v1` rejects missing tokens and anonymous UUID sessions. |
+| `test_api_v1_rejects_revoked_token` | Verifies `/api/v1` rejects session tokens that have been revoked after creation. |
+| `test_api_v1_whoami_accepts_bearer_token` | Verifies bearer-token auth returns session metadata without echoing the token. |
+| `test_api_v1_read_routes_use_api_rate_limit` | Verifies read-only `/api/v1` routes use the shared API rate limit. |
+| `test_api_v1_history_is_token_scoped_and_uses_page_envelope` | Verifies history list responses are token-scoped and use the shared pagination envelope. |
+| `test_api_v1_history_detail_output_and_cross_session_404` | Verifies run detail/output reads work for the owner and hide cross-session runs behind 404. |
+| `test_api_v1_artifact_list_and_download_are_token_scoped` | Verifies artifact list and download routes work for the owner and hide cross-session artifacts behind 404. |
+| `test_api_v1_artifact_download_rejects_cross_run_artifact_id` | Verifies artifact downloads reject artifact ids that belong to a different run. |
+| `test_api_v1_project_readers_are_token_scoped` | Verifies project detail, findings, and package readers work for the owner and return 404 across sessions. |
+| `test_api_v1_run_start_uses_broker_and_streams_ndjson` | Verifies API run start returns stream links and NDJSON stream adaptation follows broker events. |
+| `test_api_v1_sse_stream_emits_idle_heartbeat` | Verifies brokered SSE streams emit heartbeat comments during idle periods. |
+| `test_api_v1_ndjson_stream_adapts_sse_heartbeat_comments` | Verifies NDJSON stream adaptation preserves idle SSE heartbeats as heartbeat rows. |
+| `test_api_v1_run_start_reports_broker_unavailable` | Verifies run start returns `503 broker_unavailable` and `Retry-After` when the broker is unavailable. |
+| `test_api_v1_run_start_rejects_archived_project_link` | Verifies API-started runs reject explicit links to archived projects before starting execution. |
+| `test_api_v1_run_start_rejects_invalid_body_and_unknown_project` | Verifies API run start rejects non-object JSON bodies and unknown project ids with stable error codes. |
+| `test_api_v1_run_start_rejects_project_links_for_builtin_missing_and_interactive` | Verifies explicit project links are rejected for built-ins, missing runtimes, and interactive PTY commands. |
+| `test_api_v1_run_start_rewrites_workspace_root_output_paths` | Verifies API-started runs rewrite leading-slash workspace output paths before spawning commands. |
+| `test_api_v1_run_stream_and_cancel_are_token_scoped` | Verifies run streams and cancel requests are scoped to the owning token. |
+| `test_api_v1_explicit_project_link_uses_finalized_run_path` | Verifies explicit project linking for API-started runs uses the finalized-run project-link path. |
+| `test_api_v1_openapi_route_matches_checked_in_contract` | Verifies live `/api/v1/openapi.json` matches the checked-in OpenAPI snapshot. |
+| `test_api_v1_openapi_generator_snapshot_is_current` | Verifies the checked-in OpenAPI JSON matches the generator output byte-for-byte. |
+| `test_api_v1_openapi_contract_describes_public_shapes` | Verifies the OpenAPI contract includes core request, response, parameter, stream, and error shapes. |
+| `test_api_v1_whoami_last_seen_is_current_auth_timestamp` | Verifies `whoami` reports and stores the current successful API authentication timestamp. |
+| `test_darklab_cli_sse_parser_reads_events` | Verifies the bundled CLI's SSE parser reads event ids and JSON payloads. |
+| `test_darklab_cli_config_flags_win_over_environment` | Verifies CLI flags take precedence over environment configuration. |
+| `test_darklab_cli_client_builds_authenticated_api_urls` | Verifies the CLI client builds `/api/v1` URLs with encoded query parameters. |
+| `test_darklab_cli_client_sends_bearer_header_and_formats_http_errors` | Verifies the CLI HTTP client sends bearer auth headers and formats JSON API errors. |
+| `test_darklab_cli_config_preserves_http_scheme_and_port` | Verifies CLI API URLs preserve explicit HTTP schemes and custom ports. |
+| `test_darklab_cli_config_file_uses_toml` | Verifies the CLI config file is parsed as TOML, including inline comments and numeric timeout values. |
+| `test_darklab_cli_config_requires_explicit_http_scheme` | Verifies CLI API URLs fail clearly when no HTTP or HTTPS scheme is provided. |
+| `test_darklab_cli_run_requires_no_follow_for_json_start_payload` | Verifies `darklab run` requires `--no-follow --format json` for start-only JSON output and rejects incompatible follow/format pairs before starting a run. |
+| `test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors` | Verifies the CLI entry point can read, stream, start runs, and report API errors through a fake API client. |
+| `test_darklab_cli_tail_text_does_not_double_space_output` | Verifies CLI text streaming normalizes SSE line endings without adding blank lines between output rows. |
+| `test_darklab_cli_tail_text_fails_when_stream_has_no_terminal_event` | Verifies CLI text tailing fails when a stream closes before an exit, killed, or error event. |
+| `test_darklab_cli_tail_ndjson_fails_when_stream_has_no_terminal_event` | Verifies CLI NDJSON tailing fails when a stream closes before an exit, killed, or error event. |
+| `test_darklab_cli_download_rejects_unsafe_header_filename` | Verifies artifact downloads reject unsafe `Content-Disposition` filenames. |
+| `test_darklab_cli_download_uses_rfc5987_filename` | Verifies artifact downloads honor UTF-8 `filename*` attachment names before writing the file. |
+| `test_darklab_cli_download_refuses_to_overwrite_existing_file` | Verifies artifact downloads do not silently overwrite existing local files. |
 
 #### `test_backend_modules.py`
 
@@ -1051,10 +1094,11 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestIsCommandAllowedEdges.test_workspace_enabled_exempts_declared_file_flags_and_rewrites_paths` | Verifies that declared workspace file flags can bypass deny entries only when workspace storage is enabled and the file names rewrite into the session workspace. |
 | `TestIsCommandAllowedEdges.test_workspace_file_flags_resolve_relative_to_workspace_cwd` | Verifies that declared workspace file flags resolve relative file names against the active tab workspace folder before rewriting them for execution. |
 | `TestIsCommandAllowedEdges.test_workspace_file_flags_allow_parent_paths_without_escaping_workspace` | Verifies that `..` path segments can move upward within the workspace but cannot escape the session workspace. |
+| `TestIsCommandAllowedEdges.test_workspace_file_flags_treat_root_paths_as_workspace_root` | Verifies that leading-slash workspace file flag values resolve from the session workspace root instead of the server filesystem root. |
 | `TestIsCommandAllowedEdges.test_workspace_disabled_keeps_declared_file_flags_denied` | Verifies that declared workspace file flags remain denied while workspace storage is disabled. |
 | `TestIsCommandAllowedEdges.test_workspace_read_flags_rewrite_relative_files_but_keep_packaged_wordlists` | Verifies that workspace-aware read flags rewrite relative session file names while preserving allowed packaged absolute wordlists. |
 | `TestIsCommandAllowedEdges.test_workspace_write_flags_keep_dev_null_exception` | Verifies that workspace-aware write flags do not break the existing `/dev/null` output exception. |
-| `TestIsCommandAllowedEdges.test_workspace_flags_cover_common_list_wordlist_and_output_tools` | Verifies workspace read/write flag rewrites for `pd-httpx`, `gobuster`, `naabu`, and `katana` using the real command registry metadata. |
+| `TestIsCommandAllowedEdges.test_workspace_flags_cover_common_list_wordlist_and_output_tools` | Verifies workspace read/write flag rewrites for `pd-httpx`, `gobuster`, `naabu`, `katana`, `nmap`, and Amass using the real command registry metadata. |
 | `TestIsCommandAllowedEdges.test_workspace_artifact_capture_skips_app_managed_amass_database` | Verifies that app-managed Amass database paths under `tools/amass` are not captured as workspace artifacts. |
 | `TestIsCommandAllowedEdges.test_restricted_command_input_cidrs_block_inline_literal_targets` | Verifies configured restricted networks block literal IP and URL-host command inputs in metadata-known target slots while allowing ordinary domains. |
 | `TestIsCommandAllowedEdges.test_restricted_command_input_cidrs_block_overlapping_cidr_targets` | Verifies configured restricted networks block overlapping CIDR command inputs in metadata-known target slots. |
@@ -1705,7 +1749,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestDenyPrefix.test_deny_flag_matches_exact_case` | Checks that deny flag matches exact case. |
 | `TestDenyPrefix.test_deny_flag_does_not_cross_case_boundary` | Checks that deny flag does not cross case boundary. |
 | `TestDenyPrefix.test_deny_tool_prefix_still_case_insensitive` | Checks that deny tool prefix still case insensitive. |
-| `TestDenyPrefix.test_deny_single_char_matches_combined_group` | Checks that deny single char matches combined group. |
+| `TestDenyPrefix.test_workspace_nmap_output_flag_exempts_combined_deny_group` | Verifies managed nmap workspace output flags can bypass the broader nmap output deny group. |
 | `TestDenyPrefix.test_devnull_exception_prefix` | Checks /dev/null exception prefix handling. |
 | `TestDenyPrefix.test_devnull_exception_anywhere` | Checks /dev/null exception anywhere handling. |
 | `TestDenyPrefix.test_devnull_exception_does_not_allow_real_paths` | Checks that /dev/null exception does not allow real paths. |
@@ -3492,6 +3536,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 - [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](../TODO.md) - open follow-ups, research notes, known issues, and future ideas
 - [ARCHITECTURE.md → Atlas Export Schema](../ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [docs/api.md](../docs/api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](../docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/postgres-migration.md](../docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
 - [docs/storage-scaling.md](../docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance

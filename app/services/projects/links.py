@@ -137,6 +137,62 @@ def link_run_to_active_project(conn, session_id, run_id):
     raise ProjectWorkspaceError("could not allocate an active project link id")
 
 
+def link_run_to_project_on_conn(conn, session_id, project_id, run_id, *, source="manual"):
+    source = validate_project_link_source(source)
+    project = conn.execute(
+        "SELECT id, name, slug FROM projects WHERE session_id = ? AND id = ? AND status != 'archived'",
+        (session_id, project_id),
+    ).fetchone()
+    if not project:
+        raise ProjectWorkspaceNotFound("project not found")
+    run = conn.execute(
+        "SELECT command, run_kind FROM runs WHERE session_id = ? AND id = ?",
+        (session_id, run_id),
+    ).fetchone()
+    if not run:
+        raise ProjectWorkspaceNotFound("run not found")
+    run_kind = normalize_run_kind(run["run_kind"], command=str(run["command"] or ""))
+    if not is_project_linkable_run_kind(run_kind):
+        raise ProjectWorkspaceError("project links only support external runs")
+    row = conn.execute(
+        "SELECT id, project_id, entity_type, entity_id, source, created "
+        "FROM project_links WHERE project_id = ? AND entity_type = 'run' AND entity_id = ?",
+        (project_id, run_id),
+    ).fetchone()
+    if row:
+        link = _row_to_link(row)
+        if link is not None:
+            link["project_name"] = project["name"] or project["slug"] or project["id"]
+        return link
+    if _quota_exceeded(
+        _project_link_count(conn, project_id),
+        "max_project_links_per_project",
+        5000,
+    ):
+        _raise_quota("project link quota exceeded for this project")
+    created = _now()
+    for _ in range(10):
+        link_id = _new_project_link_id()
+        conn.execute(
+            "INSERT INTO project_links "
+            "(id, project_id, entity_type, entity_id, source, created) "
+            "VALUES (?, ?, 'run', ?, ?, ?) "
+            "ON CONFLICT(project_id, entity_type, entity_id) DO NOTHING",
+            (link_id, project_id, run_id, source, created),
+        )
+        row = conn.execute(
+            "SELECT id, project_id, entity_type, entity_id, source, created "
+            "FROM project_links WHERE project_id = ? AND entity_type = 'run' AND entity_id = ?",
+            (project_id, run_id),
+        ).fetchone()
+        if row:
+            link = _row_to_link(row)
+            if link is not None:
+                link["project_name"] = project["name"] or project["slug"] or project["id"]
+            return link
+    raise ProjectWorkspaceError("could not allocate a project link id")
+
+
 def link_active_project_run_entities(conn, session_id, project_id, run_id):
     if not _project_auto_link_run_entities_enabled(conn, session_id):
         return None

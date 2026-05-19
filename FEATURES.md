@@ -26,6 +26,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [Share Redaction](#share-redaction)
 - [Mobile Shell](#mobile-shell)
 - [Built-In Commands](#built-in-commands)
+- [Headless API and CLI](#headless-api-and-cli)
 - [Session Command Variables](#session-command-variables)
 - [Session Files](#session-files)
 - [Project Workspaces](#project-workspaces)
@@ -639,6 +640,27 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 **Configuration:** none. Built-in commands are defined in application code, not in operator config.
 
 **Related files:** `app/services/commands/builtins.py` (built-in command registry + output rendering), `app/services/commands/registry.py` (dispatch, autocomplete loading, and man routing), `app/services/commands/builtin_autocomplete.yaml` (built-in autocomplete grammar), `app/static/js/app.js` (dynamic autocomplete hooks, client-side command flows, and Options/theme command handling), `app/static/js/runner.js` (client-side command interception).
+
+---
+
+## Headless API and CLI
+
+**Purpose:** run commands and read saved data from scripts, CI jobs, or a local terminal without driving the browser shell.
+
+**Behavior:**
+
+- `/api/v1` authenticates with existing `tok_...` session tokens and rejects anonymous browser UUID sessions.
+- API-started runs use the same command validation, registry rewrites, runtime checks, brokered stream, history persistence, Atlas capture, and project capture behavior as browser-started runs.
+- Scripts can start non-interactive runs, stream broker events as SSE or NDJSON, cancel active current-session runs, read history/output/artifacts, download run artifacts by stable artifact id, and inspect read-only project data.
+- History responses include the same batched artifact, finding, Atlas entity, and Atlas finding counts shown in History and Run Details.
+- The bundled `darklab` CLI wraps the API with `whoami`, `run`, `tail`, `cancel`, `history`, `show`, `output`, `artifacts`, `projects`, `project`, `project-findings`, `project-packages`, and `download` commands. Live tailing fails clearly if a stream closes before the run reaches an exit, killed, or error event.
+- CLI configuration uses flags first, then `DARKLAB_API_URL`, `DARKLAB_TOKEN`, and `DARKLAB_TIMEOUT`, then the TOML file at `~/.config/darklab/config.toml`.
+
+**Limits:** API v1 is intentionally non-interactive. It does not expose Interactive PTY start/input/resize routes, project write routes, workflow execution, API-only token scopes, or workspace ZIP downloads.
+
+**Configuration:** no server-side API-specific settings. CLI users can set `DARKLAB_API_URL`, `DARKLAB_TOKEN`, `DARKLAB_TIMEOUT`, or `~/.config/darklab/config.toml`; see [docs/api.md](docs/api.md).
+
+**Related files:** `app/blueprints/api_v1.py` (`/api/v1` routes), `app/services/api_v1/` (auth, serialization, and OpenAPI helpers), `docs/api.md` (user guide), `docs/api-v1-openapi.json` (checked-in OpenAPI snapshot), `scripts/generate_api_openapi.py` (OpenAPI generator), and `tools/darklab_cli/` (bundled CLI package).
 
 ---
 
@@ -1261,6 +1283,7 @@ The repo also includes a starter Grafana dashboard at `examples/grafana/darklab-
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance

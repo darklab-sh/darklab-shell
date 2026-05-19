@@ -16,6 +16,14 @@ class RunSearchClause:
     fts_query: str | None = None
     strategy: str = "none"
 
+    @property
+    def predicate_sql(self) -> str:
+        """Return the search predicate without a leading WHERE/AND joiner."""
+        stripped = self.sql.strip()
+        if stripped.upper().startswith("AND "):
+            return stripped[4:].strip()
+        return stripped
+
 
 def sqlite_fts_query(raw: str) -> str | None:
     """Build a conservative SQLite FTS5 query, or None when LIKE is safer."""

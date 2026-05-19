@@ -326,16 +326,17 @@
 
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
 
-# Whether the /runs rate limiter is active at all. Set to false for test-only or
-# maintenance overlays where you want the app to accept runs without throttling.
+# Whether the shared /runs and /api/v1 rate limiter is active at all. Set to false
+# for test-only or maintenance overlays where you want the app to accept requests
+# without throttling.
 # Server default if unset: true
 # rate_limit_enabled: true
 
-# Maximum number of /runs requests per minute per IP
+# Maximum number of /runs and /api/v1 requests per minute per IP
 # Server default if unset: 30
 # rate_limit_per_minute: 30
 
-# Maximum number of /runs requests per second per IP
+# Maximum number of /runs and /api/v1 requests per second per IP
 # Server default if unset: 5
 # rate_limit_per_second: 5
 

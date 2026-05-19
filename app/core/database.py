@@ -155,7 +155,8 @@ def _create_schema(conn):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS session_tokens (
             token   TEXT PRIMARY KEY,
-            created TEXT NOT NULL
+            created TEXT NOT NULL,
+            last_seen_at TEXT
         )
     """)
     conn.execute(f"""
@@ -750,9 +751,14 @@ def _migrate_schema(conn):
         conn.execute("""
             CREATE TABLE IF NOT EXISTS session_tokens (
                 token   TEXT PRIMARY KEY,
-                created TEXT NOT NULL
+                created TEXT NOT NULL,
+                last_seen_at TEXT
             )
         """)
+    except SQLiteOperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE session_tokens ADD COLUMN last_seen_at TEXT")
     except SQLiteOperationalError:
         pass
 

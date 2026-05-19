@@ -2493,6 +2493,15 @@ def _absolute_workspace_flag_path_error(value: str) -> str:
     return ""
 
 
+def _workspace_flag_absolute_passthrough(value: str, mode: str) -> bool:
+    raw = str(value or "").strip()
+    if not os.path.isabs(raw):
+        return False
+    if raw == "/dev/null" and mode in {"write", "read_write"}:
+        return True
+    return mode in {"read", "read_write"} and raw.startswith("/usr/share/wordlists/")
+
+
 def _restricted_command_networks(cfg: dict | None = None) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
     active_cfg = cfg or app_config.CFG
     raw_values = active_cfg.get("restricted_command_input_cidrs") or []
@@ -2881,6 +2890,16 @@ def _workspace_read_file_restriction_reason(
     return ""
 
 
+def _reserved_interactive_deny_matches(command: str, deny_entries: list[str]) -> bool:
+    command_tokens = split_command_argv(command)
+    if "--interactive" not in command_tokens:
+        return False
+    return is_denied(
+        command,
+        [entry for entry in deny_entries if "--interactive" in split_command_argv(entry)],
+    )
+
+
 def _rewrite_workspace_file_flags(
     command: str,
     session_id: str,
@@ -2988,20 +3007,22 @@ def _rewrite_workspace_file_flags(
 
         mode = str(matched_spec.get("mode") or "")
         kind = str(matched_spec.get("kind") or "file")
+        workspace_value = user_value
         if os.path.isabs(user_value):
             path_error = _absolute_workspace_flag_path_error(user_value)
             if path_error:
                 return command, set(), [], [], [], _invalid_workspace_file_path_reason(user_value, path_error)
-            index = value_index + 1
-            continue
-        workspace_value = user_value
+            if _workspace_flag_absolute_passthrough(user_value, mode):
+                index = value_index + 1
+                continue
+            workspace_value = user_value.lstrip("/")
         if not (
             managed_dir_applies
             and flag == managed_dir_flag
-            and user_value.rstrip(os.sep) == managed_dir_name
+            and workspace_value.rstrip(os.sep) == managed_dir_name
         ):
             try:
-                workspace_value = _normalize_workspace_command_path(user_value, workspace_cwd)
+                workspace_value = _normalize_workspace_command_path(workspace_value, workspace_cwd)
             except InvalidWorkspacePath as exc:
                 return command, set(), [], [], [], _invalid_workspace_file_path_reason(user_value, str(exc))
 
@@ -3152,6 +3173,14 @@ def validate_command(
         return CommandValidationResult(
             False,
             restricted_reason,
+            display_command=command,
+            exec_command=command_to_validate,
+        )
+
+    if denied and _reserved_interactive_deny_matches(command_to_validate.strip(), denied):
+        return CommandValidationResult(
+            False,
+            f"Command not allowed: '{command.strip()}'",
             display_command=command,
             exec_command=command_to_validate,
         )

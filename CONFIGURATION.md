@@ -64,6 +64,31 @@ Most operator-owned files under `app/conf/` and `app/conf/themes/` support sibli
 
 ---
 
+## Headless CLI Configuration
+
+The bundled `darklab` CLI talks to `/api/v1` and keeps its own client-side settings. These do not change server behavior.
+
+Resolution order is:
+
+1. command flags: `--api-url`, `--token`, and `--timeout`
+2. environment variables: `DARKLAB_API_URL`, `DARKLAB_TOKEN`, and `DARKLAB_TIMEOUT`
+3. `~/.config/darklab/config.toml`
+4. built-in defaults
+
+Example:
+
+```toml
+api_url = "https://shell.example.com"
+token = "tok_your_session_token"
+timeout = 30
+```
+
+`api_url` must include `http://` or `https://`. Custom ports are supported, so local installs can use values like `http://192.168.1.3:9999`. The file is parsed as TOML, so inline comments and numeric timeout values work normally.
+
+Use [docs/api.md](docs/api.md) for endpoint examples and CLI commands.
+
+---
+
 ## Application Settings
 
 The values below are the built-in server defaults from `app/config.py`.
@@ -98,9 +123,9 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `runs_search_text_inline_max_bytes` | `0` | Server-side only. Offloads oversized `runs.output_search_text` values to compressed files under `data_dir/body-store` when the UTF-8 body is larger than this byte threshold. History search still checks the offloaded body when needed, so terms beyond the stored preview remain findable. `0` keeps values inline |
 | `snapshots_inline_max_bytes` | `0` | Server-side only. Offloads oversized tab snapshot bodies under `data_dir/body-store` while share links still read back normally. `0` keeps snapshot content inline |
 | `intel_payload_inline_max_bytes` | `0` | Server-side only. Offloads oversized Atlas intel provider payloads under `data_dir/body-store` while entity detail responses still return the provider data. `0` keeps intel payloads inline |
-| `rate_limit_enabled` | `true` | Enables the `/runs` rate limiter. Set to `false` only for test-only or maintenance overlays where throttling should be bypassed |
-| `rate_limit_per_minute` | `30` | Max `/runs` requests per minute per IP |
-| `rate_limit_per_second` | `5` | Max `/runs` requests per second per IP |
+| `rate_limit_enabled` | `true` | Enables the shared `/runs` and `/api/v1` rate limiter. Set to `false` only for test-only or maintenance overlays where throttling should be bypassed |
+| `rate_limit_per_minute` | `30` | Max `/runs` and `/api/v1` requests per minute per IP |
+| `rate_limit_per_second` | `5` | Max `/runs` and `/api/v1` requests per second per IP |
 | `intel_cache_ttl_shodan_ip_seconds` | `86400` | Server-side only. Default cache lifetime for normalized Shodan IP responses |
 | `intel_cache_ttl_shodan_search_seconds` | `21600` | Server-side only. Default cache lifetime for normalized Shodan search responses |
 | `intel_cache_ttl_censys_host_seconds` | `21600` | Server-side only. Default cache lifetime for normalized Censys host responses |
@@ -913,6 +938,7 @@ Use the production Compose overlay and `DOCKER_GELF_ADDRESS` if Docker should al
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance

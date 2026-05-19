@@ -203,6 +203,27 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/welcome/hints` | Returns rotating desktop welcome footer hints from `app_hints.txt`. |
 | `GET` | `/welcome/hints-mobile` | Returns rotating mobile welcome footer hints from `app_hints_mobile.txt`. |
 
+### Headless API Routes
+
+| Method | Endpoint | Description |
+| -------- | ---------- | ------------- |
+| `GET` | `/api/v1/health` | Returns unauthenticated API liveness metadata. |
+| `GET` | `/api/v1/openapi.json` | Returns the checked-in `/api/v1` OpenAPI contract from the Python spec source. |
+| `GET` | `/api/v1/whoami` | Authenticates a `tok_` session token and returns session metadata without echoing the token. |
+| `GET` | `/api/v1/history` | Returns current-token run history with the browser-aligned offset page envelope, search filters, and batched History/Run Details counts. |
+| `GET` | `/api/v1/history/<run_id>` | Returns one current-token run summary with artifact, finding, Atlas, label, and note counts. |
+| `GET` | `/api/v1/history/<run_id>/output` | Returns stored run output as plain text or JSON using the same preview/full-output behavior as Run Details. |
+| `GET` | `/api/v1/history/<run_id>/artifacts` | Lists workspace artifacts for one current-token run by stable artifact id. |
+| `GET` | `/api/v1/history/<run_id>/artifacts/<artifact_id>` | Streams one current-token run artifact while rejecting cross-run artifact ids. |
+| `GET` | `/api/v1/projects` | Returns a read-only paged project list for the token session. |
+| `GET` | `/api/v1/projects/<project_id>` | Returns one read-only project record for the token session. |
+| `GET` | `/api/v1/projects/<project_id>/findings` | Returns a read-only paged project findings response using project query services. |
+| `GET` | `/api/v1/projects/<project_id>/packages` | Returns a read-only paged evidence package list for one project. |
+| `POST` | `/api/v1/runs` | Starts a non-interactive command through the same validation, rewrite, broker, and persistence path as browser runs. |
+| `GET` | `/api/v1/runs/<run_id>` | Returns active broker status or completed history status for a current-token run. |
+| `GET` | `/api/v1/runs/<run_id>/stream` | Streams a current-token run as SSE by default or NDJSON when `format=ndjson`. |
+| `POST` | `/api/v1/runs/<run_id>/cancel` | Cancels any active run in the token session, including browser-started runs. |
+
 ### Run Lifecycle Routes
 
 | Method | Endpoint | Description |
@@ -718,7 +739,7 @@ flowchart TB
 - `logging_setup.py` must initialize before the rest of the app because module-import-time startup work, especially Redis setup, can log immediately.
 - The infrastructure/helper layer owns shared concerns like request metadata, persistence, process tracking, permalink shaping, artifact storage, and the Flask-Limiter singleton.
 - `commands.py` and `builtin_commands.py` stay logically adjacent to the run path but remain separate from the Flask factory so command policy and shell-helper behavior can be tested in isolation.
-- The HTTP layer owns the actual request/response surface across assets/content, run streaming, history/share, session-token/session-state APIs, workspace-file APIs, and project workspace APIs. `app.py` remains a thin factory that composes logging, limiter setup, blueprint registration, and request hooks.
+- The HTTP layer owns the actual request/response surface across assets/content, run streaming, history/share, session-token/session-state APIs, headless API routes, workspace-file APIs, and project workspace APIs. `app.py` remains a thin factory that composes logging, limiter setup, blueprint registration, and request hooks.
 - Project workspace service code keeps active project helpers in `services.projects.active`, run-file artifact ingestion/checksum/availability helpers in `services.projects.artifacts`, project run comparison helpers in `services.projects.comparisons`, project create/update/delete helpers in `services.projects.crud`, project/run finding ingestion, query, and review helpers in `services.projects.findings`, project link and run-entity link helpers in `services.projects.links`, metadata helpers in `services.projects.metadata`, session migration helpers in `services.projects.migration`, row/payload shaping helpers in `services.projects.models`, evidence package create/delete/archive helpers in `services.projects.package_archive`, evidence package archive build job helpers in `services.projects.package_jobs`, evidence package export rendering helpers in `services.projects.package_rendering`, evidence package manifest/redaction helpers in `services.projects.packages`, preference helpers in `services.projects.preferences`, project list/summary/entity/run/artifact query helpers in `services.projects.queries`, slug allocation helpers in `services.projects.slugs`, project target validation/discovery/mutation helpers in `services.projects.targets`, and shared ID/timestamp/quota helpers in `services.projects.utils`. `services.projects.workspace` stays as a compatibility export layer for callers while the project service split settles.
 
 ### Backend Runtime Boundaries
@@ -730,6 +751,18 @@ This boundary view answers a different question than the dependency graph above:
 - The configured database plus artifact files own durable run, snapshot, token, workflow, workspace metadata, project workspace, package, and search state.
 - Scanner subprocesses remain an out-of-process boundary rather than an in-worker extension of the Flask app.
 - Config and theme YAML files are filesystem-backed dependencies that shape both backend behavior and frontend presentation but do not become a general runtime datastore.
+
+---
+
+## Headless API Surface
+
+`app/blueprints/api_v1.py` exposes `/api/v1` for scripts and the bundled `darklab` CLI. The route layer stays intentionally thin: it authenticates a session token through `app/services/api_v1/auth.py`, shapes responses through `app/services/api_v1/serialization.py`, and then reuses the same command preparation, brokered run worker, history search, artifact storage, and project query services used by the browser.
+
+The API accepts `Authorization: Bearer tok_...` as the canonical identity and keeps `X-Session-ID: tok_...` as a compatibility fallback. Anonymous browser UUID sessions are rejected so headless callers must use a revocable session token. API errors use the stable `{"error":{"code":"...","message":"..."}}` envelope, and app-level 429/500 handlers preserve that envelope for `/api/v1/*`.
+
+Run start requests do not get a separate execution path. `POST /api/v1/runs` uses the browser validation/rewrite/runtime checks before starting brokered execution, honors active-project capture when no explicit project is supplied, and can link completed external runs to an explicit project id. Streaming is an adapter over broker events: SSE remains the native transport, while `format=ndjson` converts broker event payloads into newline-delimited JSON for CLI pipelines.
+
+The OpenAPI dictionary in `app/services/api_v1/openapi.py` is the source of truth. `scripts/generate_api_openapi.py` writes the checked-in `docs/api-v1-openapi.json`, and pytest compares the live `/api/v1/openapi.json` response against that snapshot so route drift is visible during normal backend checks.
 
 ---
 
@@ -1217,7 +1250,7 @@ erDiagram
 - `schema_migrations` — Postgres-only migration bookkeeping table. It records app-owned migration versions so startup and the SQLite-to-Postgres migration helper can verify that a destination schema has the expected baseline before app data is copied.
 - `run_output_artifacts` — metadata rows pointing at compressed full-output artifacts under `<data_dir>/run-output/`. This keeps the `runs` table lean while still allowing the canonical `/history/<id>` permalink to serve full output when it exists.
 - `snapshots` — one row per tab permalink (`/share/<id>`). Contains `{text, cls, tsC, tsE}` objects with raw ANSI codes and timestamp data for accurate HTML export reproduction, and now feeds the `SNAPSHOT` rows in the shared history surfaces. When `snapshots_inline_max_bytes` is set, oversized snapshot bodies move to `data_dir/body-store` while share links still read through the pointer.
-- `session_tokens` — one row per issued named session token `(token TEXT PRIMARY KEY, created TEXT)`. Used to validate `tok_`-prefixed `X-Session-ID` headers and to support `session-token list` and `session-token revoke`.
+- `session_tokens` — one row per issued named session token `(token TEXT PRIMARY KEY, created TEXT, last_seen_at TEXT)`. Used to validate `tok_`-prefixed `X-Session-ID` headers, report headless API token activity without echoing the token, and support `session-token list` and `session-token revoke`.
 - `session_preferences` — one row per session ID `(session_id TEXT PRIMARY KEY, preferences TEXT, updated TEXT)`. Stores the normalized Options snapshot that follows a named session token across browsers while still allowing browser-local UUID sessions to keep independent defaults.
 - `starred_commands` — one row per starred command per session `(session_id, command)`. Backs the `/session/starred` endpoints and follows session tokens across devices via the migration path.
 - `session_variables` — one row per session command variable `(session_id, name, value, updated)`. Backs the `var` built-in, `/session/variables`, and app-managed command expansion before validation.
@@ -1468,12 +1501,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,919
+- behavior tests: 2,956
 - docs/inventory meta-tests: 32
-- `pytest`: 1519 (1487 behavior + 32 meta)
+- `pytest`: 1558 (1526 behavior + 32 meta)
 - `vitest`: 1180
 - `playwright`: 252
-- total: 2,951
+- total: 2,990
 
 ### Testing Architecture
 
@@ -1513,6 +1546,7 @@ Keep the detailed suite appendix, focused run commands, and maintenance notes in
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
 - [Atlas and Entity Model →  → Export Schema](#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance

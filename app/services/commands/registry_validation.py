@@ -190,6 +190,14 @@ def _nmap_output_deny_matches(flag: str, token: str) -> bool:
     )
 
 
+def _is_exempted_nmap_output_token(token: str, exempt_flags: set[str]) -> bool:
+    return any(
+        exempt_flag in {"-oN", "-oX", "-oG", "-oA", "-oS"}
+        and (token == exempt_flag or token.startswith(exempt_flag))
+        for exempt_flag in exempt_flags
+    )
+
+
 def is_denied(command: str, deny_entries: list[str], *, exempt_flags: set[str] | None = None) -> bool:
     """Return True if command matches any deny entry."""
     command_tokens = split_command_argv(command)
@@ -220,6 +228,8 @@ def is_denied(command: str, deny_entries: list[str], *, exempt_flags: set[str] |
                 _flag_matches_token(flag, token)
                 or (command_tokens[0].lower() == "nmap" and _nmap_output_deny_matches(flag, token))
             ):
+                continue
+            if flag == "-o" and command_tokens[0].lower() == "nmap" and _is_exempted_nmap_output_token(token, exempt_flags):
                 continue
             if idx + 1 < len(tail) and tail[idx + 1] == "/dev/null":
                 break

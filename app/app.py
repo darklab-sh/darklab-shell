@@ -65,6 +65,7 @@ _init_metrics_environment()
 from extensions import limiter  # noqa: E402
 from core.helpers import get_client_ip, get_session_id  # noqa: E402, F401 — get_session_id re-exported
 from blueprints.assets import assets_bp  # noqa: E402
+from blueprints.api_v1 import api_v1_bp  # noqa: E402
 from blueprints.atlas import atlas_bp  # noqa: E402
 from blueprints.content import content_bp  # noqa: E402
 from blueprints.run import run_bp, SUDO_BIN, KILL_BIN  # noqa: E402, F401 — re-exported
@@ -75,6 +76,7 @@ from blueprints.workspace import workspace_bp  # noqa: E402
 from blueprints.projects import projects_bp  # noqa: E402
 from services.workspace.files import cleanup_inactive_workspaces  # noqa: E402
 from services import metrics as app_metrics  # noqa: E402
+from services.api_v1.serialization import json_error  # noqa: E402
 
 app = Flask(__name__, template_folder="templates")
 app.config["RATELIMIT_ENABLED"] = CFG.get("rate_limit_enabled", True)
@@ -90,6 +92,8 @@ def _rate_limit_handler(e):
     log.warning("RATE_LIMIT", extra={"ip": ip, "path": request.path, "limit": str(e.description)})
     scope = "secrets" if request.path.startswith("/session/secrets") else "global"
     app_metrics.record_rate_limit_rejection(request.endpoint or "unknown", scope=scope)
+    if request.path.startswith("/api/v1/"):
+        return jsonify(json_error("rate_limited", "Rate limit exceeded. Please slow down.")), 429
     if request.path.startswith("/session/secrets"):
         retry_after = None
         limit = getattr(e, "limit", None)
@@ -104,6 +108,8 @@ def _rate_limit_handler(e):
 def _server_error_handler(e):
     app_metrics.record_unhandled_exception(request.endpoint or "unknown")
     log.error("UNHANDLED_EXCEPTION", exc_info=True, extra={"path": request.path})
+    if request.path.startswith("/api/v1/"):
+        return jsonify(json_error("internal_error", "Internal server error.")), 500
     return jsonify({"error": "Internal server error"}), 500
 
 
@@ -165,6 +171,7 @@ def _log_response(response):
 
 
 app.register_blueprint(assets_bp)
+app.register_blueprint(api_v1_bp)
 app.register_blueprint(atlas_bp)
 app.register_blueprint(content_bp)
 app.register_blueprint(run_bp)

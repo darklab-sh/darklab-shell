@@ -49,6 +49,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Run notifications** — optional browser desktop notifications fire on run completion (any exit code or kill); toggled from the Options panel on desktop and intentionally hidden from the mobile Options sheet; uses only the command root in the notification title to avoid exposing arguments or token values
 - **Themes and presentation** — named theme variants, a terminal-native `theme` command, theme-aware permalink/export rendering, mobile/desktop theme parity, browser-aligned permalink/saved-HTML export styling with best-effort PDF parity, MOTD support, a customizable welcome animation (ASCII art, sampled commands, rotating hints), a guided onboarding tour in the terminal and desktop carousel, a section-grouped operator-configurable FAQ modal, and user options for welcome-intro behavior plus default share-snapshot redaction that now follow the active session token instead of staying browser-local
 - **Built-in commands** — native shell commands like `help`, `commands`, `history`, `last`, `limits`, `status`, `runs`, `stats`, `project`, `workflow`, `file`, `ls`, `cat`, `mv`, `rm`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available. `project` manages project selection, links, and targets from the terminal; `commands info <tool>` and the desktop/mobile Command Registry expose supported external-tool descriptions, examples, flags, and subcommands from `commands.yaml`; `runs` / `jobs` show active app-run metadata with CPU and RSS memory, `runs --json` prints an automation-friendly snapshot, and `stats` summarizes session activity by command root
+- **Headless API and CLI** — `/api/v1` and the bundled `darklab` CLI let scripts and CI jobs authenticate with a session token, start non-interactive runs, tail broker events as SSE or NDJSON, cancel active runs, read history/output/artifacts, and inspect read-only project data without driving the browser
 - **Guided workflows** — built-in sequences for DNS, TLS/HTTPS, HTTP, reachability, email, passive recon, subdomain checks, directory discovery, CDN/edge checks, API recon, network paths, port/service triage, and workspace-native recon chains. Users can save session-scoped workflows with `{{variables}}`, edit/delete them above the built-ins, and run them from the terminal with `workflow list/show/run`
 - **Security and operations** — registry-backed command policy with deny-prefix lists for loopback and path blocking, shell metacharacter blocking, Redis-backed rate limiting and PID tracking, structured logging with `text` and `gelf` format support, an IP-gated `/diag` page for live operator checks, and an IP-gated `/metrics` endpoint for Prometheus/Grafana monitoring
 - **Pre-installed security tooling** — nmap, rustscan, naabu, masscan, nuclei, ffuf, gobuster, katana, amass, wafw00f, sslscan, sslyze, openssl, and more, all sandboxed under a dedicated `scanner` user with enforced allowlists and the full [SecLists](https://github.com/danielmiessler/SecLists) collection pre-installed at `/usr/share/wordlists/seclists/`; the built-in `wordlist` command and typed autocomplete catalog show high-signal SecLists entries without dumping the whole corpus into suggestions
@@ -380,6 +381,7 @@ To prevent commands from writing to either path directly, the app blocks any com
 - [THEME.md](THEME.md) - Theme registry, selector metadata, and override behavior
 - [TODO.md](TODO.md) - Open follow-ups, research notes, known issues, and future ideas
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [docs/api.md](docs/api.md) - Headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - External command registry, rewrite, environment, Files, and smoke-test contracts
 - [docs/postgres-migration.md](docs/postgres-migration.md) - Offline SQLite-to-Postgres cutover helper and validation workflow
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
@@ -434,6 +436,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── app/
 │   ├── app.py                  # Flask factory — logging setup, blueprint registration, before/after-request hooks
 │   ├── blueprints/
+│   │   ├── api_v1.py           # /api/v1 headless REST, run streaming, artifact, and read-only project routes
 │   │   ├── assets.py           # /vendor/*, /favicon.ico, /health, /diag (IP-gated operator diagnostics)
 │   │   ├── atlas.py           # /atlas* session entity summary, list, and detail routes
 │   │   ├── content.py          # /, /config, /themes, /faq, /autocomplete, /welcome*
@@ -474,7 +477,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0004_postgres_atlas_detail_indexes.py # Postgres Atlas detail lookup indexes
 │   │   │   ├── v0005_postgres_project_findings_indexes.py # Postgres Project Findings paging indexes
 │   │   │   ├── v0006_postgres_atlas_suppression.py # Postgres Atlas suppression columns and indexes
-│   │   │   └── v0007_postgres_atlas_metadata_search.py # Postgres Atlas label/note search indexes
+│   │   │   ├── v0007_postgres_atlas_metadata_search.py # Postgres Atlas label/note search indexes
+│   │   │   └── v0008_postgres_session_token_last_seen.py # Postgres API token last-seen column
 │   │   ├── output_signals.py   # Server-side output signal and entity classifier
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and in-process fallback
 │   │   └── redaction.py        # Snapshot-share redaction helpers and built-in rule application
@@ -483,6 +487,11 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── requirements.txt        # Python runtime dependencies
 │   ├── services/
 │   │   ├── __init__.py         # Service package marker
+│   │   ├── api_v1/
+│   │   │   ├── __init__.py     # Headless API service package marker
+│   │   │   ├── auth.py         # /api/v1 token authentication and JSON error helpers
+│   │   │   ├── openapi.py      # OpenAPI source-of-truth dictionary for /api/v1
+│   │   │   └── serialization.py # Shared /api/v1 run, artifact, and error payload shaping
 │   │   ├── atlas/
 │   │   │   ├── __init__.py     # Atlas service package marker
 │   │   │   ├── cleanup.py      # Atlas run-link, orphan, and delete cleanup helpers
@@ -793,6 +802,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   └── history.db              #   stores run history and tab snapshots
 ├── docker-compose.yml
 ├── docs/
+│   ├── api-v1-openapi.json    # Checked-in OpenAPI snapshot for /api/v1
+│   ├── api.md                 # Headless API and bundled CLI usage guide
 │   ├── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
 │   ├── postgres-migration.md # Offline SQLite-to-Postgres cutover helper and validation workflow
 │   ├── release-drafts/
@@ -818,6 +829,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── capture_ui_screenshots.sh # Drives the UI screenshot capture pipeline (desktop + mobile, all themes or one) — emits PNGs, manifests, and a review index to /tmp/darklab_shell-ui-capture/
 │   ├── check_versions.sh       # Local dependency/version drift helper used by the manual CI job; reports production Docker base image plus CI runner images
 │   ├── container_smoke_test.sh # Reuses or force-builds the smoke cache image, runs the shared smoke corpus through /runs, and checks output against tests/py/fixtures/container_smoke_test-expectations.json
+│   ├── generate_api_openapi.py # Regenerates docs/api-v1-openapi.json from the Python /api/v1 spec
 │   ├── generate_theme_examples.py # Regenerates the checked-in dark/light theme example files from app/config.py defaults
 │   ├── hooks/
 │   │   └── pre-commit          # Git pre-commit hook — runs all lint, security, and unit checks (activate with: git config core.hooksPath scripts/hooks)
@@ -916,6 +928,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   │   ├── container_smoke_test-expectations.json # Stored expected output for the Container Smoke Test corpus
     │   │   ├── container_smoke_test-interactive-expectations.json # Interactive PTY smoke fixtures
     │   │   └── container_smoke_test-workspace-expectations.json # Workspace file-flag smoke fixtures
+    │   ├── test_api_v1.py     # Headless API auth/history/run/OpenAPI route coverage plus bundled CLI unit checks
     │   ├── test_backend_modules.py # DB init/migration, loader/overlay helpers, config/theme/FAQ coverage
     │   ├── test_container_smoke_test.py # Opt-in Docker build/run smoke test (see scripts/container_smoke_test.sh)
     │   ├── test_docs.py        # Doc-drift meta-tests — appendix counts, documented totals, and README project-structure coverage
@@ -929,4 +942,12 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   ├── test_session_routes.py # session-token generation/verify/migrate/revoke/starred/preferences route coverage
     │   └── test_validation.py  # Tests for command validation, rewrites, and runtime availability helpers
     └── ui-capture-scenes.md    # Reviewer hand-off manifest for the UI screenshot capture pack — per-scene "what to check" tables for design review
+└── tools/
+    └── darklab_cli/
+        ├── pyproject.toml      # Installable in-repo darklab CLI package metadata
+        └── src/
+            └── darklab_cli/
+                ├── __init__.py # CLI package marker
+                ├── __main__.py # darklab command parser and command dispatch
+                └── client.py   # urllib-based /api/v1 client, config loading, SSE parsing, and downloads
 ```

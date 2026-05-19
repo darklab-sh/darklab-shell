@@ -413,11 +413,19 @@ class TestDenyPrefix:
         ok, _ = _check("CURL -K config.txt", allow=["curl"], deny=["curl -K"])
         assert not ok
 
-    def test_deny_single_char_matches_combined_group(self):
-        # Single-char deny "-o" matches "-oN" — treat as combined flag group
-        # (useful for blocking all nmap file output with a single !nmap -o entry)
-        ok, _ = _check("nmap -oN output.txt", allow=["nmap"], deny=["nmap -o"])
-        assert not ok
+    def test_workspace_nmap_output_flag_exempts_combined_deny_group(self, tmp_path):
+        # Managed nmap output flags are rewritten into the session workspace
+        # before deny-prefix checks so safe file capture still works.
+        with mock.patch.dict(commands.app_config.CFG, {
+            "workspace_enabled": True,
+            "workspace_backend": "tmpfs",
+            "workspace_root": str(tmp_path),
+            "workspace_quota_mb": 1,
+            "workspace_max_file_mb": 1,
+            "workspace_max_files": 10,
+        }):
+            ok, _ = _check("nmap -oN output.txt", allow=["nmap"], deny=["nmap -o"])
+        assert ok
 
     def test_devnull_exception_prefix(self):
         # curl -o /dev/null ... is a common pattern for checking HTTP status — should be allowed

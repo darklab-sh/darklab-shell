@@ -704,6 +704,7 @@ class TestPostgresMigrations:
             "0005",
             "0006",
             "0007",
+            "0008",
         ]
         for table_name in (
             "runs",

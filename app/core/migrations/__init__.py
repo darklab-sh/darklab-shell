@@ -12,6 +12,7 @@ from . import (
     v0005_postgres_project_findings_indexes,
     v0006_postgres_atlas_suppression,
     v0007_postgres_atlas_metadata_search,
+    v0008_postgres_session_token_last_seen,
 )
 from .runner import Migration
 
@@ -23,4 +24,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0005_postgres_project_findings_indexes.MIGRATION,
     v0006_postgres_atlas_suppression.MIGRATION,
     v0007_postgres_atlas_metadata_search.MIGRATION,
+    v0008_postgres_session_token_last_seen.MIGRATION,
 )

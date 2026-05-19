@@ -48,7 +48,8 @@ MIGRATION = Migration(
         """
         CREATE TABLE IF NOT EXISTS session_tokens (
             token TEXT PRIMARY KEY,
-            created TEXT NOT NULL
+            created TEXT NOT NULL,
+            last_seen_at TEXT
         )
         """,
         """

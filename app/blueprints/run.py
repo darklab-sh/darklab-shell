@@ -87,6 +87,7 @@ from services.projects.artifacts import record_run_file_artifacts
 from services.projects.findings import record_run_findings
 from services.projects.links import (
     link_active_project_run_entities,
+    link_run_to_project_on_conn,
     link_run_to_active_project,
 )
 from services.projects.contracts import ProjectWorkspaceQuotaExceeded
@@ -126,6 +127,10 @@ class _RunSessionVisibility(TypedDict):
 
 def _active_run_owner_value(value: object) -> str:
     return str(value or "").strip()[:128]
+
+
+def _workspace_cwd_value(value: object) -> str:
+    return str(value or "").strip()[:1024]
 
 
 def _validate_command_for_run(
@@ -397,6 +402,7 @@ def _save_completed_run(
     *,
     workspace_artifacts=None,
     link_active_project=True,
+    link_project_id="",
     run_kind=RUN_KIND_EXTERNAL,
     owner_tab_id="",
 ):
@@ -457,7 +463,28 @@ def _save_completed_run(
                     truncated=capture.full_output_truncated,
                     created=finished_iso,
                 )
-            if link_active_project:
+            if link_project_id:
+                try:
+                    active_project_link = _run_finalize_savepoint(
+                        conn,
+                        "project_link",
+                        lambda: link_run_to_project_on_conn(
+                            conn,
+                            session_id,
+                            link_project_id,
+                            run_id,
+                            source="manual",
+                        ),
+                    )
+                except Exception:
+                    active_project_link = None
+                    log.error("PROJECT_RUN_LINK_ERROR", exc_info=True, extra={
+                        "run_id": run_id,
+                        "session": get_log_session_id(session_id),
+                        "project_id": link_project_id,
+                        "cmd": command,
+                    })
+            elif link_active_project:
                 try:
                     active_project_link = _run_finalize_savepoint(
                         conn,
@@ -633,6 +660,7 @@ def _finalize_completed_run(
     cmd_type="real",
     workspace_artifacts=None,
     owner_tab_id="",
+    link_project_id="",
 ):
     finished = datetime.now(timezone.utc)
     elapsed = round((finished - datetime.fromisoformat(run_started)).total_seconds(), 1)
@@ -646,6 +674,7 @@ def _finalize_completed_run(
         finished.isoformat(), exit_code, capture,
         workspace_artifacts=workspace_artifacts,
         link_active_project=cmd_type == "real",
+        link_project_id=link_project_id,
         run_kind=run_kind_for_cmd_type(cmd_type),
         owner_tab_id=owner_tab_id,
     )
@@ -1517,6 +1546,7 @@ def _brokered_real_run_worker(
     workspace_notices,
     workspace_artifacts,
     owner_tab_id,
+    link_project_id="",
 ):
     command_timeout = CFG["command_timeout_seconds"] or None
     heartbeat_interval = CFG.get("run_broker_heartbeat_seconds") or CFG["heartbeat_interval_seconds"]
@@ -1620,6 +1650,7 @@ def _brokered_real_run_worker(
             capture,
             workspace_artifacts=workspace_artifacts,
             owner_tab_id=owner_tab_id,
+            link_project_id=link_project_id,
         )
         elapsed = finalize_info["elapsed"]
         active_project_link = finalize_info.get("active_project_link")
@@ -1765,7 +1796,7 @@ def start_interactive_pty_run():
 
     session_id = get_session_id()
     client_ip = get_client_ip()
-    workspace_cwd = _active_run_owner_value(data.get("workspace_cwd", ""))
+    workspace_cwd = _workspace_cwd_value(data.get("workspace_cwd", ""))
     try:
         argv, execution_command, pty_spec = _prepare_interactive_pty_command(
             original_command,
@@ -1938,7 +1969,7 @@ def start_brokered_run():
     client_ip = get_client_ip()
     owner_client_id = _active_run_owner_value(request.headers.get("X-Client-ID", ""))
     owner_tab_id = _active_run_owner_value(data.get("tab_id", ""))
-    workspace_cwd = _active_run_owner_value(data.get("workspace_cwd", ""))
+    workspace_cwd = _workspace_cwd_value(data.get("workspace_cwd", ""))
     if not isinstance(original_command, str):
         return jsonify({"error": "Command must be a string"}), 400
     original_command = original_command.strip()
