@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,054
+- behavior tests: 3,074
 - docs/inventory meta-tests: 32
-- `pytest`: 1649 (1617 behavior + 32 meta)
-- `vitest`: 1187
+- `pytest`: 1663 (1631 behavior + 32 meta)
+- `vitest`: 1191
 - `playwright`: 252
-- total: 3,088
+- total: 3,106
 
 This document is organized in two parts:
 
@@ -389,6 +389,7 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `test_api_v1_explicit_project_link_uses_finalized_run_path` | Verifies explicit project linking for API-started runs plus API run/project link and unlink routes use the guarded project-link path. |
 | `test_api_v1_schedules_crud_run_now_and_fire_audit_are_token_scoped` | Verifies schedule API CRUD, manual run-now, fire audit rows, and cross-session 404 behavior. |
 | `test_api_v1_schedules_reject_invalid_body_and_disallowed_command` | Verifies schedule API creates reject non-object bodies and commands that fail command policy. |
+| `test_api_v1_schedule_create_normalizes_string_false_enabled` | Verifies schedule API create treats string `"false"` as disabled instead of truthy. |
 | `test_api_v1_openapi_route_matches_checked_in_contract` | Verifies live `/api/v1/openapi.json` matches the checked-in OpenAPI snapshot. |
 | `test_api_v1_notification_channels_crud_masks_secrets_and_lists_events` | Verifies notification channel API CRUD, secret masking, test-send payloads, and delivery event audit rows. |
 | `test_api_v1_notification_channels_are_token_scoped` | Verifies notification channel API reads and writes are scoped to the owning token. |
@@ -461,10 +462,21 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPostgresMigrations.test_migration_runner_serializes_with_advisory_lock_and_records_versions` | Verifies the Postgres migration runner takes a transaction-scoped advisory lock and records applied migration versions. |
 | `TestPostgresMigrations.test_database_init_runs_postgres_migrations_without_sqlite_bootstrap` | Verifies Postgres startup runs migrations without entering the SQLite bootstrap path. |
 | `TestSchedulerFoundation.test_scheduler_cron_presets_and_strict_cron_validation` | Verifies scheduler cadence presets normalize to canonical cron strings, strict POSIX cron validation rejects unsupported forms and sub-five-minute cadences, and timezone names must be valid IANA zones. |
+| `TestSchedulerFoundation.test_scheduler_cron_handles_local_timezones_and_dst_boundaries` | Verifies next-fire calculations across local timezones, US DST transitions, and a non-US weekly schedule. |
 | `TestSchedulerFoundation.test_scheduler_service_requires_tokens_and_hides_watcher_owned_rows` | Verifies schedule creation requires a durable session token and normal schedule listings hide watcher-owned schedule rows. |
 | `TestSchedulerFoundation.test_scheduler_recovery_coalesces_recent_missed_fire` | Verifies scheduler recovery coalesces a recent missed fire into one audit row and advances the next fire from the recovered fire time. |
 | `TestSchedulerFoundation.test_scheduler_fire_disables_revoked_token_schedule` | Verifies due schedules whose durable session token was revoked are audited, disabled, and marked with the revoked-token pause reason. |
 | `TestSchedulerFoundation.test_scheduler_fire_skips_when_previous_run_active` | Verifies overlap policy skips a due schedule while its previous run is still active. |
+| `TestSchedulerFoundation.test_scheduler_fire_claim_prevents_duplicate_manual_launch` | Verifies an atomic schedule-fire claim prevents duplicate manual launches for the same stale schedule row. |
+| `TestSchedulerFoundation.test_scheduler_fire_failure_records_audit_state_and_notification` | Verifies failed schedule launches record fire audit state, advance failure metadata, and enqueue the scheduled-run-failed notification trigger. |
+| `TestSchedulerFoundation.test_scheduler_launch_path_rejects_unavailable_broker_and_interactive_pty` | Verifies scheduled launch rejects broker outages and interactive PTY commands before starting work. |
+| `TestSchedulerFoundation.test_scheduler_launch_path_runs_exact_builtin_with_schedule_owner_tab` | Verifies exact special built-ins launch as brokered synthetic runs owned by the schedule tab id. |
+| `TestSchedulerFoundation.test_scheduler_launch_path_runs_rewritten_builtin_after_input_preparation` | Verifies commands rewritten into built-ins keep variable/filter handling and schedule ownership. |
+| `TestSchedulerFoundation.test_scheduler_launch_path_returns_missing_runtime_synthetic_run` | Verifies missing scanner runtimes become brokered synthetic failure runs owned by the schedule tab id. |
+| `TestSchedulerFoundation.test_scheduler_launch_path_starts_external_run_worker_with_schedule_owner_tab` | Verifies external scheduled commands publish a start event and launch the broker worker with schedule ownership metadata. |
+| `TestSchedulerFoundation.test_scheduler_due_schedules_orders_limits_and_ignores_disabled` | Verifies due schedule selection orders by next fire, honors limits, and ignores disabled schedules. |
+| `TestSchedulerFoundation.test_scheduler_recovery_skips_invalid_and_stale_missed_fires` | Verifies recovery audits invalid due timestamps and stale missed fires outside the catch-up window. |
+| `TestSchedulerFoundation.test_scheduler_worker_run_once_fires_due_schedules_and_commits` | Verifies one worker tick fires due schedules and commits the resulting fire rows. |
 | `TestSchedulerFoundation.test_scheduler_postgres_lock_exits_when_already_held` | Verifies the Postgres scheduler lock path exits cleanly when another scheduler already holds the advisory lock. |
 | `TestNotificationsPhase0.test_dispatcher_sync_delivery_fans_out_once_per_channel` | Verifies the notification dispatcher can synchronously fan out a run-complete trigger to two subscribed channels exactly once each. |
 | `TestNotificationsPhase0.test_dispatcher_event_claims_are_single_use` | Verifies notification event claims are leased so two workers cannot claim the same due event at the same time. |
@@ -1705,6 +1717,8 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestSchedulesRoutes.test_schedule_run_now_records_fire_without_scheduler_process` | Verifies manual run-now records a schedule fire, exposes the fire audit route, and advances schedule metadata without depending on the scheduler worker. |
 | `TestSchedulesRoutes.test_schedule_fire_links_completed_run_in_history` | Verifies a fired schedule's completed run appears in History with a scheduled badge and originating schedule id. |
 | `TestSchedulesRoutes.test_schedule_create_enforces_session_cap` | Verifies normal schedules respect the configured per-session schedule cap. |
+| `TestSchedulesRoutes.test_schedule_create_and_patch_normalize_edge_inputs` | Verifies browser schedule routes normalize disabled string booleans, trim labels, reject invalid timezones and blank commands, and preserve paused schedules during cadence updates. |
+| `TestSchedulesRoutes.test_schedule_fires_pagination_bounds` | Verifies schedule fire audit pagination returns stable limits, offsets, totals, has-more flags, and newest-first rows. |
 | `TestScheduleBuiltin.test_schedule_builtin_create_list_info_and_state_changes` | Verifies the terminal schedule command creates, lists, inspects, pauses, resumes, and deletes current-session schedules. |
 | `TestScheduleBuiltin.test_schedule_builtin_rejects_disallowed_command` | Verifies the terminal schedule command rejects commands that fail command policy before persistence. |
 | `TestScheduleBuiltin.test_schedule_builtin_run_records_fire` | Verifies the terminal schedule run subcommand records a schedule fire and advances schedule metadata. |
@@ -1898,7 +1912,11 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 
 | Test | Description |
 | --- | --- |
-| `binds focus traps for project workspace modal surfaces at startup` | Verifies that project workspace modal surfaces bind focus traps during startup. |
+| `binds focus traps for persistent app modal surfaces at startup` | Verifies that persistent app modal surfaces bind focus traps during startup. |
+| `uses the shared confirmation action contract before deleting schedules` | Verifies that the Schedules modal delete action uses the shared confirmation action contract before deleting. |
+| `opens schedule fire runs without using the run id as the command title` | Verifies that Schedule fire rows open Run Details with only the run id so the run id is not shown as a temporary command title. |
+| `creates schedules from the modal with cadence preview details` | Verifies the Schedules modal creates a schedule from the form, shows preview data, sends the expected payload, and refreshes the list. |
+| `pauses resumes and fires schedules from the modal action buttons` | Verifies Schedules modal pause, resume, and run-now actions call the right endpoints and refresh action state. |
 | `does not let history outside-click dismissal close behind modal overlays` | Verifies that History drawer outside-click dismissal exempts modal overlays so stacked editors keep focus. |
 | `applies the saved theme at startup` | Verifies that applies the saved theme at startup. |
 | `applies saved timestamp, line number, HUD clock, and compare preferences from cookies at startup` | Verifies that saved timestamp, line number, HUD clock, and compare preferences are applied from cookies at startup. |

@@ -14,7 +14,16 @@ log = logging.getLogger("shell")
 
 
 def _max_catchup_window_seconds() -> int:
-    return max(0, int(scheduler_cfg().get("max_catchup_window_seconds") or 3600))
+    raw = scheduler_cfg().get("max_catchup_window_seconds")
+    try:
+        return max(0, int(raw or 3600))
+    except (TypeError, ValueError):
+        log.warning("SCHEDULER_CONFIG_INVALID", extra={
+            "key": "scheduler.max_catchup_window_seconds",
+            "value": str(raw),
+            "fallback": 3600,
+        })
+        return 3600
 
 
 def _parse_time(value: str) -> datetime | None:
@@ -36,6 +45,12 @@ def recover_missed_fires(conn, *, now: datetime | None = None, limit: int = 100)
     for schedule in due_schedules(conn, now=current_iso, limit=limit):
         due_at = _parse_time(schedule.next_run_at)
         if due_at is None:
+            log.warning("SCHEDULE_RECOVERY_SKIPPED_INVALID_NEXT_RUN", extra={
+                "schedule_id": schedule.id,
+                "owner_kind": schedule.owner_kind,
+                "next_run_at": schedule.next_run_at,
+                "fired_at": current_iso,
+            })
             record_schedule_fire(
                 conn,
                 schedule,
@@ -55,6 +70,13 @@ def recover_missed_fires(conn, *, now: datetime | None = None, limit: int = 100)
             fire_schedule(conn, schedule, fired_at=current_iso)
             fired += 1
             continue
+        log.warning("SCHEDULE_RECOVERY_SKIPPED_STALE", extra={
+            "schedule_id": schedule.id,
+            "owner_kind": schedule.owner_kind,
+            "next_run_at": schedule.next_run_at,
+            "fired_at": current_iso,
+            "catchup_window_seconds": catchup_window,
+        })
         record_schedule_fire(
             conn,
             schedule,

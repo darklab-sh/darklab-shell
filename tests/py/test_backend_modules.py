@@ -31,6 +31,7 @@ import unittest.mock as mock
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -943,6 +944,34 @@ class TestSchedulerFoundation:
         database.db_init()
         return database.db_connect()
 
+    def _schedule(self, **overrides):
+        from services.scheduler.models import OWNER_KIND_USER, OVERLAP_POLICY_SKIP, SCHEDULE_KIND_COMMAND, Schedule
+
+        base = {
+            "id": "sch_test",
+            "session_token": "tok_scheduler",
+            "owner_kind": OWNER_KIND_USER,
+            "owner_id": "",
+            "kind": SCHEDULE_KIND_COMMAND,
+            "command_text": "ping -c 1 darklab.sh",
+            "cron_expr": "0 * * * *",
+            "cadence_preset": "hourly",
+            "timezone": "UTC",
+            "enabled": True,
+            "next_run_at": "2026-05-20T13:00:00+00:00",
+            "last_run_at": "",
+            "last_run_id": "",
+            "overlap_policy": OVERLAP_POLICY_SKIP,
+            "consecutive_failures": 0,
+            "label": "Hourly ping",
+            "paused_reason": "",
+            "last_error": "",
+            "created": "2026-05-20T12:00:00+00:00",
+            "updated": "2026-05-20T12:00:00+00:00",
+        }
+        base.update(overrides)
+        return Schedule(**base)
+
     def test_scheduler_cron_presets_and_strict_cron_validation(self):
         from services.scheduler import cron
 
@@ -969,6 +998,29 @@ class TestSchedulerFoundation:
             cron.normalize_cron("0,3,10 * * * *")
         with pytest.raises(cron.ScheduleCronError):
             cron.validate_timezone("Not/A_Timezone")
+
+    def test_scheduler_cron_handles_local_timezones_and_dst_boundaries(self):
+        from services.scheduler import cron
+
+        spring = cron.next_fire(
+            "30 2 * * *",
+            datetime(2026, 3, 7, 12, 0, tzinfo=timezone.utc),
+            "America/Chicago",
+        )
+        fall = cron.next_fire(
+            "30 1 * * *",
+            datetime(2026, 10, 31, 12, 0, tzinfo=timezone.utc),
+            "America/Chicago",
+        )
+        weekly_tokyo = cron.next_fire(
+            "0 9 * * 1",
+            datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc),
+            "Asia/Tokyo",
+        )
+
+        assert spring.isoformat() == "2026-03-08T08:30:00+00:00"
+        assert fall.isoformat() == "2026-11-01T06:30:00+00:00"
+        assert weekly_tokyo.isoformat() == "2026-05-25T00:00:00+00:00"
 
     def test_scheduler_service_requires_tokens_and_hides_watcher_owned_rows(self, monkeypatch, tmp_path):
         from services.scheduler import service
@@ -1092,6 +1144,416 @@ class TestSchedulerFoundation:
             "reason": "previous scheduled run is still active",
             "run_id": "",
         }
+
+    def test_scheduler_fire_claim_prevents_duplicate_manual_launch(self, monkeypatch, tmp_path):
+        from services.scheduler import dispatch, service
+
+        fired_at = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc).isoformat()
+        launched_schedule_ids = []
+
+        def _launch(schedule):
+            launched_schedule_ids.append(schedule.id)
+            return "run_claimed"
+
+        monkeypatch.setattr(dispatch, "_launch_user_schedule_run", _launch)
+        with self._scheduler_db(monkeypatch, tmp_path) as conn:
+            conn.execute(
+                "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+                ("tok_claim_schedule", fired_at, ""),
+            )
+            schedule = service.create_schedule(
+                "tok_claim_schedule",
+                command_text="ping -c 1 darklab.sh",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+
+            first_status = dispatch.fire_schedule(conn, schedule, fired_at=fired_at)
+            second_status = dispatch.fire_schedule(conn, schedule, fired_at=fired_at)
+            fire_rows = conn.execute(
+                "SELECT status, reason, run_id FROM schedule_fires WHERE schedule_id = ? ORDER BY rowid",
+                (schedule.id,),
+            ).fetchall()
+            refreshed = service.get_schedule(schedule.id, conn=conn)
+
+        assert first_status == "fired"
+        assert second_status == "skipped_overlap"
+        assert launched_schedule_ids == [schedule.id]
+        assert [dict(row) for row in fire_rows] == [
+            {"status": "fired", "reason": "started scheduled run", "run_id": "run_claimed"},
+            {"status": "skipped_overlap", "reason": "schedule fire already claimed", "run_id": ""},
+        ]
+        assert refreshed is not None
+        assert refreshed.last_run_id == "run_claimed"
+
+    def test_scheduler_fire_failure_records_audit_state_and_notification(self, monkeypatch, tmp_path):
+        from services.scheduler import dispatch, service
+
+        fired_at = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc).isoformat()
+        enqueued = []
+
+        def _launch(_schedule):
+            raise dispatch.ScheduleFireError("broker unavailable")
+
+        monkeypatch.setattr(dispatch, "_launch_user_schedule_run", _launch)
+        monkeypatch.setattr(dispatch, "enqueue_notification", lambda *args, **kwargs: enqueued.append((args, kwargs)) or [])
+        with self._scheduler_db(monkeypatch, tmp_path) as conn:
+            conn.execute(
+                "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+                ("tok_failed_schedule", fired_at, ""),
+            )
+            schedule = service.create_schedule(
+                "tok_failed_schedule",
+                command_text="ping -c 1 darklab.sh",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+
+            status = dispatch.fire_schedule(conn, schedule, fired_at=fired_at)
+            fire_row = conn.execute(
+                "SELECT status, reason, run_id FROM schedule_fires WHERE schedule_id = ?",
+                (schedule.id,),
+            ).fetchone()
+            refreshed = service.get_schedule(schedule.id, conn=conn)
+
+        assert status == "fire_failed"
+        assert dict(fire_row) == {"status": "fire_failed", "reason": "broker unavailable", "run_id": ""}
+        assert refreshed is not None
+        assert refreshed.last_error == "broker unavailable"
+        assert refreshed.consecutive_failures == 1
+        assert refreshed.next_run_at > fired_at
+        assert len(enqueued) == 1
+        args, kwargs = enqueued[0]
+        assert args[0] == "scheduled_run_failed"
+        assert args[1]["schedule_id"] == schedule.id
+        assert args[1]["summary_fields"] == {"error": "broker unavailable"}
+        assert args[2] == "tok_failed_schedule"
+        assert kwargs["conn"] is conn
+
+    def test_scheduler_launch_path_rejects_unavailable_broker_and_interactive_pty(self, monkeypatch):
+        from services.scheduler import dispatch
+        import services.commands.registry as registry
+        import services.runs.broker as broker
+
+        schedule = self._schedule()
+        monkeypatch.setattr(broker, "broker_available", lambda: False)
+        monkeypatch.setattr(broker, "broker_unavailable_reason", lambda: "redis offline")
+        with pytest.raises(dispatch.ScheduleFireError, match="redis offline"):
+            dispatch._launch_user_schedule_run(schedule)
+
+        monkeypatch.setattr(broker, "broker_available", lambda: True)
+        monkeypatch.setattr(registry, "interactive_pty_spec_for_command", lambda _command: {"trigger_flag": "--pty"})
+        interactive = self._schedule(command_text="msfconsole --pty")
+        with pytest.raises(dispatch.ScheduleFireError, match="interactive PTY commands cannot be scheduled"):
+            dispatch._launch_user_schedule_run(interactive)
+
+    def test_scheduler_launch_path_runs_exact_builtin_with_schedule_owner_tab(self, monkeypatch):
+        from blueprints import run as run_blueprint
+        from services.commands import builtins as builtins_module
+        import services.commands.registry as registry
+        import services.runs.broker as broker
+        from services.scheduler import dispatch
+
+        synthetic_calls = []
+        monkeypatch.setattr(broker, "broker_available", lambda: True)
+        monkeypatch.setattr(registry, "interactive_pty_spec_for_command", lambda _command: None)
+        monkeypatch.setattr(builtins_module, "resolves_exact_special_builtin_command", lambda _command: True)
+        monkeypatch.setattr(
+            builtins_module,
+            "execute_builtin_command",
+            lambda *args, **kwargs: ([{"type": "output", "text": "ok"}], 0),
+        )
+        monkeypatch.setattr(run_blueprint, "_history_safe_command_for_storage", lambda command: f"safe:{command}")
+
+        def _synthetic(*args, **kwargs):
+            synthetic_calls.append((args, kwargs))
+            return "run_builtin_exact"
+
+        monkeypatch.setattr(run_blueprint, "_brokered_synthetic_run", _synthetic)
+
+        run_id = dispatch._launch_user_schedule_run(self._schedule(command_text="session-token copy"))
+
+        assert run_id == "run_builtin_exact"
+        assert synthetic_calls[0][0][:5] == (
+            "safe:session-token copy",
+            "tok_scheduler",
+            "scheduler",
+            [{"type": "output", "text": "ok"}],
+            0,
+        )
+        assert synthetic_calls[0][1] == {"cmd_type": "builtin", "owner_tab_id": "schedule:sch_test"}
+
+    def test_scheduler_launch_path_runs_rewritten_builtin_after_input_preparation(self, monkeypatch):
+        from blueprints import run as run_blueprint
+        from services.commands import builtins as builtins_module
+        import services.commands.registry as registry
+        import services.runs.broker as broker
+        from services.scheduler import dispatch
+
+        filtered_events = [{"type": "output", "text": "filtered"}]
+        synthetic_calls = []
+        monkeypatch.setattr(broker, "broker_available", lambda: True)
+        monkeypatch.setattr(registry, "interactive_pty_spec_for_command", lambda _command: None)
+        monkeypatch.setattr(builtins_module, "resolves_exact_special_builtin_command", lambda _command: False)
+        monkeypatch.setattr(builtins_module, "resolve_builtin_command", lambda command: command == "history")
+        monkeypatch.setattr(
+            run_blueprint,
+            "_prepare_command_input",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                execution_command="history",
+                variable_notice="expanded vars",
+                postfilter=object(),
+            ),
+        )
+        monkeypatch.setattr(
+            builtins_module,
+            "execute_builtin_command",
+            lambda *args, **kwargs: ([{"type": "output", "text": "raw"}], 0),
+        )
+        monkeypatch.setattr(run_blueprint, "_filter_builtin_command_events", lambda *_args: filtered_events)
+        monkeypatch.setattr(run_blueprint, "_history_safe_command_for_storage", lambda command: command)
+
+        def _synthetic(*args, **kwargs):
+            synthetic_calls.append((args, kwargs))
+            return "run_builtin_rewritten"
+
+        monkeypatch.setattr(run_blueprint, "_brokered_synthetic_run", _synthetic)
+
+        run_id = dispatch._launch_user_schedule_run(self._schedule(command_text="var HISTORY_CMD"))
+
+        assert run_id == "run_builtin_rewritten"
+        assert synthetic_calls[0][0][3] == filtered_events
+        assert synthetic_calls[0][1] == {"cmd_type": "builtin", "owner_tab_id": "schedule:sch_test"}
+
+    def test_scheduler_launch_path_returns_missing_runtime_synthetic_run(self, monkeypatch):
+        from blueprints import run as run_blueprint
+        from services.commands import builtins as builtins_module
+        import services.commands.registry as registry
+        import services.runs.broker as broker
+        from services.scheduler import dispatch
+
+        synthetic_calls = []
+        monkeypatch.setattr(broker, "broker_available", lambda: True)
+        monkeypatch.setattr(registry, "interactive_pty_spec_for_command", lambda _command: None)
+        monkeypatch.setattr(builtins_module, "resolves_exact_special_builtin_command", lambda _command: False)
+        monkeypatch.setattr(builtins_module, "resolve_builtin_command", lambda _command: False)
+        monkeypatch.setattr(
+            run_blueprint,
+            "_prepare_command_input",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                execution_command="missingtool --help",
+                variable_notice="",
+                postfilter=object(),
+            ),
+        )
+        monkeypatch.setattr(
+            run_blueprint,
+            "_prepare_real_command",
+            lambda *_args, **_kwargs: SimpleNamespace(missing_runtime="missingtool"),
+        )
+        monkeypatch.setattr(registry, "runtime_missing_command_message", lambda command: f"{command} is missing")
+
+        def _synthetic(*args, **kwargs):
+            synthetic_calls.append((args, kwargs))
+            return "run_missing_runtime"
+
+        monkeypatch.setattr(run_blueprint, "_brokered_synthetic_run", _synthetic)
+
+        run_id = dispatch._launch_user_schedule_run(self._schedule(command_text="missingtool --help"))
+
+        assert run_id == "run_missing_runtime"
+        assert synthetic_calls[0][0][3] == [{"type": "output", "text": "missingtool is missing"}]
+        assert synthetic_calls[0][0][4] == 127
+        assert synthetic_calls[0][1] == {"cmd_type": "missing", "owner_tab_id": "schedule:sch_test"}
+
+    def test_scheduler_launch_path_starts_external_run_worker_with_schedule_owner_tab(self, monkeypatch):
+        from blueprints import run as run_blueprint
+        from services.commands import builtins as builtins_module
+        import services.commands.registry as registry
+        import services.runs.broker as broker
+        from services.scheduler import dispatch
+
+        published = []
+        started_threads = []
+
+        class FakeThread:
+            def __init__(self, *, target, kwargs, name, daemon):
+                started_threads.append({"target": target, "kwargs": kwargs, "name": name, "daemon": daemon})
+
+            def start(self):
+                started_threads[-1]["started"] = True
+
+        monkeypatch.setattr(broker, "broker_available", lambda: True)
+        monkeypatch.setattr(broker, "publish_run_event", lambda *args: published.append(args))
+        monkeypatch.setattr(registry, "interactive_pty_spec_for_command", lambda _command: None)
+        monkeypatch.setattr(builtins_module, "resolves_exact_special_builtin_command", lambda _command: False)
+        monkeypatch.setattr(builtins_module, "resolve_builtin_command", lambda _command: False)
+        monkeypatch.setattr(
+            run_blueprint,
+            "_prepare_command_input",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                execution_command="ping -c 1 darklab.sh",
+                variable_notice="",
+                postfilter="postfilter",
+            ),
+        )
+        monkeypatch.setattr(
+            run_blueprint,
+            "_prepare_real_command",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                missing_runtime="",
+                rewrite_notice="",
+                validation={},
+            ),
+        )
+        monkeypatch.setattr(
+            run_blueprint,
+            "_start_real_command_process",
+            lambda *args, **kwargs: SimpleNamespace(
+                run_id="run_external_schedule",
+                run_started="2026-05-20T12:00:00+00:00",
+                proc=object(),
+                capture=object(),
+                signal_classifier=object(),
+                workspace_path_filter=object(),
+            ),
+        )
+        monkeypatch.setattr(run_blueprint, "_workspace_notice_lines", lambda _validation: ["notice"])
+        monkeypatch.setattr(run_blueprint, "_workspace_artifacts_from_validation", lambda *_args: ["artifact"])
+        monkeypatch.setattr(dispatch.threading, "Thread", FakeThread)
+
+        run_id = dispatch._launch_user_schedule_run(self._schedule(command_text="ping -c 1 darklab.sh"))
+
+        assert run_id == "run_external_schedule"
+        assert published == [("run_external_schedule", "started", {
+            "run_id": "run_external_schedule",
+            "started": "2026-05-20T12:00:00+00:00",
+        })]
+        assert started_threads[0]["name"] == "schedule-run-broker-run_exte"
+        assert started_threads[0]["daemon"] is True
+        assert started_threads[0]["started"] is True
+        assert started_threads[0]["kwargs"]["owner_tab_id"] == "schedule:sch_test"
+        assert started_threads[0]["kwargs"]["postfilter"] == "postfilter"
+
+    def test_scheduler_due_schedules_orders_limits_and_ignores_disabled(self, monkeypatch, tmp_path):
+        from services.scheduler import service
+
+        with self._scheduler_db(monkeypatch, tmp_path) as conn:
+            conn.execute(
+                "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+                ("tok_due_schedules", "2026-05-20T10:00:00+00:00", ""),
+            )
+            first = service.create_schedule(
+                "tok_due_schedules",
+                command_text="echo first",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            second = service.create_schedule(
+                "tok_due_schedules",
+                command_text="echo second",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            disabled = service.create_schedule(
+                "tok_due_schedules",
+                command_text="echo disabled",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            third = service.create_schedule(
+                "tok_due_schedules",
+                command_text="echo third",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            conn.execute("UPDATE schedules SET next_run_at = ? WHERE id = ?", ("2026-05-20T09:10:00+00:00", first.id))
+            conn.execute("UPDATE schedules SET next_run_at = ? WHERE id = ?", ("2026-05-20T09:05:00+00:00", second.id))
+            conn.execute(
+                "UPDATE schedules SET enabled = ?, next_run_at = ? WHERE id = ?",
+                (0, "2026-05-20T09:00:00+00:00", disabled.id),
+            )
+            conn.execute("UPDATE schedules SET next_run_at = ? WHERE id = ?", ("2026-05-20T09:15:00+00:00", third.id))
+
+            due = service.due_schedules(conn, now="2026-05-20T10:00:00+00:00", limit=2)
+
+        assert [schedule.id for schedule in due] == [second.id, first.id]
+
+    def test_scheduler_recovery_skips_invalid_and_stale_missed_fires(self, monkeypatch, tmp_path):
+        from services.scheduler import recovery, service
+
+        now = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc)
+        with self._scheduler_db(monkeypatch, tmp_path) as conn:
+            conn.execute(
+                "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+                ("tok_recovery_edges", now.isoformat(), ""),
+            )
+            invalid = service.create_schedule(
+                "tok_recovery_edges",
+                command_text="echo invalid",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            stale = service.create_schedule("tok_recovery_edges", command_text="echo stale", cadence_preset="hourly", conn=conn)
+            conn.execute("UPDATE schedules SET next_run_at = ? WHERE id = ?", ("0000-not-a-time", invalid.id))
+            conn.execute("UPDATE schedules SET next_run_at = ? WHERE id = ?", ((now - timedelta(hours=2)).isoformat(), stale.id))
+
+            result = recovery.recover_missed_fires(conn, now=now)
+            rows = conn.execute(
+                "SELECT schedule_id, status, reason FROM schedule_fires",
+            ).fetchall()
+            invalid_refreshed = service.get_schedule(invalid.id, conn=conn)
+            stale_refreshed = service.get_schedule(stale.id, conn=conn)
+
+        assert result == {"fired": 0, "skipped": 2}
+        rows_by_schedule = {row["schedule_id"]: dict(row) for row in rows}
+        assert rows_by_schedule == {
+            invalid.id: {
+                "schedule_id": invalid.id,
+                "status": "skipped_overlap",
+                "reason": "invalid next_run_at during scheduler recovery",
+            },
+            stale.id: {
+                "schedule_id": stale.id,
+                "status": "skipped_overlap",
+                "reason": "missed fire outside catch-up window",
+            },
+        }
+        assert invalid_refreshed is not None
+        assert invalid_refreshed.last_error == "invalid next_run_at during scheduler recovery"
+        assert stale_refreshed is not None
+        assert stale_refreshed.last_error == "missed fire outside catch-up window"
+
+    def test_scheduler_worker_run_once_fires_due_schedules_and_commits(self, monkeypatch, tmp_path):
+        from services.scheduler import service, worker
+        from services.scheduler.service import record_schedule_fire
+
+        fired_ids = []
+        with self._scheduler_db(monkeypatch, tmp_path) as conn:
+            conn.execute(
+                "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+                ("tok_worker_once", "2026-05-20T10:00:00+00:00", ""),
+            )
+            due = service.create_schedule(
+                "tok_worker_once",
+                command_text="echo worker",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            conn.execute("UPDATE schedules SET next_run_at = ? WHERE id = ?", ("2000-01-01T00:00:00+00:00", due.id))
+            conn.commit()
+
+        def _fire(conn, schedule, *, fired_at):
+            fired_ids.append(schedule.id)
+            record_schedule_fire(conn, schedule, status="fired", fired_at=fired_at, run_id="run_worker_once")
+
+        monkeypatch.setattr(worker, "fire_schedule", _fire)
+
+        assert worker.run_once(limit=5) == 1
+        with database.db_connect() as conn:
+            rows = conn.execute("SELECT schedule_id, status, run_id FROM schedule_fires").fetchall()
+        assert fired_ids == [due.id]
+        assert [dict(row) for row in rows] == [{"schedule_id": due.id, "status": "fired", "run_id": "run_worker_once"}]
 
     def test_scheduler_postgres_lock_exits_when_already_held(self, monkeypatch):
         from services.scheduler import worker
@@ -4317,7 +4779,10 @@ class TestDerivedCommandRegistry:
             "pause",
             "resume",
         ]
-        assert context["schedule"]["subcommands"]["create"]["arg_hints"]["--every"][0]["value"] == "hourly"
+        from services.scheduler.models import CADENCE_PRESETS
+
+        schedule_every_hints = context["schedule"]["subcommands"]["create"]["arg_hints"]["--every"]
+        assert [item["value"] for item in schedule_every_hints] == list(CADENCE_PRESETS)
         assert context["schedule"]["subcommands"]["info"]["arg_hints"]["__positional__"][0]["value"] == "<schedule-id>"
         assert context["session-token"]["arg_hints"]["set"][0]["value"] == "<token>"
         assert [item["value"] for item in context["project"]["arg_hints"]["__positional__"][:4]] == [

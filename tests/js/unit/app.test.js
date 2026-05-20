@@ -3,6 +3,7 @@ import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import yaml from 'js-yaml'
 import { loadAppFns } from './helpers/app_harness.js'
+import { fromDomScripts } from './helpers/extract.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
@@ -24,6 +25,51 @@ const THEME_BASE_KEYS = new Set([
   'terminal_font_size',
   'terminal_line_height',
 ])
+
+function loadSchedulesModalTestFns({
+  apiFetch = vi.fn(async () => ({ ok: true, json: async () => ({}) })),
+  showConfirm = vi.fn(async () => null),
+  showToast = vi.fn(),
+  openHistoryRunDetails = vi.fn(),
+} = {}) {
+  document.body.innerHTML = `
+    <div id="schedules-overlay" class="u-hidden">
+      <div id="schedules-modal">
+        <button class="schedules-close" type="button"></button>
+        <button id="schedules-new-btn" type="button"></button>
+        <button id="schedules-refresh-btn" type="button"></button>
+        <span id="schedules-count"></span>
+        <div id="schedules-list"></div>
+        <div id="schedules-detail"></div>
+      </div>
+    </div>
+  `
+  const bindDismissible = vi.fn()
+  const fns = fromDomScripts(
+    ['app/static/js/features/schedules/schedules_modal.js'],
+    {
+      document,
+      window,
+      apiFetch,
+      showConfirm,
+      showToast,
+      openHistoryRunDetails,
+      bindDismissible,
+      refocusComposerAfterAction: vi.fn(),
+    },
+    '({ _bindSchedulesModal, _deleteSelectedSchedule, refreshSchedulesModal, _newSchedule })',
+  )
+  return {
+    ...fns,
+    apiFetch,
+    bindDismissible,
+    showConfirm,
+    showToast,
+    openHistoryRunDetails,
+    list: document.getElementById('schedules-list'),
+    detail: document.getElementById('schedules-detail'),
+  }
+}
 
 function builtInAutocompleteBase() {
   const hint = (value, description = '', insertValue = undefined) => {
@@ -244,7 +290,7 @@ describe('app helpers', () => {
     })
   })
 
-  it('binds focus traps for project workspace modal surfaces at startup', async () => {
+  it('binds focus traps for persistent app modal surfaces at startup', async () => {
     await loadAppFns()
 
     ;[
@@ -253,9 +299,177 @@ describe('app helpers', () => {
       'project-package-manifest-modal',
       'project-package-wizard-modal',
       'project-entity-editor-modal',
+      'schedules-modal',
     ].forEach((id) => {
       expect(document.getElementById(id)?.dataset.focusTrapBound).toBe('1')
     })
+  })
+
+  it('uses the shared confirmation action contract before deleting schedules', async () => {
+    const apiFetch = vi.fn(async (url, options = {}) => {
+      if (url === '/schedules/sch_1' && options.method === 'DELETE') {
+        return { ok: true, json: async () => ({ removed: true }) }
+      }
+      if (url === '/schedules') {
+        return { ok: true, json: async () => ({ schedules: [] }) }
+      }
+      return { ok: true, json: async () => ({}) }
+    })
+    const showConfirm = vi.fn(async () => 'delete')
+    const { _deleteSelectedSchedule } = loadSchedulesModalTestFns({ apiFetch, showConfirm })
+
+    await _deleteSelectedSchedule({ id: 'sch_1', label: 'Hourly Echo' })
+
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      tone: 'danger',
+      actions: [
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+        { id: 'delete', label: 'Delete', role: 'destructive' },
+      ],
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/schedules/sch_1', { method: 'DELETE' })
+  })
+
+  it('opens schedule fire runs without using the run id as the command title', () => {
+    const openHistoryRunDetails = vi.fn()
+    const { _bindSchedulesModal } = loadSchedulesModalTestFns({ openHistoryRunDetails })
+    _bindSchedulesModal()
+
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.dataset.scheduleRunId = 'run_scheduled_1'
+    document.getElementById('schedules-overlay').appendChild(button)
+    button.click()
+
+    expect(openHistoryRunDetails).toHaveBeenCalledWith({ id: 'run_scheduled_1' })
+  })
+
+  it('creates schedules from the modal with cadence preview details', async () => {
+    let schedules = []
+    const apiFetch = vi.fn(async (url, options = {}) => {
+      if (url === '/schedules' && !options.method) {
+        return { ok: true, json: async () => ({ schedules }) }
+      }
+      if (url.startsWith('/schedules/preview')) {
+        return {
+          ok: true,
+          json: async () => ({
+            cron_expr: '0 * * * *',
+            cadence_preset: 'hourly',
+            timezone: 'UTC',
+            next_fires: ['2026-05-20T13:00:00+00:00', '2026-05-20T14:00:00+00:00'],
+          }),
+        }
+      }
+      if (url === '/schedules' && options.method === 'POST') {
+        schedules = [{
+          id: 'sch_created',
+          label: 'Hourly darklab',
+          command_text: 'ping -c 1 darklab.sh',
+          cadence_preset: 'hourly',
+          cron_expr: '0 * * * *',
+          timezone: 'UTC',
+          enabled: true,
+          next_run_at: '2026-05-20T13:00:00+00:00',
+        }]
+        return { ok: true, json: async () => ({ schedule: schedules[0] }) }
+      }
+      if (url.startsWith('/schedules/sch_created/fires')) {
+        return { ok: true, json: async () => ({ fires: [], total: 0, limit: 20, offset: 0, has_more: false }) }
+      }
+      throw new Error(`unexpected request ${url}`)
+    })
+    const showToast = vi.fn()
+    const { _bindSchedulesModal, _newSchedule, list } = loadSchedulesModalTestFns({ apiFetch, showToast })
+    _bindSchedulesModal()
+
+    _newSchedule('ping -c 1 darklab.sh')
+    await vi.waitFor(() => expect(document.getElementById('schedules-form')).not.toBeNull())
+    expect(document.getElementById('schedules-detail').textContent).toContain('Next runs (UTC)')
+    document.getElementById('schedules-label-input').value = 'Hourly darklab'
+    document.getElementById('schedules-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Schedule created', 'success'))
+    const postCall = apiFetch.mock.calls.find(([url, options]) => url === '/schedules' && options?.method === 'POST')
+    expect(JSON.parse(postCall[1].body)).toMatchObject({
+      label: 'Hourly darklab',
+      command: 'ping -c 1 darklab.sh',
+      cadence_preset: 'hourly',
+      timezone: 'UTC',
+      enabled: true,
+    })
+    expect(list.textContent).toContain('Hourly darklab')
+  })
+
+  it('pauses resumes and fires schedules from the modal action buttons', async () => {
+    let schedule = {
+      id: 'sch_actions',
+      label: 'Action schedule',
+      command_text: 'echo actions',
+      cadence_preset: 'hourly',
+      cron_expr: '0 * * * *',
+      timezone: 'UTC',
+      enabled: true,
+      next_run_at: '2026-05-20T13:00:00+00:00',
+      last_error: '',
+      paused_reason: '',
+      consecutive_failures: 0,
+    }
+    const apiFetch = vi.fn(async (url, options = {}) => {
+      if (url === '/schedules' && !options.method) {
+        return { ok: true, json: async () => ({ schedules: [schedule] }) }
+      }
+      if (url.startsWith('/schedules/preview')) {
+        return {
+          ok: true,
+          json: async () => ({
+            cron_expr: schedule.cron_expr,
+            cadence_preset: schedule.cadence_preset,
+            timezone: schedule.timezone,
+            next_fires: [schedule.next_run_at],
+          }),
+        }
+      }
+      if (url.startsWith('/schedules/sch_actions/fires')) {
+        return {
+          ok: true,
+          json: async () => ({
+            fires: [{ status: 'fired', fired_at: '2026-05-20T12:00:00+00:00', run_id: 'run_actions' }],
+            total: 1,
+            limit: 20,
+            offset: 0,
+            has_more: false,
+          }),
+        }
+      }
+      if (url === '/schedules/sch_actions' && options.method === 'PATCH') {
+        const body = JSON.parse(options.body)
+        schedule = { ...schedule, ...body }
+        return { ok: true, json: async () => ({ schedule }) }
+      }
+      if (url === '/schedules/sch_actions/run-now' && options.method === 'POST') {
+        schedule = { ...schedule, last_run_at: '2026-05-20T12:00:00+00:00', last_run_id: 'run_actions' }
+        return { ok: true, json: async () => ({ status: 'fired', schedule }) }
+      }
+      throw new Error(`unexpected request ${url}`)
+    })
+    const showToast = vi.fn()
+    const { _bindSchedulesModal, refreshSchedulesModal } = loadSchedulesModalTestFns({ apiFetch, showToast })
+    _bindSchedulesModal()
+
+    await refreshSchedulesModal()
+    await vi.waitFor(() => expect(document.getElementById('schedules-detail').textContent).toContain('Action schedule'))
+    Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Pause').click()
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Schedule paused', 'success'))
+    expect(JSON.parse(apiFetch.mock.calls.find(([url, options]) => (
+      url === '/schedules/sch_actions' && options?.method === 'PATCH'
+    ))[1].body)).toMatchObject({ enabled: false, paused_reason: 'paused' })
+
+    Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Resume').click()
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Schedule resumed', 'success'))
+    Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Run now').click()
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Schedule fired', 'success'))
+    expect(document.getElementById('schedules-detail').textContent).toContain('Open run')
   })
 
   it('does not let history outside-click dismissal close behind modal overlays', async () => {

@@ -471,6 +471,16 @@ body #search-toggle-btn.search-discover-pulse {
   border-color: var(--green-dim);
 }
 
+.badge-tone-amber {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 42%, var(--border));
+}
+
+.badge-tone-red {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 48%, var(--border));
+}
+
 .badge-tone-muted {
   color: color-mix(in srgb, var(--text) 72%, var(--muted));
 }

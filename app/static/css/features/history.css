@@ -379,6 +379,17 @@ body #history-panel { background: var(--theme-chrome-bg); }
   flex-wrap: wrap;
   gap: 10px;
 }
+.history-entry-kind.chip-action {
+  cursor: pointer;
+}
+
+.history-entry-kind.chip-action:hover,
+.history-entry-kind.chip-action:focus-visible {
+  border-color: var(--green);
+  color: var(--green);
+  outline: none;
+}
+
 .history-entry-date {
   color: color-mix(in srgb, var(--muted) 82%, var(--text));
 }

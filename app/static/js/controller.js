@@ -280,6 +280,7 @@ function setupModalFocusTraps() {
     'workspace-modal',
     'workflows-modal',
     'workflow-editor-form',
+    'schedules-modal',
   ];
   ids.forEach((id) => {
     const card = document.getElementById(id);

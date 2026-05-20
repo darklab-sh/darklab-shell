@@ -5,6 +5,9 @@ from __future__ import annotations
 from copy import deepcopy
 
 from config import APP_VERSION
+from services.scheduler.models import CADENCE_PRESETS
+
+CADENCE_PRESET_ENUM = list(CADENCE_PRESETS)
 
 
 def _ref(name: str) -> dict:
@@ -671,6 +674,7 @@ OPENAPI_SPEC: dict = {
             },
             "Schedule": {
                 "type": "object",
+                "additionalProperties": False,
                 "required": [
                     "id",
                     "owner_kind",
@@ -698,7 +702,7 @@ OPENAPI_SPEC: dict = {
                     "kind": {"type": "string", "enum": ["command"]},
                     "command_text": {"type": "string"},
                     "cron_expr": {"type": "string"},
-                    "cadence_preset": {"type": "string", "nullable": True, "enum": ["hourly", "daily", "weekly"]},
+                    "cadence_preset": {"type": "string", "nullable": True, "enum": CADENCE_PRESET_ENUM},
                     "timezone": {"type": "string"},
                     "enabled": {"type": "boolean"},
                     "next_run_at": {"type": "string", "nullable": True},
@@ -736,7 +740,7 @@ OPENAPI_SPEC: dict = {
                     "command": {"type": "string"},
                     "command_text": {"type": "string"},
                     "cron_expr": {"type": "string"},
-                    "cadence_preset": {"type": "string", "enum": ["hourly", "daily", "weekly"]},
+                    "cadence_preset": {"type": "string", "enum": CADENCE_PRESET_ENUM},
                     "timezone": {"type": "string"},
                     "label": {"type": "string"},
                     "enabled": {"type": "boolean"},
@@ -749,7 +753,7 @@ OPENAPI_SPEC: dict = {
                     "command": {"type": "string"},
                     "command_text": {"type": "string"},
                     "cron_expr": {"type": "string"},
-                    "cadence_preset": {"type": "string", "enum": ["hourly", "daily", "weekly"]},
+                    "cadence_preset": {"type": "string", "enum": CADENCE_PRESET_ENUM},
                     "timezone": {"type": "string"},
                     "label": {"type": "string"},
                     "enabled": {"type": "boolean"},

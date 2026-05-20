@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 import shlex
 from typing import Any
 
 from core import database
+from core.helpers import get_log_session_id
 from services.commands.builtins_format import ansi_dim, ansi_green, format_native_record, output_line
 from services.commands.registry import split_command_argv
 from services.scheduler.commands import ScheduleCommandValidationError, validate_schedule_command
@@ -23,6 +25,8 @@ from services.scheduler.service import (
     resume_schedule,
 )
 from services.session.variables import SessionVariableError
+
+log = logging.getLogger("shell")
 
 
 class BuiltinScheduleError(ValueError):
@@ -167,6 +171,16 @@ def _create_schedule(parts: list[str], session_id: str) -> list[dict[str, str]]:
         timezone_name=payload.get("timezone_name"),
         label=str(payload.get("label") or ""),
     )
+    log.info("BUILTIN_SCHEDULE_CREATED", extra={
+        "session": get_log_session_id(session_id),
+        "source": "builtin",
+        "schedule_id": schedule.id,
+        "enabled": schedule.enabled,
+        "cron_expr": schedule.cron_expr,
+        "cadence_preset": schedule.cadence_preset or "",
+        "timezone": schedule.timezone,
+        "next_run_at": schedule.next_run_at,
+    })
     return [
         output_line(f"schedule: created {schedule.id}", "builtin-success"),
         output_line(format_native_record("next run", schedule.next_run_at, 10), "builtin-kv"),
@@ -184,6 +198,15 @@ def _run_schedule_now(schedule: Schedule) -> list[dict[str, str]]:
     lines.append(output_line(format_native_record("fired at", fired_at, 10), "builtin-kv"))
     if refreshed:
         lines.append(output_line(format_native_record("next run", refreshed.next_run_at or "-", 10), "builtin-kv"))
+    log.info("BUILTIN_SCHEDULE_RUN_NOW", extra={
+        "session": get_log_session_id(schedule.session_token),
+        "source": "builtin",
+        "schedule_id": schedule.id,
+        "status": status,
+        "fired_at": fired_at,
+        "run_id": (refreshed or schedule).last_run_id,
+        "last_error": (refreshed or schedule).last_error,
+    })
     return lines
 
 
@@ -193,6 +216,12 @@ def run_builtin_schedule(command: str, session_id: str) -> list[dict[str, str]]:
     if subcommand in {"help", "-h", "--help"}:
         return _schedule_usage()
     if not _is_durable_session(session_id):
+        log.warning("BUILTIN_SCHEDULE_REJECTED", extra={
+            "session": get_log_session_id(session_id),
+            "source": "builtin",
+            "subcommand": subcommand,
+            "error": "session token required",
+        })
         return [output_line(_durable_session_error(session_id))]
     try:
         if subcommand in {"list", "ls"}:
@@ -205,14 +234,33 @@ def run_builtin_schedule(command: str, session_id: str) -> list[dict[str, str]]:
         if subcommand == "pause":
             schedule = _schedule_for_session(_schedule_ref(parts, "Usage: schedule pause <id>"), session_id)
             updated = pause_schedule(schedule.id)
+            log.info("BUILTIN_SCHEDULE_PAUSED", extra={
+                "session": get_log_session_id(session_id),
+                "source": "builtin",
+                "schedule_id": schedule.id,
+                "enabled": bool((updated or schedule).enabled),
+            })
             return [output_line(f"schedule: paused {(updated or schedule).id}", "builtin-success")]
         if subcommand == "resume":
             schedule = _schedule_for_session(_schedule_ref(parts, "Usage: schedule resume <id>"), session_id)
             updated = resume_schedule(schedule.id)
+            log.info("BUILTIN_SCHEDULE_RESUMED", extra={
+                "session": get_log_session_id(session_id),
+                "source": "builtin",
+                "schedule_id": schedule.id,
+                "enabled": bool((updated or schedule).enabled),
+                "next_run_at": (updated or schedule).next_run_at,
+            })
             return [output_line(f"schedule: resumed {(updated or schedule).id}", "builtin-success")]
         if subcommand in {"delete", "rm", "remove"}:
             schedule = _schedule_for_session(_schedule_ref(parts, "Usage: schedule delete <id>"), session_id)
             removed = delete_schedule(schedule.id)
+            log.info("BUILTIN_SCHEDULE_DELETED", extra={
+                "session": get_log_session_id(session_id),
+                "source": "builtin",
+                "schedule_id": schedule.id,
+                "removed": removed,
+            })
             cls = "builtin-success" if removed else "builtin-note"
             return [output_line(f"schedule: deleted {schedule.id}" if removed else f"schedule: not found {schedule.id}", cls)]
         if subcommand in {"run", "run-now"}:
@@ -233,4 +281,10 @@ def run_builtin_schedule(command: str, session_id: str) -> list[dict[str, str]]:
         message = str(exc)
         if message == "notification channels require a durable session token":
             message = _durable_session_error(session_id)
+        log.warning("BUILTIN_SCHEDULE_REJECTED", extra={
+            "session": get_log_session_id(session_id),
+            "source": "builtin",
+            "subcommand": subcommand,
+            "error": message,
+        })
         return [output_line(f"schedule: {message}" if not message.startswith("schedule:") else message)]

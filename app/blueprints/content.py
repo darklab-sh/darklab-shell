@@ -110,6 +110,10 @@ def _prompt_label(workspace_enabled: bool) -> str:
 def _frontend_config_payload():
     """Return the browser-facing config payload derived from server config."""
     cfg = _config.CFG
+    scheduler_config = cfg.get("scheduler")
+    scheduler_default_timezone = "UTC"
+    if isinstance(scheduler_config, dict):
+        scheduler_default_timezone = str(scheduler_config.get("default_timezone") or "UTC")
     tour = load_tour(cfg)
     tour_version = tour.get("version", 0)
     tour_chapters = tour.get("chapters", [])
@@ -140,6 +144,7 @@ def _frontend_config_payload():
         "workspace_enabled":       bool(cfg.get("workspace_enabled", False)),
         "interactive_pty_enabled": bool(cfg.get("interactive_pty_enabled", False)),
         "interactive_pty_commands": interactive_pty_specs_from_registry(),
+        "scheduler_default_timezone": scheduler_default_timezone,
         "welcome_char_ms":          cfg["welcome_char_ms"],
         "welcome_jitter_ms":      cfg["welcome_jitter_ms"],
         "welcome_post_cmd_ms":    cfg["welcome_post_cmd_ms"],

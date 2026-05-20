@@ -19,6 +19,8 @@ CADENCE_PRESETS = {
     "daily": "0 0 * * *",
     "weekly": "0 0 * * 0",
 }
+# Cadence names are operator-facing. Keep OpenAPI, CLI choices, browser modal
+# chips, and command-autocomplete hints aligned when this set changes.
 
 FIRE_STATUS_SKIPPED_OVERLAP = "skipped_overlap"
 FIRE_STATUS_SKIPPED_REVOKED = "skipped_revoked"

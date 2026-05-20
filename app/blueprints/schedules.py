@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from datetime import datetime, timezone
 import logging
 from typing import Any
@@ -15,9 +14,10 @@ from extensions import limiter
 from services.scheduler.commands import ScheduleCommandValidationError, validate_schedule_command
 from services.scheduler.cron import ScheduleCronError, default_timezone, next_fire, normalize_cron, validate_timezone
 from services.scheduler.dispatch import fire_schedule
-from services.scheduler.models import OWNER_KIND_USER
+from services.scheduler.serialization import get_user_schedule_for_session, schedule_fire_payload, schedule_payload
 from services.scheduler.service import (
     ScheduleError,
+    coerce_schedule_bool,
     create_schedule,
     delete_schedule,
     get_schedule,
@@ -61,17 +61,6 @@ def _required_token_session():
     return session_id, None
 
 
-def _schedule_payload(schedule):
-    payload = asdict(schedule)
-    payload.pop("session_token", None)
-    payload["enabled"] = bool(schedule.enabled)
-    return payload
-
-
-def _schedule_fire_payload(fire):
-    return asdict(fire)
-
-
 def _schedule_error_response(exc):
     if isinstance(exc, ScheduleNotFound):
         return jsonify({"error": "schedule_not_found"}), 404
@@ -91,9 +80,50 @@ def _schedule_error_response(exc):
     return jsonify({"error": "invalid_schedule"}), 400
 
 
+def _response_status(response) -> int:
+    if isinstance(response, tuple) and len(response) > 1:
+        try:
+            return int(response[1])
+        except (TypeError, ValueError):
+            return 400
+    return 400
+
+
+def _schedule_log_payload(schedule=None, *, session_id: str = "", source: str = "browser", **extra) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id or getattr(schedule, "session_token", "")),
+        "source": source,
+    }
+    if schedule is not None:
+        payload.update({
+            "schedule_id": schedule.id,
+            "enabled": schedule.enabled,
+            "cron_expr": schedule.cron_expr,
+            "cadence_preset": schedule.cadence_preset or "",
+            "timezone": schedule.timezone,
+            "next_run_at": schedule.next_run_at,
+            "consecutive_failures": schedule.consecutive_failures,
+        })
+    payload.update(extra)
+    return payload
+
+
+def _log_schedule_rejected(action: str, session_id: str, exc: Exception, response, schedule_id: str = "") -> None:
+    log.warning("SCHEDULE_REQUEST_REJECTED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "source": "browser",
+        "action": action,
+        "schedule_id": schedule_id,
+        "status": _response_status(response),
+        "error": str(exc),
+    })
+
+
 def _schedule_for_session_or_404(schedule_id: str, session_id: str):
-    schedule = get_schedule(schedule_id)
-    if schedule is None or schedule.session_token != session_id or schedule.owner_kind != OWNER_KIND_USER:
+    schedule = get_user_schedule_for_session(schedule_id, session_id)
+    if schedule is None:
         raise ScheduleNotFound("schedule not found")
     return schedule
 
@@ -115,7 +145,17 @@ def schedules_preview():
             cursor = next_fire(cron_expr, cursor, timezone_name)
             next_fires.append(cursor.isoformat())
     except (ScheduleCronError, ValueError) as exc:
-        return _schedule_error_response(exc)
+        response = _schedule_error_response(exc)
+        _log_schedule_rejected("preview", session_id, exc, response)
+        return response
+    log.debug("SCHEDULE_PREVIEW_GENERATED", extra=_schedule_log_payload(
+        None,
+        session_id=session_id,
+        cron_expr=cron_expr,
+        cadence_preset=cadence_preset or "",
+        timezone=timezone_name,
+        next_fire_count=len(next_fires),
+    ))
     return jsonify({
         "cron_expr": cron_expr,
         "cadence_preset": cadence_preset,
@@ -130,9 +170,12 @@ def schedules_list():
     if error_response:
         return error_response
     try:
-        schedules = [_schedule_payload(schedule) for schedule in list_for_session(session_id)]
+        schedules = [schedule_payload(schedule) for schedule in list_for_session(session_id)]
     except (ScheduleError, ScheduleCronError, ValueError) as exc:
-        return _schedule_error_response(exc)
+        response = _schedule_error_response(exc)
+        _log_schedule_rejected("list", session_id, exc, response)
+        return response
+    log.debug("SCHEDULES_LISTED", extra=_schedule_log_payload(None, session_id=session_id, count=len(schedules)))
     return jsonify({"schedules": schedules})
 
 
@@ -145,7 +188,7 @@ def schedules_detail(schedule_id):
         schedule = _schedule_for_session_or_404(schedule_id, session_id)
     except ScheduleNotFound as exc:
         return _schedule_error_response(exc)
-    return jsonify({"schedule": _schedule_payload(schedule)})
+    return jsonify({"schedule": schedule_payload(schedule)})
 
 
 @schedules_bp.route("/schedules/<schedule_id>/fires")
@@ -159,8 +202,18 @@ def schedules_fires(schedule_id):
         offset = normalize_page_offset(request.args.get("offset"))
         fires, total = list_schedule_fires(schedule.id, limit=limit, offset=offset)
     except (ScheduleNotFound, ScheduleError, ValueError) as exc:
-        return _schedule_error_response(exc)
-    return jsonify(page_payload("fires", [_schedule_fire_payload(fire) for fire in fires], total, limit, offset))
+        response = _schedule_error_response(exc)
+        _log_schedule_rejected("fires", session_id, exc, response, schedule_id=schedule_id)
+        return response
+    log.debug("SCHEDULE_FIRES_LISTED", extra=_schedule_log_payload(
+        schedule,
+        session_id=session_id,
+        count=len(fires),
+        total=total,
+        limit=limit,
+        offset=offset,
+    ))
+    return jsonify(page_payload("fires", [schedule_fire_payload(fire) for fire in fires], total, limit, offset))
 
 
 @schedules_bp.route("/schedules", methods=["POST"])
@@ -187,7 +240,7 @@ def schedules_create():
             cadence_preset=data.get("cadence_preset"),
             timezone_name=data.get("timezone"),
             label=str(data.get("label") or ""),
-            enabled=bool(data.get("enabled", True)),
+            enabled=coerce_schedule_bool(data.get("enabled"), default=True),
         )
     except (
         ScheduleError,
@@ -197,13 +250,11 @@ def schedules_create():
         SessionVariableError,
         ValueError,
     ) as exc:
-        return _schedule_error_response(exc)
-    log.info("SCHEDULE_CREATED", extra={
-        "ip": get_client_ip(),
-        "session": get_log_session_id(session_id),
-        "schedule_id": schedule.id,
-    })
-    return jsonify({"schedule": _schedule_payload(schedule)}), 201
+        response = _schedule_error_response(exc)
+        _log_schedule_rejected("create", session_id, exc, response)
+        return response
+    log.info("SCHEDULE_CREATED", extra=_schedule_log_payload(schedule, session_id=session_id))
+    return jsonify({"schedule": schedule_payload(schedule)}), 201
 
 
 @schedules_bp.route("/schedules/<schedule_id>", methods=["PATCH"])
@@ -240,15 +291,19 @@ def schedules_update(schedule_id):
         SessionVariableError,
         ValueError,
     ) as exc:
-        return _schedule_error_response(exc)
+        response = _schedule_error_response(exc)
+        _log_schedule_rejected("update", session_id, exc, response, schedule_id=schedule.id)
+        return response
     if updated is None:
-        return jsonify({"error": "schedule_not_found"}), 404
-    log.info("SCHEDULE_UPDATED", extra={
-        "ip": get_client_ip(),
-        "session": get_log_session_id(session_id),
-        "schedule_id": updated.id,
-    })
-    return jsonify({"schedule": _schedule_payload(updated)})
+        response = (jsonify({"error": "schedule_not_found"}), 404)
+        _log_schedule_rejected("update", session_id, ScheduleNotFound("schedule not found"), response, schedule_id)
+        return response
+    log.info("SCHEDULE_UPDATED", extra=_schedule_log_payload(
+        updated,
+        session_id=session_id,
+        changed_fields=",".join(sorted(key for key in updates if key != "workspace_cwd")),
+    ))
+    return jsonify({"schedule": schedule_payload(updated)})
 
 
 @schedules_bp.route("/schedules/<schedule_id>", methods=["DELETE"])
@@ -262,11 +317,7 @@ def schedules_delete(schedule_id):
     except ScheduleNotFound as exc:
         return _schedule_error_response(exc)
     removed = delete_schedule(schedule.id)
-    log.info("SCHEDULE_DELETED", extra={
-        "ip": get_client_ip(),
-        "session": get_log_session_id(session_id),
-        "schedule_id": schedule.id,
-    })
+    log.info("SCHEDULE_DELETED", extra=_schedule_log_payload(schedule, session_id=session_id, removed=removed))
     return jsonify({"removed": removed})
 
 
@@ -289,15 +340,19 @@ def schedules_run_now(schedule_id):
             refreshed = get_schedule(schedule.id, conn=conn)
             conn.commit()
     except (ScheduleError, ScheduleCronError, ValueError) as exc:
-        return _schedule_error_response(exc)
-    log.info("SCHEDULE_RUN_NOW", extra={
-        "ip": get_client_ip(),
-        "session": get_log_session_id(session_id),
-        "schedule_id": schedule.id,
-        "status": status,
-    })
+        response = _schedule_error_response(exc)
+        _log_schedule_rejected("run_now", session_id, exc, response, schedule_id=schedule.id)
+        return response
+    log.info("SCHEDULE_RUN_NOW", extra=_schedule_log_payload(
+        refreshed or schedule,
+        session_id=session_id,
+        status=status,
+        fired_at=fired_at,
+        run_id=(refreshed or schedule).last_run_id,
+        last_error=(refreshed or schedule).last_error,
+    ))
     return jsonify({
         "status": status,
-        "schedule": _schedule_payload(refreshed or schedule),
+        "schedule": schedule_payload(refreshed or schedule),
         "fired_at": fired_at,
     })

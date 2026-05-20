@@ -9,7 +9,6 @@ import signal
 import subprocess
 import threading
 import time
-from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
@@ -73,9 +72,10 @@ from services.runs.output_store import load_full_output_entries
 from services.scheduler.commands import ScheduleCommandValidationError, validate_schedule_command
 from services.scheduler.cron import ScheduleCronError
 from services.scheduler.dispatch import fire_schedule
-from services.scheduler.models import OWNER_KIND_USER
+from services.scheduler.serialization import get_user_schedule_for_session, schedule_fire_payload, schedule_payload
 from services.scheduler.service import (
     ScheduleError,
+    coerce_schedule_bool,
     create_schedule,
     delete_schedule,
     get_schedule,
@@ -170,39 +170,66 @@ def _notification_api_error(exc: Exception):
     return _api_json_error(code, message, status_code)
 
 
-def _schedule_payload(schedule) -> dict[str, Any]:
-    payload = asdict(schedule)
-    payload.pop("session_token", None)
-    payload["enabled"] = bool(schedule.enabled)
-    return payload
-
-
-def _schedule_fire_payload(fire) -> dict[str, Any]:
-    return asdict(fire)
-
-
 def _schedule_for_api_session(schedule_id: str, session_id: str):
-    schedule = get_schedule(schedule_id)
-    if schedule is None or schedule.session_token != session_id or schedule.owner_kind != OWNER_KIND_USER:
+    schedule = get_user_schedule_for_session(schedule_id, session_id)
+    if schedule is None:
         raise ApiAuthError("not_found", "Schedule not found.", status_code=404)
     return schedule
 
 
-def _schedule_api_error(exc: Exception):
+def _api_schedule_error_shape(exc: Exception) -> tuple[str, str, int]:
     if isinstance(exc, ApiAuthError):
-        return _api_json_error(exc.code, exc.message, exc.status_code)
+        return exc.code, exc.message, exc.status_code
     if isinstance(exc, ScheduleCronError):
-        return _api_json_error("invalid_schedule", str(exc), 400)
+        return "invalid_schedule", str(exc), 400
     if isinstance(exc, ScheduleCommandValidationError):
-        return _api_json_error("invalid_command", str(exc), 400)
+        return "invalid_command", str(exc), 400
     if isinstance(exc, SessionVariableError):
-        return _api_json_error("invalid_command", str(exc), 400)
+        return "invalid_command", str(exc), 400
     if isinstance(exc, ScheduleError):
         status = 409 if "quota" in str(exc).lower() else 400
-        return _api_json_error("invalid_schedule", str(exc), status)
+        return "invalid_schedule", str(exc), status
     if isinstance(exc, ValueError):
-        return _api_json_error("invalid_schedule", str(exc), 400)
+        return "invalid_schedule", str(exc), 400
     raise exc
+
+
+def _schedule_api_error(exc: Exception):
+    code, message, status = _api_schedule_error_shape(exc)
+    try:
+        session = get_log_session_id(current_api_session().token)
+    except Exception:
+        session = ""
+    log.warning("API_SCHEDULE_REJECTED", extra={
+        "ip": get_client_ip(),
+        "session": session,
+        "code": code,
+        "status": status,
+        "route": str(request.path or ""),
+        "method": str(request.method or ""),
+        "error": message,
+    })
+    return _api_json_error(code, message, status)
+
+
+def _api_schedule_log_payload(schedule=None, *, session_id: str = "", **extra) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id or getattr(schedule, "session_token", "")),
+        "source": "api",
+    }
+    if schedule is not None:
+        payload.update({
+            "schedule_id": schedule.id,
+            "enabled": schedule.enabled,
+            "cron_expr": schedule.cron_expr,
+            "cadence_preset": schedule.cadence_preset or "",
+            "timezone": schedule.timezone,
+            "next_run_at": schedule.next_run_at,
+            "consecutive_failures": schedule.consecutive_failures,
+        })
+    payload.update(extra)
+    return payload
 
 
 @api_v1_bp.errorhandler(ApiAuthError)
@@ -971,11 +998,18 @@ def api_project_packages(project_id):
 def api_schedules():
     session_id = _require_session_id()
     try:
-        schedules = [_schedule_payload(schedule) for schedule in list_schedules_for_session(session_id)]
+        schedules = [schedule_payload(schedule) for schedule in list_schedules_for_session(session_id)]
     except (ScheduleError, ScheduleCronError, ValueError) as exc:
         return _schedule_api_error(exc)
     limit = normalize_page_limit(request.args.get("limit"), 50, 100)
     offset = normalize_page_offset(request.args.get("offset"))
+    log.debug("API_SCHEDULES_LISTED", extra=_api_schedule_log_payload(
+        None,
+        session_id=session_id,
+        count=len(schedules),
+        limit=limit,
+        offset=offset,
+    ))
     return jsonify(page_payload("schedules", schedules[offset:offset + limit], len(schedules), limit, offset))
 
 
@@ -997,7 +1031,7 @@ def api_schedule_create():
             cadence_preset=data.get("cadence_preset"),
             timezone_name=data.get("timezone", data.get("timezone_name")),
             label=str(data.get("label") or ""),
-            enabled=bool(data.get("enabled", True)),
+            enabled=coerce_schedule_bool(data.get("enabled"), default=True),
         )
     except (
         ApiAuthError,
@@ -1008,12 +1042,8 @@ def api_schedule_create():
         ValueError,
     ) as exc:
         return _schedule_api_error(exc)
-    log.info("API_SCHEDULE_CREATED", extra={
-        "ip": get_client_ip(),
-        "session": get_log_session_id(session_id),
-        "schedule_id": schedule.id,
-    })
-    return jsonify({"schedule": _schedule_payload(schedule)}), 201
+    log.info("API_SCHEDULE_CREATED", extra=_api_schedule_log_payload(schedule, session_id=session_id))
+    return jsonify({"schedule": schedule_payload(schedule)}), 201
 
 
 @api_v1_bp.route("/schedules/<schedule_id>", methods=["GET"])
@@ -1023,7 +1053,7 @@ def api_schedule(schedule_id):
         schedule = _schedule_for_api_session(schedule_id, _require_session_id())
     except ApiAuthError as exc:
         return _schedule_api_error(exc)
-    return jsonify({"schedule": _schedule_payload(schedule)})
+    return jsonify({"schedule": schedule_payload(schedule)})
 
 
 @api_v1_bp.route("/schedules/<schedule_id>", methods=["PATCH"])
@@ -1053,12 +1083,12 @@ def api_schedule_update(schedule_id):
         return _schedule_api_error(exc)
     if updated is None:
         return _api_json_error("not_found", "Schedule not found.", 404)
-    log.info("API_SCHEDULE_UPDATED", extra={
-        "ip": get_client_ip(),
-        "session": get_log_session_id(session_id),
-        "schedule_id": updated.id,
-    })
-    return jsonify({"schedule": _schedule_payload(updated)})
+    log.info("API_SCHEDULE_UPDATED", extra=_api_schedule_log_payload(
+        updated,
+        session_id=session_id,
+        changed_fields=",".join(sorted(key for key in updates if key != "workspace_cwd")),
+    ))
+    return jsonify({"schedule": schedule_payload(updated)})
 
 
 @api_v1_bp.route("/schedules/<schedule_id>", methods=["DELETE"])
@@ -1070,12 +1100,7 @@ def api_schedule_delete(schedule_id):
     except ApiAuthError as exc:
         return _schedule_api_error(exc)
     removed = delete_schedule(schedule.id)
-    log.info("API_SCHEDULE_DELETED", extra={
-        "ip": get_client_ip(),
-        "session": get_log_session_id(session_id),
-        "schedule_id": schedule.id,
-        "removed": removed,
-    })
+    log.info("API_SCHEDULE_DELETED", extra=_api_schedule_log_payload(schedule, session_id=session_id, removed=removed))
     return jsonify({"removed": removed})
 
 
@@ -1092,16 +1117,18 @@ def api_schedule_run_now(schedule_id):
             conn.commit()
     except (ApiAuthError, ScheduleError, ScheduleCronError, ValueError) as exc:
         return _schedule_api_error(exc)
-    log.info("API_SCHEDULE_RUN_NOW", extra={
-        "ip": get_client_ip(),
-        "session": get_log_session_id(session_id),
-        "schedule_id": schedule.id,
-        "status": status,
-    })
+    log.info("API_SCHEDULE_RUN_NOW", extra=_api_schedule_log_payload(
+        refreshed or schedule,
+        session_id=session_id,
+        status=status,
+        fired_at=fired_at,
+        run_id=(refreshed or schedule).last_run_id,
+        last_error=(refreshed or schedule).last_error,
+    ))
     return jsonify({
         "status": status,
         "fired_at": fired_at,
-        "schedule": _schedule_payload(refreshed or schedule),
+        "schedule": schedule_payload(refreshed or schedule),
     })
 
 
@@ -1115,7 +1142,15 @@ def api_schedule_fires(schedule_id):
         fires, total = list_schedule_fires(schedule.id, limit=limit, offset=offset)
     except (ApiAuthError, ScheduleError, ValueError) as exc:
         return _schedule_api_error(exc)
-    return jsonify(page_payload("fires", [_schedule_fire_payload(fire) for fire in fires], total, limit, offset))
+    log.debug("API_SCHEDULE_FIRES_LISTED", extra=_api_schedule_log_payload(
+        schedule,
+        session_id=schedule.session_token,
+        count=len(fires),
+        total=total,
+        limit=limit,
+        offset=offset,
+    ))
+    return jsonify(page_payload("fires", [schedule_fire_payload(fire) for fire in fires], total, limit, offset))
 
 
 @api_v1_bp.route("/notification-channels", methods=["GET"])

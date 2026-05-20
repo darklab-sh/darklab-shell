@@ -62,8 +62,6 @@
   width: 100%;
   min-height: 76px;
   padding: 12px;
-  border: 1px solid var(--border-soft);
-  border-radius: 6px;
   background: transparent;
   color: var(--text);
   text-align: left;
@@ -191,9 +189,29 @@
 }
 
 .schedules-cadence-controls {
+  --tab-strip-bg: transparent;
+  --tab-strip-border-color: transparent;
+  --tab-strip-min-height: 0;
+  --tab-strip-padding: 0;
+  --tab-strip-active-bg: var(--theme-button-ghost-hover-bg);
+  --tab-strip-item-radius: 6px;
+  --tab-strip-item-padding: 8px 12px;
+
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  align-items: stretch;
+  border-bottom: 0;
+  overflow: visible;
+}
+
+.schedules-cadence-btn.tab-strip-item {
+  margin-bottom: 0;
+  border-bottom-color: var(--border-bright);
+}
+
+.schedules-cadence-btn.tab-strip-item.is-active {
+  border-bottom-color: color-mix(in srgb, var(--green) 42%, var(--border-bright));
 }
 
 .schedules-check-row {
@@ -275,10 +293,7 @@
 }
 
 .schedules-fire-status {
-  color: var(--green);
-  font-family: var(--font-display);
-  font-size: 12px;
-  font-weight: 700;
+  min-height: 18px;
 }
 
 .schedules-fire-date {
@@ -289,18 +304,6 @@
 
 .schedules-fire-reason {
   grid-column: 1 / -1;
-}
-
-.history-entry-kind-action {
-  appearance: none;
-  cursor: pointer;
-}
-
-.history-entry-kind-action:hover,
-.history-entry-kind-action:focus-visible {
-  border-color: var(--green);
-  color: var(--green);
-  outline: none;
 }
 
 @media (max-width: 760px) {

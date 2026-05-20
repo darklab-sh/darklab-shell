@@ -2,11 +2,11 @@
 
 const SCHEDULES_DEFAULT_CRON = '0 * * * *';
 const SCHEDULES_FIRES_LIMIT = 20;
-const SCHEDULES_PRESETS = {
-  hourly: '0 * * * *',
-  daily: '0 0 * * *',
-  weekly: '0 0 * * 0',
-};
+const SCHEDULES_CADENCE_PRESETS = [
+  ['hourly', 'Every hour'],
+  ['daily', 'Daily'],
+  ['weekly', 'Weekly'],
+];
 const SCHEDULES_COMMON_TIMEZONES = [
   'UTC',
   'America/New_York',
@@ -34,8 +34,10 @@ let _schedulesState = {
   loading: false,
   loadingFires: false,
   saving: false,
-  preview: { loading: false, error: '', next_fires: [], cron_expr: SCHEDULES_DEFAULT_CRON, timezone: 'UTC' },
+  preview: { loading: false, error: '', next_fires: [], cron_expr: SCHEDULES_DEFAULT_CRON, timezone: _scheduleDefaultTimezone() },
   previewTimer: null,
+  previewController: null,
+  missingScheduleId: '',
 };
 
 function _scheduleEls() {
@@ -55,10 +57,17 @@ function _scheduleTitle(schedule) {
 
 function _schedulePresetFor(schedule) {
   const preset = String(schedule?.cadence_preset || '').trim().toLowerCase();
-  if (preset && SCHEDULES_PRESETS[preset]) return preset;
-  const cron = String(schedule?.cron_expr || '').trim();
-  const matched = Object.entries(SCHEDULES_PRESETS).find(([, value]) => value === cron);
-  return matched ? matched[0] : 'custom';
+  if (preset && SCHEDULES_CADENCE_PRESETS.some(([value]) => value === preset)) return preset;
+  return 'custom';
+}
+
+function _scheduleDefaultTimezone() {
+  const configured = String(
+    typeof APP_CONFIG !== 'undefined' && APP_CONFIG
+      ? APP_CONFIG.scheduler_default_timezone || ''
+      : '',
+  ).trim();
+  return configured || 'UTC';
 }
 
 function _scheduleDraftFromSchedule(schedule = null, command = '') {
@@ -68,8 +77,8 @@ function _scheduleDraftFromSchedule(schedule = null, command = '') {
     label: String(schedule?.label || '').trim(),
     command_text: String(schedule?.command_text || command || '').trim(),
     cadence_preset: preset,
-    cron_expr: String(schedule?.cron_expr || SCHEDULES_PRESETS[preset] || SCHEDULES_DEFAULT_CRON).trim(),
-    timezone: String(schedule?.timezone || 'UTC').trim(),
+    cron_expr: String(schedule?.cron_expr || SCHEDULES_DEFAULT_CRON).trim(),
+    timezone: String(schedule?.timezone || _scheduleDefaultTimezone()).trim(),
     enabled: schedule ? schedule.enabled !== false : true,
   };
 }
@@ -83,7 +92,8 @@ async function _scheduleJson(url, options = {}) {
   let data = {};
   try {
     data = await resp.json();
-  } catch (_) {
+  } catch (err) {
+    _scheduleClientError(`failed to parse schedule response from ${url}`, err);
     data = {};
   }
   if (!resp.ok) {
@@ -95,6 +105,10 @@ async function _scheduleJson(url, options = {}) {
 
 function _scheduleToast(message, tone = 'success') {
   if (typeof showToast === 'function') showToast(message, tone);
+}
+
+function _scheduleClientError(context, err) {
+  if (typeof logClientError === 'function') logClientError(context, err);
 }
 
 function _scheduleDateLabel(value) {
@@ -166,6 +180,60 @@ function _scheduleStatusTone(schedule) {
   return 'badge-tone-muted';
 }
 
+function _scheduleFireStatusTone(status) {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (normalized === 'fired') return 'badge-tone-green';
+  if (normalized === 'fire_failed') return 'badge-tone-red';
+  if (normalized.startsWith('skipped_')) return 'badge-tone-amber';
+  return 'badge-tone-muted';
+}
+
+function _bindSchedulePressable(el, onActivate, options = {}) {
+  if (!el || typeof onActivate !== 'function') return;
+  if (typeof bindPressable === 'function') {
+    bindPressable(el, { refocusComposer: false, ...options, onActivate });
+    return;
+  }
+  el.addEventListener('click', onActivate);
+  if (el.tagName?.toLowerCase() === 'button') return;
+  el.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    onActivate(event);
+  });
+}
+
+function _activateScheduleAction(value) {
+  const schedule = _selectedSchedule();
+  if (value === 'delete') _deleteSelectedSchedule(schedule);
+  if (value === 'pause') _patchSelectedSchedule(schedule, { enabled: false, paused_reason: 'paused' }, 'Schedule paused');
+  if (value === 'resume') {
+    _patchSelectedSchedule(schedule, {
+      enabled: true,
+      paused_reason: '',
+      last_error: '',
+      consecutive_failures: 0,
+    }, 'Schedule resumed');
+  }
+  if (value === 'run-now') _runSelectedSchedule(schedule);
+  if (value === 'refresh-fires') _loadScheduleFires(schedule?.id || '').catch(() => {});
+}
+
+function _changeScheduleFiresPage(direction) {
+  const meta = _schedulesState.firesMeta || {};
+  const nextOffset = direction === 'next'
+    ? Number(meta.offset || 0) + Number(meta.limit || SCHEDULES_FIRES_LIMIT)
+    : Math.max(0, Number(meta.offset || 0) - Number(meta.limit || SCHEDULES_FIRES_LIMIT));
+  _loadScheduleFires(_schedulesState.selectedId, { offset: nextOffset }).catch(() => {});
+}
+
+function _openScheduleRun(runId) {
+  closeSchedulesModal({ refocus: false });
+  if (typeof openHistoryRunDetails === 'function') {
+    openHistoryRunDetails({ id: runId || '' });
+  }
+}
+
 function _setSchedulesOpen(open) {
   const { overlay } = _scheduleEls();
   if (!overlay) return;
@@ -181,10 +249,22 @@ function isSchedulesOverlayOpen() {
 }
 
 function closeSchedulesModal({ refocus = true } = {}) {
+  _cancelSchedulePreview();
   _setSchedulesOpen(false);
   if (refocus && typeof refocusComposerAfterAction === 'function') {
     refocusComposerAfterAction({ preventScroll: true, defer: true });
   }
+}
+
+function _cancelSchedulePreview() {
+  window.clearTimeout(_schedulesState.previewTimer);
+  _schedulesState.previewTimer = null;
+  try {
+    _schedulesState.previewController?.abort?.();
+  } catch (_) {
+    // Abort is best effort; a completed preview may already have released it.
+  }
+  _schedulesState.previewController = null;
 }
 
 function _renderSchedulesList() {
@@ -207,10 +287,11 @@ function _renderSchedulesList() {
     return;
   }
   _schedulesState.schedules.forEach((schedule) => {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'schedules-list-row';
+    const row = document.createElement('div');
+    row.className = 'schedules-list-row panel-row panel-row-clickable';
     row.dataset.scheduleId = schedule.id || '';
+    row.setAttribute('role', 'button');
+    row.tabIndex = 0;
     if (String(schedule.id || '') === String(_schedulesState.selectedId || '')) row.classList.add('active');
     const title = document.createElement('span');
     title.className = 'schedules-list-title';
@@ -223,6 +304,7 @@ function _renderSchedulesList() {
     status.className = `badge ${_scheduleStatusTone(schedule)} schedules-list-status`;
     status.textContent = _scheduleStatusLabel(schedule);
     row.append(title, meta, status);
+    _bindSchedulePressable(row, () => _selectSchedule(schedule.id || ''));
     list.appendChild(row);
   });
 }
@@ -232,7 +314,7 @@ function _schedulePreviewNode() {
   wrap.className = 'schedules-preview';
   const title = document.createElement('div');
   title.className = 'schedules-section-kicker';
-  const timezone = _schedulesState.preview.timezone || _schedulesState.draft?.timezone || 'UTC';
+  const timezone = _schedulesState.preview.timezone || _schedulesState.draft?.timezone || _scheduleDefaultTimezone();
   title.textContent = `Next runs (${timezone})`;
   wrap.appendChild(title);
   if (_schedulesState.preview.loading) {
@@ -285,7 +367,7 @@ function _scheduleFormField(label, control) {
 
 function _scheduleInput(value, attrs = {}) {
   const input = document.createElement('input');
-  input.className = 'options-token-input schedules-input';
+  input.className = 'form-control schedules-input';
   input.value = value || '';
   Object.entries(attrs).forEach(([key, attrValue]) => {
     if (attrValue !== null && attrValue !== undefined) input.setAttribute(key, attrValue);
@@ -294,7 +376,7 @@ function _scheduleInput(value, attrs = {}) {
 }
 
 function _scheduleTimezoneSelect(value) {
-  const selectedValue = value || 'UTC';
+  const selectedValue = value || _scheduleDefaultTimezone();
   const select = document.createElement('select');
   select.id = 'schedules-timezone-input';
   select.className = 'form-select schedules-select';
@@ -305,15 +387,15 @@ function _scheduleTimezoneSelect(value) {
     if (timezone === selectedValue) option.selected = true;
     select.appendChild(option);
   });
-  if (select.value !== selectedValue) select.value = 'UTC';
+  if (select.value !== selectedValue) select.value = _scheduleDefaultTimezone();
   return select;
 }
 
 function _setScheduleCadencePreset(value) {
   document.querySelectorAll('.schedules-cadence-btn').forEach((btn) => {
     const active = btn.dataset.schedulePreset === value;
-    btn.classList.toggle('active', active);
-    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-checked', active ? 'true' : 'false');
   });
 }
 
@@ -330,12 +412,12 @@ function _renderScheduleForm(parent, schedule) {
   });
   const commandInput = document.createElement('textarea');
   commandInput.id = 'schedules-command-input';
-  commandInput.className = 'options-token-input schedules-command-input';
+  commandInput.className = 'form-control schedules-command-input';
   commandInput.value = draft.command_text;
   commandInput.rows = 3;
   commandInput.spellcheck = false;
   commandInput.setAttribute('required', 'required');
-  const timezoneInput = _scheduleTimezoneSelect(draft.timezone || 'UTC');
+  const timezoneInput = _scheduleTimezoneSelect(draft.timezone || _scheduleDefaultTimezone());
   const cronInput = _scheduleInput(draft.cron_expr || SCHEDULES_DEFAULT_CRON, {
     id: 'schedules-cron-input',
     autocomplete: 'off',
@@ -353,20 +435,25 @@ function _renderScheduleForm(parent, schedule) {
   cadenceLabel.className = 'schedules-field-label';
   cadenceLabel.textContent = 'Cadence';
   const cadenceControls = document.createElement('div');
-  cadenceControls.className = 'schedules-cadence-controls';
+  cadenceControls.className = 'schedules-cadence-controls tab-strip';
+  cadenceControls.setAttribute('role', 'radiogroup');
+  cadenceControls.setAttribute('aria-label', 'Cadence');
   [
-    ['hourly', 'Every hour'],
-    ['daily', 'Daily'],
-    ['weekly', 'Weekly'],
+    ...SCHEDULES_CADENCE_PRESETS,
     ['custom', 'Custom cron'],
   ].forEach(([preset, label]) => {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'toggle-btn schedules-cadence-btn';
+    btn.className = 'tab-strip-item schedules-cadence-btn';
     btn.dataset.schedulePreset = preset;
-    btn.setAttribute('aria-pressed', draft.cadence_preset === preset ? 'true' : 'false');
-    if (draft.cadence_preset === preset) btn.classList.add('active');
+    btn.setAttribute('role', 'radio');
+    btn.setAttribute('aria-checked', draft.cadence_preset === preset ? 'true' : 'false');
+    if (draft.cadence_preset === preset) btn.classList.add('is-active');
     btn.textContent = label;
+    _bindSchedulePressable(btn, () => {
+      _setScheduleCadencePreset(preset);
+      _loadSchedulePreview({ immediate: true }).catch(() => {});
+    });
     cadenceControls.appendChild(btn);
   });
   cadence.append(cadenceLabel, cadenceControls);
@@ -403,16 +490,19 @@ function _renderScheduleForm(parent, schedule) {
     toggleBtn.className = 'btn btn-secondary btn-compact';
     toggleBtn.dataset.scheduleAction = schedule.enabled === false ? 'resume' : 'pause';
     toggleBtn.textContent = schedule.enabled === false ? 'Resume' : 'Pause';
+    _bindSchedulePressable(toggleBtn, () => _activateScheduleAction(toggleBtn.dataset.scheduleAction));
     const runBtn = document.createElement('button');
     runBtn.type = 'button';
     runBtn.className = 'btn btn-secondary btn-compact';
     runBtn.dataset.scheduleAction = 'run-now';
     runBtn.textContent = 'Run now';
+    _bindSchedulePressable(runBtn, () => _activateScheduleAction('run-now'));
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
     deleteBtn.className = 'btn btn-ghost btn-compact';
     deleteBtn.dataset.scheduleAction = 'delete';
     deleteBtn.textContent = 'Delete';
+    _bindSchedulePressable(deleteBtn, () => _activateScheduleAction('delete'));
     actions.append(toggleBtn, runBtn, deleteBtn);
   }
   form.appendChild(actions);
@@ -432,6 +522,7 @@ function _renderScheduleFires(parent, schedule) {
   refresh.className = 'btn btn-ghost btn-compact';
   refresh.dataset.scheduleAction = 'refresh-fires';
   refresh.textContent = 'Refresh';
+  _bindSchedulePressable(refresh, () => _activateScheduleAction('refresh-fires'));
   header.append(title, refresh);
   section.appendChild(header);
   if (_schedulesState.loadingFires) {
@@ -453,7 +544,7 @@ function _renderScheduleFires(parent, schedule) {
       const main = document.createElement('div');
       main.className = 'schedules-fire-main';
       const status = document.createElement('span');
-      status.className = 'schedules-fire-status';
+      status.className = `badge ${_scheduleFireStatusTone(fire.status)} schedules-fire-status`;
       status.textContent = fire.status || 'fire';
       const date = document.createElement('span');
       date.className = 'schedules-fire-date';
@@ -469,6 +560,7 @@ function _renderScheduleFires(parent, schedule) {
         open.className = 'btn btn-secondary btn-compact';
         open.dataset.scheduleRunId = fire.run_id;
         open.textContent = 'Open run';
+        _bindSchedulePressable(open, () => _openScheduleRun(fire.run_id || ''));
         row.appendChild(open);
       }
       rows.appendChild(row);
@@ -485,6 +577,7 @@ function _renderScheduleFires(parent, schedule) {
     prev.dataset.scheduleFiresPage = 'prev';
     prev.disabled = Number(meta.offset || 0) <= 0;
     prev.textContent = 'Prev';
+    _bindSchedulePressable(prev, () => _changeScheduleFiresPage('prev'));
     const label = document.createElement('span');
     label.className = 'schedules-muted';
     const start = Number(meta.offset || 0) + 1;
@@ -496,6 +589,7 @@ function _renderScheduleFires(parent, schedule) {
     next.dataset.scheduleFiresPage = 'next';
     next.disabled = !meta.has_more;
     next.textContent = 'Next';
+    _bindSchedulePressable(next, () => _changeScheduleFiresPage('next'));
     pager.append(prev, label, next);
     section.appendChild(pager);
   }
@@ -510,6 +604,16 @@ function _renderSchedulesDetail() {
   const isNew = _schedulesState.mode === 'new';
   const root = document.createElement('div');
   root.className = 'schedules-detail-inner';
+  if (_schedulesState.mode === 'missing') {
+    const missing = document.createElement('div');
+    missing.className = 'schedules-empty schedules-detail-empty';
+    missing.textContent = _schedulesState.missingScheduleId
+      ? `Schedule ${_schedulesState.missingScheduleId} was not found. It may have been deleted.`
+      : 'Schedule was not found. It may have been deleted.';
+    root.appendChild(missing);
+    detail.appendChild(root);
+    return;
+  }
   if (!schedule && !isNew) {
     const empty = document.createElement('div');
     empty.className = 'schedules-empty schedules-detail-empty';
@@ -539,7 +643,9 @@ function _renderSchedulesDetail() {
   } else if (schedule?.last_error) {
     const err = document.createElement('div');
     err.className = 'schedules-alert';
-    err.textContent = schedule.last_error;
+    const failures = Number(schedule.consecutive_failures || 0);
+    const failureText = failures > 1 ? ` (${failures} failed runs in a row)` : '';
+    err.textContent = `${schedule.last_error}${failureText}`;
     root.appendChild(err);
   }
   _renderScheduleForm(root, isNew ? null : schedule);
@@ -563,16 +669,17 @@ function _renderSchedulesModal() {
   _renderSchedulesDetail();
 }
 
-function _collectScheduleDraft() {
-  const preset = document.querySelector('.schedules-cadence-btn.active')?.dataset.schedulePreset || 'hourly';
-  const cronExpr = String(document.getElementById('schedules-cron-input')?.value || '').trim();
+function _collectScheduleDraft(form = document.getElementById('schedules-form')) {
+  const root = form || document;
+  const preset = root.querySelector?.('.schedules-cadence-btn.is-active')?.dataset.schedulePreset || 'hourly';
+  const cronExpr = String(root.querySelector?.('#schedules-cron-input')?.value || '').trim();
   return {
-    label: String(document.getElementById('schedules-label-input')?.value || '').trim(),
-    command: String(document.getElementById('schedules-command-input')?.value || '').trim(),
+    label: String(root.querySelector?.('#schedules-label-input')?.value || '').trim(),
+    command: String(root.querySelector?.('#schedules-command-input')?.value || '').trim(),
     cadence_preset: preset === 'custom' ? '' : preset,
-    cron_expr: preset === 'custom' ? cronExpr : SCHEDULES_PRESETS[preset],
-    timezone: String(document.getElementById('schedules-timezone-input')?.value || 'UTC').trim(),
-    enabled: !!document.getElementById('schedules-enabled-input')?.checked,
+    cron_expr: cronExpr || SCHEDULES_DEFAULT_CRON,
+    timezone: String(root.querySelector?.('#schedules-timezone-input')?.value || _scheduleDefaultTimezone()).trim(),
+    enabled: !!root.querySelector?.('#schedules-enabled-input')?.checked,
   };
 }
 
@@ -584,39 +691,57 @@ function _syncScheduleDraftFromForm() {
     command_text: data.command,
     cadence_preset: data.cadence_preset || 'custom',
     cron_expr: data.cron_expr || SCHEDULES_DEFAULT_CRON,
-    timezone: data.timezone || 'UTC',
+    timezone: data.timezone || _scheduleDefaultTimezone(),
     enabled: data.enabled,
   };
 }
 
 async function _loadSchedulePreview({ immediate = false } = {}) {
-  window.clearTimeout(_schedulesState.previewTimer);
+  _cancelSchedulePreview();
   const run = async () => {
-    if (!document.getElementById('schedules-form')) return;
+    const form = document.getElementById('schedules-form');
+    if (!form) return;
     _syncScheduleDraftFromForm();
     const draft = _schedulesState.draft || {};
     const params = new URLSearchParams();
     if (draft.cadence_preset && draft.cadence_preset !== 'custom') params.set('cadence_preset', draft.cadence_preset);
     else params.set('cron', draft.cron_expr || SCHEDULES_DEFAULT_CRON);
-    params.set('tz', draft.timezone || 'UTC');
+    params.set('tz', draft.timezone || _scheduleDefaultTimezone());
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    _schedulesState.previewController = controller;
     _schedulesState.preview = { ..._schedulesState.preview, loading: true, error: '' };
     _updateSchedulePreviewView();
     try {
-      const data = await _scheduleJson(`/schedules/preview?${params.toString()}`, { cache: 'no-store' });
+      const data = await _scheduleJson(`/schedules/preview?${params.toString()}`, {
+        cache: 'no-store',
+        signal: controller?.signal,
+      });
+      const cronExpr = String(data.cron_expr || '').trim();
+      if (cronExpr && draft.cadence_preset && draft.cadence_preset !== 'custom') {
+        const cronInput = form.querySelector?.('#schedules-cron-input');
+        if (cronInput) cronInput.value = cronExpr;
+        _schedulesState.draft = { ...draft, cron_expr: cronExpr };
+      }
       _schedulesState.preview = {
         loading: false,
         error: '',
         next_fires: Array.isArray(data.next_fires) ? data.next_fires : [],
-        cron_expr: data.cron_expr || draft.cron_expr || SCHEDULES_DEFAULT_CRON,
-        timezone: data.timezone || draft.timezone || 'UTC',
+        cron_expr: cronExpr || draft.cron_expr || SCHEDULES_DEFAULT_CRON,
+        timezone: data.timezone || draft.timezone || _scheduleDefaultTimezone(),
       };
     } catch (err) {
+      if (err?.name === 'AbortError') return;
+      _scheduleClientError('failed to preview schedule cadence', err);
       _schedulesState.preview = {
         ..._schedulesState.preview,
         loading: false,
         error: err?.message || 'Could not preview cadence',
         next_fires: [],
       };
+    } finally {
+      if (_schedulesState.previewController === controller) {
+        _schedulesState.previewController = null;
+      }
     }
     _updateSchedulePreviewView();
   };
@@ -650,6 +775,7 @@ async function _loadScheduleFires(scheduleId, { offset = 0 } = {}) {
   } catch (err) {
     _schedulesState.fires = [];
     _schedulesState.firesMeta = { limit: SCHEDULES_FIRES_LIMIT, offset: 0, total: 0, has_more: false };
+    _scheduleClientError('failed to load schedule fires', err);
     _scheduleToast(err?.message || 'Could not load schedule fires', 'error');
   } finally {
     _schedulesState.loadingFires = false;
@@ -663,14 +789,22 @@ async function refreshSchedulesModal({ selectId = '', command = '' } = {}) {
   try {
     const data = await _scheduleJson('/schedules', { cache: 'no-store' });
     _schedulesState.schedules = Array.isArray(data.schedules) ? data.schedules : [];
+    _schedulesState.missingScheduleId = '';
+    const requestedId = String(selectId || '');
     const currentId = String(selectId || _schedulesState.selectedId || '');
-    const fallbackId = _schedulesState.schedules[0]?.id || '';
-    _schedulesState.selectedId = _schedulesState.schedules.some(item => String(item.id || '') === currentId)
-      ? currentId
-      : fallbackId;
+    const hasCurrent = _schedulesState.schedules.some(item => String(item.id || '') === currentId);
+    if (requestedId && !hasCurrent) {
+      _schedulesState.mode = 'missing';
+      _schedulesState.selectedId = '';
+      _schedulesState.missingScheduleId = requestedId;
+    } else {
+      const fallbackId = _schedulesState.schedules[0]?.id || '';
+      _schedulesState.selectedId = hasCurrent ? currentId : fallbackId;
+    }
     if (command) {
       _schedulesState.mode = 'new';
       _schedulesState.selectedId = '';
+      _schedulesState.missingScheduleId = '';
       _schedulesState.draft = _scheduleDraftFromSchedule(null, command);
     } else if (_schedulesState.selectedId) {
       _schedulesState.mode = 'view';
@@ -678,6 +812,7 @@ async function refreshSchedulesModal({ selectId = '', command = '' } = {}) {
     }
     _schedulesState.fires = [];
   } catch (err) {
+    _scheduleClientError('failed to load schedules', err);
     _scheduleToast(err?.message || 'Could not load schedules', 'error');
   } finally {
     _schedulesState.loading = false;
@@ -728,6 +863,7 @@ async function _saveScheduleForm(event) {
     if (typeof loadScheduleAutocompleteHints === 'function') loadScheduleAutocompleteHints().catch(() => {});
     if (typeof refreshHistoryPanel === 'function') refreshHistoryPanel();
   } catch (err) {
+    _scheduleClientError(isNew ? 'failed to create schedule' : 'failed to update schedule', err);
     _scheduleToast(err?.message || 'Could not save schedule', 'error');
   } finally {
     _schedulesState.saving = false;
@@ -739,13 +875,15 @@ async function _deleteSelectedSchedule(schedule) {
   if (!schedule) return;
   let confirmed = true;
   if (typeof showConfirm === 'function') {
-    confirmed = await showConfirm({
-      title: 'Delete schedule?',
-      message: _scheduleTitle(schedule),
-      confirmText: 'Delete',
-      cancelText: 'Cancel',
+    const choice = await showConfirm({
+      body: `Delete schedule "${_scheduleTitle(schedule)}"?`,
       tone: 'danger',
+      actions: [
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+        { id: 'delete', label: 'Delete', role: 'destructive' },
+      ],
     });
+    confirmed = choice === 'delete';
   }
   if (!confirmed) return;
   try {
@@ -756,6 +894,7 @@ async function _deleteSelectedSchedule(schedule) {
     if (typeof loadScheduleAutocompleteHints === 'function') loadScheduleAutocompleteHints().catch(() => {});
     if (typeof refreshHistoryPanel === 'function') refreshHistoryPanel();
   } catch (err) {
+    _scheduleClientError('failed to delete schedule', err);
     _scheduleToast(err?.message || 'Could not delete schedule', 'error');
   }
 }
@@ -773,6 +912,7 @@ async function _patchSelectedSchedule(schedule, updates, successMessage) {
     if (typeof loadScheduleAutocompleteHints === 'function') loadScheduleAutocompleteHints().catch(() => {});
     if (typeof refreshHistoryPanel === 'function') refreshHistoryPanel();
   } catch (err) {
+    _scheduleClientError('failed to update schedule', err);
     _scheduleToast(err?.message || 'Could not update schedule', 'error');
   }
 }
@@ -785,6 +925,7 @@ async function _runSelectedSchedule(schedule) {
     await refreshSchedulesModal({ selectId: schedule.id });
     if (typeof refreshHistoryPanel === 'function') refreshHistoryPanel();
   } catch (err) {
+    _scheduleClientError('failed to run schedule now', err);
     _scheduleToast(err?.message || 'Could not fire schedule', 'error');
   }
 }
@@ -794,6 +935,7 @@ function _selectSchedule(scheduleId) {
   _schedulesState.selectedId = String(scheduleId || '');
   _schedulesState.draft = _scheduleDraftFromSchedule(_selectedSchedule());
   _schedulesState.fires = [];
+  _schedulesState.missingScheduleId = '';
   _renderSchedulesModal();
   _loadSchedulePreview({ immediate: true }).catch(() => {});
   _loadScheduleFires(_schedulesState.selectedId).catch(() => {});
@@ -804,6 +946,7 @@ function _newSchedule(command = '') {
   _schedulesState.selectedId = '';
   _schedulesState.draft = _scheduleDraftFromSchedule(null, command);
   _schedulesState.fires = [];
+  _schedulesState.missingScheduleId = '';
   _renderSchedulesModal();
   _loadSchedulePreview({ immediate: true }).catch(() => {});
 }
@@ -821,49 +964,9 @@ function _bindSchedulesModal() {
       closeSchedulesModal();
       return;
     }
-    const row = event.target.closest?.('[data-schedule-id]');
-    if (row) {
-      _selectSchedule(row.dataset.scheduleId || '');
-      return;
-    }
-    const preset = event.target.closest?.('[data-schedule-preset]');
-    if (preset) {
-      event.preventDefault();
-      const value = preset.dataset.schedulePreset || 'hourly';
-      _setScheduleCadencePreset(value);
-      const cronInput = document.getElementById('schedules-cron-input');
-      if (cronInput && value !== 'custom') cronInput.value = SCHEDULES_PRESETS[value] || SCHEDULES_DEFAULT_CRON;
-      _loadSchedulePreview().catch(() => {});
-      return;
-    }
-    const action = event.target.closest?.('[data-schedule-action]');
-    if (action) {
-      event.preventDefault();
-      const schedule = _selectedSchedule();
-      const value = action.dataset.scheduleAction;
-      if (value === 'delete') _deleteSelectedSchedule(schedule);
-      if (value === 'pause') _patchSelectedSchedule(schedule, { enabled: false, paused_reason: 'paused' }, 'Schedule paused');
-      if (value === 'resume') _patchSelectedSchedule(schedule, { enabled: true, paused_reason: '' }, 'Schedule resumed');
-      if (value === 'run-now') _runSelectedSchedule(schedule);
-      if (value === 'refresh-fires') _loadScheduleFires(schedule?.id || '').catch(() => {});
-      return;
-    }
-    const page = event.target.closest?.('[data-schedule-fires-page]');
-    if (page) {
-      const meta = _schedulesState.firesMeta || {};
-      const direction = page.dataset.scheduleFiresPage;
-      const nextOffset = direction === 'next'
-        ? Number(meta.offset || 0) + Number(meta.limit || SCHEDULES_FIRES_LIMIT)
-        : Math.max(0, Number(meta.offset || 0) - Number(meta.limit || SCHEDULES_FIRES_LIMIT));
-      _loadScheduleFires(_schedulesState.selectedId, { offset: nextOffset }).catch(() => {});
-      return;
-    }
     const run = event.target.closest?.('[data-schedule-run-id]');
-    if (run) {
-      closeSchedulesModal({ refocus: false });
-      if (typeof openHistoryRunDetails === 'function') {
-        openHistoryRunDetails({ id: run.dataset.scheduleRunId || '', command: run.dataset.scheduleRunId || '' });
-      }
+    if (run && run.dataset.pressableBound !== '1') {
+      _openScheduleRun(run.dataset.scheduleRunId || '');
     }
   });
   overlay.addEventListener('input', (event) => {

@@ -1493,15 +1493,35 @@ The current event inventory is:
 | INFO | `NOTIFICATION_DISPATCHED` | notification dispatcher | event_id, channel_id, trigger, session |
 | INFO | `NOTIFICATION_DEFERRED` | notification dispatcher | event_id, channel_id, trigger, session, reason |
 | INFO | `NOTIFICATION_EVENTS_PRUNED` | notification dispatcher | count, retention_days |
-| INFO | `SCHEDULE_CREATED` | browser schedule routes | ip, session, schedule_id |
-| INFO | `SCHEDULE_UPDATED` | browser schedule routes | ip, session, schedule_id |
-| INFO | `SCHEDULE_DELETED` | browser schedule routes | ip, session, schedule_id |
-| INFO | `SCHEDULE_RUN_NOW` | browser schedule routes | ip, session, schedule_id, status |
-| INFO | `SCHEDULE_FIRED` | scheduler dispatch | schedule_id, owner_kind, run_id |
-| INFO | `SCHEDULE_FIRE_SKIPPED_OVERLAP` | scheduler dispatch | schedule_id, run_id |
-| INFO | `SCHEDULER_WORKER_STARTED` | scheduler worker | worker boot |
-| INFO | `SCHEDULER_WORKER_LOCK_HELD` | scheduler worker | another scheduler already owns the deployment lock |
-| INFO | `SCHEDULER_WORKER_STOPPED` | scheduler worker | worker shutdown |
+| DEBUG | `SCHEDULER_TICK` | scheduler worker | now, limit, due_count |
+| DEBUG | `SCHEDULE_FIRE_DISPATCH` | scheduler dispatch | schedule_id, owner_kind, session, fired_at, command_root |
+| DEBUG | `SCHEDULE_RUN_PREPARED` | scheduler dispatch | schedule_id, dispatch_path, command_root |
+| DEBUG | `SCHEDULE_PERSISTED` | scheduler storage | schedule_id, owner_kind, enabled, cron_expr, cadence_preset, timezone, next_run_at |
+| DEBUG | `SCHEDULE_STATE_UPDATED` | scheduler storage | schedule_id, owner_kind, enabled, cron_expr, cadence_preset, timezone, next_run_at |
+| DEBUG | `SCHEDULE_AFTER_FIRE_UPDATED` | scheduler storage | schedule_id, owner_kind, run_id, fired_at, next_run_at, consecutive_failures |
+| DEBUG | `SCHEDULE_PREVIEW_GENERATED` | browser schedule routes | ip, session, cron_expr, cadence_preset, timezone, next_fire_count |
+| DEBUG | `SCHEDULES_LISTED` | browser schedule routes | ip, session, count |
+| DEBUG | `SCHEDULE_FIRES_LISTED` | browser schedule routes | ip, session, schedule_id, count, total, limit, offset |
+| DEBUG | `API_SCHEDULES_LISTED` | API schedule routes | ip, session, count, limit, offset |
+| DEBUG | `API_SCHEDULE_FIRES_LISTED` | API schedule routes | ip, session, schedule_id, count, total, limit, offset |
+| INFO | `SCHEDULE_CREATED` | browser schedule routes | ip, session, source, schedule_id, enabled, cron_expr, cadence_preset, timezone, next_run_at |
+| INFO | `SCHEDULE_UPDATED` | browser schedule routes | ip, session, source, schedule_id, changed_fields, enabled, next_run_at |
+| INFO | `SCHEDULE_DELETED` | browser schedule routes | ip, session, source, schedule_id, removed |
+| INFO | `SCHEDULE_RUN_NOW` | browser schedule routes | ip, session, source, schedule_id, status, fired_at, run_id, last_error |
+| INFO | `API_SCHEDULE_CREATED` | API schedule routes | ip, session, source, schedule_id, enabled, cron_expr, cadence_preset, timezone, next_run_at |
+| INFO | `API_SCHEDULE_UPDATED` | API schedule routes | ip, session, source, schedule_id, changed_fields, enabled, next_run_at |
+| INFO | `API_SCHEDULE_DELETED` | API schedule routes | ip, session, source, schedule_id, removed |
+| INFO | `API_SCHEDULE_RUN_NOW` | API schedule routes | ip, session, source, schedule_id, status, fired_at, run_id, last_error |
+| INFO | `BUILTIN_SCHEDULE_CREATED` | terminal schedule built-in | session, source, schedule_id, enabled, cron_expr, cadence_preset, timezone, next_run_at |
+| INFO | `BUILTIN_SCHEDULE_PAUSED` | terminal schedule built-in | session, source, schedule_id, enabled |
+| INFO | `BUILTIN_SCHEDULE_RESUMED` | terminal schedule built-in | session, source, schedule_id, enabled, next_run_at |
+| INFO | `BUILTIN_SCHEDULE_DELETED` | terminal schedule built-in | session, source, schedule_id, removed |
+| INFO | `BUILTIN_SCHEDULE_RUN_NOW` | terminal schedule built-in | session, source, schedule_id, status, fired_at, run_id, last_error |
+| INFO | `SCHEDULE_FIRED` | scheduler dispatch | schedule_id, owner_kind, session, run_id, fired_at, next_run_at, command_root |
+| INFO | `SCHEDULE_FIRE_SKIPPED_OVERLAP` | scheduler dispatch | schedule_id, session, run_id, fired_at, active_run_count, command_root |
+| INFO | `SCHEDULER_WORKER_STARTED` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
+| INFO | `SCHEDULER_WORKER_LOCK_HELD` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
+| INFO | `SCHEDULER_WORKER_STOPPED` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
 | INFO | `SCHEDULER_RECOVERY_APPLIED` | scheduler recovery | fired, skipped |
 | WARN | `FTS_SEARCH_FALLBACK` | `get_history` | session, q, error |
 | INFO | `HISTORY_DELETED` | `delete_run` | ip, run_id, session |
@@ -1521,7 +1541,15 @@ The current event inventory is:
 | WARN | `NOTIFICATION_RETRIED` | notification dispatcher | event_id, channel_id, trigger, session, attempts |
 | WARN | `NOTIFICATION_DELIVERY_FAILED` | notification dispatcher | event_id, channel_id, trigger, session, attempts |
 | WARN | `API_NOTIFICATION_CHANNEL_REJECTED` | API notification routes | ip, session, code, status, route, method |
-| WARN | `SCHEDULE_DISABLED_REVOKED` | scheduler dispatch | schedule_id, session |
+| WARN | `SCHEDULER_CONFIG_INVALID` | scheduler config readers | key, value, fallback |
+| WARN | `SCHEDULE_REQUEST_REJECTED` | browser schedule routes | ip, session, source, action, schedule_id, status, error |
+| WARN | `API_SCHEDULE_REJECTED` | API schedule routes | ip, session, code, status, route, method, error |
+| WARN | `BUILTIN_SCHEDULE_REJECTED` | terminal schedule built-in | session, source, subcommand, error |
+| WARN | `SCHEDULE_DISABLED_REVOKED` | scheduler dispatch | schedule_id, owner_kind, session, fired_at, next_run_at, command_root |
+| WARN | `SCHEDULE_WATCHER_FIRE_SKIPPED_UNIMPLEMENTED` | scheduler dispatch | schedule_id, owner_kind, session, fired_at |
+| WARN | `SCHEDULE_RECOVERY_SKIPPED_INVALID_NEXT_RUN` | scheduler recovery | schedule_id, owner_kind, next_run_at, fired_at |
+| WARN | `SCHEDULE_RECOVERY_SKIPPED_STALE` | scheduler recovery | schedule_id, owner_kind, next_run_at, fired_at, catchup_window_seconds |
+| WARN | `SCHEDULE_FIRE_LOOKUP_UNAVAILABLE` | scheduler history helper | run_count, error |
 | WARN | `PROJECT_QUOTA_HIT` | project quota helper | reason |
 | WARN | `PROJECT_ROUTE_FAILED` | project download routes | ip, session, project_id, package_id, route, error |
 | WARN | `SESSION_ROUTE_FAILED` | session routes | ip, session, route, error |
@@ -1545,7 +1573,9 @@ The current event inventory is:
 | ERROR | `PACKAGE_BUILD_FAILED` | evidence package builders | ip, session, project_id, package_id, job_id, stage, error (+ traceback) |
 | ERROR | `PACKAGE_JOB_FAILED` | evidence package job worker | session, project_id, package_id, job_id, stage, error (+ traceback) |
 | ERROR | `NOTIFICATION_RUN_COMPLETE_ENQUEUE_ERROR` | run finalization notification hook | run_id, session (+ traceback) |
-| ERROR | `SCHEDULE_FIRE_FAILED` | scheduler dispatch | schedule_id, owner_kind (+ traceback) |
+| ERROR | `SCHEDULE_FIRE_FAILED` | scheduler dispatch | schedule_id, owner_kind, session, fired_at, next_run_at, consecutive_failures, error, command_root (+ traceback) |
+| ERROR | `SCHEDULE_FAILURE_NOTIFICATION_ERROR` | scheduler dispatch | schedule_id (+ traceback) |
+| ERROR | `SCHEDULER_WORKER_CRASHED` | scheduler worker | phase, tick_seconds, limit, database_backend, lock_type (+ traceback) |
 | ERROR | `MIGRATION_FAILED` | Postgres migration runner | version, migration_name, error (+ traceback) |
 | ERROR | `HEALTH_DB_FAIL` | `health()` | (+ traceback) |
 | ERROR | `HEALTH_REDIS_FAIL` | `health()` | (+ traceback) |
@@ -1649,12 +1679,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,054
+- behavior tests: 3,074
 - docs/inventory meta-tests: 32
-- `pytest`: 1649 (1617 behavior + 32 meta)
-- `vitest`: 1187
+- `pytest`: 1663 (1631 behavior + 32 meta)
+- `vitest`: 1191
 - `playwright`: 252
-- total: 3,088
+- total: 3,106
 
 ### Testing Architecture
 

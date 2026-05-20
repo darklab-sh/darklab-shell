@@ -2,6 +2,7 @@ import json
 import sqlite3
 import sys
 import uuid
+from dataclasses import fields
 from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ from unittest import mock
 import app as shell_app
 import config
 from core.database import DB_PATH
+from services.scheduler.models import CADENCE_PRESETS, Schedule
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -784,6 +786,14 @@ def test_api_v1_schedules_crud_run_now_and_fire_audit_are_token_scoped(monkeypat
     other_listed = json.loads(client.get("/api/v1/schedules", headers=_headers(other_token)).data)
     detail = json.loads(client.get(f"/api/v1/schedules/{schedule['id']}", headers=_headers(token)).data)["schedule"]
     cross_detail = client.get(f"/api/v1/schedules/{schedule['id']}", headers=_headers(other_token))
+    cross_patch = client.patch(
+        f"/api/v1/schedules/{schedule['id']}",
+        headers=_headers(other_token),
+        json={"enabled": False},
+    )
+    cross_run_now = client.post(f"/api/v1/schedules/{schedule['id']}/run-now", headers=_headers(other_token))
+    cross_fires = client.get(f"/api/v1/schedules/{schedule['id']}/fires", headers=_headers(other_token))
+    cross_delete = client.delete(f"/api/v1/schedules/{schedule['id']}", headers=_headers(other_token))
     patched = json.loads(
         client.patch(
             f"/api/v1/schedules/{schedule['id']}",
@@ -802,6 +812,10 @@ def test_api_v1_schedules_crud_run_now_and_fire_audit_are_token_scoped(monkeypat
     assert detail["label"] == "API Schedule"
     assert cross_detail.status_code == 404
     assert json.loads(cross_detail.data)["error"]["code"] == "not_found"
+    assert cross_patch.status_code == 404
+    assert cross_run_now.status_code == 404
+    assert cross_fires.status_code == 404
+    assert cross_delete.status_code == 404
     assert patched["enabled"] is False
     assert patched["label"] == "Paused API Schedule"
     assert fired["status"] == "fired"
@@ -839,6 +853,27 @@ def test_api_v1_schedules_reject_invalid_body_and_disallowed_command(monkeypatch
     assert json.loads(invalid_body.data)["error"]["code"] == "invalid_body"
     assert disallowed.status_code == 400
     assert json.loads(disallowed.data)["error"]["code"] == "invalid_command"
+
+
+def test_api_v1_schedule_create_normalizes_string_false_enabled(monkeypatch):
+    import blueprints.api_v1 as api_blueprint
+
+    client = get_client()
+    token = _token(client)
+    monkeypatch.setattr(api_blueprint, "validate_schedule_command", lambda command, *_args, **_kwargs: command.strip())
+
+    create = client.post(
+        "/api/v1/schedules",
+        headers=_headers(token),
+        json={
+            "command": "echo disabled",
+            "cadence_preset": "hourly",
+            "enabled": "false",
+        },
+    )
+
+    assert create.status_code == 201
+    assert json.loads(create.data)["schedule"]["enabled"] is False
 
 
 def test_api_v1_openapi_route_matches_checked_in_contract():
@@ -1115,7 +1150,7 @@ def test_darklab_cli_schedule_commands_manage_api_schedules(monkeypatch, capsys)
         "last_run_at": "",
         "last_run_id": "",
         "label": "Hourly Echo",
-        "command_text": "echo cli",
+        "command_text": "echo 'hello world' 'semi;colon'",
     }
 
     class FakeClient:
@@ -1126,7 +1161,7 @@ def test_darklab_cli_schedule_commands_manage_api_schedules(monkeypatch, capsys)
             calls.append((method, path, params, body))
             if path == "/schedules" and method == "POST":
                 assert body == {
-                    "command": "echo cli",
+                    "command": "echo 'hello world' 'semi;colon'",
                     "cron_expr": None,
                     "cadence_preset": "hourly",
                     "label": "Hourly Echo",
@@ -1165,14 +1200,27 @@ def test_darklab_cli_schedule_commands_manage_api_schedules(monkeypatch, capsys)
     monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
     monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
 
-    assert cli_main.main(["schedule", "create", "--every", "hourly", "--label", "Hourly Echo", "--", "echo", "cli"]) == 0
+    assert cli_main.main([
+        "schedule",
+        "create",
+        "--every",
+        "hourly",
+        "--label",
+        "Hourly Echo",
+        "--",
+        "echo",
+        "hello world",
+        "semi;colon",
+    ]) == 0
     assert "sch_cli" in capsys.readouterr().out
+    assert cli_main.main(["schedule", "create", "--every", "hourly", "echo", "missing separator"]) == 1
+    assert "needs -- before the command" in capsys.readouterr().err
     assert cli_main.main(["schedule", "list", "--limit", "10"]) == 0
     list_output = capsys.readouterr().out
     assert "ENABLED" in list_output
     assert "Hourly Echo" in list_output
     assert cli_main.main(["schedule", "info", "sch_cli"]) == 0
-    assert "echo cli" in capsys.readouterr().out
+    assert "echo 'hello world' 'semi;colon'" in capsys.readouterr().out
     assert cli_main.main(["schedule", "pause", "sch_cli"]) == 0
     assert "no" in capsys.readouterr().out
     assert cli_main.main(["schedule", "resume", "sch_cli"]) == 0
@@ -1277,6 +1325,11 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert schemas["PackagePage"]["properties"]["packages"]["items"] == {"$ref": "#/components/schemas/EvidencePackage"}
     assert schemas["SchedulePage"]["properties"]["schedules"]["items"] == {"$ref": "#/components/schemas/Schedule"}
     assert schemas["ScheduleFirePage"]["properties"]["fires"]["items"] == {"$ref": "#/components/schemas/ScheduleFire"}
+    schedule_schema = schemas["Schedule"]
+    schedule_payload_fields = {field.name for field in fields(Schedule)} - {"session_token"}
+    assert set(schedule_schema["properties"]) == schedule_payload_fields
+    assert schedule_schema["additionalProperties"] is False
+    assert schedule_schema["properties"]["cadence_preset"]["enum"] == list(CADENCE_PRESETS)
     assert spec["paths"]["/schedules"]["post"]["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ScheduleCreateRequest"
     }

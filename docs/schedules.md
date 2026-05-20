@@ -31,6 +31,8 @@ Cron support is intentionally strict:
 - custom cron expressions cannot run more often than every five minutes
 - each schedule stores an IANA timezone, such as `UTC` or `America/Chicago`
 
+Some cron expressions are valid but rare. For example, a schedule for a day that does not happen every month will simply move to the next real matching date. The preview shows the next three times before you save, so check it when using day-of-month rules.
+
 For example:
 
 | Expression | Result |
@@ -40,7 +42,13 @@ For example:
 | `*/4 * * * *` | rejected, faster than the minimum interval |
 | `* * * * *` | rejected, every minute |
 
-The default timezone comes from `scheduler.default_timezone`, which defaults to `UTC`. In the browser, choose the timezone from the dropdown before saving or previewing the schedule.
+The default timezone comes from `scheduler.default_timezone`, which defaults to `UTC`. The browser uses that value for new schedules, and you can choose a different timezone from the dropdown before saving or previewing.
+
+When using the bundled CLI, put `--` before the command so command flags are treated as part of the scheduled command:
+
+```bash
+darklab schedule create --every hourly -- nmap -p 80 darklab.sh
+```
 
 ## Firing And History Links
 
@@ -55,10 +63,13 @@ Manual **Run now** actions use the same fire-audit path. They run directly from 
 When the scheduler worker starts, it checks for schedules that became due while the worker was offline.
 
 - Recent missed fires inside `scheduler.max_catchup_window_seconds` are coalesced into one catch-up fire.
-- Older missed windows are skipped and recorded in the fire audit.
+- Older missed windows are skipped and recorded in the fire audit as `skipped_overlap` with the reason `missed fire outside catch-up window`.
+- Invalid stored `next_run_at` values are also skipped as `skipped_overlap`, with the reason `invalid next_run_at during scheduler recovery`.
 - `scheduler.missed_fire_policy` is `coalesce`.
 
 This keeps a short restart from losing one run, while avoiding a burst of old commands after a long outage.
+
+If command registry changes later turn a previously schedulable command into an interactive PTY command, the next fire is blocked, recorded as a failed fire, and can send `scheduled_run_failed` notifications. Edit or delete the schedule after changing command registry behavior.
 
 ## Overlap Policy
 
@@ -68,7 +79,7 @@ The overlap policy is stored on the schedule row for forward compatibility, but 
 
 ## Revoked Tokens
 
-Schedules belong to the session token that created them. If that token is revoked, the worker records `skipped_revoked`, disables the schedule, and leaves the row visible to the owner session data instead of deleting it. The browser shows the schedule as paused with the revocation reason.
+Schedules belong to the session token that created them. If that token is revoked, the worker records `skipped_revoked`, disables the schedule, and keeps the row in storage instead of deleting it. Clients using the revoked token lose access to session-scoped schedule routes, so they will not be able to list or edit those rows after revocation.
 
 ## Notifications
 
@@ -110,7 +121,7 @@ Useful places to inspect scheduler behavior:
 - **History** — `scheduled` badges on runs created by a schedule
 - **Run Details** — the originating schedule link for scheduled runs
 - `/api/v1/schedules/<id>/fires` or `darklab schedule fires <id>` — paged audit rows
-- logs — `SCHEDULE_FIRED`, `SCHEDULE_FIRE_SKIPPED_OVERLAP`, `SCHEDULE_FIRE_FAILED`, `SCHEDULE_DISABLED_REVOKED`, `SCHEDULER_WORKER_STARTED`, `SCHEDULER_WORKER_LOCK_HELD`, `SCHEDULER_WORKER_STOPPED`, and `SCHEDULER_RECOVERY_APPLIED`
+- logs — `SCHEDULE_CREATED`, `SCHEDULE_UPDATED`, `SCHEDULE_DELETED`, `SCHEDULE_RUN_NOW`, `API_SCHEDULE_CREATED`, `API_SCHEDULE_UPDATED`, `API_SCHEDULE_DELETED`, `API_SCHEDULE_RUN_NOW`, `BUILTIN_SCHEDULE_CREATED`, `BUILTIN_SCHEDULE_PAUSED`, `BUILTIN_SCHEDULE_RESUMED`, `BUILTIN_SCHEDULE_DELETED`, `BUILTIN_SCHEDULE_RUN_NOW`, `SCHEDULE_FIRED`, `SCHEDULE_FIRE_SKIPPED_OVERLAP`, `SCHEDULE_FIRE_FAILED`, `SCHEDULE_FAILURE_NOTIFICATION_ERROR`, `SCHEDULE_REQUEST_REJECTED`, `API_SCHEDULE_REJECTED`, `BUILTIN_SCHEDULE_REJECTED`, `SCHEDULE_DISABLED_REVOKED`, `SCHEDULE_RECOVERY_SKIPPED_INVALID_NEXT_RUN`, `SCHEDULE_RECOVERY_SKIPPED_STALE`, `SCHEDULER_WORKER_STARTED`, `SCHEDULER_WORKER_LOCK_HELD`, `SCHEDULER_WORKER_STOPPED`, `SCHEDULER_WORKER_CRASHED`, and `SCHEDULER_RECOVERY_APPLIED`
 
 ## Related Docs
 

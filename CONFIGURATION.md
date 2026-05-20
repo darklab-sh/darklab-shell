@@ -616,6 +616,8 @@ WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 # WEB_CONCURRENCY=4
 # WEB_THREADS=4
 # PROMETHEUS_MULTIPROC_DIR=/tmp/darklab_shell-prom
+# NOTIFICATION_WORKER_ENABLED=1
+# SCHEDULER_ENABLED=1
 # COMPOSE_PROFILES=postgres
 # DATABASE_BACKEND=postgres
 # DATABASE_URL=postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell
@@ -626,7 +628,6 @@ WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 # POSTGRES_USER=darklab
 # POSTGRES_PASSWORD=darklab_dev_password
 # SECRETS_MASTER_KEY=
-# NOTIFICATION_WORKER_ENABLED=1
 # DOCKER_GELF_ADDRESS=udp://loghost.darklab.sh:12201/
 ```
 
@@ -637,6 +638,7 @@ WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 | `WEB_CONCURRENCY` | Gunicorn entrypoint | Number of Gunicorn worker processes |
 | `WEB_THREADS` | Gunicorn entrypoint | Number of threads per Gunicorn worker |
 | `NOTIFICATION_WORKER_ENABLED` | Docker entrypoint | Starts the outbound notification worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
+| `SCHEDULER_ENABLED` | Docker entrypoint | Starts the scheduled-run worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
 | `PROMETHEUS_MULTIPROC_DIR` | Docker Compose, Flask app, Prometheus client | Optional override for `prometheus_multiproc_dir`. The app creates this scratch directory and exports it for `prometheus_client` multiprocess metrics |
 | `COMPOSE_PROFILES` | Docker Compose | Optional comma-separated Compose profiles to enable. Set to `postgres` when you want the profile-gated Postgres service included without passing `--profile postgres` |
 | `DATABASE_BACKEND` | Flask app | Optional override for `database_backend`. Use `sqlite` for the default local/single-user path or `postgres` for a Postgres-backed deployment |

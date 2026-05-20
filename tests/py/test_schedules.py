@@ -112,9 +112,18 @@ class TestSchedulesRoutes:
         assert other_delete.status_code == 404
 
     def test_schedule_preview_returns_next_three_fires(self, monkeypatch, tmp_path):
+        import blueprints.schedules as schedules_blueprint
+
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
         token = "tok_schedule_preview"
         _register_token(token)
+
+        class FixedDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):  # noqa: ANN001
+                return datetime(2026, 5, 20, 12, 15, tzinfo=timezone.utc)
+
+        monkeypatch.setattr(schedules_blueprint, "datetime", FixedDatetime)
 
         resp = client.get("/schedules/preview?cadence_preset=hourly&tz=UTC", headers={"X-Session-ID": token})
 
@@ -123,7 +132,11 @@ class TestSchedulesRoutes:
         assert payload["cron_expr"] == "0 * * * *"
         assert payload["cadence_preset"] == "hourly"
         assert payload["timezone"] == "UTC"
-        assert len(payload["next_fires"]) == 3
+        assert payload["next_fires"] == [
+            "2026-05-20T13:00:00+00:00",
+            "2026-05-20T14:00:00+00:00",
+            "2026-05-20T15:00:00+00:00",
+        ]
 
         valid_custom = client.get(
             "/schedules/preview?cron=*/5%20*%20*%20*%20*&tz=America/Chicago",
@@ -264,6 +277,78 @@ class TestSchedulesRoutes:
         assert second.status_code == 409
         assert second.get_json()["message"] == "schedule quota exceeded for this session"
 
+    def test_schedule_create_and_patch_normalize_edge_inputs(self, monkeypatch, tmp_path):
+        client, _db_path = _schedule_client(monkeypatch, tmp_path)
+        token = "tok_schedule_edges"
+        _register_token(token)
+
+        disabled = _create_schedule(client, token, enabled="false", label="  Edge schedule  ", timezone="America/Chicago")
+        schedule = disabled.get_json()["schedule"]
+        invalid_timezone = _create_schedule(client, token, label="Bad timezone", timezone="Not/A_Timezone")
+        blank_patch = client.patch(
+            f"/schedules/{schedule['id']}",
+            headers={"X-Session-ID": token},
+            json={"command": "   "},
+        )
+        paused_update = client.patch(
+            f"/schedules/{schedule['id']}",
+            headers={"X-Session-ID": token},
+            json={"cadence_preset": "daily", "timezone": "America/Los_Angeles", "label": "  Daily edge  "},
+        )
+
+        assert disabled.status_code == 201
+        assert schedule["enabled"] is False
+        assert schedule["label"] == "Edge schedule"
+        assert schedule["timezone"] == "America/Chicago"
+        assert invalid_timezone.status_code == 400
+        assert invalid_timezone.get_json()["message"] == "timezone must be an IANA timezone name"
+        assert blank_patch.status_code == 400
+        assert blank_patch.get_json()["message"] == "command is required"
+        assert paused_update.status_code == 200
+        updated = paused_update.get_json()["schedule"]
+        assert updated["enabled"] is False
+        assert updated["cadence_preset"] == "daily"
+        assert updated["timezone"] == "America/Los_Angeles"
+        assert updated["label"] == "Daily edge"
+
+    def test_schedule_fires_pagination_bounds(self, monkeypatch, tmp_path):
+        client, _db_path = _schedule_client(monkeypatch, tmp_path)
+        token = "tok_schedule_fire_pages"
+        _register_token(token)
+        created = _create_schedule(client, token)
+        schedule_id = created.get_json()["schedule"]["id"]
+        with db_connect() as conn:
+            for index in range(3):
+                conn.execute(
+                    """
+                    INSERT INTO schedule_fires (id, schedule_id, owner_kind, owner_id, fired_at, run_id, status, reason)
+                    VALUES (?, ?, 'user', '', ?, ?, 'fired', 'started scheduled run')
+                    """,
+                    (
+                        f"scf_page_{index}",
+                        schedule_id,
+                        f"2026-05-20T00:00:0{index}+00:00",
+                        f"run_page_{index}",
+                    ),
+                )
+            conn.commit()
+
+        first = client.get(f"/schedules/{schedule_id}/fires?limit=2&offset=0", headers={"X-Session-ID": token})
+        second = client.get(f"/schedules/{schedule_id}/fires?limit=2&offset=2", headers={"X-Session-ID": token})
+
+        assert first.status_code == 200
+        first_payload = first.get_json()
+        assert first_payload["limit"] == 2
+        assert first_payload["offset"] == 0
+        assert first_payload["total"] == 3
+        assert first_payload["has_more"] is True
+        assert [fire["run_id"] for fire in first_payload["fires"]] == ["run_page_2", "run_page_1"]
+        assert second.status_code == 200
+        second_payload = second.get_json()
+        assert second_payload["offset"] == 2
+        assert second_payload["has_more"] is False
+        assert [fire["run_id"] for fire in second_payload["fires"]] == ["run_page_0"]
+
 
 class TestScheduleBuiltin:
     def test_schedule_builtin_create_list_info_and_state_changes(self, monkeypatch, tmp_path):
@@ -291,14 +376,24 @@ class TestScheduleBuiltin:
         assert paused[0]["text"] == f"schedule: paused {schedule_id}"
         with db_connect() as conn:
             paused_row = conn.execute("SELECT enabled, paused_reason FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
+            conn.execute(
+                "UPDATE schedules SET last_error = ?, consecutive_failures = ? WHERE id = ?",
+                ("scanner failed", 3, schedule_id),
+            )
+            conn.commit()
         assert paused_row["enabled"] == 0
         assert paused_row["paused_reason"] == "paused"
 
         resumed, _ = execute_builtin_command(f"schedule resume {schedule_id}", token)
         assert resumed[0]["text"] == f"schedule: resumed {schedule_id}"
         with db_connect() as conn:
-            resumed_row = conn.execute("SELECT enabled FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
+            resumed_row = conn.execute(
+                "SELECT enabled, last_error, consecutive_failures FROM schedules WHERE id = ?",
+                (schedule_id,),
+            ).fetchone()
         assert resumed_row["enabled"] == 1
+        assert resumed_row["last_error"] == ""
+        assert resumed_row["consecutive_failures"] == 0
 
         deleted, _ = execute_builtin_command(f"schedule delete {schedule_id}", token)
         assert deleted[0]["text"] == f"schedule: deleted {schedule_id}"

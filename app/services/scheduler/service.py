@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 import uuid
 from typing import Any
 
@@ -21,6 +22,8 @@ from services.scheduler.models import (
     Schedule,
     ScheduleFire,
 )
+
+log = logging.getLogger("shell")
 
 
 class ScheduleError(ValueError):
@@ -43,12 +46,18 @@ def _fire_id() -> str:
     return f"scf_{uuid.uuid4().hex}"
 
 
-def _as_bool(value: Any) -> bool:
+def coerce_schedule_bool(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return bool(default)
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
         return bool(value)
     return str(value or "").lower() in {"1", "true", "yes", "on"}
+
+
+def _as_bool(value: Any) -> bool:
+    return coerce_schedule_bool(value)
 
 
 def _value(row: Any, key: str, default: Any = "") -> Any:
@@ -119,9 +128,15 @@ def _bool_param(value: Any) -> Any:
 
 
 def _max_schedules_per_session() -> int:
+    raw = database.CFG.get("scheduler", {}).get("max_per_session")
     try:
-        configured = int(database.CFG.get("scheduler", {}).get("max_per_session") or 32)
+        configured = int(raw or 32)
     except (TypeError, ValueError):
+        log.warning("SCHEDULER_CONFIG_INVALID", extra={
+            "key": "scheduler.max_per_session",
+            "value": str(raw),
+            "fallback": 32,
+        })
         configured = 32
     return max(1, configured)
 
@@ -234,6 +249,15 @@ def create_schedule(
         )
         if ctx is not None:
             conn.commit()
+        log.debug("SCHEDULE_PERSISTED", extra={
+            "schedule_id": schedule.id,
+            "owner_kind": schedule.owner_kind,
+            "enabled": schedule.enabled,
+            "cron_expr": schedule.cron_expr,
+            "cadence_preset": schedule.cadence_preset or "",
+            "timezone": schedule.timezone,
+            "next_run_at": schedule.next_run_at,
+        })
         return schedule
     finally:
         if ctx is not None:
@@ -295,6 +319,16 @@ def update_schedule(schedule_id: str, updates: dict[str, Any], *, conn=None) -> 
         next_cron, next_preset = schedule.cron_expr, schedule.cadence_preset
     enabled = _as_bool(updates.get("enabled", schedule.enabled))
     next_run_at = _next_fire_iso(next_cron, next_timezone) if enabled else schedule.next_run_at
+    next_label = str(updates.get("label", schedule.label) or "").strip()
+    next_paused_reason = str(updates.get("paused_reason", schedule.paused_reason) or "")
+    next_last_error = str(updates.get("last_error", schedule.last_error) or "")
+    try:
+        next_failures = max(0, int(updates.get("consecutive_failures", schedule.consecutive_failures) or 0))
+    except (TypeError, ValueError) as exc:
+        raise ScheduleError("consecutive failures must be a non-negative integer") from exc
+    if "enabled" in updates and enabled and schedule.enabled is False and not next_paused_reason:
+        next_last_error = ""
+        next_failures = 0
     now = _utc_now()
     ctx = None
     if conn is None:
@@ -306,7 +340,8 @@ def update_schedule(schedule_id: str, updates: dict[str, Any], *, conn=None) -> 
             """
             UPDATE schedules
             SET command_text = ?, cron_expr = ?, cadence_preset = ?, timezone = ?, enabled = ?,
-                next_run_at = ?, label = ?, paused_reason = ?, last_error = ?, updated = ?
+                next_run_at = ?, label = ?, paused_reason = ?, last_error = ?,
+                consecutive_failures = ?, updated = ?
             WHERE id = ?
             """,
             (
@@ -316,16 +351,28 @@ def update_schedule(schedule_id: str, updates: dict[str, Any], *, conn=None) -> 
                 next_timezone,
                 _bool_param(enabled),
                 next_run_at,
-                str(updates.get("label", schedule.label) or "").strip(),
-                str(updates.get("paused_reason", schedule.paused_reason) or ""),
-                str(updates.get("last_error", schedule.last_error) or ""),
+                next_label,
+                next_paused_reason,
+                next_last_error,
+                next_failures,
                 now,
                 schedule_id,
             ),
         )
         if ctx is not None:
             conn.commit()
-        return get_schedule(schedule_id, conn=conn)
+        refreshed = get_schedule(schedule_id, conn=conn)
+        if refreshed is not None:
+            log.debug("SCHEDULE_STATE_UPDATED", extra={
+                "schedule_id": refreshed.id,
+                "owner_kind": refreshed.owner_kind,
+                "enabled": refreshed.enabled,
+                "cron_expr": refreshed.cron_expr,
+                "cadence_preset": refreshed.cadence_preset or "",
+                "timezone": refreshed.timezone,
+                "next_run_at": refreshed.next_run_at,
+            })
+        return refreshed
     finally:
         if ctx is not None:
             ctx.__exit__(None, None, None)
@@ -336,7 +383,11 @@ def pause_schedule(schedule_id: str, reason: str = "", *, conn=None) -> Schedule
 
 
 def resume_schedule(schedule_id: str, *, conn=None) -> Schedule | None:
-    return update_schedule(schedule_id, {"enabled": True, "paused_reason": ""}, conn=conn)
+    return update_schedule(
+        schedule_id,
+        {"enabled": True, "paused_reason": "", "last_error": "", "consecutive_failures": 0},
+        conn=conn,
+    )
 
 
 def delete_schedule(schedule_id: str, *, conn=None) -> bool:
@@ -427,11 +478,16 @@ def schedule_ids_by_run(conn, run_ids: list[str]) -> dict[str, str]:
         ).fetchall()
     except Exception as exc:
         if _is_missing_schedule_fires_table(exc):
+            log.warning("SCHEDULE_FIRE_LOOKUP_UNAVAILABLE", extra={
+                "run_count": len(ids),
+                "error": str(exc),
+            })
             return {}
         raise
     schedule_by_run: dict[str, str] = {}
     for row in rows:
         run_id = str(_value(row, "run_id") or "")
+        # Rows are newest first, so the first schedule for a run wins.
         if run_id and run_id not in schedule_by_run:
             schedule_by_run[run_id] = str(_value(row, "schedule_id") or "")
     return schedule_by_run
@@ -485,4 +541,13 @@ def mark_schedule_after_fire(
     refreshed = get_schedule(schedule.id, conn=conn)
     if refreshed is None:
         raise ScheduleError("schedule disappeared during fire update")
+    log.debug("SCHEDULE_AFTER_FIRE_UPDATED", extra={
+        "schedule_id": refreshed.id,
+        "owner_kind": refreshed.owner_kind,
+        "run_id": run_id or "",
+        "fired_at": fired_at,
+        "next_run_at": refreshed.next_run_at,
+        "consecutive_failures": refreshed.consecutive_failures,
+        "last_error": refreshed.last_error,
+    })
     return refreshed

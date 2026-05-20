@@ -3467,6 +3467,7 @@ class TestConfigRoute:
             "high_volume_output_status_interval_lines", "evidence_package_max_mb",
             "evidence_package_max_uncompressed_mb", "evidence_package_max_artifacts",
             "workspace_enabled", "interactive_pty_commands",
+            "scheduler_default_timezone",
             "tour_chapters",
         ):
             assert key in data

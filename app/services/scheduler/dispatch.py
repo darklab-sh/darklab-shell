@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import logging
 import threading
+import uuid
 
 from core.helpers import get_log_session_id
+from core.output_signals import command_root
 from core.process import active_runs_for_session
 from services.notifications.dispatcher import enqueue as enqueue_notification
 from services.notifications.models import TRIGGER_SCHEDULED_RUN_FAILED
@@ -19,13 +22,29 @@ from services.scheduler.models import (
     OWNER_KIND_WATCHER,
     Schedule,
 )
-from services.scheduler.service import mark_schedule_after_fire, record_schedule_fire
+from services.scheduler.service import _bool_param, mark_schedule_after_fire, record_schedule_fire
 
 log = logging.getLogger("shell")
+_FIRE_CLAIM_PREFIX = "__schedule_firing__:"
+_FIRE_CLAIM_TTL_SECONDS = 300
 
 
 class ScheduleFireError(RuntimeError):
     """Raised when a due schedule cannot start its requested work."""
+
+
+def _schedule_log_payload(schedule: Schedule, **extra) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "schedule_id": schedule.id,
+        "owner_kind": schedule.owner_kind,
+        "owner_id": schedule.owner_id,
+        "session": get_log_session_id(schedule.session_token),
+        "next_run_at": schedule.next_run_at,
+        "last_run_id": schedule.last_run_id,
+        "command_root": command_root(str(schedule.command_text or "")),
+    }
+    payload.update(extra)
+    return payload
 
 
 def fire_schedule(conn, schedule: Schedule, *, fired_at: str) -> str:
@@ -36,6 +55,7 @@ def fire_schedule(conn, schedule: Schedule, *, fired_at: str) -> str:
     so the watcher service can plug in without the scheduler starting a normal
     command as well.
     """
+    log.debug("SCHEDULE_FIRE_DISPATCH", extra=_schedule_log_payload(schedule, fired_at=fired_at))
     try:
         if schedule.owner_kind == OWNER_KIND_USER:
             status, run_id = _fire_user_schedule(conn, schedule, fired_at=fired_at)
@@ -45,6 +65,8 @@ def fire_schedule(conn, schedule: Schedule, *, fired_at: str) -> str:
             raise ValueError(f"unsupported schedule owner kind {schedule.owner_kind!r}")
         if status == FIRE_STATUS_SKIPPED_REVOKED:
             _disable_revoked_schedule(conn, schedule, fired_at=fired_at)
+        elif status == FIRE_STATUS_SKIPPED_OVERLAP and not run_id:
+            pass
         else:
             mark_schedule_after_fire(conn, schedule, fired_at=fired_at, run_id=run_id)
         return status
@@ -55,7 +77,12 @@ def fire_schedule(conn, schedule: Schedule, *, fired_at: str) -> str:
         log.error(
             "SCHEDULE_FIRE_FAILED",
             exc_info=True,
-            extra={"schedule_id": schedule.id, "owner_kind": schedule.owner_kind},
+            extra=_schedule_log_payload(
+                schedule,
+                fired_at=fired_at,
+                error=str(exc),
+                consecutive_failures=schedule.consecutive_failures + 1,
+            ),
         )
         return FIRE_STATUS_FAILED
 
@@ -71,11 +98,31 @@ def _fire_user_schedule(conn, schedule: Schedule, *, fired_at: str) -> tuple[str
         )
         log.warning(
             "SCHEDULE_DISABLED_REVOKED",
-            extra={"schedule_id": schedule.id, "session": get_log_session_id(schedule.session_token)},
+            extra=_schedule_log_payload(schedule, fired_at=fired_at),
         )
         return FIRE_STATUS_SKIPPED_REVOKED, ""
 
-    if _previous_run_is_active(schedule):
+    if _schedule_has_fresh_fire_claim(schedule):
+        record_schedule_fire(
+            conn,
+            schedule,
+            status=FIRE_STATUS_SKIPPED_OVERLAP,
+            fired_at=fired_at,
+            reason="schedule fire already in progress",
+        )
+        log.info(
+            "SCHEDULE_FIRE_SKIPPED_OVERLAP",
+            extra=_schedule_log_payload(
+                schedule,
+                fired_at=fired_at,
+                run_id=schedule.last_run_id,
+                active_run_count=0,
+            ),
+        )
+        return FIRE_STATUS_SKIPPED_OVERLAP, ""
+
+    previous_active, active_run_count = _previous_run_is_active(schedule)
+    if previous_active:
         record_schedule_fire(
             conn,
             schedule,
@@ -85,9 +132,33 @@ def _fire_user_schedule(conn, schedule: Schedule, *, fired_at: str) -> tuple[str
         )
         log.info(
             "SCHEDULE_FIRE_SKIPPED_OVERLAP",
-            extra={"schedule_id": schedule.id, "run_id": schedule.last_run_id},
+            extra=_schedule_log_payload(
+                schedule,
+                fired_at=fired_at,
+                run_id=schedule.last_run_id,
+                active_run_count=active_run_count,
+            ),
         )
         return FIRE_STATUS_SKIPPED_OVERLAP, schedule.last_run_id
+
+    if not _claim_schedule_fire(conn, schedule, fired_at=fired_at):
+        record_schedule_fire(
+            conn,
+            schedule,
+            status=FIRE_STATUS_SKIPPED_OVERLAP,
+            fired_at=fired_at,
+            reason="schedule fire already claimed",
+        )
+        log.info(
+            "SCHEDULE_FIRE_SKIPPED_OVERLAP",
+            extra=_schedule_log_payload(
+                schedule,
+                fired_at=fired_at,
+                run_id=schedule.last_run_id,
+                active_run_count=active_run_count,
+            ),
+        )
+        return FIRE_STATUS_SKIPPED_OVERLAP, ""
 
     run_id = _launch_user_schedule_run(schedule)
     record_schedule_fire(
@@ -100,7 +171,7 @@ def _fire_user_schedule(conn, schedule: Schedule, *, fired_at: str) -> tuple[str
     )
     log.info(
         "SCHEDULE_FIRED",
-        extra={"schedule_id": schedule.id, "owner_kind": schedule.owner_kind, "run_id": run_id},
+        extra=_schedule_log_payload(schedule, fired_at=fired_at, run_id=run_id),
     )
     return FIRE_STATUS_FIRED, run_id
 
@@ -113,7 +184,10 @@ def _fire_watcher_schedule(conn, schedule: Schedule, *, fired_at: str) -> tuple[
         fired_at=fired_at,
         reason="dispatch pending watcher integration",
     )
-    log.info("SCHEDULE_FIRE_RECORDED", extra={"schedule_id": schedule.id, "owner_kind": schedule.owner_kind})
+    log.warning(
+        "SCHEDULE_WATCHER_FIRE_SKIPPED_UNIMPLEMENTED",
+        extra=_schedule_log_payload(schedule, fired_at=fired_at),
+    )
     return FIRE_STATUS_FIRED, ""
 
 
@@ -122,14 +196,42 @@ def _session_token_exists(conn, session_token: str) -> bool:
     return row is not None
 
 
-def _previous_run_is_active(schedule: Schedule) -> bool:
+def _previous_run_is_active(schedule: Schedule) -> tuple[bool, int]:
     previous_run_id = str(schedule.last_run_id or "").strip()
     if not previous_run_id:
-        return False
+        return False, 0
+    active_runs = active_runs_for_session(schedule.session_token)
     return any(
         str(active.get("run_id") or "") == previous_run_id
-        for active in active_runs_for_session(schedule.session_token)
+        for active in active_runs
+    ), len(active_runs)
+
+
+def _schedule_has_fresh_fire_claim(schedule: Schedule) -> bool:
+    claim = str(schedule.last_run_id or "")
+    if not claim.startswith(_FIRE_CLAIM_PREFIX):
+        return False
+    try:
+        claimed_at = datetime.fromisoformat(str(schedule.last_run_at or ""))
+    except ValueError:
+        return True
+    if claimed_at.tzinfo is None:
+        claimed_at = claimed_at.replace(tzinfo=timezone.utc)
+    age_seconds = (datetime.now(timezone.utc) - claimed_at.astimezone(timezone.utc)).total_seconds()
+    return age_seconds <= _FIRE_CLAIM_TTL_SECONDS
+
+
+def _claim_schedule_fire(conn, schedule: Schedule, *, fired_at: str) -> bool:
+    claim_id = f"{_FIRE_CLAIM_PREFIX}{uuid.uuid4().hex}"
+    result = conn.execute(
+        """
+        UPDATE schedules
+        SET last_run_id = ?, last_run_at = ?, updated = ?
+        WHERE id = ? AND last_run_id = ?
+        """,
+        (claim_id, fired_at, fired_at, schedule.id, schedule.last_run_id or ""),
     )
+    return int(getattr(result, "rowcount", 0) or 0) == 1
 
 
 def _disable_revoked_schedule(conn, schedule: Schedule, *, fired_at: str) -> None:
@@ -139,7 +241,7 @@ def _disable_revoked_schedule(conn, schedule: Schedule, *, fired_at: str) -> Non
         SET enabled = ?, last_run_at = ?, last_error = ?, paused_reason = ?, updated = ?
         WHERE id = ?
         """,
-        (False, fired_at, "session token revoked", "session token revoked", fired_at, schedule.id),
+        (_bool_param(False), fired_at, "session token revoked", "session token revoked", fired_at, schedule.id),
     )
 
 
@@ -182,9 +284,11 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
     interactive_spec = interactive_pty_spec_for_command(original_command)
     interactive_trigger = str((interactive_spec or {}).get("trigger_flag") or "").strip()
     if interactive_trigger and interactive_trigger in split_command_argv(original_command)[1:]:
+        log.debug("SCHEDULE_RUN_PREPARED", extra=_schedule_log_payload(schedule, dispatch_path="interactive_rejected"))
         raise ScheduleFireError("interactive PTY commands cannot be scheduled")
 
     if resolves_exact_special_builtin_command(original_command):
+        log.debug("SCHEDULE_RUN_PREPARED", extra=_schedule_log_payload(schedule, dispatch_path="builtin_exact"))
         events, exit_code = execute_builtin_command(original_command, schedule.session_token, tab_id=owner_tab_id)
         return run_blueprint._brokered_synthetic_run(  # noqa: SLF001
             run_blueprint._history_safe_command_for_storage(original_command),  # noqa: SLF001
@@ -192,6 +296,7 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
             client_ip,
             events,
             exit_code,
+            cmd_type="builtin",
             owner_tab_id=owner_tab_id,
         )
 
@@ -205,6 +310,7 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
         raise ScheduleFireError(str(exc)) from exc
 
     if resolve_builtin_command(prepared_input.execution_command):
+        log.debug("SCHEDULE_RUN_PREPARED", extra=_schedule_log_payload(schedule, dispatch_path="builtin_rewritten"))
         events, exit_code = execute_builtin_command(prepared_input.execution_command, schedule.session_token, tab_id=owner_tab_id)
         return run_blueprint._brokered_synthetic_run(  # noqa: SLF001
             run_blueprint._history_safe_command_for_storage(original_command),  # noqa: SLF001
@@ -216,6 +322,7 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
                 prepared_input.postfilter,
             ),
             exit_code,
+            cmd_type="builtin",
             owner_tab_id=owner_tab_id,
         )
 
@@ -231,6 +338,7 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
         raise ScheduleFireError(str(exc)) from exc
 
     if prepared_real.missing_runtime:
+        log.debug("SCHEDULE_RUN_PREPARED", extra=_schedule_log_payload(schedule, dispatch_path="missing_runtime"))
         return run_blueprint._brokered_synthetic_run(  # noqa: SLF001
             original_command,
             schedule.session_token,
@@ -242,6 +350,7 @@ def _launch_user_schedule_run(schedule: Schedule) -> str:
         )
 
     try:
+        log.debug("SCHEDULE_RUN_PREPARED", extra=_schedule_log_payload(schedule, dispatch_path="external"))
         started = run_blueprint._start_real_command_process(  # noqa: SLF001
             original_command,
             schedule.session_token,

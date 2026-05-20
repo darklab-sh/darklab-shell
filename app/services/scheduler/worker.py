@@ -34,12 +34,32 @@ def _tick_seconds() -> float:
     raw = scheduler_cfg().get("tick_seconds")
     if raw in ("", None):
         return DEFAULT_TICK_SECONDS
-    return max(0.5, float(raw))
+    try:
+        return max(0.5, float(raw))
+    except (TypeError, ValueError):
+        log.warning("SCHEDULER_CONFIG_INVALID", extra={
+            "key": "scheduler.tick_seconds",
+            "value": str(raw),
+            "fallback": DEFAULT_TICK_SECONDS,
+        })
+        return DEFAULT_TICK_SECONDS
 
 
 def _lock_path() -> Path:
     raw = str(scheduler_cfg().get("lock_path") or "").strip()
     return Path(raw) if raw else Path(resolve_data_dir()) / "scheduler.lock"
+
+
+def _worker_log_context(*, tick_seconds: float, limit: int) -> dict[str, object]:
+    backend = getattr(database.DB_BACKEND, "value", str(database.DB_BACKEND))
+    postgres = database.DB_BACKEND == DatabaseBackend.POSTGRES
+    return {
+        "tick_seconds": tick_seconds,
+        "limit": limit,
+        "database_backend": backend,
+        "lock_type": "postgres_advisory" if postgres else "file",
+        "lock_path": "" if postgres else str(_lock_path()),
+    }
 
 
 @contextmanager
@@ -77,7 +97,15 @@ def run_once(*, limit: int = 50) -> int:
     fired = 0
     now = datetime.now(timezone.utc).isoformat()
     with database.db_connect() as conn:
-        for schedule in due_schedules(conn, now=now, limit=limit):
+        schedules = due_schedules(conn, now=now, limit=limit)
+        log.debug("SCHEDULER_TICK", extra={"now": now, "limit": limit, "due_count": len(schedules)})
+        for schedule in schedules:
+            log.debug("SCHEDULER_FIRE_ATTEMPT", extra={
+                "schedule_id": schedule.id,
+                "owner_kind": schedule.owner_kind,
+                "next_run_at": schedule.next_run_at,
+                "fired_at": now,
+            })
             fire_schedule(conn, schedule, fired_at=now)
             fired += 1
         conn.commit()
@@ -88,19 +116,27 @@ def run_forever(*, tick_seconds: float | None = None, limit: int = 50) -> None:
     signal.signal(signal.SIGTERM, _handle_stop)
     signal.signal(signal.SIGINT, _handle_stop)
     sleep_for = tick_seconds if tick_seconds is not None else _tick_seconds()
-    with acquire_scheduler_lock() as acquired:
-        if not acquired:
-            log.info("SCHEDULER_WORKER_LOCK_HELD")
-            return
-        log.info("SCHEDULER_WORKER_STARTED")
-        with database.db_connect() as conn:
-            recover_missed_fires(conn)
-            conn.commit()
-        while not _STOP:
-            fired = run_once(limit=limit)
-            if fired == 0:
-                time.sleep(max(0.1, float(sleep_for)))
-        log.info("SCHEDULER_WORKER_STOPPED")
+    context = _worker_log_context(tick_seconds=float(sleep_for), limit=limit)
+    phase = "lock"
+    try:
+        with acquire_scheduler_lock() as acquired:
+            if not acquired:
+                log.info("SCHEDULER_WORKER_LOCK_HELD", extra=context)
+                return
+            log.info("SCHEDULER_WORKER_STARTED", extra=context)
+            phase = "recovery"
+            with database.db_connect() as conn:
+                recover_missed_fires(conn)
+                conn.commit()
+            phase = "tick"
+            while not _STOP:
+                fired = run_once(limit=limit)
+                if fired == 0:
+                    time.sleep(max(0.1, float(sleep_for)))
+            log.info("SCHEDULER_WORKER_STOPPED", extra=context)
+    except Exception:
+        log.error("SCHEDULER_WORKER_CRASHED", exc_info=True, extra={**context, "phase": phase})
+        raise
 
 
 def main() -> None:

@@ -6,6 +6,7 @@ import argparse
 import getpass
 import json
 from pathlib import Path
+import shlex
 import sys
 from typing import Any
 
@@ -176,7 +177,7 @@ def _parser() -> argparse.ArgumentParser:
 
     schedule_create = schedule_sub.add_parser("create", help="Create a scheduled command.")
     schedule_create.add_argument("--cron")
-    schedule_create.add_argument("--every", choices=("hourly", "daily", "weekly"))
+    schedule_create.add_argument("--every", metavar="PRESET", help="Cadence preset: hourly, daily, or weekly.")
     schedule_create.add_argument("--label")
     schedule_create.add_argument("--timezone")
     schedule_create.add_argument("--format", choices=("text", "json"), default="text")
@@ -391,7 +392,7 @@ def _schedule(client: DarklabClient, args: argparse.Namespace) -> int:
             payload = client.request(
                 "PATCH",
                 f"/schedules/{args.schedule_id}",
-                body={"enabled": True, "paused_reason": ""},
+                body={"enabled": True, "paused_reason": "", "last_error": "", "consecutive_failures": 0},
             )
             return _print_schedule(payload, args.format)
         case "delete":
@@ -411,9 +412,10 @@ def _schedule(client: DarklabClient, args: argparse.Namespace) -> int:
 
 def _schedule_command_text(argv: list[str]) -> str:
     parts = list(argv or [])
-    if parts and parts[0] == "--":
-        parts = parts[1:]
-    command = " ".join(parts).strip()
+    if not parts or parts[0] != "--":
+        raise DarklabCliError("schedule create needs -- before the command.")
+    parts = parts[1:]
+    command = shlex.join(parts).strip()
     if not command:
         raise DarklabCliError("schedule create needs a command after --.")
     return command

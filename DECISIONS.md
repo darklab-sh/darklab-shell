@@ -187,6 +187,24 @@ Header sync alone is not sufficient, though. Passive tabs also need to refresh s
 
 `session-token revoke` deletes the token row from `session_tokens`. But that alone is not enough — any client still holding the token string could keep sending it as `X-Session-ID` and get data back, because the old data routes trusted any header value unconditionally. `get_session_id()` in `helpers.py` now looks up every `tok_`-prefixed header value against `session_tokens` on each request. A revoked or never-issued token returns `""` (anonymous), so the caller immediately loses access to session-scoped runs, snapshots, and stars — no client-side coopertion required. The DB lookup adds a single indexed read per request; the `session_tokens` table is small and hit-rate is high, so the overhead is negligible.
 
+### Scheduled Runs Worker And Audit Model
+
+**Scheduled runs fire from a dedicated worker, not from Flask request handlers.**
+
+The scheduler is a Gunicorn-sibling process supervised by `entrypoint.sh`. It stays outside Flask workers so time-based firing is not tied to browser traffic, request lifetimes, or the number of web workers currently serving users. Manual **Run now** is the exception: it fires directly from the operator's request because it is an on-demand action and should not depend on the background worker being healthy.
+
+Only one scheduler worker should fire due rows for a deployment. Postgres uses the reserved `darklab_shell_scheduler` advisory lock, while SQLite uses a filesystem lock under the app data directory unless `scheduler.lock_path` overrides it. Extra workers that cannot take the lock exit cleanly and let the supervisor retry.
+
+Normal schedules and watcher-owned schedules share the physical `schedules` table. The ownership fields (`owner_kind`, `owner_id`, and `session_token`) keep the behavior explicit: browser/API/CLI schedule lists expose only normal user-owned schedules, while watcher-owned cadence rows stay tied to watcher state and cannot be edited as ordinary command schedules.
+
+The firing policy is deliberately conservative:
+
+- schedules require durable `tok_` sessions so revocation can stop future work
+- strict five-field cron and a five-minute minimum custom interval prevent accidental rapid loops
+- missed fires are coalesced on worker startup instead of replaying every skipped interval
+- overlap policy is stored as `skip` and enforced by recording an audit row instead of starting another copy while the previous scheduled run is still active
+- every fire attempt writes `schedule_fires`, so History, Run Details, API clients, and operators can trace why a due schedule fired, skipped, or failed
+
 ### Deny Flag Matching (anywhere in command)
 
 **Deny entries match denied flags anywhere in the command, not just as a command prefix.**

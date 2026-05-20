@@ -1941,6 +1941,7 @@
         "type": "object"
       },
       "Schedule": {
+        "additionalProperties": false,
         "properties": {
           "cadence_preset": {
             "enum": [

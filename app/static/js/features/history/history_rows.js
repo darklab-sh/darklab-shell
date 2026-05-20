@@ -192,7 +192,7 @@ function _createHistoryEntry(run, isStarred, options = {}) {
     const scheduledBadge = _historyMetaKindBadge('schedule', 'scheduled');
     scheduledBadge.title = run.schedule_id ? `Schedule ${run.schedule_id}` : 'Scheduled run';
     if (run.schedule_id) {
-      scheduledBadge.classList.add('history-entry-kind-action');
+      scheduledBadge.classList.add('chip-action');
       scheduledBadge.dataset.action = 'open-schedule';
       scheduledBadge.dataset.scheduleId = run.schedule_id;
       scheduledBadge.setAttribute('role', 'button');

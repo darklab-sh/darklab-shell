@@ -631,6 +631,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── dispatch.py     # Schedule fire dispatch, broker launch, skip handling, and fire audit rows
 │   │   │   ├── models.py       # Schedule and schedule-fire dataclasses, constants, and allowed values
 │   │   │   ├── recovery.py     # Scheduler startup recovery for missed fire windows
+│   │   │   ├── serialization.py # Shared schedule payload shaping and ownership lookup helpers
 │   │   │   ├── service.py      # Backend-agnostic schedule CRUD, due-row, and fire-audit helpers
 │   │   │   └── worker.py       # Dedicated scheduler worker entrypoint and deployment-wide lock
 │   │   ├── secrets/
