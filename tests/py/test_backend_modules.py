@@ -646,6 +646,8 @@ class TestPostgresMigrations:
         "secrets",
         "notification_channels",
         "notification_events",
+        "schedules",
+        "schedule_fires",
         "projects",
         "project_links",
         "entities",
@@ -715,6 +717,7 @@ class TestPostgresMigrations:
             "0007",
             "0008",
             "0009",
+            "0010",
         ]
         for table_name in (
             "runs",
@@ -729,6 +732,8 @@ class TestPostgresMigrations:
             "secrets",
             "notification_channels",
             "notification_events",
+            "schedules",
+            "schedule_fires",
             "projects",
             "project_links",
             "entities",
@@ -920,6 +925,125 @@ class TestPostgresMigrations:
         assert fake_app_conn.committed is True
         migration_runner.assert_called_once()
         prune_retention.assert_called_once_with(fake_app_conn)
+
+
+class TestSchedulerFoundation:
+    def _scheduler_db(self, monkeypatch, tmp_path):
+        db_path = os.path.join(tmp_path, "scheduler.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
+        monkeypatch.setattr(database, "CFG", {
+            "permalink_retention_days": 0,
+            "scheduler": {
+                "default_timezone": "UTC",
+                "max_catchup_window_seconds": 3600,
+                "tick_seconds": 5,
+            },
+        })
+        database.db_init()
+        return database.db_connect()
+
+    def test_scheduler_cron_presets_and_strict_cron_validation(self):
+        from services.scheduler import cron
+
+        assert cron.normalize_cron(cadence_preset="hourly") == ("0 * * * *", "hourly")
+        assert cron.normalize_cron(cadence_preset="daily") == ("0 0 * * *", "daily")
+        assert cron.normalize_cron(cadence_preset="weekly") == ("0 0 * * 0", "weekly")
+
+        next_hour = cron.next_fire("0 * * * *", datetime(2026, 5, 20, 12, 15, tzinfo=timezone.utc), "UTC")
+        assert next_hour == datetime(2026, 5, 20, 13, 0, tzinfo=timezone.utc)
+
+        with pytest.raises(cron.ScheduleCronError):
+            cron.normalize_cron("@hourly")
+        with pytest.raises(cron.ScheduleCronError):
+            cron.normalize_cron("* * * * * *")
+        with pytest.raises(cron.ScheduleCronError):
+            cron.validate_timezone("Not/A_Timezone")
+
+    def test_scheduler_service_requires_tokens_and_hides_watcher_owned_rows(self, monkeypatch, tmp_path):
+        from services.scheduler import service
+
+        with self._scheduler_db(monkeypatch, tmp_path) as conn:
+            with pytest.raises(ValueError):
+                service.create_schedule(
+                    "anonymous-session",
+                    command_text="ping -c 1 darklab.sh",
+                    cadence_preset="hourly",
+                    conn=conn,
+                )
+
+            user_schedule = service.create_schedule(
+                "tok_scheduler",
+                command_text="ping -c 1 darklab.sh",
+                cadence_preset="hourly",
+                label="Hourly ping",
+                conn=conn,
+            )
+            watcher_schedule = service.create_schedule(
+                "tok_scheduler",
+                command_text="curl https://darklab.sh",
+                cadence_preset="daily",
+                owner_kind="watcher",
+                owner_id="wtr_123",
+                conn=conn,
+            )
+            conn.commit()
+
+            visible = service.list_for_session("tok_scheduler", conn=conn)
+            all_rows = service.list_for_session("tok_scheduler", include_watchers=True, conn=conn)
+
+        assert [schedule.id for schedule in visible] == [user_schedule.id]
+        assert {schedule.id for schedule in all_rows} == {user_schedule.id, watcher_schedule.id}
+
+    def test_scheduler_recovery_coalesces_recent_missed_fire(self, monkeypatch, tmp_path):
+        from services.scheduler import recovery, service
+
+        now = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc)
+        missed_at = (now - timedelta(minutes=50)).isoformat()
+        with self._scheduler_db(monkeypatch, tmp_path) as conn:
+            schedule = service.create_schedule(
+                "tok_scheduler",
+                command_text="ping -c 1 darklab.sh",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            conn.execute("UPDATE schedules SET next_run_at = ? WHERE id = ?", (missed_at, schedule.id))
+            recovery_result = recovery.recover_missed_fires(conn, now=now)
+            fire_rows = conn.execute(
+                "SELECT schedule_id, status, reason FROM schedule_fires WHERE schedule_id = ?",
+                (schedule.id,),
+            ).fetchall()
+            refreshed = service.get_schedule(schedule.id, conn=conn)
+
+        assert recovery_result == {"fired": 1, "skipped": 0}
+        assert [(row["schedule_id"], row["status"]) for row in fire_rows] == [(schedule.id, "fired")]
+        assert fire_rows[0]["reason"] == "dispatch pending run integration"
+        assert refreshed is not None
+        assert refreshed.next_run_at > now.isoformat()
+
+    def test_scheduler_postgres_lock_exits_when_already_held(self, monkeypatch):
+        from services.scheduler import worker
+
+        class FakeConnection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def execute(self, sql, params=()):
+                self.sql = sql
+                self.params = params
+                return self
+
+            def fetchone(self):
+                return {"acquired": False}
+
+        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.POSTGRES)
+        monkeypatch.setattr(database, "db_connect", mock.Mock(return_value=FakeConnection()))
+
+        with worker.acquire_scheduler_lock() as acquired:
+            assert acquired is False
 
 
 class TestNotificationsPhase0:

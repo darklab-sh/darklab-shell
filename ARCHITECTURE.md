@@ -112,6 +112,7 @@ flowchart TB
   Artifacts["Artifacts"]
   Scanner["Scanner subprocesses"]
   Notifier["Notification worker"]
+  Scheduler["Scheduler worker"]
 
   Browser -->|HTTP bootstrap reads| Flask
   Browser -->|HTTP POST /runs + SSE stream| Flask
@@ -123,6 +124,7 @@ flowchart TB
   Flask <--> |filesystem artifact I/O| Artifacts
   Flask -->|spawn / signal process groups| Scanner
   Notifier <--> |claim/deliver notification events| Database
+  Scheduler <--> |claim/fire due schedules| Database
 ```
 
 This is the transport and boundary view. It focuses on stable communication paths rather than the internal modules that implement them.
@@ -132,6 +134,7 @@ This is the transport and boundary view. It focuses on stable communication path
 - The configured database and output files are the durable history/share boundary
 - command execution remains out-of-process, which keeps the Flask worker lifecycle separate from tool execution
 - outbound notification delivery runs in its own supervised process and claims queued delivery rows from the database, so Flask workers do not send external notifications inline
+- the scheduler runs in its own supervised process, uses an exclusive deployment-wide lock, and owns time-based schedule ticks outside the Flask worker lifecycle
 
 ---
 
@@ -791,6 +794,14 @@ Delivery is asynchronous. App event sources build stable payloads in `services.n
 `services.notifications.base.Channel` is the registerable delivery contract. Built-in channel implementations cover generic JSON webhooks, Slack, Discord, Telegram, Pushover, and SMTP email. Formatting helpers keep chat/push/email titles aligned, while generic webhooks receive the raw JSON payload. Webhook-style HTTP senders reject non-public destinations by default and allow trusted internal receivers only through `notifications.http_private_host_allowlist`. Each channel returns a `ChannelResult` so the dispatcher can decide whether a failure is retryable or terminal without coupling the queue to provider-specific exceptions.
 
 The notification worker is a dedicated Gunicorn-sibling process started and supervised by `entrypoint.sh` when `NOTIFICATION_WORKER_ENABLED` is not disabled. It claims due event rows from the database, applies global do-not-disturb and per-channel delivery-rate settings, sends through the registered channel class, and then marks each event `sent`, `retry_wait`, or `dead`. Local gates such as do-not-disturb and per-channel rate limits defer events without consuming provider retry attempts. Retryable provider failures use exponential backoff capped by `notifications.retry.max_attempts` and `notifications.retry.max_age_hours`; terminal failures and expired retry windows become dead-letter audit rows. The worker prunes sent delivery audit rows after `notifications.events.retention_days`; retry and dead-letter rows remain available for triage. Postgres deployments reserve separate advisory-lock namespaces for notification delivery and notification sweeps so future worker coordination cannot collide with migrations or the scheduler.
+
+### Scheduler Process
+
+Scheduled runs are stored in the shared `schedules` table. The same table also holds watcher-owned schedules through `owner_kind='watcher'`; normal schedule listings only expose `owner_kind='user'` rows so watcher cadence cannot be edited as an ordinary command schedule. Schedules require durable `tok_` session ownership because the worker has to keep firing after the browser closes and token revocation must remain enforceable.
+
+The scheduler worker is a dedicated Gunicorn-sibling process started and supervised by `entrypoint.sh` when `SCHEDULER_ENABLED` is not disabled. It is not hosted inside Flask workers. On startup it takes one deployment-wide lock: Postgres uses the reserved `darklab_shell_scheduler` advisory-lock namespace, and SQLite uses a filesystem lock at `scheduler.lock` in the app data directory unless `scheduler.lock_path` overrides it. If another scheduler owns the lock, the extra process exits cleanly and the supervisor can retry later.
+
+Cron support is intentionally strict: five-field POSIX cron only, with `hourly`, `daily`, and `weekly` cadence presets normalized to canonical cron strings before storage. Each schedule stores an IANA timezone, defaulting to `scheduler.default_timezone` (`UTC`). On startup, recovery coalesces recent missed fire windows into one catch-up fire within `scheduler.max_catchup_window_seconds`; older missed windows are skipped with an audit row in `schedule_fires`. The v1 overlap policy is always stored and enforced as `skip`, leaving the column in place for future policies without changing the current behavior.
 
 ---
 
@@ -1602,12 +1613,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,027
+- behavior tests: 3,031
 - docs/inventory meta-tests: 32
-- `pytest`: 1627 (1595 behavior + 32 meta)
+- `pytest`: 1631 (1599 behavior + 32 meta)
 - `vitest`: 1185
 - `playwright`: 252
-- total: 3,064
+- total: 3,068
 
 ### Testing Architecture
 

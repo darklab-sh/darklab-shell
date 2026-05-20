@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,027
+- behavior tests: 3,031
 - docs/inventory meta-tests: 32
-- `pytest`: 1627 (1595 behavior + 32 meta)
+- `pytest`: 1631 (1599 behavior + 32 meta)
 - `vitest`: 1185
 - `playwright`: 252
-- total: 3,064
+- total: 3,068
 
 This document is organized in two parts:
 
@@ -457,6 +457,10 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPostgresMigrations.test_postgres_search_migration_adds_trigram_indexes` | Verifies the Postgres run-search migration creates `pg_trgm` and trigram indexes for command and output search. |
 | `TestPostgresMigrations.test_migration_runner_serializes_with_advisory_lock_and_records_versions` | Verifies the Postgres migration runner takes a transaction-scoped advisory lock and records applied migration versions. |
 | `TestPostgresMigrations.test_database_init_runs_postgres_migrations_without_sqlite_bootstrap` | Verifies Postgres startup runs migrations without entering the SQLite bootstrap path. |
+| `TestSchedulerFoundation.test_scheduler_cron_presets_and_strict_cron_validation` | Verifies scheduler cadence presets normalize to canonical cron strings, strict POSIX cron validation rejects unsupported forms, and timezone names must be valid IANA zones. |
+| `TestSchedulerFoundation.test_scheduler_service_requires_tokens_and_hides_watcher_owned_rows` | Verifies schedule creation requires a durable session token and normal schedule listings hide watcher-owned schedule rows. |
+| `TestSchedulerFoundation.test_scheduler_recovery_coalesces_recent_missed_fire` | Verifies scheduler recovery coalesces a recent missed fire into one audit row and advances the next fire from the recovered fire time. |
+| `TestSchedulerFoundation.test_scheduler_postgres_lock_exits_when_already_held` | Verifies the Postgres scheduler lock path exits cleanly when another scheduler already holds the advisory lock. |
 | `TestNotificationsPhase0.test_dispatcher_sync_delivery_fans_out_once_per_channel` | Verifies the notification dispatcher can synchronously fan out a run-complete trigger to two subscribed channels exactly once each. |
 | `TestNotificationsPhase0.test_dispatcher_event_claims_are_single_use` | Verifies notification event claims are leased so two workers cannot claim the same due event at the same time. |
 | `TestNotificationsPhase0.test_dispatcher_dnd_defers_without_consuming_attempts` | Verifies notification do-not-disturb defers delivery without burning provider retry attempts. |

@@ -10,6 +10,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Scheduled run foundation** — the app now has the durable schema, cron helpers, service layer, and supervised worker shell needed for scheduled and watcher-owned runs.
+  - **Why:** recurring commands need a reliable process outside the browser and outside Gunicorn workers before routes, UI, and watcher orchestration can safely build on top.
+  - **What:** added SQLite/Postgres `schedules` and `schedule_fires` tables, strict five-field cron parsing through `croniter`, hourly/daily/weekly cadence normalization, IANA timezone validation, durable-token schedule ownership checks, normal-vs-watcher ownership separation, missed-fire recovery, deployment-wide scheduler locks, a supervised scheduler worker entrypoint, scheduler config defaults, and scheduler architecture/config documentation.
+  - **Tests:** added backend coverage for cadence presets, strict cron rejection, durable-token enforcement, watcher-owned row hiding, recent missed-fire catch-up, Postgres scheduler lock behavior, and SQLite/Postgres schema parity.
 - **Outbound notifications** — the app now has durable storage, browser channel management, a supervised worker, and webhook, chat, push, and email senders for webhook, Slack, Discord, Telegram, Pushover, and SMTP email notification channels.
   - **Why:** scheduled runs and watchers need a real delivery queue instead of building their own one-off notification paths later.
   - **What:**

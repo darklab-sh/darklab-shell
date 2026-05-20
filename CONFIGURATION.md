@@ -240,6 +240,13 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `notifications.retry.max_age_hours` | `24` | Server-side only. Maximum retry window before a notification event moves to dead-letter state |
 | `notifications.retry.base_delay_seconds` | `30` | Server-side only. Base delay for exponential notification retry backoff |
 | `notifications.events.retention_days` | `30` | Server-side only. Number of days to keep sent notification delivery audit rows; set to `0` to disable pruning |
+| `scheduler` | see nested defaults | Server-side only. Cadence and recovery settings for scheduled runs and watcher-owned schedules |
+| `scheduler.lock_path` | `APP_DATA_DIR/scheduler.lock` | SQLite scheduler worker lock path. Leave empty to use the app data directory default. Postgres deployments use an advisory lock instead |
+| `scheduler.tick_seconds` | `5` | How often the scheduler worker checks for due schedules when no immediate fire is found |
+| `scheduler.max_per_session` | `32` | Maximum normal schedules a durable session token can own |
+| `scheduler.missed_fire_policy` | `coalesce` | Missed-fire behavior. The worker coalesces recent missed windows into one catch-up fire |
+| `scheduler.max_catchup_window_seconds` | `3600` | Maximum age for a missed schedule to receive one catch-up fire on worker startup |
+| `scheduler.default_timezone` | `UTC` | Default IANA timezone used when a schedule does not set its own timezone |
 | `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` means disabled |
 | `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
 | `run_broker_enabled` | `true` | Enables the brokered run model for command start, output replay, and live reattachment |

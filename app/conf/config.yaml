@@ -242,6 +242,20 @@
 #   events:
 #     retention_days: 30
 
+# ── Scheduler ────────────────────────────────────────────────────────────────
+#
+# Server-side cadence settings for scheduled runs and watcher-owned schedules.
+# The scheduler worker is a separate process from Gunicorn and uses a database
+# or filesystem lock so only one worker fires due schedules.
+# Server default if unset:
+# scheduler:
+#   lock_path: ""  # Empty uses APP_DATA_DIR/scheduler.lock for SQLite.
+#   tick_seconds: 5
+#   max_per_session: 32
+#   missed_fire_policy: coalesce
+#   max_catchup_window_seconds: 3600
+#   default_timezone: UTC
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 # Log verbosity level . Options: ERROR, WARN, INFO, DEBUG

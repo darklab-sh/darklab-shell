@@ -263,7 +263,7 @@ def test_postgres_baseline_migration_runs_in_isolated_schema(postgres_schema):
     applied_again = run_migrations_with_advisory_lock(conn, MIGRATIONS)
     conn.commit()
 
-    assert applied == ["0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009"]
+    assert applied == ["0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009", "0010"]
     assert applied_again == []
     table_rows = conn.execute(
         """

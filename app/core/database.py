@@ -4,8 +4,8 @@ Database lives in the configured data directory. If unset, /data is used when
 writable and /tmp is the local-dev fallback.
 
 Tables: runs, run_output_artifacts, snapshots, session_tokens, session_preferences,
-starred_commands, session_variables, user_workflows, recent_values, Atlas entity
-tables, and project workspace relationship tables.
+starred_commands, session_variables, user_workflows, recent_values, scheduled runs,
+Atlas entity tables, and project workspace relationship tables.
 FTS: runs_fts (FTS5 virtual table over runs.command + runs.output_search_text).
 """
 
@@ -206,6 +206,7 @@ def _create_schema(conn):
     """)
     _create_secrets_schema(conn)
     _create_notification_schema(conn)
+    _create_schedule_schema(conn)
     _create_project_workspace_schema(conn)
 
 
@@ -269,6 +270,52 @@ def _create_notification_schema(conn):
                 )
             ),
             CHECK (status IN ('pending', 'retry_wait', 'sent', 'dead'))
+        )
+    """)
+
+
+def _create_schedule_schema(conn):
+    """Create scheduled run storage."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS schedules (
+            id                   TEXT PRIMARY KEY,
+            session_token        TEXT NOT NULL,
+            owner_kind           TEXT NOT NULL DEFAULT 'user',
+            owner_id             TEXT NOT NULL DEFAULT '',
+            kind                 TEXT NOT NULL DEFAULT 'command',
+            command_text         TEXT NOT NULL,
+            cron_expr            TEXT NOT NULL,
+            cadence_preset       TEXT,
+            timezone             TEXT NOT NULL DEFAULT 'UTC',
+            enabled              INTEGER NOT NULL DEFAULT 1,
+            next_run_at          TEXT NOT NULL DEFAULT '',
+            last_run_at          TEXT NOT NULL DEFAULT '',
+            last_run_id          TEXT NOT NULL DEFAULT '',
+            overlap_policy       TEXT NOT NULL DEFAULT 'skip',
+            consecutive_failures INTEGER NOT NULL DEFAULT 0,
+            label                TEXT NOT NULL DEFAULT '',
+            paused_reason        TEXT NOT NULL DEFAULT '',
+            last_error           TEXT NOT NULL DEFAULT '',
+            created              TEXT NOT NULL,
+            updated              TEXT NOT NULL,
+            CHECK (owner_kind IN ('user', 'watcher')),
+            CHECK (kind IN ('command')),
+            CHECK (cadence_preset IS NULL OR cadence_preset IN ('hourly', 'daily', 'weekly')),
+            CHECK (overlap_policy IN ('skip'))
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS schedule_fires (
+            id           TEXT PRIMARY KEY,
+            schedule_id  TEXT NOT NULL,
+            owner_kind   TEXT NOT NULL,
+            owner_id     TEXT NOT NULL DEFAULT '',
+            fired_at     TEXT NOT NULL,
+            run_id       TEXT NOT NULL DEFAULT '',
+            status       TEXT NOT NULL,
+            reason       TEXT NOT NULL DEFAULT '',
+            CHECK (owner_kind IN ('user', 'watcher')),
+            CHECK (status IN ('skipped_overlap', 'skipped_revoked', 'fired', 'fire_failed'))
         )
     """)
 
@@ -502,6 +549,22 @@ def _create_indexes(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_notification_events_run "
         "ON notification_events (run_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_schedules_due "
+        "ON schedules (enabled, next_run_at, owner_kind)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_schedules_session_updated "
+        "ON schedules (session_token, owner_kind, updated DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_schedules_owner "
+        "ON schedules (owner_kind, owner_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_schedule_fires_schedule_fired "
+        "ON schedule_fires (schedule_id, fired_at DESC)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_projects_session_status_updated "

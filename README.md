@@ -482,7 +482,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0006_postgres_atlas_suppression.py # Postgres Atlas suppression columns and indexes
 │   │   │   ├── v0007_postgres_atlas_metadata_search.py # Postgres Atlas label/note search indexes
 │   │   │   ├── v0008_postgres_session_token_last_seen.py # Postgres API token last-seen column
-│   │   │   └── v0009_notification_channels.py # Postgres outbound notification channel and event tables
+│   │   │   ├── v0009_notification_channels.py # Postgres outbound notification channel and event tables
+│   │   │   └── v0010_schedules.py # Postgres scheduled-run and watcher-owned schedule tables
 │   │   ├── output_signals.py   # Server-side output signal and entity classifier
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and in-process fallback
 │   │   └── redaction.py        # Snapshot-share redaction helpers and built-in rule application
@@ -619,6 +620,14 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── output_store.py # Preview/full-output capture and artifact persistence helpers
 │   │   │   ├── streaming.py    # Low-level subprocess stdout readiness, nonblocking read, and cleanup helpers
 │   │   │   └── workspace_artifacts.py # Run-scoped workspace artifact detection and size helpers
+│   │   ├── scheduler/
+│   │   │   ├── __init__.py     # Scheduled-run service package marker and config helper
+│   │   │   ├── cron.py         # Strict cron, cadence preset, timezone, and next-fire helpers
+│   │   │   ├── dispatch.py     # Schedule fire audit boundary for normal and watcher-owned schedules
+│   │   │   ├── models.py       # Schedule and schedule-fire dataclasses, constants, and allowed values
+│   │   │   ├── recovery.py     # Scheduler startup recovery for missed fire windows
+│   │   │   ├── service.py      # Backend-agnostic schedule CRUD, due-row, and fire-audit helpers
+│   │   │   └── worker.py       # Dedicated scheduler worker entrypoint and deployment-wide lock
 │   │   ├── secrets/
 │   │   │   ├── __init__.py     # Secrets service package marker
 │   │   │   ├── audit.py        # Structured audit events for secret metadata operations

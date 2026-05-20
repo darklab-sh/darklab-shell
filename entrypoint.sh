@@ -64,6 +64,17 @@ if [ "${NOTIFICATION_WORKER_ENABLED:-1}" = "1" ]; then
     " &
 fi
 
+if [ "${SCHEDULER_ENABLED:-1}" = "1" ]; then
+    gosu appuser sh -c "
+        while true; do
+            python -m services.scheduler.worker
+            status=\$?
+            echo \"scheduler worker exited with status \${status}; restarting in 5s\" >&2
+            sleep 5
+        done
+    " &
+fi
+
 exec gosu appuser gunicorn \
     --config /app/gunicorn_conf.py \
     --bind "0.0.0.0:${APP_PORT:-8888}" \

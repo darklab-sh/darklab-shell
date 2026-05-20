@@ -14,6 +14,7 @@ from . import (
     v0007_postgres_atlas_metadata_search,
     v0008_postgres_session_token_last_seen,
     v0009_notification_channels,
+    v0010_schedules,
 )
 from .runner import Migration
 
@@ -27,4 +28,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0007_postgres_atlas_metadata_search.MIGRATION,
     v0008_postgres_session_token_last_seen.MIGRATION,
     v0009_notification_channels.MIGRATION,
+    v0010_schedules.MIGRATION,
 )
