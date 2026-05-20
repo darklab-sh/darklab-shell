@@ -86,16 +86,29 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `GET` | `/api/v1/openapi.json` | Unauthenticated OpenAPI document. |
 | `GET` | `/api/v1/whoami` | Token smoke test with creation metadata and the current successful-auth timestamp, without echoing the token. |
 | `GET` | `/api/v1/history` | Current-token run history with `limit`, `offset`, `project_id`, `q`, `since`, `until`, `run_kind`, and `exit_code` filters. |
+| `GET` | `/api/v1/history/search` | Search saved run output and return line-context matches with `q`, `context`, `limit`, `offset`, and the same history filters. |
 | `GET` | `/api/v1/history/<run_id>` | One current-token run summary. |
-| `GET` | `/api/v1/history/<run_id>/output` | Text output by default, or JSON with `?format=json`. |
+| `GET` | `/api/v1/history/<run_id>/output` | Text output by default, or JSON with `?format=json`; supports `?range=N-M`. |
 | `GET` | `/api/v1/history/<run_id>/artifacts` | Workspace artifact metadata for one run. |
 | `GET` | `/api/v1/history/<run_id>/artifacts/<artifact_id>` | Download one artifact by stable artifact id. |
+| `GET` | `/api/v1/atlas` | Atlas summary counts with optional `run_id`, orphan, and suppression filters. |
+| `GET` | `/api/v1/atlas/runs` | Source runs that currently contribute Atlas entities or findings. |
+| `GET` | `/api/v1/atlas/entities` | Atlas entity page with `entity_type`, `run_id`, `project_id`, `q`, orphan, and suppression filters. |
+| `GET` | `/api/v1/atlas/entities/<entity_id>` | One Atlas entity with source runs, findings, intel summary, labels, notes, and project links. |
+| `GET` | `/api/v1/atlas/findings` | Atlas finding page with `review_state`, `run_id`, `project_id`, `q`, orphan, and suppression filters. |
+| `GET` | `/api/v1/atlas/findings/<finding_id>` | One Atlas finding with recent source occurrences. |
 | `GET` | `/api/v1/projects` | Read-only project list. |
 | `GET` | `/api/v1/projects/<project_id>` | Read-only project detail. |
 | `GET` | `/api/v1/projects/<project_id>/findings` | Read-only project finding page. |
+| `GET` | `/api/v1/projects/<project_id>/runs` | Read-only project run page. |
+| `GET` | `/api/v1/projects/<project_id>/entities` | Read-only project entity page with optional `entity_type`, `run_id`, and `target_id` filters. |
 | `GET` | `/api/v1/projects/<project_id>/packages` | Read-only evidence package page. |
 | `POST` | `/api/v1/runs` | Start a non-interactive command run. |
 | `GET` | `/api/v1/runs/<run_id>` | Active or completed run status. |
+| `GET` | `/api/v1/runs/<run_id>/output` | Stored run output, with the same `format` and `range` options as the history output route. |
+| `POST` | `/api/v1/runs/<run_id>/wait` | Block until the run finishes or `?timeout=` expires. |
+| `POST` | `/api/v1/runs/<run_id>/projects/<project_id>` | Link a completed external run to an active project. |
+| `DELETE` | `/api/v1/runs/<run_id>/projects/<project_id>` | Remove a completed external run link from an active project. |
 | `GET` | `/api/v1/runs/<run_id>/stream` | SSE stream by default, or NDJSON with `?format=ndjson`. |
 | `POST` | `/api/v1/runs/<run_id>/cancel` | Cancel an active current-token run, including browser-started runs. |
 
@@ -119,6 +132,7 @@ Start and follow from the CLI:
 ```bash
 darklab run "ping -c 4 darklab.sh"
 darklab run "ping -c 4 darklab.sh" --format ndjson
+darklab run "nmap -p 80 darklab.sh" --link-project "External Recon" --wait
 ```
 
 `POST /api/v1/runs` accepts:
@@ -140,6 +154,53 @@ Interactive PTY commands are intentionally outside v1 and return `409 interactiv
 Real command starts return `status: "running"`. Built-in and missing-runtime synthetic runs finish immediately, so their start response can return `succeeded`, `failed`, or `complete` instead.
 
 If the run broker is unavailable, the API returns `503 broker_unavailable` with `Retry-After: 5`.
+
+Completed external runs can be linked to or removed from active projects without changing the project itself:
+
+```bash
+curl -X POST -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  "$DARKLAB_API_URL/api/v1/runs/$RUN_ID/projects/$PROJECT_ID"
+curl -X DELETE -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  "$DARKLAB_API_URL/api/v1/runs/$RUN_ID/projects/$PROJECT_ID"
+```
+
+Archived projects reject these link changes with `409 archived_project`.
+
+For shell scripts that do not need live output, `POST /api/v1/runs/<run_id>/wait?timeout=60`
+returns the same `run` payload as `GET /runs/<run_id>` once the run is no longer active.
+If the timeout expires first, the route returns `408 wait_timeout`.
+
+Stored output can be sliced with 1-based inclusive ranges:
+
+```bash
+darklab output run_123 --range 100-140
+curl -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  "$DARKLAB_API_URL/api/v1/runs/run_123/output?range=100-140"
+```
+
+Saved output can also be searched across runs:
+
+```bash
+darklab grep "open port" --context 2
+curl -H "Authorization: Bearer $DARKLAB_TOKEN" \
+  "$DARKLAB_API_URL/api/v1/history/search?q=open%20port&context=2"
+```
+
+Search responses are paged by match row and include `run_id`, `line_number`, the matching `line`, and nearby `context_before` / `context_after` lines. Candidate runs use the same backend-aware history search clauses as the browser, including SQLite FTS, Postgres trigram search, and offloaded-output fallback.
+
+---
+
+## Atlas
+
+The Atlas API is read-only in v1 and follows the same filters as the browser overlay:
+
+```bash
+darklab atlas summary
+darklab atlas entities --entity-type domain --q darklab --suppression-filter hide
+darklab atlas findings --review-state important --run-id run_123
+```
+
+Entity and finding list routes use the same `limit`, `offset`, and filter contract as the modal. `orphan_filter` and `suppression_filter` accept `hide`, `all`, or `only`. Entity detail includes source runs, related findings, project links, labels, notes, and intel summaries. Finding detail includes the normalized finding row plus recent source occurrences.
 
 ---
 
@@ -170,16 +231,25 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | Command | Purpose |
 | --- | --- |
 | `darklab whoami` | Check token auth. |
-| `darklab run "<cmd>" [--project PROJECT_ID] [--follow\|--no-follow] [--format text\|json\|ndjson]` | Start a run. The default `--follow --format text` follows output as text, `--format ndjson` follows broker events, and `--no-follow --format json` prints the start payload. `--format json` is start-only, and `--format ndjson` is follow-only. Follow modes exit with code `2` if the stream closes before a terminal event. |
+| `darklab run "<cmd>" [--project PROJECT_ID\|--link-project NAME] [--wait] [--wait-timeout N] [--follow\|--no-follow] [--format text\|json\|ndjson]` | Start a run. The default `--follow --format text` follows output as text, `--format ndjson` follows broker events, `--no-follow --format json` prints the start payload, and `--wait` waits for the final run status without streaming. `--link-project` resolves a project name locally before starting. Follow modes exit with code `2` if the stream closes before a terminal event. |
 | `darklab tail <run_id> [--format text\|ndjson] [--after EVENT_ID]` | Follow an existing run stream. Exits with code `2` if the stream closes before a terminal event. |
 | `darklab cancel <run_id>` | Cancel an active run in the same token session. |
 | `darklab history [--project PROJECT_ID] [--since ISO] [--until ISO] [--limit N] [--offset N] [--format text\|json\|ndjson]` | Read paged history. CLI output includes each run's finished timestamp and prints the newest item last. |
+| `darklab grep <pattern> [--context N] [--project PROJECT_ID] [--since ISO] [--until ISO] [--limit N] [--offset N] [--format text\|json\|ndjson]` | Search saved run output across runs and print line-context matches. |
 | `darklab show <run_id> [--lines N] [--format text\|json]` | Show run metadata and optional tail lines. |
-| `darklab output <run_id> [--format text\|json]` | Print stored output. |
+| `darklab output <run_id> [--range N-M] [--format text\|json]` | Print stored output, optionally sliced to a 1-based line range. |
 | `darklab artifacts <run_id>` | List run artifacts. |
+| `darklab atlas summary [--run-id RUN_ID] [--orphan-filter hide\|all\|only] [--suppression-filter hide\|all\|only] [--format text\|json]` | Print Atlas summary counts. |
+| `darklab atlas runs [--q TEXT] [--run-id RUN_ID] [--limit N] [--format text\|json\|ndjson]` | List recent Atlas source runs. |
+| `darklab atlas entities [--entity-type TYPE] [--q TEXT] [--project PROJECT_ID] [--run-id RUN_ID] [--orphan-filter hide\|all\|only] [--suppression-filter hide\|all\|only] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas entities. |
+| `darklab atlas entity <entity_id> [--format text\|json]` | Show one Atlas entity. |
+| `darklab atlas findings [--review-state STATE] [--q TEXT] [--project PROJECT_ID] [--run-id RUN_ID] [--orphan-filter hide\|all\|only] [--suppression-filter hide\|all\|only] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas findings. |
+| `darklab atlas finding <finding_id> [--format text\|json]` | Show one Atlas finding. |
 | `darklab projects [--limit N] [--offset N] [--format text\|json\|ndjson]` | List projects. |
 | `darklab project <project_id> [--format text\|json]` | Show one project. |
 | `darklab project-findings <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List project findings. |
+| `darklab project-runs <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List runs linked to a project. |
+| `darklab project-entities <project_id> [--entity-type TYPE] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas entities linked to a project. |
 | `darklab project-packages <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List evidence packages. |
 | `darklab download <run_id> --artifact ARTIFACT_ID --out DIR` | Download one artifact. |
 

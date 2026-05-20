@@ -8,6 +8,7 @@ import os
 import signal
 import subprocess
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
@@ -26,12 +27,28 @@ from services.commands.registry import (
     runtime_missing_command_message,
     split_command_argv,
 )
+from services.atlas.lookup import (
+    atlas_summary,
+    entity_detail,
+    finding_detail,
+    list_entities as list_atlas_entities,
+    list_findings as list_atlas_findings,
+    list_source_runs as list_atlas_source_runs,
+)
 from services.history.search import run_search_clause
 from services.projects.artifacts import artifact_availability
+from services.projects.contracts import (
+    ProjectWorkspaceError,
+    ProjectWorkspaceNotFound,
+    ProjectWorkspaceQuotaExceeded,
+)
 from services.projects.findings import list_project_findings
+from services.projects.links import link_project_entity, unlink_project_entity
 from services.projects.queries import (
     get_project,
     list_evidence_packages,
+    list_project_entities,
+    list_project_runs,
     list_projects_page,
 )
 from services.projects.utils import normalize_page_limit, normalize_page_offset, page_payload
@@ -89,6 +106,14 @@ def _api_json_error(code: str, message: str, status: int):
     return jsonify(json_error(code, message)), status
 
 
+def _project_workspace_api_error(exc: ProjectWorkspaceError):
+    if isinstance(exc, ProjectWorkspaceNotFound):
+        return _api_json_error("not_found", str(exc), 404)
+    if isinstance(exc, ProjectWorkspaceQuotaExceeded):
+        return _api_json_error("quota_exceeded", str(exc), 409)
+    return _api_json_error("invalid_project_link", str(exc), 400)
+
+
 @api_v1_bp.errorhandler(ApiAuthError)
 def _handle_api_auth_error(exc: ApiAuthError):
     log.warning("API_AUTH_FAILED", extra={
@@ -106,6 +131,14 @@ def _require_session_id() -> str:
 def _parse_int(value: object, default: int, *, minimum: int = 0, maximum: int = 100000) -> int:
     try:
         parsed = int(str(value))
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(parsed, maximum))
+
+
+def _parse_float(value: object, default: float, *, minimum: float = 0.0, maximum: float = 3600.0) -> float:
+    try:
+        parsed = float(str(value))
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(parsed, maximum))
@@ -202,7 +235,22 @@ def _requested_project_id(data: dict[str, Any], session_id: str) -> str:
     return project_id
 
 
-def _history_where(session_id: str, filters: dict[str, str], *, offloaded_ids: list[str] | None = None):
+def _active_project_for_write(session_id: str, project_id: str) -> dict[str, Any] | None:
+    project = get_project(session_id, project_id)
+    if project is None:
+        return None
+    if str(project.get("status") or "") == "archived":
+        raise ApiAuthError("archived_project", "Archived projects cannot be modified through API v1.", status_code=409)
+    return project
+
+
+def _history_where(
+    session_id: str,
+    filters: dict[str, str],
+    *,
+    offloaded_ids: list[str] | None = None,
+    search_scope: str = "all",
+):
     where = ["r.session_id = ?"]
     params: list[Any] = [session_id]
     if filters["run_kind"]:
@@ -227,7 +275,7 @@ def _history_where(session_id: str, filters: dict[str, str], *, offloaded_ids: l
         where.append("r.started <= ?")
         params.append(filters["until"])
     if filters["q"]:
-        search = run_search_clause(DB_BACKEND, filters["q"], "all", alias="r", postgres_placeholder="?")
+        search = run_search_clause(DB_BACKEND, filters["q"], search_scope, alias="r", postgres_placeholder="?")
         if search.predicate_sql:
             if offloaded_ids:
                 placeholders = ",".join("?" for _ in offloaded_ids)
@@ -238,6 +286,76 @@ def _history_where(session_id: str, filters: dict[str, str], *, offloaded_ids: l
                 where.append(search.predicate_sql)
                 params.extend(search.params)
     return " WHERE " + " AND ".join(where), params
+
+
+def _history_search_candidate_runs(session_id: str, filters: dict[str, str]) -> list[dict[str, Any]]:
+    offloaded_ids: list[str] = []
+    if filters["q"]:
+        with db_connect() as conn:
+            offloaded_ids = _history_offloaded_search_run_ids(
+                conn,
+                session_id,
+                filters["q"],
+                "",
+                "",
+                "",
+                filters["project_id"],
+                run_kind=filters["run_kind"] or "all",
+            )
+    with db_connect() as conn:
+        where_sql, params = _history_where(
+            session_id,
+            filters,
+            offloaded_ids=offloaded_ids,
+            search_scope="all",
+        )
+        rows = conn.execute(
+            "SELECT r.*, ("  # nosec
+            "SELECT art.rel_path FROM run_output_artifacts art "
+            "WHERE art.run_id = r.id ORDER BY art.created DESC LIMIT 1"
+            ") AS rel_path FROM runs r"
+            + where_sql
+            + " ORDER BY r.started DESC, r.id DESC",
+            params,
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _entry_text(entry: object) -> str:
+    if isinstance(entry, dict):
+        return str(entry.get("text", ""))
+    return str(entry)
+
+
+def _run_output_search_matches(run: dict[str, Any], query: str, context: int) -> list[dict[str, Any]]:
+    needle = query.casefold()
+    lines = [_entry_text(entry) for entry in _run_output_entries(run)]
+    matches: list[dict[str, Any]] = []
+    for index, line in enumerate(lines):
+        if needle not in line.casefold():
+            continue
+        before_start = max(0, index - context)
+        after_end = min(len(lines), index + context + 1)
+        matches.append({
+            "run_id": str(run.get("id") or ""),
+            "command": str(run.get("command") or ""),
+            "started": run.get("started"),
+            "finished": run.get("finished"),
+            "line_number": index + 1,
+            "line": line,
+            "context_before": lines[before_start:index],
+            "context_after": lines[index + 1:after_end],
+        })
+    return matches
+
+
+def _history_output_search(session_id: str, query: str, context: int) -> list[dict[str, Any]]:
+    filters = _history_filters()
+    filters["q"] = query
+    matches: list[dict[str, Any]] = []
+    for run in _history_search_candidate_runs(session_id, filters):
+        matches.extend(_run_output_search_matches(run, query, context))
+    return matches
 
 
 def _history_rows(session_id: str, limit: int, offset: int, filters: dict[str, str]):
@@ -259,7 +377,7 @@ def _history_rows(session_id: str, limit: int, offset: int, filters: dict[str, s
         total_row = conn.execute("SELECT COUNT(*) AS count FROM runs r" + where_sql, params).fetchone()  # nosec B608
         total = int(total_row["count"] or 0) if total_row else 0
         rows = conn.execute(
-            "SELECT r.id, r.run_kind, r.command, r.started, r.finished, r.exit_code, "  # nosec B608
+            "SELECT r.id, r.run_kind, r.command, r.started, r.finished, r.exit_code, "  # nosec
             "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated "
             "FROM runs r"
             + where_sql
@@ -311,6 +429,30 @@ def _run_output_entries(run: dict[str, Any], *, full: bool = True) -> list[dict[
                 "error": str(exc),
             })
     return _preview_output_entries_from_run(run)
+
+
+def _parse_output_range(value: object) -> tuple[int, int] | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if "-" not in text:
+        raise ApiAuthError("invalid_range", "range must use N-M line numbers.", status_code=400)
+    start_text, end_text = text.split("-", 1)
+    try:
+        start = int(start_text)
+        end = int(end_text)
+    except (TypeError, ValueError) as exc:
+        raise ApiAuthError("invalid_range", "range must use N-M line numbers.", status_code=400) from exc
+    if start < 1 or end < start:
+        raise ApiAuthError("invalid_range", "range must use 1-based line numbers with M >= N.", status_code=400)
+    return start, end
+
+
+def _slice_output_lines(lines: list[str], line_range: tuple[int, int] | None) -> list[str]:
+    if line_range is None:
+        return lines
+    start, end = line_range
+    return lines[start - 1:end]
 
 
 def _artifact_for_run(session_id: str, run_id: str, artifact_id: str) -> dict[str, Any] | None:
@@ -425,6 +567,125 @@ def api_history():
     return jsonify(page_payload("runs", [run_summary(run) for run in runs], total, limit, offset))
 
 
+@api_v1_bp.route("/history/search")
+@require_api_auth
+def api_history_search():
+    query = _normalize_history_filter_text(request.args.get("q"))
+    if not query:
+        return _api_json_error("missing_query", "q is required.", 400)
+    session_id = _require_session_id()
+    limit = normalize_page_limit(request.args.get("limit"), 50, 100)
+    offset = normalize_page_offset(request.args.get("offset"))
+    context = _parse_int(request.args.get("context"), 2, minimum=0, maximum=10)
+    matches = _history_output_search(session_id, query, context)
+    page = matches[offset:offset + limit]
+    return jsonify(page_payload(
+        "matches",
+        page,
+        len(matches),
+        limit,
+        offset,
+        extra={"query": query, "context": context},
+    ))
+
+
+@api_v1_bp.route("/atlas")
+@require_api_auth
+def api_atlas_summary():
+    with db_connect() as conn:
+        return jsonify(atlas_summary(
+            conn,
+            _require_session_id(),
+            run_id=request.args.get("run_id") or "",
+            orphan_filter=request.args.get("orphan_filter") or "hide",
+            suppression_filter=request.args.get("suppression_filter") or "hide",
+        ))
+
+
+@api_v1_bp.route("/atlas/runs")
+@require_api_auth
+def api_atlas_runs():
+    limit = normalize_page_limit(request.args.get("limit"), 30, 50)
+    with db_connect() as conn:
+        return jsonify(list_atlas_source_runs(
+            conn,
+            _require_session_id(),
+            query=request.args.get("q") or "",
+            run_id=request.args.get("run_id") or "",
+            limit=limit,
+        ))
+
+
+@api_v1_bp.route("/atlas/entities")
+@require_api_auth
+def api_atlas_entities():
+    limit = normalize_page_limit(request.args.get("limit"), 50, 200)
+    offset = normalize_page_offset(request.args.get("offset"))
+    entity_type = request.args.get("entity_type") or request.args.get("type") or ""
+    with db_connect() as conn:
+        return jsonify(list_atlas_entities(
+            conn,
+            _require_session_id(),
+            entity_type=entity_type,
+            query=request.args.get("q") or "",
+            project_id=request.args.get("project_id") or "",
+            run_id=request.args.get("run_id") or "",
+            orphan_filter=request.args.get("orphan_filter") or "hide",
+            suppression_filter=request.args.get("suppression_filter") or "hide",
+            limit=limit,
+            offset=offset,
+        ))
+
+
+@api_v1_bp.route("/atlas/entities/<entity_id>")
+@require_api_auth
+def api_atlas_entity(entity_id):
+    runs_offset = normalize_page_offset(request.args.get("runs_offset"))
+    findings_offset = normalize_page_offset(request.args.get("findings_offset"))
+    with db_connect() as conn:
+        detail = entity_detail(
+            conn,
+            _require_session_id(),
+            entity_id,
+            runs_offset=runs_offset,
+            findings_offset=findings_offset,
+        )
+    if detail is None:
+        return _api_json_error("not_found", "Atlas entity not found.", 404)
+    return jsonify(detail)
+
+
+@api_v1_bp.route("/atlas/findings")
+@require_api_auth
+def api_atlas_findings():
+    limit = normalize_page_limit(request.args.get("limit"), 50, 200)
+    offset = normalize_page_offset(request.args.get("offset"))
+    review_states = request.args.getlist("review_state") or request.args.getlist("status")
+    with db_connect() as conn:
+        return jsonify(list_atlas_findings(
+            conn,
+            _require_session_id(),
+            query=request.args.get("q") or "",
+            project_id=request.args.get("project_id") or "",
+            run_id=request.args.get("run_id") or "",
+            review_states=review_states,
+            orphan_filter=request.args.get("orphan_filter") or "hide",
+            suppression_filter=request.args.get("suppression_filter") or "hide",
+            limit=limit,
+            offset=offset,
+        ))
+
+
+@api_v1_bp.route("/atlas/findings/<finding_id>")
+@require_api_auth
+def api_atlas_finding(finding_id):
+    with db_connect() as conn:
+        detail = finding_detail(conn, _require_session_id(), finding_id)
+    if detail is None:
+        return _api_json_error("not_found", "Atlas finding not found.", 404)
+    return jsonify(detail)
+
+
 @api_v1_bp.route("/history/<run_id>")
 @require_api_auth
 def api_history_run(run_id):
@@ -437,21 +698,31 @@ def api_history_run(run_id):
 
 
 @api_v1_bp.route("/history/<run_id>/output")
+@api_v1_bp.route("/runs/<run_id>/output")
 @require_api_auth
 def api_history_run_output(run_id):
     run = _load_run_detail(_require_session_id(), run_id)
     if run is None:
         return _api_json_error("not_found", "Run not found.", 404)
     entries = _run_output_entries(run)
-    lines = [str(entry.get("text", "")) if isinstance(entry, dict) else str(entry) for entry in entries]
+    try:
+        line_range = _parse_output_range(request.args.get("range"))
+    except ApiAuthError as exc:
+        return _api_json_error(exc.code, exc.message, exc.status_code)
+    all_lines = [str(entry.get("text", "")) if isinstance(entry, dict) else str(entry) for entry in entries]
+    lines = _slice_output_lines(all_lines, line_range)
     if str(request.args.get("format") or "text").lower() == "json":
-        return jsonify({
+        payload = {
             "run_id": run_id,
             "preview": not bool(run.get("full_output_available") and run.get("rel_path")),
             "full_output_available": bool(run.get("full_output_available")),
             "truncated": bool(run.get("preview_truncated") or run.get("full_output_truncated")),
+            "line_count": len(all_lines),
             "lines": lines,
-        })
+        }
+        if line_range is not None:
+            payload["range"] = {"start": line_range[0], "end": line_range[1], "returned": len(lines)}
+        return jsonify(payload)
     return Response("\n".join(lines), mimetype="text/plain; charset=utf-8")
 
 
@@ -539,6 +810,39 @@ def api_project_findings(project_id):
     if findings is None:
         return _api_json_error("not_found", "Project not found.", 404)
     return jsonify(findings)
+
+
+@api_v1_bp.route("/projects/<project_id>/runs")
+@require_api_auth
+def api_project_runs(project_id):
+    runs = list_project_runs(
+        _require_session_id(),
+        project_id,
+        limit=normalize_page_limit(request.args.get("limit"), 50, 100),
+        offset=normalize_page_offset(request.args.get("offset")),
+    )
+    if runs is None:
+        return _api_json_error("not_found", "Project not found.", 404)
+    return jsonify(runs)
+
+
+@api_v1_bp.route("/projects/<project_id>/entities")
+@require_api_auth
+def api_project_entities(project_id):
+    entities = list_project_entities(
+        _require_session_id(),
+        project_id,
+        {
+            "run_id": request.args.getlist("run_id"),
+            "target_id": request.args.getlist("target_id"),
+        },
+        entity_type=str(request.args.get("entity_type") or ""),
+        limit=normalize_page_limit(request.args.get("limit"), 50, 100),
+        offset=normalize_page_offset(request.args.get("offset")),
+    )
+    if entities is None:
+        return _api_json_error("not_found", "Project not found.", 404)
+    return jsonify(entities)
 
 
 @api_v1_bp.route("/projects/<project_id>/packages")
@@ -746,6 +1050,82 @@ def api_run_status(run_id):
     if run is None:
         return _api_json_error("not_found", "Run not found.", 404)
     return jsonify({"run": run})
+
+
+@api_v1_bp.route("/runs/<run_id>/wait", methods=["POST"])
+@require_api_auth
+def api_run_wait(run_id):
+    session_id = _require_session_id()
+    timeout = _parse_float(request.args.get("timeout"), 30.0, minimum=0.0, maximum=3600.0)
+    deadline = time.monotonic() + timeout
+    poll_interval = 0.1
+    while True:
+        run = _run_status_from_active_or_row(run_id, session_id)
+        if run is None:
+            return _api_json_error("not_found", "Run not found.", 404)
+        if str(run.get("status") or "") != "running":
+            return jsonify({"run": run})
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return _api_json_error("wait_timeout", "Run is still running.", 408)
+        time.sleep(min(poll_interval, remaining))
+
+
+@api_v1_bp.route("/runs/<run_id>/projects/<project_id>", methods=["POST"])
+@require_api_auth
+def api_run_project_link(run_id, project_id):
+    session_id = _require_session_id()
+    try:
+        if _active_project_for_write(session_id, project_id) is None:
+            return _api_json_error("not_found", "Project not found.", 404)
+        link = link_project_entity(
+            session_id,
+            project_id,
+            {"entity_type": "run", "entity_id": run_id, "source": "manual"},
+        )
+    except ApiAuthError as exc:
+        return _api_json_error(exc.code, exc.message, exc.status_code)
+    except ProjectWorkspaceError as exc:
+        return _project_workspace_api_error(exc)
+    if link is None:
+        return _api_json_error("not_found", "Project not found.", 404)
+    log.info("API_PROJECT_RUN_LINKED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "run_id": run_id,
+        "project_id": project_id,
+        "link_source": link.get("source") or "",
+    })
+    return jsonify({"ok": True, "link": link}), 201
+
+
+@api_v1_bp.route("/runs/<run_id>/projects/<project_id>", methods=["DELETE"])
+@require_api_auth
+def api_run_project_unlink(run_id, project_id):
+    session_id = _require_session_id()
+    try:
+        if _active_project_for_write(session_id, project_id) is None:
+            return _api_json_error("not_found", "Project not found.", 404)
+        deleted = unlink_project_entity(
+            session_id,
+            project_id,
+            {"entity_type": "run", "entity_id": run_id},
+        )
+    except ApiAuthError as exc:
+        return _api_json_error(exc.code, exc.message, exc.status_code)
+    except ProjectWorkspaceError as exc:
+        return _project_workspace_api_error(exc)
+    if deleted is None:
+        return _api_json_error("not_found", "Project not found.", 404)
+    if not deleted:
+        return _api_json_error("not_found", "Project link not found.", 404)
+    log.info("API_PROJECT_RUN_UNLINKED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "run_id": run_id,
+        "project_id": project_id,
+    })
+    return jsonify({"ok": True})
 
 
 @api_v1_bp.route("/runs/<run_id>/stream")

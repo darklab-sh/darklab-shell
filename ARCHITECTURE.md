@@ -211,16 +211,29 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/api/v1/openapi.json` | Returns the checked-in `/api/v1` OpenAPI contract from the Python spec source. |
 | `GET` | `/api/v1/whoami` | Authenticates a `tok_` session token and returns session metadata without echoing the token. |
 | `GET` | `/api/v1/history` | Returns current-token run history with the browser-aligned offset page envelope, search filters, and batched History/Run Details counts. |
+| `GET` | `/api/v1/history/search` | Returns paged line-context matches from saved run output using the same backend-aware history search path as the browser. |
 | `GET` | `/api/v1/history/<run_id>` | Returns one current-token run summary with artifact, finding, Atlas, label, and note counts. |
-| `GET` | `/api/v1/history/<run_id>/output` | Returns stored run output as plain text or JSON using the same preview/full-output behavior as Run Details. |
+| `GET` | `/api/v1/history/<run_id>/output` | Returns stored run output as plain text or JSON using the same preview/full-output behavior as Run Details, with optional line ranges. |
 | `GET` | `/api/v1/history/<run_id>/artifacts` | Lists workspace artifacts for one current-token run by stable artifact id. |
 | `GET` | `/api/v1/history/<run_id>/artifacts/<artifact_id>` | Streams one current-token run artifact while rejecting cross-run artifact ids. |
+| `GET` | `/api/v1/atlas` | Returns Atlas entity and finding summary counts with the browser overlay's orphan, suppression, and run filters. |
+| `GET` | `/api/v1/atlas/runs` | Returns recent Atlas source runs with entity and finding counts. |
+| `GET` | `/api/v1/atlas/entities` | Returns a paged Atlas entity list with query, type, project, run, orphan, and suppression filters. |
+| `GET` | `/api/v1/atlas/entities/<entity_id>` | Returns one Atlas entity with source runs, related findings, intel summary, labels, notes, and project links. |
+| `GET` | `/api/v1/atlas/findings` | Returns a paged Atlas finding list with query, project, run, review-state, orphan, and suppression filters. |
+| `GET` | `/api/v1/atlas/findings/<finding_id>` | Returns one Atlas finding with recent source occurrences. |
 | `GET` | `/api/v1/projects` | Returns a read-only paged project list for the token session. |
 | `GET` | `/api/v1/projects/<project_id>` | Returns one read-only project record for the token session. |
 | `GET` | `/api/v1/projects/<project_id>/findings` | Returns a read-only paged project findings response using project query services. |
+| `GET` | `/api/v1/projects/<project_id>/runs` | Returns a read-only paged project run response using project query services. |
+| `GET` | `/api/v1/projects/<project_id>/entities` | Returns a read-only paged project Atlas entity response using project query services. |
 | `GET` | `/api/v1/projects/<project_id>/packages` | Returns a read-only paged evidence package list for one project. |
 | `POST` | `/api/v1/runs` | Starts a non-interactive command through the same validation, rewrite, broker, and persistence path as browser runs. |
 | `GET` | `/api/v1/runs/<run_id>` | Returns active broker status or completed history status for a current-token run. |
+| `GET` | `/api/v1/runs/<run_id>/output` | Returns stored run output as plain text or JSON, with optional line ranges. |
+| `POST` | `/api/v1/runs/<run_id>/wait` | Waits for an active run to become terminal or returns a timeout error. |
+| `POST` | `/api/v1/runs/<run_id>/projects/<project_id>` | Links a completed external run to an active project in the token session. |
+| `DELETE` | `/api/v1/runs/<run_id>/projects/<project_id>` | Removes a completed external run link from an active project in the token session. |
 | `GET` | `/api/v1/runs/<run_id>/stream` | Streams a current-token run as SSE by default or NDJSON when `format=ndjson`. |
 | `POST` | `/api/v1/runs/<run_id>/cancel` | Cancels any active run in the token session, including browser-started runs. |
 
@@ -760,7 +773,7 @@ This boundary view answers a different question than the dependency graph above:
 
 The API accepts `Authorization: Bearer tok_...` as the canonical identity and keeps `X-Session-ID: tok_...` as a compatibility fallback. Anonymous browser UUID sessions are rejected so headless callers must use a revocable session token. API errors use the stable `{"error":{"code":"...","message":"..."}}` envelope, and app-level 429/500 handlers preserve that envelope for `/api/v1/*`.
 
-Run start requests do not get a separate execution path. `POST /api/v1/runs` uses the browser validation/rewrite/runtime checks before starting brokered execution, honors active-project capture when no explicit project is supplied, and can link completed external runs to an explicit project id. Streaming is an adapter over broker events: SSE remains the native transport, while `format=ndjson` converts broker event payloads into newline-delimited JSON for CLI pipelines.
+Run start requests do not get a separate execution path. `POST /api/v1/runs` uses the browser validation/rewrite/runtime checks before starting brokered execution, honors active-project capture when no explicit project is supplied, and can link completed external runs to an explicit project id. Scripts that do not need live output can use `POST /api/v1/runs/<id>/wait` to block until the run is terminal, and output readers can request 1-based line ranges without downloading the whole stored transcript. Cross-run output search uses the browser's backend-aware history search clauses to select candidate runs, then returns bounded line-context matches for CLI and script callers. Atlas API readers reuse the same summary, source-run, entity, finding, and detail helpers as the browser overlay so filters stay aligned across the modal, project surfaces, Run Details, and CLI. The only project write surface in API v1 links or unlinks completed external runs from active projects; archived projects reject those mutations before the project-link service is called. Streaming is an adapter over broker events: SSE remains the native transport, while `format=ndjson` converts broker event payloads into newline-delimited JSON for CLI pipelines.
 
 The OpenAPI dictionary in `app/services/api_v1/openapi.py` is the source of truth. `scripts/generate_api_openapi.py` writes the checked-in `docs/api-v1-openapi.json`, and pytest compares the live `/api/v1/openapi.json` response against that snapshot so route drift is visible during normal backend checks.
 

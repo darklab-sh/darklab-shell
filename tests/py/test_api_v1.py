@@ -29,21 +29,23 @@ def _headers(token):
     return {"Authorization": f"Bearer {token}"}
 
 
-def _seed_run(session_id, *, command="echo api", output="ok"):
+def _seed_run(session_id, *, command="echo api", output: str | list[str] = "ok"):
     run_id = "api_run_" + session_id[-8:]
+    output_lines = output if isinstance(output, list) else [str(output)]
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO runs "
             "(id, session_id, run_kind, command, started, finished, exit_code, output, output_preview, "
             "preview_truncated, output_line_count, full_output_available, full_output_truncated, output_search_text) "
             "VALUES (?, ?, 'external', ?, '2026-05-19T00:00:00+00:00', "
-            "'2026-05-19T00:00:01+00:00', 0, '', ?, 0, 1, 0, 0, ?)",
+            "'2026-05-19T00:00:01+00:00', 0, '', ?, 0, ?, 0, 0, ?)",
             (
                 run_id,
                 session_id,
                 command,
-                json.dumps([{"text": output, "cls": "", "tsC": "", "tsE": ""}]),
-                output,
+                json.dumps([{"text": line, "cls": "", "tsC": "", "tsE": ""} for line in output_lines]),
+                len(output_lines),
+                "\n".join(output_lines),
             ),
         )
         conn.commit()
@@ -128,10 +130,12 @@ def test_api_v1_history_is_token_scoped_and_uses_page_envelope():
     client = get_client()
     token = _token(client)
     other_token = _token(client)
-    run_id = _seed_run(token, command="echo api scoped", output="api scoped output")
-    _seed_run(other_token, command="echo other", output="other output")
+    run_id = _seed_run(token, command="echo api scoped", output=["before", "api scoped output", "after"])
+    _seed_run(other_token, command="echo other", output="api scoped output")
 
     resp = client.get("/api/v1/history?limit=10&offset=0&q=scoped", headers=_headers(token))
+    search = client.get("/api/v1/history/search?q=scoped&context=1&limit=10", headers=_headers(token))
+    missing_query = client.get("/api/v1/history/search", headers=_headers(token))
     data = json.loads(resp.data)
 
     assert resp.status_code == 200
@@ -140,6 +144,22 @@ def test_api_v1_history_is_token_scoped_and_uses_page_envelope():
     assert data["total"] >= 1
     assert any(item["id"] == run_id for item in data["runs"])
     assert all(item["command"] != "echo other" for item in data["runs"])
+    assert search.status_code == 200
+    search_data = json.loads(search.data)
+    assert search_data["query"] == "scoped"
+    assert search_data["context"] == 1
+    assert search_data["matches"] == [{
+        "run_id": run_id,
+        "command": "echo api scoped",
+        "started": "2026-05-19T00:00:00+00:00",
+        "finished": "2026-05-19T00:00:01+00:00",
+        "line_number": 2,
+        "line": "api scoped output",
+        "context_before": ["before"],
+        "context_after": ["after"],
+    }]
+    assert missing_query.status_code == 400
+    assert json.loads(missing_query.data)["error"]["code"] == "missing_query"
 
     valid_since = client.get("/api/v1/history?since=2026-05-19T00:00:00Z", headers=_headers(token))
     invalid_since = client.get("/api/v1/history?since=last-week", headers=_headers(token))
@@ -156,7 +176,7 @@ def test_api_v1_history_detail_output_and_cross_session_404():
     client = get_client()
     token = _token(client)
     other_token = _token(client)
-    run_id = _seed_run(token, output="line one")
+    run_id = _seed_run(token, output=["line one", "line two", "line three"])
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created) "
@@ -173,6 +193,8 @@ def test_api_v1_history_detail_output_and_cross_session_404():
     detail = client.get(f"/api/v1/history/{run_id}", headers=_headers(token))
     output = client.get(f"/api/v1/history/{run_id}/output", headers=_headers(token))
     output_json = client.get(f"/api/v1/history/{run_id}/output?format=json", headers=_headers(token))
+    output_range = client.get(f"/api/v1/runs/{run_id}/output?range=2-3&format=json", headers=_headers(token))
+    invalid_range = client.get(f"/api/v1/runs/{run_id}/output?range=3-2", headers=_headers(token))
     cross_session = client.get(f"/api/v1/history/{run_id}", headers=_headers(other_token))
 
     assert detail.status_code == 200
@@ -182,7 +204,11 @@ def test_api_v1_history_detail_output_and_cross_session_404():
     assert detail_run["note_count"] == 1
     assert output.status_code == 200
     assert "line one" in output.get_data(as_text=True)
-    assert json.loads(output_json.data)["lines"] == ["line one"]
+    assert json.loads(output_json.data)["lines"] == ["line one", "line two", "line three"]
+    assert json.loads(output_range.data)["lines"] == ["line two", "line three"]
+    assert json.loads(output_range.data)["range"] == {"start": 2, "end": 3, "returned": 2}
+    assert invalid_range.status_code == 400
+    assert json.loads(invalid_range.data)["error"]["code"] == "invalid_range"
     assert cross_session.status_code == 404
 
 
@@ -260,6 +286,9 @@ def test_api_v1_project_readers_are_token_scoped():
     token = _token(client)
     other_token = _token(client)
     project = _create_project(client, token, name="Scoped API Project")
+    run_id = _seed_run(token, command="echo project api", output="project api")
+    entity_id = "ent_" + uuid.uuid4().hex[:16]
+    finding_id = "fnd_" + uuid.uuid4().hex[:16]
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT INTO evidence_packages "
@@ -269,24 +298,93 @@ def test_api_v1_project_readers_are_token_scoped():
             "'2026-05-19T00:00:00+00:00', '2026-05-19T00:00:00+00:00')",
             ("pkg_" + uuid.uuid4().hex[:16], token, project["id"]),
         )
+        conn.execute(
+            "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+            "VALUES (?, ?, 'run', ?, 'manual', '2026-05-19T00:00:00+00:00')",
+            ("plr_" + uuid.uuid4().hex[:16], project["id"], run_id),
+        )
+        conn.execute(
+            "INSERT INTO entities "
+            "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, occurrence_count, created) "
+            "VALUES (?, ?, 'domain', 'api.darklab.sh', ?, "
+            "'2026-05-19T00:00:00+00:00', '2026-05-19T00:00:00+00:00', 2, '2026-05-19T00:00:00+00:00')",
+            (entity_id, token, "sig_" + uuid.uuid4().hex),
+        )
+        conn.execute(
+            "INSERT INTO entity_run_links (entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+            "VALUES (?, ?, '2026-05-19T00:00:00+00:00', '2026-05-19T00:00:00+00:00', 2)",
+            (entity_id, run_id),
+        )
+        conn.execute(
+            "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+            "VALUES (?, ?, 'atlas_entity', ?, 'manual', '2026-05-19T00:00:00+00:00')",
+            ("ple_" + uuid.uuid4().hex[:16], project["id"], entity_id),
+        )
+        conn.execute(
+            "INSERT INTO findings "
+            "(id, session_id, run_id, entity_id, subject_key, signature_hash, severity, kind, tool_root, "
+            "first_run_id, last_run_id, first_seen_at, last_seen_at, occurrence_count, status, title, raw_line, created) "
+            "VALUES (?, ?, ?, ?, 'api.darklab.sh', ?, 'medium', 'finding', 'nmap', ?, ?, "
+            "'2026-05-19T00:00:00+00:00', '2026-05-19T00:00:01+00:00', 1, 'new', "
+            "'API finding', 'open port', '2026-05-19T00:00:01+00:00')",
+            (finding_id, token, run_id, entity_id, "sig_" + uuid.uuid4().hex, run_id, run_id),
+        )
+        conn.execute(
+            "INSERT INTO findings_occurrences (finding_id, run_id, line_number, snippet, seen_at) "
+            "VALUES (?, ?, 2, 'open port', '2026-05-19T00:00:01+00:00')",
+            (finding_id, run_id),
+        )
         conn.commit()
 
     owner_project = client.get(f"/api/v1/projects/{project['id']}", headers=_headers(token))
     owner_findings = client.get(f"/api/v1/projects/{project['id']}/findings", headers=_headers(token))
+    owner_runs = client.get(f"/api/v1/projects/{project['id']}/runs", headers=_headers(token))
+    owner_entities = client.get(f"/api/v1/projects/{project['id']}/entities?entity_type=domain", headers=_headers(token))
     owner_packages = client.get(f"/api/v1/projects/{project['id']}/packages", headers=_headers(token))
+    atlas_summary_resp = client.get("/api/v1/atlas", headers=_headers(token))
+    atlas_runs = client.get("/api/v1/atlas/runs", headers=_headers(token))
+    atlas_entities = client.get("/api/v1/atlas/entities?entity_type=domain&q=api", headers=_headers(token))
+    atlas_entity = client.get(f"/api/v1/atlas/entities/{entity_id}", headers=_headers(token))
+    atlas_findings = client.get("/api/v1/atlas/findings?q=finding&review_state=new", headers=_headers(token))
+    atlas_finding = client.get(f"/api/v1/atlas/findings/{finding_id}", headers=_headers(token))
     cross_project = client.get(f"/api/v1/projects/{project['id']}", headers=_headers(other_token))
     cross_findings = client.get(f"/api/v1/projects/{project['id']}/findings", headers=_headers(other_token))
+    cross_runs = client.get(f"/api/v1/projects/{project['id']}/runs", headers=_headers(other_token))
+    cross_entities = client.get(f"/api/v1/projects/{project['id']}/entities", headers=_headers(other_token))
     cross_packages = client.get(f"/api/v1/projects/{project['id']}/packages", headers=_headers(other_token))
+    cross_atlas_entity = client.get(f"/api/v1/atlas/entities/{entity_id}", headers=_headers(other_token))
+    cross_atlas_finding = client.get(f"/api/v1/atlas/findings/{finding_id}", headers=_headers(other_token))
 
     assert owner_project.status_code == 200
     assert json.loads(owner_project.data)["project"]["id"] == project["id"]
     assert owner_findings.status_code == 200
-    assert json.loads(owner_findings.data)["findings"] == []
+    assert json.loads(owner_findings.data)["findings"][0]["id"] == finding_id
+    assert owner_runs.status_code == 200
+    assert json.loads(owner_runs.data)["runs"][0]["id"] == run_id
+    assert owner_entities.status_code == 200
+    assert json.loads(owner_entities.data)["entities"][0]["id"] == entity_id
+    assert json.loads(owner_entities.data)["counts_by_type"] == {"domain": 1}
     assert owner_packages.status_code == 200
     assert json.loads(owner_packages.data)["total"] == 1
+    assert atlas_summary_resp.status_code == 200
+    assert json.loads(atlas_summary_resp.data)["counts"]["domain"] >= 1
+    assert atlas_runs.status_code == 200
+    assert json.loads(atlas_runs.data)["runs"][0]["id"] == run_id
+    assert atlas_entities.status_code == 200
+    assert json.loads(atlas_entities.data)["entities"][0]["id"] == entity_id
+    assert atlas_entity.status_code == 200
+    assert json.loads(atlas_entity.data)["entity"]["id"] == entity_id
+    assert atlas_findings.status_code == 200
+    assert json.loads(atlas_findings.data)["findings"][0]["id"] == finding_id
+    assert atlas_finding.status_code == 200
+    assert json.loads(atlas_finding.data)["occurrences"][0]["run_id"] == run_id
     assert cross_project.status_code == 404
     assert cross_findings.status_code == 404
+    assert cross_runs.status_code == 404
+    assert cross_entities.status_code == 404
     assert cross_packages.status_code == 404
+    assert cross_atlas_entity.status_code == 404
+    assert cross_atlas_finding.status_code == 404
 
 
 def test_api_v1_run_start_uses_broker_and_streams_ndjson(monkeypatch):
@@ -514,6 +612,16 @@ def test_api_v1_run_stream_and_cancel_are_token_scoped(monkeypatch):
     token = _token(client)
     other_token = _token(client)
     run_id = _seed_run(token, command="sleep 30", output="")
+    completed_run_id = "api_wait_done_" + uuid.uuid4().hex[:8]
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO runs "
+            "(id, session_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+            "VALUES (?, ?, 'external', 'echo done', '2026-05-19T00:00:00+00:00', "
+            "'2026-05-19T00:00:01+00:00', 7, '[]', 0)",
+            (completed_run_id, token),
+        )
+        conn.commit()
     killed = {}
 
     monkeypatch.setattr(
@@ -530,17 +638,26 @@ def test_api_v1_run_stream_and_cancel_are_token_scoped(monkeypatch):
     monkeypatch.setattr(api_blueprint.os, "killpg", lambda pid, sig: killed.update({"pid": pid, "sig": sig}))
 
     cross_stream = client.get(f"/api/v1/runs/{run_id}/stream", headers=_headers(other_token))
+    completed_wait = client.post(f"/api/v1/runs/{completed_run_id}/wait?timeout=0", headers=_headers(token))
+    running_wait = client.post(f"/api/v1/runs/{run_id}/wait?timeout=0", headers=_headers(token))
+    cross_wait = client.post(f"/api/v1/runs/{run_id}/wait?timeout=0", headers=_headers(other_token))
     owner_cancel = client.post(f"/api/v1/runs/{run_id}/cancel", headers=_headers(token))
     cross_cancel = client.post(f"/api/v1/runs/{run_id}/cancel", headers=_headers(other_token))
 
     assert cross_stream.status_code == 404
+    assert completed_wait.status_code == 200
+    assert json.loads(completed_wait.data)["run"]["exit_code"] == 7
+    assert running_wait.status_code == 408
+    assert json.loads(running_wait.data)["error"]["code"] == "wait_timeout"
+    assert cross_wait.status_code == 404
     assert owner_cancel.status_code == 200
     assert json.loads(owner_cancel.data) == {"killed": True, "id": run_id}
     assert killed["pid"] == 4321
     assert cross_cancel.status_code == 404
 
 
-def test_api_v1_explicit_project_link_uses_finalized_run_path():
+def test_api_v1_explicit_project_link_uses_finalized_run_path(monkeypatch):
+    import blueprints.api_v1 as api_blueprint
     from blueprints.run import _save_completed_run
     from services.runs.kinds import RUN_KIND_EXTERNAL
 
@@ -558,9 +675,17 @@ def test_api_v1_explicit_project_link_uses_finalized_run_path():
 
     client = get_client()
     token = _token(client)
+    other_token = _token(client)
+    audit_events = []
+    monkeypatch.setattr(
+        api_blueprint.log,
+        "info",
+        lambda event, *args, **kwargs: audit_events.append((event, kwargs.get("extra", {}))),
+    )
     project_resp = client.post("/projects", json={"name": "API Project"}, headers={"X-Session-ID": token})
     project = json.loads(project_resp.data)["project"]
     run_id = "api_project_link_run_" + uuid.uuid4().hex[:8]
+    route_run_id = _seed_run(token, command="echo route link", output="route link")
 
     link = _save_completed_run(
         run_id,
@@ -583,6 +708,40 @@ def test_api_v1_explicit_project_link_uses_finalized_run_path():
 
     assert link["project_id"] == project["id"]
     assert row[0] == "manual"
+
+    route_link = client.post(f"/api/v1/runs/{route_run_id}/projects/{project['id']}", headers=_headers(token))
+    cross_link = client.post(f"/api/v1/runs/{route_run_id}/projects/{project['id']}", headers=_headers(other_token))
+    route_unlink = client.delete(f"/api/v1/runs/{route_run_id}/projects/{project['id']}", headers=_headers(token))
+    route_unlink_again = client.delete(f"/api/v1/runs/{route_run_id}/projects/{project['id']}", headers=_headers(token))
+    client.put(f"/projects/{project['id']}", json={"status": "archived"}, headers={"X-Session-ID": token})
+    archived_link = client.post(f"/api/v1/runs/{route_run_id}/projects/{project['id']}", headers=_headers(token))
+
+    assert route_link.status_code == 201
+    assert json.loads(route_link.data)["link"]["entity_id"] == route_run_id
+    assert cross_link.status_code == 404
+    assert route_unlink.status_code == 200
+    assert route_unlink_again.status_code == 404
+    assert archived_link.status_code == 409
+    assert json.loads(archived_link.data)["error"]["code"] == "archived_project"
+    assert (
+        "API_PROJECT_RUN_LINKED",
+        {
+            "ip": "127.0.0.1",
+            "session": token[:8] + "********",
+            "run_id": route_run_id,
+            "project_id": project["id"],
+            "link_source": "manual",
+        },
+    ) in audit_events
+    assert (
+        "API_PROJECT_RUN_UNLINKED",
+        {
+            "ip": "127.0.0.1",
+            "session": token[:8] + "********",
+            "run_id": route_run_id,
+            "project_id": project["id"],
+        },
+    ) in audit_events
 
 
 def test_api_v1_openapi_route_matches_checked_in_contract():
@@ -609,14 +768,31 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     schemas = spec["components"]["schemas"]
     assert {
         "ApiError",
+        "AtlasEntity",
+        "AtlasEntityDetail",
+        "AtlasEntityPage",
+        "AtlasFinding",
+        "AtlasFindingDetail",
+        "AtlasFindingPage",
+        "AtlasRunList",
+        "AtlasSourceRun",
+        "AtlasSummary",
         "ArtifactSummary",
         "EvidencePackage",
         "Health",
+        "HistorySearchMatch",
+        "HistorySearchPage",
         "NdjsonStream",
         "Project",
         "ProjectCounts",
+        "ProjectEntity",
+        "ProjectEntityPage",
         "ProjectFinding",
         "ProjectFindingPage",
+        "ProjectLink",
+        "ProjectRunLinkResponse",
+        "ProjectRun",
+        "ProjectRunPage",
         "RunOutput",
         "RunPage",
         "RunStartRequest",
@@ -629,6 +805,10 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "$ref": "#/components/schemas/NdjsonStream"
     }
     assert schemas["ProjectFindingPage"]["properties"]["findings"]["items"] == {"$ref": "#/components/schemas/ProjectFinding"}
+    assert schemas["ProjectRunPage"]["properties"]["runs"]["items"] == {"$ref": "#/components/schemas/ProjectRun"}
+    assert schemas["ProjectEntityPage"]["properties"]["entities"]["items"] == {"$ref": "#/components/schemas/ProjectEntity"}
+    assert schemas["AtlasEntityPage"]["properties"]["entities"]["items"] == {"$ref": "#/components/schemas/AtlasEntity"}
+    assert schemas["AtlasFindingPage"]["properties"]["findings"]["items"] == {"$ref": "#/components/schemas/AtlasFinding"}
     assert schemas["PackagePage"]["properties"]["packages"]["items"] == {"$ref": "#/components/schemas/EvidencePackage"}
     assert {"id", "run_id", "workspace_path", "display_name", "file_status"}.issubset(
         set(schemas["ArtifactSummary"]["required"])
@@ -637,6 +817,18 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert {"q", "project_id", "run_kind", "limit", "offset"}.issubset(history_params)
     assert history_params["since"]["schema"]["format"] == "date-time"
     assert history_params["until"]["schema"]["format"] == "date-time"
+    history_search_params = {param["name"]: param for param in spec["paths"]["/history/search"]["get"]["parameters"]}
+    assert {"q", "context", "project_id", "since", "until", "limit", "offset"}.issubset(history_search_params)
+    assert history_search_params["q"]["required"] is True
+    assert schemas["HistorySearchPage"]["properties"]["matches"]["items"] == {"$ref": "#/components/schemas/HistorySearchMatch"}
+    atlas_entity_params = {param["name"] for param in spec["paths"]["/atlas/entities"]["get"]["parameters"]}
+    assert {"entity_type", "q", "project_id", "run_id", "orphan_filter", "suppression_filter", "limit", "offset"}.issubset(
+        atlas_entity_params
+    )
+    atlas_finding_params = {param["name"] for param in spec["paths"]["/atlas/findings"]["get"]["parameters"]}
+    assert {"q", "project_id", "run_id", "review_state", "orphan_filter", "suppression_filter", "limit", "offset"}.issubset(
+        atlas_finding_params
+    )
     project_finding_params = {param["name"] for param in spec["paths"]["/projects/{project_id}/findings"]["get"]["parameters"]}
     assert {
         "command_root",
@@ -649,6 +841,17 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "severity",
         "target_id",
     }.issubset(project_finding_params)
+    project_entity_params = {param["name"] for param in spec["paths"]["/projects/{project_id}/entities"]["get"]["parameters"]}
+    assert {"entity_type", "run_id", "target_id", "limit", "offset"}.issubset(project_entity_params)
+    run_output_params = {param["name"] for param in spec["paths"]["/runs/{run_id}/output"]["get"]["parameters"]}
+    assert {"format", "range"}.issubset(run_output_params)
+    assert spec["paths"]["/runs/{run_id}/wait"]["post"]["responses"]["408"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ApiError"
+    }
+    project_link_schema = spec["paths"]["/runs/{run_id}/projects/{project_id}"]["post"]["responses"]["201"]["content"][
+        "application/json"
+    ]["schema"]
+    assert project_link_schema == {"$ref": "#/components/schemas/ProjectRunLinkResponse"}
     assert set(spec["paths"]["/runs"]["post"]["responses"]) == {"202", "400", "401", "409", "429", "503"}
     for path, operations in spec["paths"].items():
         for operation in operations.values():
@@ -861,6 +1064,11 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
         def request(self, method, path, *, params=None, body=None, stream=False):
             if path == "/whoami":
                 return {"token_created": "2026-05-19 00:00:00", "last_seen_at": "2026-05-19 00:00:01"}
+            if path == "/projects":
+                return {
+                    "projects": [{"id": "prj_cli", "name": "CLI Project", "status": "active"}],
+                    "has_more": False,
+                }
             if path == "/history":
                 return {
                     "runs": [
@@ -880,14 +1088,95 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
                         },
                     ],
                 }
-            if path == "/history/run_cli/output":
+            if path == "/history/search":
+                assert params == {
+                    "project_id": None,
+                    "since": None,
+                    "until": None,
+                    "limit": 50,
+                    "offset": 0,
+                    "q": "needle",
+                    "context": 1,
+                }
+                return {
+                    "matches": [
+                        {
+                            "run_id": "run_cli",
+                            "command": "echo needle",
+                            "line_number": 2,
+                            "line": "needle here",
+                            "context_before": ["before"],
+                            "context_after": ["after"],
+                        }
+                    ],
+                    "total": 1,
+                    "limit": 50,
+                    "offset": 0,
+                    "has_more": False,
+                    "query": "needle",
+                    "context": 1,
+                }
+            if path == "/runs/run_cli/output":
+                assert params == {"format": "text", "range": None}
                 return "ok\n"
             if path == "/runs/run_cli/stream" and stream:
                 assert params == {"format": "ndjson", "after": "1-0"}
                 return FakeResponse()
             if path == "/runs" and method == "POST":
+                if body == {"command": "echo linked", "project_id": "prj_cli"}:
+                    return {"id": "run_wait", "status": "running"}
                 assert body == {"command": "echo ok", "project_id": None}
                 return {"id": "run_cli", "status": "running"}
+            if path == "/runs/run_wait/wait":
+                assert params == {"timeout": None}
+                return {"run": {"id": "run_wait", "status": "succeeded", "exit_code": 0, "command": "echo linked"}}
+            if path == "/projects/prj_cli/runs":
+                return {"runs": [{"id": "run_cli", "started": "2026-05-19T00:00:00+00:00", "exit_code": 0, "command": "echo ok"}]}
+            if path == "/projects/prj_cli/entities":
+                assert params == {"limit": 50, "offset": 0, "entity_type": "domain"}
+                return {"entities": [{"id": "ent_cli", "type": "domain", "value": "darklab.sh"}]}
+            if path == "/atlas":
+                assert params == {
+                    "q": None,
+                    "project_id": None,
+                    "run_id": None,
+                    "entity_type": None,
+                    "orphan_filter": "hide",
+                    "suppression_filter": "hide",
+                }
+                return {"total": 1, "findings": 1, "counts": {"domain": 1}}
+            if path == "/atlas/runs":
+                assert params == {"q": None, "run_id": None, "limit": 30}
+                return {"runs": [{"id": "run_cli", "entity_count": 1, "finding_count": 1, "command": "echo ok"}]}
+            if path == "/atlas/entities":
+                assert params == {
+                    "q": None,
+                    "project_id": None,
+                    "run_id": None,
+                    "entity_type": "domain",
+                    "orphan_filter": "hide",
+                    "suppression_filter": "hide",
+                    "limit": 50,
+                    "offset": 0,
+                }
+                return {"entities": [{"id": "ent_cli", "type": "domain", "occurrence_count": 2, "canonical_value": "darklab.sh"}]}
+            if path == "/atlas/entities/ent_cli":
+                return {"entity": {"id": "ent_cli", "type": "domain", "occurrence_count": 2, "canonical_value": "darklab.sh"}}
+            if path == "/atlas/findings":
+                assert params == {
+                    "q": None,
+                    "project_id": None,
+                    "run_id": None,
+                    "entity_type": None,
+                    "orphan_filter": "hide",
+                    "suppression_filter": "hide",
+                    "limit": 50,
+                    "offset": 0,
+                    "review_state": [],
+                }
+                return {"findings": [{"id": "fnd_cli", "status": "new", "severity": "medium", "title": "Open port"}]}
+            if path == "/atlas/findings/fnd_cli":
+                return {"finding": {"id": "fnd_cli", "status": "new", "severity": "medium", "title": "Open port"}}
             raise cli_main.DarklabCliError("not_found: missing")
 
     monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
@@ -903,12 +1192,32 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     ndjson_lines = capsys.readouterr().out.splitlines()
     assert json.loads(ndjson_lines[0])["id"] == "run_old"
     assert json.loads(ndjson_lines[1])["id"] == "run_cli"
+    assert cli_main.main(["grep", "needle", "--context", "1"]) == 0
+    assert "run_cli:2: needle here" in capsys.readouterr().out
     assert cli_main.main(["output", "run_cli"]) == 0
     assert capsys.readouterr().out == "ok\n"
     assert cli_main.main(["run", "echo ok", "--no-follow", "--format", "json"]) == 0
     assert json.loads(capsys.readouterr().out)["id"] == "run_cli"
+    assert cli_main.main(["run", "echo linked", "--link-project", "CLI Project", "--wait"]) == 0
+    assert "run_wait  succeeded  0  echo linked" in capsys.readouterr().out
     assert cli_main.main(["tail", "run_cli", "--format", "ndjson", "--after", "1-0"]) == 0
     assert '"event_id":"2-0"' in capsys.readouterr().out
+    assert cli_main.main(["project-runs", "prj_cli"]) == 0
+    assert "run_cli" in capsys.readouterr().out
+    assert cli_main.main(["project-entities", "prj_cli", "--entity-type", "domain"]) == 0
+    assert "darklab.sh" in capsys.readouterr().out
+    assert cli_main.main(["atlas", "summary"]) == 0
+    assert "entities: 1" in capsys.readouterr().out
+    assert cli_main.main(["atlas", "runs"]) == 0
+    assert "run_cli" in capsys.readouterr().out
+    assert cli_main.main(["atlas", "entities", "--entity-type", "domain"]) == 0
+    assert "darklab.sh" in capsys.readouterr().out
+    assert cli_main.main(["atlas", "entity", "ent_cli"]) == 0
+    assert "ent_cli" in capsys.readouterr().out
+    assert cli_main.main(["atlas", "findings"]) == 0
+    assert "Open port" in capsys.readouterr().out
+    assert cli_main.main(["atlas", "finding", "fnd_cli"]) == 0
+    assert "fnd_cli" in capsys.readouterr().out
     assert cli_main.main(["project", "missing"]) == 1
     assert "not_found: missing" in capsys.readouterr().err
 

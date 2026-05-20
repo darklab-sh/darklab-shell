@@ -373,10 +373,10 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `test_api_v1_whoami_accepts_bearer_token` | Verifies bearer-token auth returns session metadata without echoing the token. |
 | `test_api_v1_read_routes_use_api_rate_limit` | Verifies read-only `/api/v1` routes use the shared API rate limit. |
 | `test_api_v1_history_is_token_scoped_and_uses_page_envelope` | Verifies history list responses are token-scoped and use the shared pagination envelope. |
-| `test_api_v1_history_detail_output_and_cross_session_404` | Verifies run detail/output reads work for the owner and hide cross-session runs behind 404. |
+| `test_api_v1_history_detail_output_and_cross_session_404` | Verifies run detail/output/ranged-output reads work for the owner and hide cross-session runs behind 404. |
 | `test_api_v1_artifact_list_and_download_are_token_scoped` | Verifies artifact list and download routes work for the owner and hide cross-session artifacts behind 404. |
 | `test_api_v1_artifact_download_rejects_cross_run_artifact_id` | Verifies artifact downloads reject artifact ids that belong to a different run. |
-| `test_api_v1_project_readers_are_token_scoped` | Verifies project detail, findings, and package readers work for the owner and return 404 across sessions. |
+| `test_api_v1_project_readers_are_token_scoped` | Verifies project detail, findings, runs, entities, and package readers work for the owner and return 404 across sessions. |
 | `test_api_v1_run_start_uses_broker_and_streams_ndjson` | Verifies API run start returns stream links and NDJSON stream adaptation follows broker events. |
 | `test_api_v1_sse_stream_emits_idle_heartbeat` | Verifies brokered SSE streams emit heartbeat comments during idle periods. |
 | `test_api_v1_ndjson_stream_adapts_sse_heartbeat_comments` | Verifies NDJSON stream adaptation preserves idle SSE heartbeats as heartbeat rows. |
@@ -385,8 +385,8 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `test_api_v1_run_start_rejects_invalid_body_and_unknown_project` | Verifies API run start rejects non-object JSON bodies and unknown project ids with stable error codes. |
 | `test_api_v1_run_start_rejects_project_links_for_builtin_missing_and_interactive` | Verifies explicit project links are rejected for built-ins, missing runtimes, and interactive PTY commands. |
 | `test_api_v1_run_start_rewrites_workspace_root_output_paths` | Verifies API-started runs rewrite leading-slash workspace output paths before spawning commands. |
-| `test_api_v1_run_stream_and_cancel_are_token_scoped` | Verifies run streams and cancel requests are scoped to the owning token. |
-| `test_api_v1_explicit_project_link_uses_finalized_run_path` | Verifies explicit project linking for API-started runs uses the finalized-run project-link path. |
+| `test_api_v1_run_stream_and_cancel_are_token_scoped` | Verifies run streams, wait requests, and cancel requests are scoped to the owning token. |
+| `test_api_v1_explicit_project_link_uses_finalized_run_path` | Verifies explicit project linking for API-started runs plus API run/project link and unlink routes use the guarded project-link path. |
 | `test_api_v1_openapi_route_matches_checked_in_contract` | Verifies live `/api/v1/openapi.json` matches the checked-in OpenAPI snapshot. |
 | `test_api_v1_openapi_generator_snapshot_is_current` | Verifies the checked-in OpenAPI JSON matches the generator output byte-for-byte. |
 | `test_api_v1_openapi_contract_describes_public_shapes` | Verifies the OpenAPI contract includes core request, response, parameter, stream, and error shapes. |

@@ -168,6 +168,42 @@ OPENAPI_SPEC: dict = {
                     "has_more": {"type": "boolean"},
                 },
             },
+            "HistorySearchMatch": {
+                "type": "object",
+                "required": [
+                    "run_id",
+                    "command",
+                    "started",
+                    "finished",
+                    "line_number",
+                    "line",
+                    "context_before",
+                    "context_after",
+                ],
+                "properties": {
+                    "run_id": {"type": "string"},
+                    "command": {"type": "string"},
+                    "started": {"type": "string", "nullable": True},
+                    "finished": {"type": "string", "nullable": True},
+                    "line_number": {"type": "integer", "minimum": 1},
+                    "line": {"type": "string"},
+                    "context_before": {"type": "array", "items": {"type": "string"}},
+                    "context_after": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            "HistorySearchPage": {
+                "type": "object",
+                "required": ["matches", "total", "limit", "offset", "has_more", "query", "context"],
+                "properties": {
+                    "matches": {"type": "array", "items": _ref("HistorySearchMatch")},
+                    "total": {"type": "integer"},
+                    "limit": {"type": "integer"},
+                    "offset": {"type": "integer"},
+                    "has_more": {"type": "boolean"},
+                    "query": {"type": "string"},
+                    "context": {"type": "integer"},
+                },
+            },
             "RunDetail": {
                 "type": "object",
                 "required": ["run"],
@@ -187,13 +223,147 @@ OPENAPI_SPEC: dict = {
             },
             "RunOutput": {
                 "type": "object",
-                "required": ["run_id", "preview", "full_output_available", "truncated", "lines"],
+                "required": ["run_id", "preview", "full_output_available", "truncated", "line_count", "lines"],
                 "properties": {
                     "run_id": {"type": "string"},
                     "preview": {"type": "boolean"},
                     "full_output_available": {"type": "boolean"},
                     "truncated": {"type": "boolean"},
+                    "line_count": {"type": "integer"},
+                    "range": {
+                        "type": "object",
+                        "required": ["start", "end", "returned"],
+                        "properties": {
+                            "start": {"type": "integer"},
+                            "end": {"type": "integer"},
+                            "returned": {"type": "integer"},
+                        },
+                    },
                     "lines": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            "AtlasSummary": {
+                "type": "object",
+                "required": ["total", "counts", "findings"],
+                "properties": {
+                    "total": {"type": "integer"},
+                    "counts": {"type": "object", "additionalProperties": {"type": "integer"}},
+                    "findings": {"type": "integer"},
+                },
+            },
+            "AtlasSourceRun": {
+                "type": "object",
+                "required": ["id", "run_id", "command", "entity_count", "finding_count"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "run_id": {"type": "string"},
+                    "command": {"type": "string"},
+                    "started": {"type": "string", "nullable": True},
+                    "finished": {"type": "string", "nullable": True},
+                    "exit_code": {"type": "integer", "nullable": True},
+                    "entity_count": {"type": "integer"},
+                    "finding_count": {"type": "integer"},
+                },
+            },
+            "AtlasRunList": {
+                "type": "object",
+                "required": ["runs", "limit"],
+                "properties": {
+                    "runs": {"type": "array", "items": _ref("AtlasSourceRun")},
+                    "limit": {"type": "integer"},
+                },
+            },
+            "AtlasEntity": {
+                "type": "object",
+                "required": ["id", "type", "canonical_value", "occurrence_count", "run_count"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "session_id": {"type": "string"},
+                    "type": {"type": "string"},
+                    "canonical_value": {"type": "string"},
+                    "first_seen_at": {"type": "string", "nullable": True},
+                    "last_seen_at": {"type": "string", "nullable": True},
+                    "occurrence_count": {"type": "integer"},
+                    "run_count": {"type": "integer"},
+                    "suppressed": {"type": "boolean"},
+                    "suppressed_reason": {"type": "string"},
+                    "suppressed_at": {"type": "string"},
+                    "labels": {"type": "array", "items": _ref("Label")},
+                    "project_link_count": {"type": "integer"},
+                    "project_links": {"type": "array", "items": _ref("ProjectLink")},
+                    "note": {"nullable": True, "allOf": [_ref("Note")]},
+                },
+            },
+            "AtlasEntityPage": {
+                "type": "object",
+                "required": ["entities", "total", "limit", "offset"],
+                "properties": {
+                    "entities": {"type": "array", "items": _ref("AtlasEntity")},
+                    "total": {"type": "integer"},
+                    "limit": {"type": "integer"},
+                    "offset": {"type": "integer"},
+                },
+            },
+            "AtlasFinding": {
+                "type": "object",
+                "required": ["id", "entity_id", "status", "title", "raw_line", "occurrence_count"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "entity_id": {"type": "string"},
+                    "entity_type": {"type": "string"},
+                    "entity_value": {"type": "string"},
+                    "subject_key": {"type": "string"},
+                    "severity": {"type": "string"},
+                    "kind": {"type": "string"},
+                    "tool_root": {"type": "string"},
+                    "first_run_id": {"type": "string"},
+                    "last_run_id": {"type": "string"},
+                    "run_id": {"type": "string"},
+                    "run_command": {"type": "string"},
+                    "first_seen_at": {"type": "string", "nullable": True},
+                    "last_seen_at": {"type": "string", "nullable": True},
+                    "occurrence_count": {"type": "integer"},
+                    "status": {"type": "string"},
+                    "review_state": {"type": "string"},
+                    "suppressed": {"type": "boolean"},
+                    "suppressed_reason": {"type": "string"},
+                    "suppressed_at": {"type": "string"},
+                    "title": {"type": "string"},
+                    "raw_line": {"type": "string"},
+                    "line_number": {"type": "integer", "nullable": True},
+                    "created": {"type": "string", "nullable": True},
+                },
+            },
+            "AtlasFindingPage": {
+                "type": "object",
+                "required": ["findings", "total", "limit", "offset", "counts"],
+                "properties": {
+                    "findings": {"type": "array", "items": _ref("AtlasFinding")},
+                    "total": {"type": "integer"},
+                    "limit": {"type": "integer"},
+                    "offset": {"type": "integer"},
+                    "counts": {"type": "object", "additionalProperties": {"type": "integer"}},
+                },
+            },
+            "AtlasEntityDetail": {
+                "type": "object",
+                "required": ["entity", "runs", "findings", "intel_snapshots", "intel_summary", "detail_limits"],
+                "properties": {
+                    "entity": _ref("AtlasEntity"),
+                    "runs": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
+                    "findings": {"type": "array", "items": _ref("AtlasFinding")},
+                    "intel_snapshots": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
+                    "intel_summary": {"type": "object", "additionalProperties": True},
+                    "detail_limits": {"type": "object", "additionalProperties": True},
+                },
+            },
+            "AtlasFindingDetail": {
+                "type": "object",
+                "required": ["finding", "occurrences", "detail_limits"],
+                "properties": {
+                    "finding": _ref("AtlasFinding"),
+                    "occurrences": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
+                    "detail_limits": {"type": "object", "additionalProperties": True},
                 },
             },
             "ArtifactSummary": {
@@ -350,6 +520,107 @@ OPENAPI_SPEC: dict = {
                     "orphan_source": {"type": "boolean"},
                 },
             },
+            "ProjectRun": {
+                "type": "object",
+                "required": ["id", "command", "started", "finished", "exit_code", "output_line_count", "created", "link_source"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "command": {"type": "string"},
+                    "started": {"type": "string", "nullable": True},
+                    "finished": {"type": "string", "nullable": True},
+                    "exit_code": {"type": "integer", "nullable": True},
+                    "output_line_count": {"type": "integer"},
+                    "created": {"type": "string", "nullable": True},
+                    "link_source": {"type": "string"},
+                    "finding_count": {"type": "integer"},
+                    "artifact_count": {"type": "integer"},
+                    "labels": {"type": "array", "items": _ref("Label")},
+                    "note": {"nullable": True, "allOf": [_ref("Note")]},
+                    "full_output_available": {"type": "boolean"},
+                    "full_output_truncated": {"type": "boolean"},
+                    "full_output_byte_size": {"type": "integer"},
+                    "full_output_line_count": {"type": "integer"},
+                },
+            },
+            "ProjectRunPage": {
+                "type": "object",
+                "required": ["runs", "total", "limit", "offset", "has_more"],
+                "properties": {
+                    "runs": {"type": "array", "items": _ref("ProjectRun")},
+                    "total": {"type": "integer"},
+                    "limit": {"type": "integer"},
+                    "offset": {"type": "integer"},
+                    "has_more": {"type": "boolean"},
+                },
+            },
+            "ProjectLink": {
+                "type": "object",
+                "required": ["id", "project_id", "entity_type", "entity_id", "source", "created"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "project_id": {"type": "string"},
+                    "entity_type": {"type": "string"},
+                    "entity_id": {"type": "string"},
+                    "source": {"type": "string"},
+                    "created": {"type": "string", "nullable": True},
+                },
+            },
+            "ProjectRunLinkResponse": {
+                "type": "object",
+                "required": ["ok", "link"],
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "link": _ref("ProjectLink"),
+                },
+            },
+            "OkResponse": {
+                "type": "object",
+                "required": ["ok"],
+                "properties": {"ok": {"type": "boolean"}},
+            },
+            "ProjectEntity": {
+                "type": "object",
+                "required": ["id", "type", "value", "canonical_value", "occurrence_count", "run_count"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "project_id": {"type": "string"},
+                    "type": {"type": "string"},
+                    "value": {"type": "string"},
+                    "canonical_value": {"type": "string"},
+                    "source_run_id": {"type": "string"},
+                    "confidence": {"type": "number"},
+                    "review_state": {"type": "string"},
+                    "status": {"type": "string"},
+                    "source": {"type": "string"},
+                    "source_detail": {"type": "object", "additionalProperties": True},
+                    "seen_count": {"type": "integer"},
+                    "occurrence_count": {"type": "integer"},
+                    "suppressed": {"type": "boolean"},
+                    "suppressed_reason": {"type": "string"},
+                    "suppressed_at": {"type": "string"},
+                    "run_count": {"type": "integer"},
+                    "intel_provider_count": {"type": "integer"},
+                    "intel_providers": {"type": "array", "items": {"type": "string"}},
+                    "intel_last_refreshed": {"type": "string"},
+                    "last_seen": {"type": "string"},
+                    "created": {"type": "string", "nullable": True},
+                    "updated": {"type": "string", "nullable": True},
+                    "labels": {"type": "array", "items": _ref("Label")},
+                    "note": {"nullable": True, "allOf": [_ref("Note")]},
+                },
+            },
+            "ProjectEntityPage": {
+                "type": "object",
+                "required": ["entities", "total", "limit", "offset", "has_more", "counts_by_type"],
+                "properties": {
+                    "entities": {"type": "array", "items": _ref("ProjectEntity")},
+                    "total": {"type": "integer"},
+                    "limit": {"type": "integer"},
+                    "offset": {"type": "integer"},
+                    "has_more": {"type": "boolean"},
+                    "counts_by_type": {"type": "object", "additionalProperties": {"type": "integer"}},
+                },
+            },
             "PackagePage": {
                 "type": "object",
                 "required": ["packages", "total", "limit", "offset", "has_more"],
@@ -490,6 +761,155 @@ OPENAPI_SPEC: dict = {
                 },
             },
         },
+        "/history/search": {
+            "get": {
+                "parameters": [
+                    *PAGE_PARAMS,
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "required": True,
+                        "description": "Literal text to locate in saved run output.",
+                        "schema": {"type": "string"},
+                    },
+                    {
+                        "name": "context",
+                        "in": "query",
+                        "schema": {"type": "integer", "default": 2, "minimum": 0, "maximum": 10},
+                    },
+                    {"name": "project_id", "in": "query", "schema": {"type": "string"}},
+                    {
+                        "name": "run_kind",
+                        "in": "query",
+                        "schema": {"type": "string", "enum": ["external", "real", "builtin", "missing"]},
+                    },
+                    {"name": "exit_code", "in": "query", "schema": {"type": "string"}},
+                    {"name": "since", "in": "query", "schema": {"type": "string", "format": "date-time"}},
+                    {"name": "until", "in": "query", "schema": {"type": "string", "format": "date-time"}},
+                ],
+                "responses": {
+                    "200": _json_response("Paginated output search matches", _ref("HistorySearchPage")),
+                    "400": _error_response("Missing query or invalid filter"),
+                    **_common_errors(),
+                },
+            },
+        },
+        "/atlas": {
+            "get": {
+                "parameters": [
+                    {"name": "run_id", "in": "query", "schema": {"type": "string"}},
+                    {
+                        "name": "orphan_filter",
+                        "in": "query",
+                        "schema": {"type": "string", "enum": ["hide", "all", "only"], "default": "hide"},
+                    },
+                    {
+                        "name": "suppression_filter",
+                        "in": "query",
+                        "schema": {"type": "string", "enum": ["hide", "all", "only"], "default": "hide"},
+                    },
+                ],
+                "responses": {
+                    "200": _json_response("Atlas summary", _ref("AtlasSummary")),
+                    **_common_errors(),
+                },
+            },
+        },
+        "/atlas/runs": {
+            "get": {
+                "parameters": [
+                    {"name": "q", "in": "query", "schema": {"type": "string"}},
+                    {"name": "run_id", "in": "query", "schema": {"type": "string"}},
+                    {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 30, "minimum": 1, "maximum": 50}},
+                ],
+                "responses": {
+                    "200": _json_response("Atlas source runs", _ref("AtlasRunList")),
+                    **_common_errors(),
+                },
+            },
+        },
+        "/atlas/entities": {
+            "get": {
+                "parameters": [
+                    *PAGE_PARAMS,
+                    {"name": "q", "in": "query", "schema": {"type": "string"}},
+                    {"name": "project_id", "in": "query", "schema": {"type": "string"}},
+                    {"name": "run_id", "in": "query", "schema": {"type": "string"}},
+                    {
+                        "name": "entity_type",
+                        "in": "query",
+                        "schema": {"type": "string", "enum": ["domain", "ip", "url", "hash", "cve"]},
+                    },
+                    {
+                        "name": "orphan_filter",
+                        "in": "query",
+                        "schema": {"type": "string", "enum": ["hide", "all", "only"], "default": "hide"},
+                    },
+                    {
+                        "name": "suppression_filter",
+                        "in": "query",
+                        "schema": {"type": "string", "enum": ["hide", "all", "only"], "default": "hide"},
+                    },
+                ],
+                "responses": {
+                    "200": _json_response("Atlas entities", _ref("AtlasEntityPage")),
+                    **_common_errors(),
+                },
+            },
+        },
+        "/atlas/entities/{entity_id}": {
+            "get": {
+                "parameters": [
+                    _path_param("entity_id", "Atlas entity id"),
+                    {"name": "runs_offset", "in": "query", "schema": {"type": "integer", "default": 0, "minimum": 0}},
+                    {"name": "findings_offset", "in": "query", "schema": {"type": "integer", "default": 0, "minimum": 0}},
+                ],
+                "responses": {
+                    "200": _json_response("Atlas entity detail", _ref("AtlasEntityDetail")),
+                    **_common_errors(not_found="Atlas entity not found"),
+                },
+            },
+        },
+        "/atlas/findings": {
+            "get": {
+                "parameters": [
+                    *PAGE_PARAMS,
+                    {"name": "q", "in": "query", "schema": {"type": "string"}},
+                    {"name": "project_id", "in": "query", "schema": {"type": "string"}},
+                    {"name": "run_id", "in": "query", "schema": {"type": "string"}},
+                    {
+                        "name": "review_state",
+                        "in": "query",
+                        "schema": {"type": "array", "items": {"type": "string"}},
+                        "style": "form",
+                        "explode": True,
+                    },
+                    {
+                        "name": "orphan_filter",
+                        "in": "query",
+                        "schema": {"type": "string", "enum": ["hide", "all", "only"], "default": "hide"},
+                    },
+                    {
+                        "name": "suppression_filter",
+                        "in": "query",
+                        "schema": {"type": "string", "enum": ["hide", "all", "only"], "default": "hide"},
+                    },
+                ],
+                "responses": {
+                    "200": _json_response("Atlas findings", _ref("AtlasFindingPage")),
+                    **_common_errors(),
+                },
+            },
+        },
+        "/atlas/findings/{finding_id}": {
+            "get": {
+                "parameters": [_path_param("finding_id", "Atlas finding id")],
+                "responses": {
+                    "200": _json_response("Atlas finding detail", _ref("AtlasFindingDetail")),
+                    **_common_errors(not_found="Atlas finding not found"),
+                },
+            },
+        },
         "/history/{run_id}": {
             "get": {
                 "parameters": [RUN_ID_PARAM],
@@ -508,6 +928,12 @@ OPENAPI_SPEC: dict = {
                         "in": "query",
                         "schema": {"type": "string", "enum": ["text", "json"], "default": "text"},
                     },
+                    {
+                        "name": "range",
+                        "in": "query",
+                        "description": "1-based inclusive line range, such as 10-40.",
+                        "schema": {"type": "string", "pattern": "^[1-9][0-9]*-[1-9][0-9]*$"},
+                    },
                 ],
                 "responses": {
                     "200": {
@@ -517,6 +943,36 @@ OPENAPI_SPEC: dict = {
                             "application/json": {"schema": _ref("RunOutput")},
                         },
                     },
+                    "400": _error_response("Invalid range"),
+                    **_common_errors(not_found="Run not found"),
+                },
+            },
+        },
+        "/runs/{run_id}/output": {
+            "get": {
+                "parameters": [
+                    RUN_ID_PARAM,
+                    {
+                        "name": "format",
+                        "in": "query",
+                        "schema": {"type": "string", "enum": ["text", "json"], "default": "text"},
+                    },
+                    {
+                        "name": "range",
+                        "in": "query",
+                        "description": "1-based inclusive line range, such as 10-40.",
+                        "schema": {"type": "string", "pattern": "^[1-9][0-9]*-[1-9][0-9]*$"},
+                    },
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Run output",
+                        "content": {
+                            "text/plain": {"schema": {"type": "string"}},
+                            "application/json": {"schema": _ref("RunOutput")},
+                        },
+                    },
+                    "400": _error_response("Invalid range"),
                     **_common_errors(not_found="Run not found"),
                 },
             },
@@ -625,6 +1081,46 @@ OPENAPI_SPEC: dict = {
                 },
             },
         },
+        "/projects/{project_id}/runs": {
+            "get": {
+                "parameters": [PROJECT_ID_PARAM, *PAGE_PARAMS],
+                "responses": {
+                    "200": _json_response("Project runs", _ref("ProjectRunPage")),
+                    **_common_errors(not_found="Project not found"),
+                },
+            },
+        },
+        "/projects/{project_id}/entities": {
+            "get": {
+                "parameters": [
+                    PROJECT_ID_PARAM,
+                    *PAGE_PARAMS,
+                    {
+                        "name": "entity_type",
+                        "in": "query",
+                        "schema": {"type": "string", "enum": ["domain", "ip", "url", "hash", "cve"]},
+                    },
+                    {
+                        "name": "run_id",
+                        "in": "query",
+                        "schema": {"type": "array", "items": {"type": "string"}},
+                        "style": "form",
+                        "explode": True,
+                    },
+                    {
+                        "name": "target_id",
+                        "in": "query",
+                        "schema": {"type": "array", "items": {"type": "string"}},
+                        "style": "form",
+                        "explode": True,
+                    },
+                ],
+                "responses": {
+                    "200": _json_response("Project entities", _ref("ProjectEntityPage")),
+                    **_common_errors(not_found="Project not found"),
+                },
+            },
+        },
         "/projects/{project_id}/packages": {
             "get": {
                 "parameters": [PROJECT_ID_PARAM, *PAGE_PARAMS],
@@ -656,6 +1152,47 @@ OPENAPI_SPEC: dict = {
                 "responses": {
                     "200": _json_response("Run status", _ref("RunStatus")),
                     **_common_errors(not_found="Run not found"),
+                },
+            },
+        },
+        "/runs/{run_id}/wait": {
+            "post": {
+                "parameters": [
+                    RUN_ID_PARAM,
+                    {
+                        "name": "timeout",
+                        "in": "query",
+                        "schema": {"type": "number", "default": 30, "minimum": 0, "maximum": 3600},
+                    },
+                ],
+                "responses": {
+                    "200": _json_response("Terminal run status", _ref("RunStatus")),
+                    "408": _error_response("Run is still running"),
+                    **_common_errors(not_found="Run not found"),
+                },
+            },
+        },
+        "/runs/{run_id}/projects/{project_id}": {
+            "post": {
+                "parameters": [RUN_ID_PARAM, PROJECT_ID_PARAM],
+                "responses": {
+                    "201": _json_response("Run linked to project", _ref("ProjectRunLinkResponse")),
+                    "400": _error_response("Invalid project link"),
+                    "401": _error_response("Missing, invalid, or revoked token"),
+                    "404": _error_response("Run or project not found"),
+                    "409": _error_response("Archived project or quota exceeded"),
+                    "429": _error_response("Rate limit exceeded"),
+                },
+            },
+            "delete": {
+                "parameters": [RUN_ID_PARAM, PROJECT_ID_PARAM],
+                "responses": {
+                    "200": _json_response("Run unlinked from project", _ref("OkResponse")),
+                    "400": _error_response("Invalid project link"),
+                    "401": _error_response("Missing, invalid, or revoked token"),
+                    "404": _error_response("Run, project, or project link not found"),
+                    "409": _error_response("Archived project"),
+                    "429": _error_response("Rate limit exceeded"),
                 },
             },
         },

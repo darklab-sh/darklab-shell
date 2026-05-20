@@ -1088,6 +1088,61 @@ def list_findings(
     }
 
 
+def finding_detail(conn, session_id: str, finding_id: str) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT f.id, f.entity_id, e.type AS entity_type, e.canonical_value AS entity_value, "
+        "f.subject_key, f.severity, f.kind, f.tool_root, f.first_run_id, f.last_run_id, "
+        "r.command AS run_command, r.run_kind AS run_kind, "
+        "f.first_seen_at, f.last_seen_at, f.occurrence_count, f.status, f.title, f.raw_line, f.created, "
+        "f.suppressed, f.suppressed_reason, f.suppressed_at, "
+        "(SELECT fo.line_number FROM findings_occurrences fo WHERE fo.finding_id = f.id "
+        " ORDER BY fo.seen_at DESC, fo.run_id DESC LIMIT 1) AS line_number, "
+        "(SELECT fo.snippet FROM findings_occurrences fo WHERE fo.finding_id = f.id "
+        " ORDER BY fo.seen_at DESC, fo.run_id DESC LIMIT 1) AS snippet "
+        "FROM findings f "
+        "LEFT JOIN entities e ON e.id = f.entity_id "
+        "LEFT JOIN runs r ON r.id = f.last_run_id AND r.session_id = f.session_id "
+        "WHERE f.session_id = ? AND f.id = ?",
+        (session_id, finding_id),
+    ).fetchone()
+    if not row:
+        return None
+    occurrence_rows = conn.execute(
+        "SELECT fo.run_id, r.command, r.run_kind, r.started, r.finished, r.exit_code, "
+        "fo.line_number, fo.snippet, fo.seen_at "
+        "FROM findings_occurrences fo "
+        "JOIN runs r ON r.id = fo.run_id "
+        "WHERE fo.finding_id = ? AND r.session_id = ? "
+        "ORDER BY fo.seen_at DESC, fo.run_id DESC, fo.line_number DESC LIMIT ?",
+        (finding_id, session_id, ENTITY_DETAIL_RUN_LIMIT),
+    ).fetchall()
+    return {
+        "finding": _row_to_finding(row),
+        "occurrences": [
+            {
+                "run_id": occurrence["run_id"],
+                "command": occurrence["command"] or "",
+                "run_kind": occurrence["run_kind"] or "",
+                "started": occurrence["started"],
+                "finished": occurrence["finished"],
+                "exit_code": occurrence["exit_code"],
+                "line_number": occurrence["line_number"],
+                "snippet": occurrence["snippet"] or "",
+                "seen_at": occurrence["seen_at"],
+            }
+            for occurrence in occurrence_rows
+        ],
+        "detail_limits": {
+            "occurrences": {
+                "limit": ENTITY_DETAIL_RUN_LIMIT,
+                "offset": 0,
+                "shown": len(occurrence_rows),
+                "has_more": len(occurrence_rows) >= ENTITY_DETAIL_RUN_LIMIT,
+            },
+        },
+    }
+
+
 def list_entities(
     conn,
     session_id: str,

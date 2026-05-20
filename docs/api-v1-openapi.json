@@ -103,6 +103,371 @@
         ],
         "type": "object"
       },
+      "AtlasEntity": {
+        "properties": {
+          "canonical_value": {
+            "type": "string"
+          },
+          "first_seen_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "labels": {
+            "items": {
+              "$ref": "#/components/schemas/Label"
+            },
+            "type": "array"
+          },
+          "last_seen_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "note": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Note"
+              }
+            ],
+            "nullable": true
+          },
+          "occurrence_count": {
+            "type": "integer"
+          },
+          "project_link_count": {
+            "type": "integer"
+          },
+          "project_links": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectLink"
+            },
+            "type": "array"
+          },
+          "run_count": {
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "suppressed": {
+            "type": "boolean"
+          },
+          "suppressed_at": {
+            "type": "string"
+          },
+          "suppressed_reason": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "canonical_value",
+          "occurrence_count",
+          "run_count"
+        ],
+        "type": "object"
+      },
+      "AtlasEntityDetail": {
+        "properties": {
+          "detail_limits": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "entity": {
+            "$ref": "#/components/schemas/AtlasEntity"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasFinding"
+            },
+            "type": "array"
+          },
+          "intel_snapshots": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "intel_summary": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "runs": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "entity",
+          "runs",
+          "findings",
+          "intel_snapshots",
+          "intel_summary",
+          "detail_limits"
+        ],
+        "type": "object"
+      },
+      "AtlasEntityPage": {
+        "properties": {
+          "entities": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasEntity"
+            },
+            "type": "array"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entities",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "type": "object"
+      },
+      "AtlasFinding": {
+        "properties": {
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "entity_type": {
+            "type": "string"
+          },
+          "entity_value": {
+            "type": "string"
+          },
+          "first_run_id": {
+            "type": "string"
+          },
+          "first_seen_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "last_run_id": {
+            "type": "string"
+          },
+          "last_seen_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "line_number": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "occurrence_count": {
+            "type": "integer"
+          },
+          "raw_line": {
+            "type": "string"
+          },
+          "review_state": {
+            "type": "string"
+          },
+          "run_command": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "subject_key": {
+            "type": "string"
+          },
+          "suppressed": {
+            "type": "boolean"
+          },
+          "suppressed_at": {
+            "type": "string"
+          },
+          "suppressed_reason": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tool_root": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "entity_id",
+          "status",
+          "title",
+          "raw_line",
+          "occurrence_count"
+        ],
+        "type": "object"
+      },
+      "AtlasFindingDetail": {
+        "properties": {
+          "detail_limits": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "finding": {
+            "$ref": "#/components/schemas/AtlasFinding"
+          },
+          "occurrences": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "finding",
+          "occurrences",
+          "detail_limits"
+        ],
+        "type": "object"
+      },
+      "AtlasFindingPage": {
+        "properties": {
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasFinding"
+            },
+            "type": "array"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "findings",
+          "total",
+          "limit",
+          "offset",
+          "counts"
+        ],
+        "type": "object"
+      },
+      "AtlasRunList": {
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/AtlasSourceRun"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs",
+          "limit"
+        ],
+        "type": "object"
+      },
+      "AtlasSourceRun": {
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "entity_count": {
+            "type": "integer"
+          },
+          "exit_code": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "finding_count": {
+            "type": "integer"
+          },
+          "finished": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "started": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "command",
+          "entity_count",
+          "finding_count"
+        ],
+        "type": "object"
+      },
+      "AtlasSummary": {
+        "properties": {
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "findings": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "counts",
+          "findings"
+        ],
+        "type": "object"
+      },
       "EvidencePackage": {
         "properties": {
           "created": {
@@ -186,6 +551,92 @@
         ],
         "type": "object"
       },
+      "HistorySearchMatch": {
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "context_after": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "context_before": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "finished": {
+            "nullable": true,
+            "type": "string"
+          },
+          "line": {
+            "type": "string"
+          },
+          "line_number": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "started": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "command",
+          "started",
+          "finished",
+          "line_number",
+          "line",
+          "context_before",
+          "context_after"
+        ],
+        "type": "object"
+      },
+      "HistorySearchPage": {
+        "properties": {
+          "context": {
+            "type": "integer"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/HistorySearchMatch"
+            },
+            "type": "array"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "query": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "matches",
+          "total",
+          "limit",
+          "offset",
+          "has_more",
+          "query",
+          "context"
+        ],
+        "type": "object"
+      },
       "Label": {
         "properties": {
           "created": {
@@ -228,6 +679,17 @@
         },
         "required": [
           "body"
+        ],
+        "type": "object"
+      },
+      "OkResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
         ],
         "type": "object"
       },
@@ -369,6 +831,145 @@
         },
         "required": [
           "project"
+        ],
+        "type": "object"
+      },
+      "ProjectEntity": {
+        "properties": {
+          "canonical_value": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "intel_last_refreshed": {
+            "type": "string"
+          },
+          "intel_provider_count": {
+            "type": "integer"
+          },
+          "intel_providers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "labels": {
+            "items": {
+              "$ref": "#/components/schemas/Label"
+            },
+            "type": "array"
+          },
+          "last_seen": {
+            "type": "string"
+          },
+          "note": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Note"
+              }
+            ],
+            "nullable": true
+          },
+          "occurrence_count": {
+            "type": "integer"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "review_state": {
+            "type": "string"
+          },
+          "run_count": {
+            "type": "integer"
+          },
+          "seen_count": {
+            "type": "integer"
+          },
+          "source": {
+            "type": "string"
+          },
+          "source_detail": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "source_run_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "suppressed": {
+            "type": "boolean"
+          },
+          "suppressed_at": {
+            "type": "string"
+          },
+          "suppressed_reason": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "updated": {
+            "nullable": true,
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "value",
+          "canonical_value",
+          "occurrence_count",
+          "run_count"
+        ],
+        "type": "object"
+      },
+      "ProjectEntityPage": {
+        "properties": {
+          "counts_by_type": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "entities": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectEntity"
+            },
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entities",
+          "total",
+          "limit",
+          "offset",
+          "has_more",
+          "counts_by_type"
         ],
         "type": "object"
       },
@@ -517,6 +1118,38 @@
         ],
         "type": "object"
       },
+      "ProjectLink": {
+        "properties": {
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "entity_type": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "entity_type",
+          "entity_id",
+          "source",
+          "created"
+        ],
+        "type": "object"
+      },
       "ProjectPage": {
         "properties": {
           "has_more": {
@@ -540,6 +1173,126 @@
         },
         "required": [
           "projects",
+          "total",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "ProjectRun": {
+        "properties": {
+          "artifact_count": {
+            "type": "integer"
+          },
+          "command": {
+            "type": "string"
+          },
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "exit_code": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "finding_count": {
+            "type": "integer"
+          },
+          "finished": {
+            "nullable": true,
+            "type": "string"
+          },
+          "full_output_available": {
+            "type": "boolean"
+          },
+          "full_output_byte_size": {
+            "type": "integer"
+          },
+          "full_output_line_count": {
+            "type": "integer"
+          },
+          "full_output_truncated": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "labels": {
+            "items": {
+              "$ref": "#/components/schemas/Label"
+            },
+            "type": "array"
+          },
+          "link_source": {
+            "type": "string"
+          },
+          "note": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Note"
+              }
+            ],
+            "nullable": true
+          },
+          "output_line_count": {
+            "type": "integer"
+          },
+          "started": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "command",
+          "started",
+          "finished",
+          "exit_code",
+          "output_line_count",
+          "created",
+          "link_source"
+        ],
+        "type": "object"
+      },
+      "ProjectRunLinkResponse": {
+        "properties": {
+          "link": {
+            "$ref": "#/components/schemas/ProjectLink"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "link"
+        ],
+        "type": "object"
+      },
+      "ProjectRunPage": {
+        "properties": {
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectRun"
+            },
+            "type": "array"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "runs",
           "total",
           "limit",
           "offset",
@@ -593,6 +1346,9 @@
           "full_output_available": {
             "type": "boolean"
           },
+          "line_count": {
+            "type": "integer"
+          },
           "lines": {
             "items": {
               "type": "string"
@@ -601,6 +1357,25 @@
           },
           "preview": {
             "type": "boolean"
+          },
+          "range": {
+            "properties": {
+              "end": {
+                "type": "integer"
+              },
+              "returned": {
+                "type": "integer"
+              },
+              "start": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "start",
+              "end",
+              "returned"
+            ],
+            "type": "object"
           },
           "run_id": {
             "type": "string"
@@ -614,6 +1389,7 @@
           "preview",
           "full_output_available",
           "truncated",
+          "line_count",
           "lines"
         ],
         "type": "object"
@@ -835,6 +1611,505 @@
   },
   "openapi": "3.0.3",
   "paths": {
+    "/atlas": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "run_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "orphan_filter",
+            "schema": {
+              "default": "hide",
+              "enum": [
+                "hide",
+                "all",
+                "only"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "suppression_filter",
+            "schema": {
+              "default": "hide",
+              "enum": [
+                "hide",
+                "all",
+                "only"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AtlasSummary"
+                }
+              }
+            },
+            "description": "Atlas summary"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/atlas/entities": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entity_type",
+            "schema": {
+              "enum": [
+                "domain",
+                "ip",
+                "url",
+                "hash",
+                "cve"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "orphan_filter",
+            "schema": {
+              "default": "hide",
+              "enum": [
+                "hide",
+                "all",
+                "only"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "suppression_filter",
+            "schema": {
+              "default": "hide",
+              "enum": [
+                "hide",
+                "all",
+                "only"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AtlasEntityPage"
+                }
+              }
+            },
+            "description": "Atlas entities"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/atlas/entities/{entity_id}": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Atlas entity id",
+            "in": "path",
+            "name": "entity_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "runs_offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "findings_offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AtlasEntityDetail"
+                }
+              }
+            },
+            "description": "Atlas entity detail"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Atlas entity not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/atlas/findings": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "explode": true,
+            "in": "query",
+            "name": "review_state",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "orphan_filter",
+            "schema": {
+              "default": "hide",
+              "enum": [
+                "hide",
+                "all",
+                "only"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "suppression_filter",
+            "schema": {
+              "default": "hide",
+              "enum": [
+                "hide",
+                "all",
+                "only"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AtlasFindingPage"
+                }
+              }
+            },
+            "description": "Atlas findings"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/atlas/findings/{finding_id}": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Atlas finding id",
+            "in": "path",
+            "name": "finding_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AtlasFindingDetail"
+                }
+              }
+            },
+            "description": "Atlas finding detail"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Atlas finding not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/atlas/runs": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 30,
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AtlasRunList"
+                }
+              }
+            },
+            "description": "Atlas source runs"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "responses": {
@@ -945,6 +2220,135 @@
               }
             },
             "description": "Paginated run history"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/history/search": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Literal text to locate in saved run output.",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "context",
+            "schema": {
+              "default": 2,
+              "maximum": 10,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_kind",
+            "schema": {
+              "enum": [
+                "external",
+                "real",
+                "builtin",
+                "missing"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exit_code",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "until",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistorySearchPage"
+                }
+              }
+            },
+            "description": "Paginated output search matches"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing query or invalid filter"
           },
           "401": {
             "content": {
@@ -1183,6 +2587,15 @@
               ],
               "type": "string"
             }
+          },
+          {
+            "description": "1-based inclusive line range, such as 10-40.",
+            "in": "query",
+            "name": "range",
+            "schema": {
+              "pattern": "^[1-9][0-9]*-[1-9][0-9]*$",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1200,6 +2613,16 @@
               }
             },
             "description": "Run output"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid range"
           },
           "401": {
             "content": {
@@ -1350,6 +2773,120 @@
               }
             },
             "description": "Project detail"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/entities": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entity_type",
+            "schema": {
+              "enum": [
+                "domain",
+                "ip",
+                "url",
+                "hash",
+                "cve"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "explode": true,
+            "in": "query",
+            "name": "run_id",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "explode": true,
+            "in": "query",
+            "name": "target_id",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectEntityPage"
+                }
+              }
+            },
+            "description": "Project entities"
           },
           "401": {
             "content": {
@@ -1621,6 +3158,82 @@
         }
       }
     },
+    "/projects/{project_id}/runs": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRunPage"
+                }
+              }
+            },
+            "description": "Project runs"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Project not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
     "/runs": {
       "post": {
         "requestBody": {
@@ -1811,6 +3424,269 @@
         }
       }
     },
+    "/runs/{run_id}/output": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "schema": {
+              "default": "text",
+              "enum": [
+                "text",
+                "json"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "1-based inclusive line range, such as 10-40.",
+            "in": "query",
+            "name": "range",
+            "schema": {
+              "pattern": "^[1-9][0-9]*-[1-9][0-9]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunOutput"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Run output"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid range"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/projects/{project_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            },
+            "description": "Run unlinked from project"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid project link"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run, project, or project link not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Archived project"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "post": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Project id",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRunLinkResponse"
+                }
+              }
+            },
+            "description": "Run linked to project"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid project link"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run or project not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Archived project or quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
     "/runs/{run_id}/stream": {
       "get": {
         "parameters": [
@@ -1885,6 +3761,83 @@
               }
             },
             "description": "Run not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/wait": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "timeout",
+            "schema": {
+              "default": 30,
+              "maximum": 3600,
+              "minimum": 0,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatus"
+                }
+              }
+            },
+            "description": "Terminal run status"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run not found"
+          },
+          "408": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run is still running"
           },
           "429": {
             "content": {
