@@ -12,137 +12,150 @@ from typing import Any
 from .client import DarklabClient, DarklabCliError, die, iter_sse_events, load_config, print_json
 
 STREAM_INCOMPLETE_EXIT_CODE = 2
+STREAM_INTERRUPTED_EXIT_CODE = 130
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="darklab")
+    parser = argparse.ArgumentParser(
+        prog="darklab",
+        description="Headless darklab_shell client for runs, history, projects, Atlas, and notifications.",
+    )
     parser.add_argument("--api-url", help="darklab_shell base URL")
     parser.add_argument("--token", help="tok_ session token")
     parser.add_argument("--timeout", type=float, default=None, help="HTTP timeout in seconds")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
-    sub.add_parser("whoami")
+    sub.add_parser("whoami", help="Show token metadata and last-auth timestamp.")
 
-    run = sub.add_parser("run")
+    run = sub.add_parser("run", help="Start a non-interactive command run.")
     run.add_argument("run_command")
     run.add_argument("--project", dest="project_id")
     run.add_argument("--link-project", dest="link_project", help="Project name to resolve and link after completion.")
     run.add_argument("--wait", action="store_true", help="Wait for the run to finish instead of streaming output.")
-    run.add_argument("--wait-timeout", type=float, default=None, help="Server-side wait timeout in seconds.")
+    run.add_argument(
+        "--wait-timeout",
+        type=float,
+        default=None,
+        help="Server-side wait timeout in seconds; default 30, max 3600.",
+    )
     run.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
     run_follow = run.add_mutually_exclusive_group()
     run_follow.add_argument("--follow", dest="follow", action="store_true", default=True)
     run_follow.add_argument("--no-follow", dest="follow", action="store_false")
 
-    tail = sub.add_parser("tail")
+    active = sub.add_parser("active", help="List active runs for the current token.")
+    active.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
+
+    tail = sub.add_parser("tail", help="Follow an active run stream.")
     tail.add_argument("run_id")
     tail.add_argument("--format", choices=("text", "ndjson"), default="text")
     tail.add_argument("--after", default="")
 
-    cancel = sub.add_parser("cancel")
+    cancel = sub.add_parser("cancel", help="Cancel an active current-token run.")
     cancel.add_argument("run_id")
 
-    history = sub.add_parser("history")
+    history = sub.add_parser("history", help="List completed run history.")
     history.add_argument("--project", dest="project_id")
     history.add_argument("--since")
     history.add_argument("--until")
-    history.add_argument("--limit", type=int, default=50)
+    history.add_argument("--limit", type=int, default=50, help="Rows to return; default 50, max 100.")
     history.add_argument("--offset", type=int, default=0)
     history.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
-    grep = sub.add_parser("grep")
+    grep = sub.add_parser("grep", help="Search saved output across completed runs.")
     grep.add_argument("pattern")
-    grep.add_argument("--context", type=int, default=2)
+    grep.add_argument("--context", type=int, default=2, help="Output lines before and after each match; default 2, max 10.")
     grep.add_argument("--project", dest="project_id")
     grep.add_argument("--since")
     grep.add_argument("--until")
-    grep.add_argument("--limit", type=int, default=50)
+    grep.add_argument("--limit", type=int, default=50, help="Matches to return; default 50, max 100.")
     grep.add_argument("--offset", type=int, default=0)
     grep.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
-    show = sub.add_parser("show")
+    show = sub.add_parser("show", help="Show one completed run summary.")
     show.add_argument("run_id")
     show.add_argument("--lines", type=int, default=0)
     show.add_argument("--format", choices=("text", "json"), default="text")
 
-    output = sub.add_parser("output")
+    output = sub.add_parser("output", help="Print stored run output.")
     output.add_argument("run_id")
     output.add_argument("--range", dest="line_range", help="1-based line range to fetch, such as 10-40.")
     output.add_argument("--format", choices=("text", "json"), default="text")
 
-    artifacts = sub.add_parser("artifacts")
+    artifacts = sub.add_parser("artifacts", help="List artifacts for one completed run.")
     artifacts.add_argument("run_id")
 
-    projects = sub.add_parser("projects")
+    projects = sub.add_parser("projects", help="List projects.")
     projects.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
-    projects.add_argument("--limit", type=int, default=50)
+    projects.add_argument("--limit", type=int, default=50, help="Rows to return; default 50, max 100.")
     projects.add_argument("--offset", type=int, default=0)
 
-    project = sub.add_parser("project")
+    project = sub.add_parser("project", help="Show one project.")
     project.add_argument("project_id")
     project.add_argument("--format", choices=("text", "json"), default="text")
 
-    project_findings = sub.add_parser("project-findings")
+    project_findings = sub.add_parser("project-findings", help="List project findings.")
     project_findings.add_argument("project_id")
-    project_findings.add_argument("--limit", type=int, default=50)
+    project_findings.add_argument("--limit", type=int, default=50, help="Rows to return; default 50, max 100.")
     project_findings.add_argument("--offset", type=int, default=0)
     project_findings.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
-    project_runs = sub.add_parser("project-runs")
+    project_runs = sub.add_parser("project-runs", help="List runs linked to a project.")
     project_runs.add_argument("project_id")
-    project_runs.add_argument("--limit", type=int, default=50)
+    project_runs.add_argument("--limit", type=int, default=50, help="Rows to return; default 50, max 100.")
     project_runs.add_argument("--offset", type=int, default=0)
     project_runs.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
-    project_entities = sub.add_parser("project-entities")
+    project_entities = sub.add_parser("project-entities", help="List Atlas entities linked to a project.")
     project_entities.add_argument("project_id")
     project_entities.add_argument("--entity-type")
-    project_entities.add_argument("--limit", type=int, default=50)
+    project_entities.add_argument("--limit", type=int, default=50, help="Rows to return; default 50, max 100.")
     project_entities.add_argument("--offset", type=int, default=0)
     project_entities.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
-    project_packages = sub.add_parser("project-packages")
+    project_packages = sub.add_parser("project-packages", help="List project evidence packages.")
     project_packages.add_argument("project_id")
-    project_packages.add_argument("--limit", type=int, default=50)
+    project_packages.add_argument("--limit", type=int, default=50, help="Rows to return; default 50, max 100.")
     project_packages.add_argument("--offset", type=int, default=0)
     project_packages.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
-    atlas = sub.add_parser("atlas")
+    atlas = sub.add_parser("atlas", help="Read Atlas summaries, source runs, entities, and findings.")
     atlas_sub = atlas.add_subparsers(dest="atlas_command", required=True)
 
-    atlas_summary = atlas_sub.add_parser("summary")
+    atlas_summary = atlas_sub.add_parser("summary", help="Show Atlas counts.")
     _add_atlas_common_filters(atlas_summary, include_entity_type=False)
     atlas_summary.add_argument("--format", choices=("text", "json"), default="text")
 
-    atlas_runs = atlas_sub.add_parser("runs")
+    atlas_runs = atlas_sub.add_parser("runs", help="List runs that contribute Atlas data.")
     atlas_runs.add_argument("--q")
     atlas_runs.add_argument("--run-id")
-    atlas_runs.add_argument("--limit", type=int, default=30)
+    atlas_runs.add_argument("--limit", type=int, default=30, help="Rows to return; default 30, max 50.")
     atlas_runs.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
-    atlas_entities = atlas_sub.add_parser("entities")
+    atlas_entities = atlas_sub.add_parser("entities", help="List Atlas entities.")
     _add_atlas_common_filters(atlas_entities)
-    atlas_entities.add_argument("--limit", type=int, default=50)
+    atlas_entities.add_argument("--limit", type=int, default=50, help="Rows to return; default 50, max 200.")
     atlas_entities.add_argument("--offset", type=int, default=0)
     atlas_entities.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
-    atlas_entity = atlas_sub.add_parser("entity")
+    atlas_entity = atlas_sub.add_parser("entity", help="Show one Atlas entity.")
     atlas_entity.add_argument("entity_id")
     atlas_entity.add_argument("--format", choices=("text", "json"), default="text")
 
-    atlas_findings = atlas_sub.add_parser("findings")
+    atlas_findings = atlas_sub.add_parser("findings", help="List Atlas findings.")
     _add_atlas_common_filters(atlas_findings, include_entity_type=False)
     atlas_findings.add_argument("--review-state", action="append", default=[])
-    atlas_findings.add_argument("--limit", type=int, default=50)
+    atlas_findings.add_argument("--limit", type=int, default=50, help="Rows to return; default 50, max 200.")
     atlas_findings.add_argument("--offset", type=int, default=0)
     atlas_findings.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
-    atlas_finding = atlas_sub.add_parser("finding")
+    atlas_finding = atlas_sub.add_parser("finding", help="Show one Atlas finding.")
     atlas_finding.add_argument("finding_id")
     atlas_finding.add_argument("--format", choices=("text", "json"), default="text")
 
     download = sub.add_parser(
         "download",
+        help="Download one artifact by id.",
         description="Download one run artifact. Use `darklab artifacts <run_id>` first to list artifact ids.",
     )
     download.add_argument("run_id")
@@ -153,46 +166,46 @@ def _parser() -> argparse.ArgumentParser:
     )
     download.add_argument("--out", default=".", help="Destination directory.")
 
-    notify = sub.add_parser("notify")
+    notify = sub.add_parser("notify", help="Manage outbound notification channels and delivery events.")
     notify_sub = notify.add_subparsers(dest="notify_command", required=True)
 
-    notify_list = notify_sub.add_parser("list")
+    notify_list = notify_sub.add_parser("list", help="List notification channels.")
     notify_list.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
-    notify_create = notify_sub.add_parser("create")
+    notify_create = notify_sub.add_parser("create", help="Create a notification channel.")
     notify_create.add_argument("kind", choices=("webhook", "slack", "discord", "telegram", "pushover", "email"))
     notify_create.add_argument("--label")
     notify_create.add_argument("--trigger", action="append", default=[])
     notify_create.add_argument("--config", action="append", default=[], help="Channel config as KEY=VALUE.")
     notify_create.add_argument("--secret-file", help="JSON file containing write-only secret fields.")
 
-    notify_update = notify_sub.add_parser("update")
+    notify_update = notify_sub.add_parser("update", help="Update a notification channel.")
     notify_update.add_argument("channel_id")
     notify_update.add_argument("--label")
     notify_update.add_argument("--trigger", action="append", default=[])
     notify_update.add_argument("--config", action="append", default=[], help="Channel config as KEY=VALUE.")
     notify_update.add_argument("--format", choices=("text", "json"), default="text")
 
-    notify_mute = notify_sub.add_parser("mute")
+    notify_mute = notify_sub.add_parser("mute", help="Mute a notification channel.")
     notify_mute.add_argument("channel_id")
     notify_mute.add_argument("--format", choices=("text", "json"), default="text")
 
-    notify_unmute = notify_sub.add_parser("unmute")
+    notify_unmute = notify_sub.add_parser("unmute", help="Unmute a notification channel.")
     notify_unmute.add_argument("channel_id")
     notify_unmute.add_argument("--format", choices=("text", "json"), default="text")
 
-    notify_delete = notify_sub.add_parser("delete")
+    notify_delete = notify_sub.add_parser("delete", help="Delete a notification channel.")
     notify_delete.add_argument("channel_id")
 
-    notify_test = notify_sub.add_parser("test")
+    notify_test = notify_sub.add_parser("test", help="Send a test notification.")
     notify_test.add_argument("channel_id")
     notify_test.add_argument("--format", choices=("text", "json"), default="text")
 
-    notify_events = notify_sub.add_parser("events")
+    notify_events = notify_sub.add_parser("events", help="List notification delivery audit rows.")
     notify_events.add_argument("--status")
     notify_events.add_argument("--channel", dest="channel_id")
     notify_events.add_argument("--trigger")
-    notify_events.add_argument("--limit", type=int, default=50)
+    notify_events.add_argument("--limit", type=int, default=50, help="Rows to return; default 50, max 100.")
     notify_events.add_argument("--offset", type=int, default=0)
     notify_events.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
@@ -215,6 +228,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         client = DarklabClient(load_config(args))
         return _dispatch(client, args)
+    except KeyboardInterrupt:
+        print("interrupted", file=sys.stderr)
+        return STREAM_INTERRUPTED_EXIT_CODE
     except DarklabCliError as exc:
         return die(str(exc))
 
@@ -225,6 +241,8 @@ def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
             return _print_payload(client.request("GET", "/whoami"), "json")
         case "run":
             return _run(client, args)
+        case "active":
+            return _active(client, args)
         case "tail":
             return _tail(client, args.run_id, args.format, after=args.after)
         case "cancel":
@@ -371,7 +389,7 @@ def _print_notification_channel(payload: dict[str, Any], output_format: str) -> 
         return _print_payload(payload, "json")
     channel = payload.get("channel") if isinstance(payload, dict) else {}
     if isinstance(channel, dict):
-        print("  ".join(str(channel.get(field, "")) for field in ("id", "kind", "muted", "label")))
+        _print_table([channel], ("id", "kind", "muted", "label"))
     return 0
 
 
@@ -502,7 +520,12 @@ def _run(client: DarklabClient, args: argparse.Namespace) -> int:
         return _print_wait_result(waited, args.format)
     if not args.follow:
         return _print_payload(payload, args.format)
-    return _tail(client, payload["id"], "ndjson" if args.format == "ndjson" else "text")
+    return _tail(client, payload["id"], "ndjson" if args.format == "ndjson" else "text", started_by_run=True)
+
+
+def _active(client: DarklabClient, args: argparse.Namespace) -> int:
+    payload = client.request("GET", "/runs")
+    return _print_collection(payload, "runs", args.format, fields=("started", "id", "status", "run_kind", "command"))
 
 
 def _resolve_project_id(client: DarklabClient, name_or_id: object) -> str:
@@ -543,40 +566,55 @@ def _print_wait_result(payload: dict[str, Any], output_format: str) -> int:
     return _exit_code_from_run(run)
 
 
-def _tail(client: DarklabClient, run_id: str, output_format: str, *, after: str = "") -> int:
-    if output_format == "ndjson":
-        response = client.request("GET", f"/runs/{run_id}/stream", params={"format": "ndjson", "after": after}, stream=True)
+def _tail(client: DarklabClient, run_id: str, output_format: str, *, after: str = "", started_by_run: bool = False) -> int:
+    try:
+        if output_format == "ndjson":
+            response = client.request("GET", f"/runs/{run_id}/stream", params={"format": "ndjson", "after": after}, stream=True)
+            exit_code = 0
+            terminal_seen = False
+            for raw in response:
+                line = raw.decode("utf-8", errors="replace")
+                print(line, end="")
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                exit_code = _exit_code_from_event(payload, exit_code)
+                terminal_seen = terminal_seen or _is_terminal_event(payload)
+            if not terminal_seen:
+                return _stream_incomplete(run_id)
+            return exit_code
+
+        response = client.request("GET", f"/runs/{run_id}/stream", params={"after": after}, stream=True)
         exit_code = 0
         terminal_seen = False
-        for raw in response:
-            line = raw.decode("utf-8", errors="replace")
-            print(line, end="")
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            exit_code = _exit_code_from_event(payload, exit_code)
-            terminal_seen = terminal_seen or _is_terminal_event(payload)
+        for event in iter_sse_events(response):
+            if event.get("type") in {"output", "notice"} and event.get("text") is not None:
+                sys.stdout.write(str(event.get("text")).rstrip("\r\n") + "\n")
+            exit_code = _exit_code_from_event(event, exit_code)
+            terminal_seen = terminal_seen or _is_terminal_event(event)
         if not terminal_seen:
             return _stream_incomplete(run_id)
         return exit_code
-
-    response = client.request("GET", f"/runs/{run_id}/stream", params={"after": after}, stream=True)
-    exit_code = 0
-    terminal_seen = False
-    for event in iter_sse_events(response):
-        if event.get("type") in {"output", "notice"} and event.get("text") is not None:
-            sys.stdout.write(str(event.get("text")).rstrip("\r\n") + "\n")
-        exit_code = _exit_code_from_event(event, exit_code)
-        terminal_seen = terminal_seen or _is_terminal_event(event)
-    if not terminal_seen:
-        return _stream_incomplete(run_id)
-    return exit_code
+    except KeyboardInterrupt:
+        return _stream_interrupted(run_id, started_by_run=started_by_run)
 
 
 def _stream_incomplete(run_id: str) -> int:
     print(f"run stream ended before {run_id} reached a terminal event", file=sys.stderr)
     return STREAM_INCOMPLETE_EXIT_CODE
+
+
+def _stream_interrupted(run_id: str, *, started_by_run: bool) -> int:
+    if started_by_run:
+        print(
+            f"stopped following run {run_id}; use `darklab tail {run_id}` to reattach "
+            f"or `darklab cancel {run_id}` to stop it.",
+            file=sys.stderr,
+        )
+    else:
+        print(f"stopped following run {run_id}", file=sys.stderr)
+    return STREAM_INTERRUPTED_EXIT_CODE
 
 
 def _is_terminal_event(event: dict[str, Any]) -> bool:
@@ -658,11 +696,47 @@ def _print_collection(
         for item in items:
             print(json.dumps(item, sort_keys=True))
         return 0
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        print("  ".join(str(item.get(field, "")) for field in fields))
+    _print_table([item for item in items if isinstance(item, dict)], fields)
     return 0
+
+
+def _print_table(rows: list[dict[str, Any]], fields: tuple[str, ...]) -> None:
+    if not rows:
+        return
+    headers = tuple(_field_header(field) for field in fields)
+    rendered_rows = [[_format_table_value(row.get(field)) for field in fields] for row in rows]
+    widths = [
+        max(len(headers[index]), *(len(row[index]) for row in rendered_rows))
+        for index in range(len(fields))
+    ]
+    print("  ".join(headers[index].ljust(widths[index]) for index in range(len(headers))))
+    print("  ".join("-" * width for width in widths))
+    for row in rendered_rows:
+        print("  ".join(_align_table_cell(row[index], widths[index]) for index in range(len(fields))))
+
+
+def _field_header(field: str) -> str:
+    aliases = {
+        "byte_size": "BYTES",
+        "canonical_value": "VALUE",
+        "display_name": "NAME",
+        "exit_code": "EXIT",
+        "occurrence_count": "OCCURRENCES",
+        "run_kind": "KIND",
+    }
+    return aliases.get(field, field.replace("_", " ").upper())
+
+
+def _format_table_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    return str(value)
+
+
+def _align_table_cell(value: str, width: int) -> str:
+    return value.ljust(width)
 
 
 def _print_search_matches(payload: dict[str, Any], output_format: str) -> int:

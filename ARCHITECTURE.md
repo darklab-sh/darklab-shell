@@ -237,6 +237,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `DELETE` | `/api/v1/notification-channels/<channel_id>` | Deletes one outbound notification channel from the token session. |
 | `POST` | `/api/v1/notification-channels/<channel_id>/test` | Queues and synchronously dispatches a canned `test` notification through one channel and returns its delivery status. |
 | `GET` | `/api/v1/notification-events` | Returns paged notification delivery audit rows with optional channel, trigger, and status filters. |
+| `GET` | `/api/v1/runs` | Returns active current-token runs for CLI and script visibility. |
 | `POST` | `/api/v1/runs` | Starts a non-interactive command through the same validation, rewrite, broker, and persistence path as browser runs. |
 | `GET` | `/api/v1/runs/<run_id>` | Returns active broker status or completed history status for a current-token run. |
 | `GET` | `/api/v1/runs/<run_id>/output` | Returns stored run output as plain text or JSON, with optional line ranges. |
@@ -799,7 +800,7 @@ The notification worker is a dedicated Gunicorn-sibling process started and supe
 
 The API accepts `Authorization: Bearer tok_...` as the canonical identity and keeps `X-Session-ID: tok_...` as a compatibility fallback. Anonymous browser UUID sessions are rejected so headless callers must use a revocable session token. API errors use the stable `{"error":{"code":"...","message":"..."}}` envelope, and app-level 429/500 handlers preserve that envelope for `/api/v1/*`.
 
-Run start requests do not get a separate execution path. `POST /api/v1/runs` uses the browser validation/rewrite/runtime checks before starting brokered execution, honors active-project capture when no explicit project is supplied, and can link completed external runs to an explicit project id. Scripts that do not need live output can use `POST /api/v1/runs/<id>/wait` to block until the run is terminal, and output readers can request 1-based line ranges without downloading the whole stored transcript. Cross-run output search uses the browser's backend-aware history search clauses to select candidate runs, then returns bounded line-context matches for CLI and script callers. Atlas API readers reuse the same summary, source-run, entity, finding, and detail helpers as the browser overlay so filters stay aligned across the modal, project surfaces, Run Details, and CLI. Notification-channel API routes reuse the browser channel store, so channel list responses stay masked, secret values are write-only, and test sends use the same canned `test` trigger payload as the Options modal. The only project write surface in API v1 links or unlinks completed external runs from active projects; archived projects reject those mutations before the project-link service is called. Streaming is an adapter over broker events: SSE remains the native transport, while `format=ndjson` converts broker event payloads into newline-delimited JSON for CLI pipelines.
+Run start requests do not get a separate execution path. `POST /api/v1/runs` uses the browser validation/rewrite/runtime checks before starting brokered execution, honors active-project capture when no explicit project is supplied, and can link completed external runs to an explicit project id. `GET /api/v1/runs` lists active runs for the current token, while `GET /api/v1/runs/<id>` works for both active and completed runs. Scripts that do not need live output can use `POST /api/v1/runs/<id>/wait` to block until the run is terminal, and output readers can request 1-based line ranges without downloading the whole stored transcript. Cross-run output search uses the browser's backend-aware history search clauses to select candidate runs, then returns bounded line-context matches for CLI and script callers. Atlas API readers reuse the same summary, source-run, entity, finding, and detail helpers as the browser overlay so filters stay aligned across the modal, project surfaces, Run Details, and CLI. Notification-channel API routes reuse the browser channel store, so channel list responses stay masked, secret values are write-only, and test sends use the same canned `test` trigger payload as the Options modal. The only project write surface in API v1 links or unlinks completed external runs from active projects; archived projects reject those mutations before the project-link service is called. Streaming is an adapter over broker events: SSE remains the native transport, while `format=ndjson` converts broker event payloads into newline-delimited JSON for CLI pipelines.
 
 The OpenAPI dictionary in `app/services/api_v1/openapi.py` is the source of truth. `scripts/generate_api_openapi.py` writes the checked-in `docs/api-v1-openapi.json`, and pytest compares the live `/api/v1/openapi.json` response against that snapshot so route drift is visible during normal backend checks.
 
@@ -1601,12 +1602,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,024
+- behavior tests: 3,027
 - docs/inventory meta-tests: 32
-- `pytest`: 1625 (1593 behavior + 32 meta)
-- `vitest`: 1184
+- `pytest`: 1627 (1595 behavior + 32 meta)
+- `vitest`: 1185
 - `playwright`: 252
-- total: 3,061
+- total: 3,064
 
 ### Testing Architecture
 

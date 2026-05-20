@@ -819,6 +819,14 @@ OPENAPI_SPEC: dict = {
                 "required": ["run"],
                 "properties": {"run": _ref("RunSummary")},
             },
+            "ActiveRunList": {
+                "type": "object",
+                "required": ["runs", "total"],
+                "properties": {
+                    "runs": {"type": "array", "items": _ref("RunSummary")},
+                    "total": {"type": "integer"},
+                },
+            },
             "RunStartRequest": {
                 "type": "object",
                 "required": ["command"],
@@ -1366,6 +1374,12 @@ OPENAPI_SPEC: dict = {
             },
         },
         "/runs": {
+            "get": {
+                "responses": {
+                    "200": _json_response("Active runs for the current token", _ref("ActiveRunList")),
+                    **_common_errors(),
+                },
+            },
             "post": {
                 "requestBody": {
                     "required": True,

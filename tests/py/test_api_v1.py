@@ -639,6 +639,8 @@ def test_api_v1_run_stream_and_cancel_are_token_scoped(monkeypatch):
     monkeypatch.setattr(api_blueprint, "publish_run_event", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(api_blueprint.os, "killpg", lambda pid, sig: killed.update({"pid": pid, "sig": sig}))
 
+    owner_active = client.get("/api/v1/runs", headers=_headers(token))
+    cross_active = client.get("/api/v1/runs", headers=_headers(other_token))
     cross_stream = client.get(f"/api/v1/runs/{run_id}/stream", headers=_headers(other_token))
     completed_wait = client.post(f"/api/v1/runs/{completed_run_id}/wait?timeout=0", headers=_headers(token))
     running_wait = client.post(f"/api/v1/runs/{run_id}/wait?timeout=0", headers=_headers(token))
@@ -646,6 +648,10 @@ def test_api_v1_run_stream_and_cancel_are_token_scoped(monkeypatch):
     owner_cancel = client.post(f"/api/v1/runs/{run_id}/cancel", headers=_headers(token))
     cross_cancel = client.post(f"/api/v1/runs/{run_id}/cancel", headers=_headers(other_token))
 
+    assert owner_active.status_code == 200
+    assert json.loads(owner_active.data)["runs"][0]["id"] == run_id
+    assert json.loads(owner_active.data)["runs"][0]["status"] == "running"
+    assert json.loads(cross_active.data) == {"runs": [], "total": 0}
     assert cross_stream.status_code == 404
     assert completed_wait.status_code == 200
     assert json.loads(completed_wait.data)["run"]["exit_code"] == 7
@@ -954,9 +960,14 @@ def test_darklab_cli_notify_commands_use_secret_file_and_event_reader(monkeypatc
         "--secret-file",
         str(secret_file),
     ]) == 0
-    assert "ntc_cli" in capsys.readouterr().out
+    create_output = capsys.readouterr().out
+    assert "MUTED" in create_output
+    assert "ntc_cli" in create_output
+    assert "no" in create_output
     assert cli_main.main(["notify", "list"]) == 0
-    assert "CLI Hook" in capsys.readouterr().out
+    list_output = capsys.readouterr().out
+    assert "ID       KIND     MUTED  LABEL" in list_output
+    assert "CLI Hook" in list_output
     assert cli_main.main([
         "notify",
         "update",
@@ -970,9 +981,9 @@ def test_darklab_cli_notify_commands_use_secret_file_and_event_reader(monkeypatc
     ]) == 0
     assert "Updated Hook" in capsys.readouterr().out
     assert cli_main.main(["notify", "mute", "ntc_cli"]) == 0
-    assert "True" in capsys.readouterr().out
+    assert "yes" in capsys.readouterr().out
     assert cli_main.main(["notify", "unmute", "ntc_cli"]) == 0
-    assert "False" in capsys.readouterr().out
+    assert "no" in capsys.readouterr().out
     assert cli_main.main(["notify", "test", "ntc_cli"]) == 0
     assert "nte_cli" in capsys.readouterr().out
     assert cli_main.main([
@@ -987,7 +998,9 @@ def test_darklab_cli_notify_commands_use_secret_file_and_event_reader(monkeypatc
         "--limit",
         "10",
     ]) == 0
-    assert "nte_cli" in capsys.readouterr().out
+    events_output = capsys.readouterr().out
+    assert "CREATED" in events_output
+    assert "nte_cli" in events_output
     assert cli_main.main(["notify", "delete", "ntc_cli"]) == 0
     assert json.loads(capsys.readouterr().out)["removed"] is True
 
@@ -1018,6 +1031,7 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     spec = openapi_spec()
     schemas = spec["components"]["schemas"]
     assert {
+        "ActiveRunList",
         "ApiError",
         "AtlasEntity",
         "AtlasEntityDetail",
@@ -1060,6 +1074,9 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     }.issubset(schemas)
     assert spec["paths"]["/runs"]["post"]["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/RunStartRequest"
+    }
+    assert spec["paths"]["/runs"]["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ActiveRunList"
     }
     assert spec["paths"]["/runs/{run_id}/stream"]["get"]["responses"]["200"]["content"]["application/x-ndjson"]["schema"] == {
         "$ref": "#/components/schemas/NdjsonStream"
@@ -1327,6 +1344,10 @@ def test_darklab_cli_run_requires_no_follow_for_json_start_payload(monkeypatch, 
 
 def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypatch, capsys):
     cli_main = import_module("darklab_cli.__main__")
+    help_text = cli_main._parser().format_help()
+    assert "active            List active runs for the current token." in help_text
+    assert "download          Download one artifact by id." in help_text
+    assert "commands:" not in help_text
 
     class FakeResponse:
         def __iter__(self):
@@ -1398,6 +1419,19 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
             if path == "/runs/run_cli/stream" and stream:
                 assert params == {"format": "ndjson", "after": "1-0"}
                 return FakeResponse()
+            if path == "/runs" and method == "GET":
+                return {
+                    "runs": [
+                        {
+                            "id": "run_active",
+                            "started": "2026-05-19T00:00:03+00:00",
+                            "status": "running",
+                            "run_kind": "external",
+                            "command": "sleep 30",
+                        }
+                    ],
+                    "total": 1,
+                }
             if path == "/runs" and method == "POST":
                 if body == {"command": "echo linked", "project_id": "prj_cli"}:
                     return {"id": "run_wait", "status": "running"}
@@ -1462,8 +1496,9 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert "token_created" in capsys.readouterr().out
     assert cli_main.main(["history"]) == 0
     history_lines = capsys.readouterr().out.splitlines()
-    assert history_lines[0].startswith("2026-05-19T00:00:01+00:00  run_old")
-    assert history_lines[1].startswith("2026-05-19T00:00:02+00:00  run_cli")
+    assert history_lines[0].startswith("FINISHED")
+    assert history_lines[2].startswith("2026-05-19T00:00:01+00:00  run_old")
+    assert history_lines[3].startswith("2026-05-19T00:00:02+00:00  run_cli")
     assert cli_main.main(["history", "--format", "ndjson"]) == 0
     ndjson_lines = capsys.readouterr().out.splitlines()
     assert json.loads(ndjson_lines[0])["id"] == "run_old"
@@ -1474,6 +1509,10 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert capsys.readouterr().out == "ok\n"
     assert cli_main.main(["run", "echo ok", "--no-follow", "--format", "json"]) == 0
     assert json.loads(capsys.readouterr().out)["id"] == "run_cli"
+    assert cli_main.main(["active"]) == 0
+    active_output = capsys.readouterr().out
+    assert "STARTED" in active_output
+    assert "run_active" in active_output
     assert cli_main.main(["run", "echo linked", "--link-project", "CLI Project", "--wait"]) == 0
     assert "run_wait  succeeded  0  echo linked" in capsys.readouterr().out
     assert cli_main.main(["tail", "run_cli", "--format", "ndjson", "--after", "1-0"]) == 0
@@ -1523,6 +1562,59 @@ def test_darklab_cli_tail_text_does_not_double_space_output(capsys):
 
     assert cli_main._tail(FakeClient(), "run_cli_tail", "text") == 0
     assert capsys.readouterr().out == "row one\nrow two\n"
+
+
+def test_darklab_cli_tail_handles_keyboard_interrupt(capsys):
+    cli_main = import_module("darklab_cli.__main__")
+
+    class FakeResponse:
+        def __iter__(self):
+            raise KeyboardInterrupt
+            yield b""
+
+    class FakeClient:
+        def request(self, method, path, *, params=None, stream=False, **_kwargs):
+            assert method == "GET"
+            assert path == "/runs/run_cli_interrupt/stream"
+            assert params == {"after": ""}
+            assert stream is True
+            return FakeResponse()
+
+    assert cli_main._tail(FakeClient(), "run_cli_interrupt", "text") == cli_main.STREAM_INTERRUPTED_EXIT_CODE
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "stopped following run run_cli_interrupt\n"
+
+
+def test_darklab_cli_run_follow_interrupt_reports_run_id(monkeypatch, capsys):
+    cli_main = import_module("darklab_cli.__main__")
+
+    class FakeResponse:
+        def __iter__(self):
+            raise KeyboardInterrupt
+            yield b""
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def request(self, method, path, *, params=None, body=None, stream=False):
+            if path == "/runs" and method == "POST":
+                assert body == {"command": "sleep 30", "project_id": None}
+                return {"id": "run_cli_follow_interrupt", "status": "running"}
+            if path == "/runs/run_cli_follow_interrupt/stream" and method == "GET":
+                assert params == {"after": ""}
+                assert stream is True
+                return FakeResponse()
+            raise cli_main.DarklabCliError("unexpected request")
+
+    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
+
+    assert cli_main.main(["run", "sleep 30"]) == cli_main.STREAM_INTERRUPTED_EXIT_CODE
+    captured = capsys.readouterr()
+    assert "run_cli_follow_interrupt" in captured.err
+    assert "darklab tail run_cli_follow_interrupt" in captured.err
 
 
 def test_darklab_cli_tail_text_fails_when_stream_has_no_terminal_event(capsys):

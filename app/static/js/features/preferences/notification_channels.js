@@ -68,6 +68,15 @@
     node.style.display = text ? '' : 'none';
   }
 
+  function _toast(text, tone = 'success') {
+    _msg('');
+    if (typeof global.showToast === 'function') {
+      global.showToast(text, tone);
+      return;
+    }
+    _msg(text, { error: tone === 'error' });
+  }
+
   function _setBusy(busy) {
     _channelsLoading = !!busy;
     ['options-notification-refresh-btn', 'options-notification-new-btn'].forEach((id) => {
@@ -230,6 +239,7 @@
     if (_channelsLoading && !force) return _channelsCache || [];
     if (_channelsCache && !force) {
       _renderChannels(_channelsCache);
+      _msg('');
       return _channelsCache;
     }
     _setBusy(true);
@@ -242,7 +252,11 @@
       _msg('');
       return _channelsCache;
     } catch (error) {
-      _renderChannels([]);
+      if (_channelsCache) {
+        _renderChannels(_channelsCache);
+      } else {
+        _renderChannels([]);
+      }
       const message = error.message === 'session_token_required'
         ? 'Generate or set a session token before adding notification channels.'
         : `Could not load notification channels: ${error.message || 'network error'}`;
@@ -364,11 +378,10 @@
       if (resp && resp.ok === false) throw new Error(data.message || data.error || `HTTP ${resp.status}`);
       _channelsCache = null;
       await refreshNotificationChannels({ force: true });
-      _msg(channel ? 'Notification channel updated.' : 'Notification channel added.');
+      _toast(channel ? 'Notification channel updated.' : 'Notification channel added.');
       return true;
     } catch (error) {
-      editor.error.textContent = `Save failed: ${error.message || 'network error'}`;
-      editor.error.style.display = '';
+      _toast(`Save failed: ${error.message || 'network error'}`, 'error');
       return false;
     }
   }
@@ -414,9 +427,9 @@
       if (resp && resp.ok === false) throw new Error(data.message || data.error || `HTTP ${resp.status}`);
       _channelsCache = null;
       await refreshNotificationChannels({ force: true });
-      _msg(payload.muted ? 'Notification channel muted.' : 'Notification channel unmuted.');
+      _toast(payload.muted ? 'Notification channel muted.' : 'Notification channel unmuted.');
     } catch (error) {
-      _msg(`Update failed: ${error.message || 'network error'}`, { error: true });
+      _toast(`Update failed: ${error.message || 'network error'}`, 'error');
     } finally {
       _setBusy(false);
     }
@@ -432,15 +445,18 @@
       if (resp && resp.ok === false) throw new Error(data.message || data.error || `HTTP ${resp.status}`);
       const event = Array.isArray(data.events) ? data.events[0] : null;
       if (event?.status === 'sent') {
-        _msg('Test notification delivered.');
+        _toast('Test notification delivered.');
       } else if (event?.status === 'retry_wait' || event?.status === 'dead') {
         const detail = event.last_error ? `: ${event.last_error}` : '.';
-        _msg(`Test notification failed${detail}`, { error: true });
+        _toast(`Test notification failed${detail}`, 'error');
       } else {
-        _msg(data.queued ? 'Test notification queued.' : 'No test notification was queued for this channel.');
+        _toast(
+          data.queued ? 'Test notification queued.' : 'No test notification was queued for this channel.',
+          data.queued ? 'success' : 'error',
+        );
       }
     } catch (error) {
-      _msg(`Test failed: ${error.message || 'network error'}`, { error: true });
+      _toast(`Test failed: ${error.message || 'network error'}`, 'error');
     } finally {
       _setBusy(false);
     }
@@ -469,10 +485,10 @@
       if (resp && resp.ok === false) throw new Error(data.message || data.error || `HTTP ${resp.status}`);
       _channelsCache = null;
       await refreshNotificationChannels({ force: true });
-      _msg('Notification channel deleted.');
+      _toast('Notification channel deleted.');
       return true;
     } catch (error) {
-      _msg(`Delete failed: ${error.message || 'network error'}`, { error: true });
+      _toast(`Delete failed: ${error.message || 'network error'}`, 'error');
       return false;
     } finally {
       _setBusy(false);
@@ -485,7 +501,7 @@
     _el('options-notification-refresh-btn')?.addEventListener('click', () => refreshNotificationChannels({ force: true }));
     _el('options-notification-new-btn')?.addEventListener('click', () => openNotificationChannelEditor());
     if (!document.querySelector('[data-options-panel="notifications"]')?.hidden) {
-      refreshNotificationChannels({ force: true });
+      refreshNotificationChannels();
     }
   }
 

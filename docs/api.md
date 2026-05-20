@@ -109,6 +109,7 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `DELETE` | `/api/v1/notification-channels/<channel_id>` | Delete one notification channel. |
 | `POST` | `/api/v1/notification-channels/<channel_id>/test` | Send the canned `test` notification payload through one channel and return the queued event's delivery status. |
 | `GET` | `/api/v1/notification-events` | Read paged notification delivery audit rows with optional channel, trigger, and status filters. |
+| `GET` | `/api/v1/runs` | Active current-token runs. |
 | `POST` | `/api/v1/runs` | Start a non-interactive command run. |
 | `GET` | `/api/v1/runs/<run_id>` | Active or completed run status. |
 | `GET` | `/api/v1/runs/<run_id>/output` | Stored run output, with the same `format` and `range` options as the history output route. |
@@ -139,6 +140,7 @@ Start and follow from the CLI:
 darklab run "ping -c 4 darklab.sh"
 darklab run "ping -c 4 darklab.sh" --format ndjson
 darklab run "nmap -p 80 darklab.sh" --link-project "External Recon" --wait
+darklab active
 ```
 
 `POST /api/v1/runs` accepts:
@@ -160,6 +162,8 @@ Interactive PTY commands are intentionally outside v1 and return `409 interactiv
 Real command starts return `status: "running"`. Built-in and missing-runtime synthetic runs finish immediately, so their start response can return `succeeded`, `failed`, or `complete` instead.
 
 If the run broker is unavailable, the API returns `503 broker_unavailable` with `Retry-After: 5`.
+
+`darklab active` shows active runs for the current token. `darklab tail <run_id>` can attach to any active run, including a run that was started in the browser. Pressing Ctrl+C while `darklab run` is following output or while `darklab tail` is attached stops the local follow session cleanly; it does not cancel the server-side run. Use `darklab cancel <run_id>` when you want to stop the job itself.
 
 Completed external runs can be linked to or removed from active projects without changing the project itself:
 
@@ -271,30 +275,34 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | Command | Purpose |
 | --- | --- |
 | `darklab whoami` | Check token auth. |
-| `darklab run "<cmd>" [--project PROJECT_ID\|--link-project NAME] [--wait] [--wait-timeout N] [--follow\|--no-follow] [--format text\|json\|ndjson]` | Start a run. The default `--follow --format text` follows output as text, `--format ndjson` follows broker events, `--no-follow --format json` prints the start payload, and `--wait` waits for the final run status without streaming. `--link-project` resolves a project name locally before starting. Follow modes exit with code `2` if the stream closes before a terminal event. |
+| `darklab run "<cmd>" [--project PROJECT_ID\|--link-project NAME] [--wait] [--wait-timeout N] [--follow\|--no-follow] [--format text\|json\|ndjson]` | Start a run. The default `--follow --format text` follows output as text, `--format ndjson` follows broker events, `--no-follow --format json` prints the start payload, and `--wait` waits for the final run status without streaming. `--wait-timeout` defaults to the server's 30 second wait and caps at 3600 seconds. `--link-project` resolves a project name locally before starting. Follow modes exit with code `2` if the stream closes before a terminal event. |
+| `darklab active [--format text\|json\|ndjson]` | List active runs for the current token. |
 | `darklab tail <run_id> [--format text\|ndjson] [--after EVENT_ID]` | Follow an existing run stream. Exits with code `2` if the stream closes before a terminal event. |
 | `darklab cancel <run_id>` | Cancel an active run in the same token session. |
-| `darklab history [--project PROJECT_ID] [--since ISO] [--until ISO] [--limit N] [--offset N] [--format text\|json\|ndjson]` | Read paged history. CLI output includes each run's finished timestamp and prints the newest item last. |
-| `darklab grep <pattern> [--context N] [--project PROJECT_ID] [--since ISO] [--until ISO] [--limit N] [--offset N] [--format text\|json\|ndjson]` | Search saved run output across runs and print line-context matches. |
+| `darklab history [--project PROJECT_ID] [--since ISO] [--until ISO] [--limit N] [--offset N] [--format text\|json\|ndjson]` | Read paged history. `--limit` defaults to 50 and caps at 100. CLI output includes each run's finished timestamp and prints the newest item last. |
+| `darklab grep <pattern> [--context N] [--project PROJECT_ID] [--since ISO] [--until ISO] [--limit N] [--offset N] [--format text\|json\|ndjson]` | Search saved run output across runs and print line-context matches. `--limit` defaults to 50 and caps at 100; `--context` defaults to 2 and caps at 10. |
 | `darklab show <run_id> [--lines N] [--format text\|json]` | Show run metadata and optional tail lines. |
 | `darklab output <run_id> [--range N-M] [--format text\|json]` | Print stored output, optionally sliced to a 1-based line range. |
 | `darklab artifacts <run_id>` | List run artifacts. |
 | `darklab atlas summary [--run-id RUN_ID] [--orphan-filter hide\|all\|only] [--suppression-filter hide\|all\|only] [--format text\|json]` | Print Atlas summary counts. |
-| `darklab atlas runs [--q TEXT] [--run-id RUN_ID] [--limit N] [--format text\|json\|ndjson]` | List recent Atlas source runs. |
-| `darklab atlas entities [--entity-type TYPE] [--q TEXT] [--project PROJECT_ID] [--run-id RUN_ID] [--orphan-filter hide\|all\|only] [--suppression-filter hide\|all\|only] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas entities. |
+| `darklab atlas runs [--q TEXT] [--run-id RUN_ID] [--limit N] [--format text\|json\|ndjson]` | List recent Atlas source runs. `--limit` defaults to 30 and caps at 50. |
+| `darklab atlas entities [--entity-type TYPE] [--q TEXT] [--project PROJECT_ID] [--run-id RUN_ID] [--orphan-filter hide\|all\|only] [--suppression-filter hide\|all\|only] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas entities. `--limit` defaults to 50 and caps at 200. |
 | `darklab atlas entity <entity_id> [--format text\|json]` | Show one Atlas entity. |
-| `darklab atlas findings [--review-state STATE] [--q TEXT] [--project PROJECT_ID] [--run-id RUN_ID] [--orphan-filter hide\|all\|only] [--suppression-filter hide\|all\|only] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas findings. |
+| `darklab atlas findings [--review-state STATE] [--q TEXT] [--project PROJECT_ID] [--run-id RUN_ID] [--orphan-filter hide\|all\|only] [--suppression-filter hide\|all\|only] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas findings. `--limit` defaults to 50 and caps at 200. |
 | `darklab atlas finding <finding_id> [--format text\|json]` | Show one Atlas finding. |
-| `darklab projects [--limit N] [--offset N] [--format text\|json\|ndjson]` | List projects. |
+| `darklab projects [--limit N] [--offset N] [--format text\|json\|ndjson]` | List projects. `--limit` defaults to 50 and caps at 100. |
 | `darklab project <project_id> [--format text\|json]` | Show one project. |
-| `darklab project-findings <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List project findings. |
-| `darklab project-runs <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List runs linked to a project. |
-| `darklab project-entities <project_id> [--entity-type TYPE] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas entities linked to a project. |
-| `darklab project-packages <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List evidence packages. |
-| `darklab notify list\|create\|update\|mute\|unmute\|delete\|test\|events ...` | Manage outbound notification channels and read delivery audit rows. Channel secrets come from prompts or `--secret-file`, never command-line secret flags. |
+| `darklab project-findings <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List project findings. `--limit` defaults to 50 and caps at 100. |
+| `darklab project-runs <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List runs linked to a project. `--limit` defaults to 50 and caps at 100. |
+| `darklab project-entities <project_id> [--entity-type TYPE] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas entities linked to a project. `--limit` defaults to 50 and caps at 100. |
+| `darklab project-packages <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List evidence packages. `--limit` defaults to 50 and caps at 100. |
+| `darklab notify list\|create\|update\|mute\|unmute\|delete\|test\|events ...` | Manage outbound notification channels and read delivery audit rows. `notify events --limit` defaults to 50 and caps at 100. Channel secrets come from prompts or `--secret-file`, never command-line secret flags. |
 | `darklab download <run_id> --artifact ARTIFACT_ID --out DIR` | Download one artifact. |
 
 `darklab download` requires `--artifact`; without it, use `darklab artifacts <run_id>` first. Downloads use the server's attachment filename only after reducing it to a safe local basename, and the CLI refuses to overwrite an existing file. Workspace ZIP download is not exposed in API v1.
+
+Text list outputs include header rows and aligned columns. Use `--format json` or
+`--format ndjson` when you want a stable shape for scripts.
 
 ---
 

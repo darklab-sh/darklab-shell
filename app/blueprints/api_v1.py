@@ -229,23 +229,7 @@ def _history_datetime_filter(name: str) -> str:
 def _run_status_from_active_or_row(run_id: str, session_id: str) -> dict[str, Any] | None:
     for active in active_runs_for_session(session_id):
         if str(active.get("run_id") or "") == run_id:
-            return {
-                "id": run_id,
-                "command": str(active.get("command") or ""),
-                "started": active.get("started"),
-                "finished": None,
-                "status": "running",
-                "exit_code": None,
-                "run_kind": str(active.get("run_type") or "command"),
-                "output_line_count": 0,
-                "preview_truncated": False,
-                "full_output_available": False,
-                "full_output_truncated": False,
-                "artifact_count": 0,
-                "finding_count": 0,
-                "atlas_entity_count": 0,
-                "atlas_finding_count": 0,
-            }
+            return _active_run_summary(active)
     with db_connect() as conn:
         row = conn.execute(
             "SELECT * FROM runs WHERE session_id = ? AND id = ?",
@@ -259,6 +243,26 @@ def _run_status_from_active_or_row(run_id: str, session_id: str) -> dict[str, An
         run.update(_run_metadata_counts_by_run(conn, [run_id]).get(run_id, {}))
         run.update(_run_atlas_counts_by_run(conn, session_id, [run_id]).get(run_id, {}))
     return run_summary(run)
+
+
+def _active_run_summary(active: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(active.get("run_id") or ""),
+        "command": str(active.get("command") or ""),
+        "started": active.get("started"),
+        "finished": None,
+        "status": "running",
+        "exit_code": None,
+        "run_kind": str(active.get("run_type") or "command"),
+        "output_line_count": 0,
+        "preview_truncated": False,
+        "full_output_available": False,
+        "full_output_truncated": False,
+        "artifact_count": 0,
+        "finding_count": 0,
+        "atlas_entity_count": 0,
+        "atlas_finding_count": 0,
+    }
 
 
 def _history_filters() -> dict[str, str]:
@@ -997,6 +1001,13 @@ def api_notification_events():
     except (NotificationChannelError, MasterKeyError, SecretDecryptError, ValueError) as exc:
         return _notification_api_error(exc)
     return jsonify(events)
+
+
+@api_v1_bp.route("/runs")
+@require_api_auth
+def api_active_runs():
+    runs = [_active_run_summary(active) for active in active_runs_for_session(_require_session_id())]
+    return jsonify({"runs": runs, "total": len(runs)})
 
 
 @api_v1_bp.route("/runs", methods=["POST"])

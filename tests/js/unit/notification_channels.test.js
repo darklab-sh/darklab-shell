@@ -17,7 +17,7 @@ function jsonResponse(body, status = 200) {
   }
 }
 
-function loadNotificationChannels({ apiFetch = vi.fn(), showConfirm = vi.fn() } = {}) {
+function loadNotificationChannels({ apiFetch = vi.fn(), showConfirm = vi.fn(), showToast = vi.fn() } = {}) {
   document.body.innerHTML = `
     <div data-options-panel="notifications" hidden></div>
     <button id="options-notification-refresh-btn"></button>
@@ -27,6 +27,7 @@ function loadNotificationChannels({ apiFetch = vi.fn(), showConfirm = vi.fn() } 
   `
   window.apiFetch = apiFetch
   window.showConfirm = showConfirm
+  window.showToast = showToast
   new Function(NOTIFICATION_CHANNELS_SRC)()
   return {
     list: document.getElementById('options-notification-list'),
@@ -44,6 +45,7 @@ describe('notification channel preferences panel', () => {
   afterEach(() => {
     delete window.apiFetch
     delete window.showConfirm
+    delete window.showToast
     delete window.refreshNotificationChannels
     delete window.openNotificationChannelEditor
     document.body.innerHTML = ''
@@ -66,6 +68,41 @@ describe('notification channel preferences panel', () => {
     expect(list.textContent).toContain('Add a channel to get pinged when long runs finish.')
   })
 
+  it('uses cached channel metadata for tab revisits and preserves it after forced load failures', async () => {
+    const apiFetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({
+        channels: [{
+          id: 'ntc_cached',
+          kind: 'slack',
+          label: 'Ops cached',
+          config: {},
+          triggers: ['run_complete'],
+          muted: false,
+          secret_fields: [{ name: 'url', configured: true }],
+        }],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        error: 'rate_limit_exceeded',
+        message: 'Rate limit exceeded. Please slow down.',
+      }, 429))
+    const { list, msg, refreshNotificationChannels } = loadNotificationChannels({ apiFetch })
+
+    await refreshNotificationChannels()
+    expect(list.textContent).toContain('Ops cached')
+    expect(apiFetch).toHaveBeenCalledTimes(1)
+
+    await refreshNotificationChannels()
+    expect(apiFetch).toHaveBeenCalledTimes(1)
+    expect(msg.textContent).toBe('')
+
+    await refreshNotificationChannels({ force: true })
+    expect(apiFetch).toHaveBeenCalledTimes(2)
+    expect(list.textContent).toContain('Ops cached')
+    expect(msg.textContent).toContain('Rate limit exceeded. Please slow down.')
+    expect(msg.classList.contains('is-error')).toBe(true)
+  })
+
   it('validates required secrets and submits editor payloads without exposing them in the list', async () => {
     const apiFetch = vi.fn(async (url, options = {}) => {
       if (url === '/session/notification-channels' && options.method === 'POST') {
@@ -84,7 +121,8 @@ describe('notification channel preferences panel', () => {
       options.content.querySelector('[data-config-field="timeout_seconds"]').value = '7'
       return saveAction.onActivate()
     })
-    const { openNotificationChannelEditor, msg } = loadNotificationChannels({ apiFetch, showConfirm })
+    const showToast = vi.fn()
+    const { openNotificationChannelEditor, msg } = loadNotificationChannels({ apiFetch, showConfirm, showToast })
 
     await openNotificationChannelEditor()
 
@@ -101,7 +139,8 @@ describe('notification channel preferences panel', () => {
       secret_values: { url: 'https://example.invalid/hook' },
       muted: false,
     })
-    expect(msg.textContent).toBe('Notification channel added.')
+    expect(showToast).toHaveBeenCalledWith('Notification channel added.', 'success')
+    expect(msg.textContent).toBe('')
   })
 
   it('renders channel actions and routes test, mute, and delete requests', async () => {
@@ -114,13 +153,24 @@ describe('notification channel preferences panel', () => {
       muted: false,
       secret_fields: [{ name: 'bot_token', configured: true }],
     }]
+    let testFails = false
     const apiFetch = vi.fn(async (url, options = {}) => {
       if (url === '/session/notification-channels') return jsonResponse({ channels })
       if (url === '/session/notification-channels/ntc_chat/test') {
+        if (testFails) {
+          return jsonResponse({ queued: 1, events: [{ event_id: 'nte_test_2', status: 'retry_wait', last_error: 'timeout' }] })
+        }
         return jsonResponse({ queued: 1, events: [{ event_id: 'nte_test', status: 'sent', last_error: '' }] })
       }
       if (url === '/session/notification-channels/ntc_chat' && options.method === 'PATCH') {
-        channels = [{ ...channels[0], muted: JSON.parse(options.body).muted }]
+        const body = JSON.parse(options.body)
+        channels = [{
+          ...channels[0],
+          label: body.label,
+          config: body.config,
+          triggers: body.triggers,
+          muted: body.muted,
+        }]
         return jsonResponse({ channel: channels[0] })
       }
       if (url === '/session/notification-channels/ntc_chat' && options.method === 'DELETE') {
@@ -129,8 +179,16 @@ describe('notification channel preferences panel', () => {
       }
       throw new Error(`unexpected request ${url}`)
     })
-    const showConfirm = vi.fn(async () => 'delete')
-    const { list, msg, refreshNotificationChannels } = loadNotificationChannels({ apiFetch, showConfirm })
+    const showConfirm = vi.fn(async (options) => {
+      const saveAction = options.actions?.find(action => action.id === 'save')
+      if (saveAction) {
+        options.content.querySelector('input[placeholder="Label"]').value = 'Ops chat edited'
+        return saveAction.onActivate()
+      }
+      return 'delete'
+    })
+    const showToast = vi.fn()
+    const { list, msg, refreshNotificationChannels } = loadNotificationChannels({ apiFetch, showConfirm, showToast })
 
     await refreshNotificationChannels({ force: true })
     expect(list.textContent).toContain('Ops chat')
@@ -138,16 +196,29 @@ describe('notification channel preferences panel', () => {
 
     const buttons = Array.from(list.querySelectorAll('button'))
     buttons.find(button => button.textContent === 'Test').click()
-    await vi.waitFor(() => expect(msg.textContent).toBe('Test notification delivered.'))
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Test notification delivered.', 'success'))
+    expect(msg.textContent).toBe('')
 
-    buttons.find(button => button.textContent === 'Mute').click()
-    await vi.waitFor(() => expect(msg.textContent).toBe('Notification channel muted.'))
-    expect(JSON.parse(apiFetch.mock.calls.find(([url, options]) => (
+    testFails = true
+    buttons.find(button => button.textContent === 'Test').click()
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Test notification failed: timeout', 'error'))
+    expect(msg.textContent).toBe('')
+
+    buttons.find(button => button.textContent === 'Edit').click()
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Notification channel updated.', 'success'))
+    expect(list.textContent).toContain('Ops chat edited')
+    expect(msg.textContent).toBe('')
+
+    Array.from(list.querySelectorAll('button')).find(button => button.textContent === 'Mute').click()
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Notification channel muted.', 'success'))
+    expect(msg.textContent).toBe('')
+    expect(JSON.parse(apiFetch.mock.calls.slice().reverse().find(([url, options]) => (
       url === '/session/notification-channels/ntc_chat' && options?.method === 'PATCH'
     ))[1].body).muted).toBe(true)
 
     Array.from(list.querySelectorAll('button')).find(button => button.textContent === 'Delete').click()
-    await vi.waitFor(() => expect(msg.textContent).toBe('Notification channel deleted.'))
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Notification channel deleted.', 'success'))
+    expect(msg.textContent).toBe('')
     expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({ tone: 'danger' }))
     expect(list.textContent).toContain('No notification channels yet.')
   })

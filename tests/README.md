@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,024
+- behavior tests: 3,027
 - docs/inventory meta-tests: 32
-- `pytest`: 1625 (1593 behavior + 32 meta)
-- `vitest`: 1184
+- `pytest`: 1627 (1595 behavior + 32 meta)
+- `vitest`: 1185
 - `playwright`: 252
-- total: 3,061
+- total: 3,064
 
 This document is organized in two parts:
 
@@ -385,13 +385,13 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `test_api_v1_run_start_rejects_invalid_body_and_unknown_project` | Verifies API run start rejects non-object JSON bodies and unknown project ids with stable error codes. |
 | `test_api_v1_run_start_rejects_project_links_for_builtin_missing_and_interactive` | Verifies explicit project links are rejected for built-ins, missing runtimes, and interactive PTY commands. |
 | `test_api_v1_run_start_rewrites_workspace_root_output_paths` | Verifies API-started runs rewrite leading-slash workspace output paths before spawning commands. |
-| `test_api_v1_run_stream_and_cancel_are_token_scoped` | Verifies run streams, wait requests, and cancel requests are scoped to the owning token. |
+| `test_api_v1_run_stream_and_cancel_are_token_scoped` | Verifies active-run lists, run streams, wait requests, and cancel requests are scoped to the owning token. |
 | `test_api_v1_explicit_project_link_uses_finalized_run_path` | Verifies explicit project linking for API-started runs plus API run/project link and unlink routes use the guarded project-link path. |
 | `test_api_v1_openapi_route_matches_checked_in_contract` | Verifies live `/api/v1/openapi.json` matches the checked-in OpenAPI snapshot. |
 | `test_api_v1_notification_channels_crud_masks_secrets_and_lists_events` | Verifies notification channel API CRUD, secret masking, test-send payloads, and delivery event audit rows. |
 | `test_api_v1_notification_channels_are_token_scoped` | Verifies notification channel API reads and writes are scoped to the owning token. |
 | `test_api_v1_notification_channel_rejections_are_logged` | Verifies notification channel API rejections emit structured warning logs with session-safe context. |
-| `test_darklab_cli_notify_commands_use_secret_file_and_event_reader` | Verifies CLI notification commands read secrets from a JSON file, avoid command-line secret flags, and list delivery events. |
+| `test_darklab_cli_notify_commands_use_secret_file_and_event_reader` | Verifies CLI notification commands read secrets from a JSON file, avoid command-line secret flags, and render channel/event table output. |
 | `test_api_v1_openapi_generator_snapshot_is_current` | Verifies the checked-in OpenAPI JSON matches the generator output byte-for-byte. |
 | `test_api_v1_openapi_contract_describes_public_shapes` | Verifies the OpenAPI contract includes core request, response, parameter, stream, and error shapes. |
 | `test_api_v1_whoami_last_seen_is_current_auth_timestamp` | Verifies `whoami` reports and stores the current successful API authentication timestamp. |
@@ -403,8 +403,10 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `test_darklab_cli_config_file_uses_toml` | Verifies the CLI config file is parsed as TOML, including inline comments and numeric timeout values. |
 | `test_darklab_cli_config_requires_explicit_http_scheme` | Verifies CLI API URLs fail clearly when no HTTP or HTTPS scheme is provided. |
 | `test_darklab_cli_run_requires_no_follow_for_json_start_payload` | Verifies `darklab run` requires `--no-follow --format json` for start-only JSON output and rejects incompatible follow/format pairs before starting a run. |
-| `test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors` | Verifies the CLI entry point can read, stream, start runs, and report API errors through a fake API client. |
+| `test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors` | Verifies the CLI entry point can read active/current data, render table output, stream, start runs, show command help, and report API errors through a fake API client. |
 | `test_darklab_cli_tail_text_does_not_double_space_output` | Verifies CLI text streaming normalizes SSE line endings without adding blank lines between output rows. |
+| `test_darklab_cli_tail_handles_keyboard_interrupt` | Verifies Ctrl+C while tailing a run exits cleanly without a traceback. |
+| `test_darklab_cli_run_follow_interrupt_reports_run_id` | Verifies Ctrl+C while `darklab run` follows output reports the run id and reattach command. |
 | `test_darklab_cli_tail_text_fails_when_stream_has_no_terminal_event` | Verifies CLI text tailing fails when a stream closes before an exit, killed, or error event. |
 | `test_darklab_cli_tail_ndjson_fails_when_stream_has_no_terminal_event` | Verifies CLI NDJSON tailing fails when a stream closes before an exit, killed, or error event. |
 | `test_darklab_cli_download_rejects_unsafe_header_filename` | Verifies artifact downloads reject unsafe `Content-Disposition` filenames. |
@@ -2405,8 +2407,9 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | Test | Description |
 | --- | --- |
 | `renders token-required and empty states from refresh responses` | Verifies the Notifications tab surfaces durable-token errors and the empty-channel nudge from refresh responses. |
+| `uses cached channel metadata for tab revisits and preserves it after forced load failures` | Verifies the Notifications tab reuses cached channel rows for normal tab revisits and keeps the cached list visible after a forced refresh hits a rate-limit response. |
 | `validates required secrets and submits editor payloads without exposing them in the list` | Verifies the channel editor blocks missing secrets, then submits secret/config/trigger payloads through the channel route. |
-| `renders channel actions and routes test, mute, and delete requests` | Verifies notification channel rows expose the expected actions and route test, mute, and delete requests through the panel helpers. |
+| `renders channel actions and routes test, mute, and delete requests` | Verifies notification channel rows route test-send success/failure to toasts while mute and delete still update the panel state. |
 
 #### `output.test.js`
 
