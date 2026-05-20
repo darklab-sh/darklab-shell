@@ -1931,6 +1931,9 @@ def save_share():
     log.info("SHARE_CREATED", extra={
         "ip": get_client_ip(), "session": get_log_session_id(session_id), "share_id": share_id,
         "label": label, "redacted": apply_redaction,
+        "run_id": str(data.get("run_id") or ""),
+        "included_artifacts": len(data.get("artifacts") or []) if isinstance(data.get("artifacts"), list) else 0,
+        "redaction_mode": "configured" if apply_redaction else "none",
     })
     app_metrics.record_snapshot_created("manual")
     return jsonify({"id": share_id, "url": f"/share/{share_id}"})

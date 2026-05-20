@@ -1359,12 +1359,32 @@ The current event inventory is:
 | DEBUG | `HISTORY_COMMANDS_VIEWED` | `get_history_commands` | ip, session, count, limit |
 | DEBUG | `SESSION_RUN_COUNT_VIEWED` | `session_run_count` | ip, session, session_kind, count |
 | DEBUG | `STARRED_COMMANDS_VIEWED` | `session_starred_list` | ip, session, session_kind, count |
+| DEBUG | `API_OPENAPI_FETCHED` | `api_openapi` | ip |
+| DEBUG | `API_RUN_STREAM_ATTACHED` | API run stream routes | ip, session, run_id, after_id, format |
+| DEBUG | `BROKER_STREAM_CLIENT_GONE` | `stream_run_events` | run_id, reason |
+| DEBUG | `BROKER_STREAM_REATTACHED` | `stream_run_events` | run_id, after_id |
+| DEBUG | `ADVISORY_LOCK_ACQUIRED` | Postgres migration runner | namespace, lock_id |
+| DEBUG | `PTY_METRIC_WRITE_FAILED` | PTY service metrics writes | run_id, metric, error |
+| DEBUG | `DIAG_REDIS_SCAN_KEY_FAILED` | `/diag` Redis probes | stage, error |
 | INFO | `LOGGING_CONFIGURED` | `configure_logging` | level, format |
+| INFO | `APP_INITIALIZED` | app startup | version, database_backend, workspace_enabled |
+| INFO | `DB_BACKEND_SELECTED` | `db_init` | backend |
+| INFO | `MIGRATION_APPLIED` | Postgres migration runner | version, migration_name |
+| INFO | `GUNICORN_WORKER_BOOTED` | Gunicorn worker hook | pid |
+| INFO | `GUNICORN_WORKER_EXITED` | Gunicorn worker hook | pid |
 | INFO | `CMD_REWRITE` | `run_command` | ip, original, rewritten |
 | INFO | `RUN_START` | `run_command` | ip, run_id, session, pid, cmd, cmd_type |
-| INFO | `RUN_END` | `generate()` | ip, run_id, session, exit_code, elapsed, cmd, cmd_type |
+| INFO | `RUN_END` | run finalization | ip, run_id, session, exit_code, elapsed, cmd, cmd_type, output_line_count, artifact_count, finding_count, atlas_entity_count, full_output_truncated |
+| INFO | `PTY_SESSION_STARTED` | interactive PTY service | ip, run_id, session, pid, cmd, rows, cols, allow_input |
+| INFO | `PTY_SESSION_ENDED` | interactive PTY service | ip, run_id, session, exit_code, elapsed, cmd |
+| INFO | `PTY_OWNERSHIP_DISPLACED` | interactive PTY ownership claim | run_id, session, owner_client_id, owner_tab_id, displaced_client_id, displaced_tab_id |
+| INFO | `PTY_SNAPSHOT_PERSISTED` | interactive PTY service | run_id, session, rows, cols, forced |
 | INFO | `RUN_KILL` | `kill_command` | ip, run_id, pid, pgid |
 | INFO | `DB_PRUNED` | `db_init` | runs, snapshots, retention_days |
+| INFO | `API_RUN_STARTED` | API run start routes | ip, session, run_id, cmd, cmd_type, project_id |
+| INFO | `API_ARTIFACT_DOWNLOADED` | API artifact download route | ip, session, run_id, artifact_id, byte_size |
+| INFO | `PACKAGE_BUILD_STARTED` | evidence package archive builder | session, project_id, package_id, redaction_mode |
+| INFO | `PACKAGE_BUILD_COMPLETED` | evidence package archive builder | session, project_id, package_id, archive_bytes, projected_bytes, duration_ms, skipped_items, redacted_artifacts |
 | INFO | `PAGE_LOAD` | `index` | ip, session, theme |
 | INFO | `CONTENT_VIEWED` | content routes | ip, session, route, count/restricted/current/key_count |
 | INFO | `SESSION_TOKEN_GENERATED` | `session_token_generate` | ip, session, session_kind |
@@ -1374,34 +1394,62 @@ The current event inventory is:
 | INFO | `STARRED_COMMAND_ADDED` | `session_starred_add` | ip, session, session_kind, command_root, changed |
 | INFO | `STARRED_COMMAND_REMOVED` | `session_starred_remove` | ip, session, session_kind, command_root, count |
 | INFO | `STARRED_COMMANDS_CLEARED` | `session_starred_remove` | ip, session, session_kind, count |
-| INFO | `SHARE_CREATED` | `save_share` | ip, session, share_id, label, redacted |
+| INFO | `SHARE_CREATED` | `save_share` | ip, session, share_id, label, redacted, run_id, included_artifacts, redaction_mode |
 | INFO | `SHARE_VIEWED` | `get_share` | ip, session, share_id, label |
 | INFO | `SHARE_DELETED` | `delete_share` | ip, session, share_id, deleted |
 | INFO | `RUN_VIEWED` | `get_run` | ip, run_id, cmd |
 | INFO | `HISTORY_VIEWED` | `get_history` | ip, session, count, q, output_search, command_root, exit_code_filter, date_range |
+| INFO | `ATLAS_RUN_CLEANED` | Atlas cleanup route | ip, session, run_id, include_curated, detached_entities, detached_findings, deleted_entities, deleted_findings |
+| INFO | `ATLAS_ENTITY_SUPPRESSION_UPDATED` | Atlas suppression routes | ip, session, entity_id/count, suppressed, reason, bulk |
+| INFO | `ATLAS_FINDING_SUPPRESSION_UPDATED` | Atlas suppression routes | ip, session, finding_id/count, suppressed, reason, bulk |
+| INFO | `ATLAS_SAVED_VIEW_CREATED` | Atlas saved-view routes | ip, session, view_id, name |
+| INFO | `ATLAS_SAVED_VIEW_UPDATED` | Atlas saved-view routes | ip, session, view_id, name |
+| INFO | `ATLAS_SAVED_VIEW_DELETED` | Atlas saved-view routes | ip, session, view_id |
+| INFO | `SECRET_STORED` | secrets vault storage | session, secret_name, consumer_envs, is_new_secret |
+| INFO | `SECRET_RETRIEVED` | secrets vault storage | session, consumer_envs |
+| INFO | `VAULT_KEY_LOADED` | secrets vault | source |
+| INFO | `VAULT_KEY_ROTATION_COMPLETED` | secrets vault storage | session, count |
+| INFO | `INTEL_PROVIDER_LOOKUP_COMPLETED` | Atlas intel refresh | session, entity_id, provider, status |
 | WARN | `FTS_SEARCH_FALLBACK` | `get_history` | session, q, error |
 | INFO | `HISTORY_DELETED` | `delete_run` | ip, run_id, session |
 | INFO | `HISTORY_CLEARED` | `clear_history` | ip, session, count |
 | INFO | `DIAG_VIEWED` | `diag()` | ip |
 | WARN | `RUN_NOT_FOUND` | `get_run` | ip, run_id |
 | WARN | `SHARE_NOT_FOUND` | `get_share` | ip, share_id |
-| WARN | `CMD_DENIED` | `run_command` | ip, session, cmd, reason |
+| WARN | `CMD_DENIED` | `run_command` | ip, session, cmd, reason, deny_kind, rule_id |
 | WARN | `CMD_MISSING` | `run_command` | ip, session, cmd |
+| WARN | `API_AUTH_FAILED` | API auth error handler | ip, code, status |
+| WARN | `API_BROKER_UNAVAILABLE` | API run start routes | ip, reason |
+| WARN | `API_FULL_OUTPUT_LOAD_FAILED` | API output route | run_id, session, rel_path, error |
+| WARN | `RUN_FULL_OUTPUT_INDEX_FALLBACK` | run finalization | run_id, session, rel_path, error |
+| WARN | `BROKER_PUBLISH_FAILED` | broker event publish | run_id, event_type, reason, error |
+| WARN | `PTY_INPUT_DROPPED` | interactive PTY control handling | run_id, session, reason, bytes |
+| WARN | `PROJECT_QUOTA_HIT` | project quota helper | reason |
+| WARN | `PROJECT_ROUTE_FAILED` | project download routes | ip, session, project_id, package_id, route, error |
+| WARN | `SESSION_ROUTE_FAILED` | session routes | ip, session, route, error |
+| WARN | `DIAG_REDIS_SCAN_INCOMPLETE` | `/diag` Redis probes | stage, error |
+| WARN | `INTEL_PROVIDERS_DISABLED` | Atlas intel refresh | session, entity_id, entity_type |
+| WARN | `INTEL_PROVIDER_LOOKUP_SKIPPED` | Atlas intel refresh | session, entity_id, provider, status, provider_message |
+| WARN | `VAULT_DECRYPT_FAILED` | secrets vault | source |
 | WARN | `CLIENT_ERROR` | `client_log` | ip, session, context, client_message |
 | WARN | `DIAG_DENIED` | `diag()` | ip, allowed_cidrs |
 | WARN | `SESSION_TOKEN_REVOKE_DENIED` | `session_token_revoke` | ip, session, reason |
 | WARN | `SESSION_MIGRATE_DENIED` | `session_migrate` | ip, session, reason, from_session_kind, to_session_kind |
 | WARN | `SESSION_PREFERENCES_INVALID` | `session_preferences_get` | ip, session, session_kind |
 | WARN | `UNTRUSTED_PROXY` | `get_client_ip` | ip, proxy_ip, forwarded_for, path |
-| WARN | `RATE_LIMIT` | `errorhandler(429)` | ip, path, limit |
+| WARN | `RATE_LIMIT` | `errorhandler(429)` | ip, path, limit, scope |
 | WARN | `CMD_TIMEOUT` | `generate()` | ip, run_id, session, timeout, cmd |
 | WARN | `KILL_FAILED` | `kill_command` | ip, run_id, pid, error |
 | WARN | `HEALTH_DEGRADED` | `health()` | db, redis |
 | ERROR | `RUN_SPAWN_ERROR` | `run_command` | ip, session, cmd (+ traceback) |
 | ERROR | `RUN_STREAM_ERROR` | `generate()` | ip, run_id, session, cmd (+ traceback) |
 | ERROR | `RUN_SAVED_ERROR` | `generate()` | run_id, session, cmd (+ traceback) |
+| ERROR | `PACKAGE_BUILD_FAILED` | evidence package builders | ip, session, project_id, package_id, job_id, stage, error (+ traceback) |
+| ERROR | `PACKAGE_JOB_FAILED` | evidence package job worker | session, project_id, package_id, job_id, stage, error (+ traceback) |
+| ERROR | `MIGRATION_FAILED` | Postgres migration runner | version, migration_name, error (+ traceback) |
 | ERROR | `HEALTH_DB_FAIL` | `health()` | (+ traceback) |
 | ERROR | `HEALTH_REDIS_FAIL` | `health()` | (+ traceback) |
+| ERROR | `UNHANDLED_EXCEPTION` | `errorhandler(500)` | ip, session, method, path, status (+ traceback) |
 
 ### Logging Shape Notes
 

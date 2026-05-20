@@ -405,6 +405,7 @@ def _save_completed_run(
     link_project_id="",
     run_kind=RUN_KIND_EXTERNAL,
     owner_tab_id="",
+    finalize_summary=None,
 ):
     # Persist preview text and artifact metadata together so history/permalink
     # readers never observe half-written run state.
@@ -424,7 +425,13 @@ def _save_completed_run(
                 full_entries = load_full_output_entries(capture.artifact_rel_path)
                 search_text = _extract_output_search_text(full_entries)
                 persisted_entries = full_entries
-            except Exception:
+            except Exception as exc:
+                log.warning("RUN_FULL_OUTPUT_INDEX_FALLBACK", extra={
+                    "run_id": run_id,
+                    "session": get_log_session_id(session_id),
+                    "rel_path": capture.artifact_rel_path,
+                    "error": str(exc),
+                })
                 search_text = _extract_output_search_text(preview_lines)
         else:
             search_text = _extract_output_search_text(preview_lines)
@@ -639,6 +646,13 @@ def _save_completed_run(
                 "session": get_log_session_id(session_id),
                 "count": len(recorded_entities),
             })
+        if isinstance(finalize_summary, dict):
+            finalize_summary.update({
+                "artifact_count": len(recorded_artifacts),
+                "finding_count": len(recorded_findings),
+                "atlas_entity_count": len(recorded_entities),
+                "project_target_count": len(recorded_targets),
+            })
         return active_project_link
     except Exception:
         app_metrics.record_run_finalize_error("db_write")
@@ -664,11 +678,7 @@ def _finalize_completed_run(
 ):
     finished = datetime.now(timezone.utc)
     elapsed = round((finished - datetime.fromisoformat(run_started)).total_seconds(), 1)
-    log.info("RUN_END", extra={
-        "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
-        "exit_code": exit_code, "elapsed": elapsed, "cmd": original_command,
-        "cmd_type": cmd_type,
-    })
+    finalize_summary = {}
     active_project_link = _save_completed_run(
         run_id, session_id, original_command, run_started,
         finished.isoformat(), exit_code, capture,
@@ -677,7 +687,20 @@ def _finalize_completed_run(
         link_project_id=link_project_id,
         run_kind=run_kind_for_cmd_type(cmd_type),
         owner_tab_id=owner_tab_id,
+        finalize_summary=finalize_summary,
     )
+    log.info("RUN_END", extra={
+        "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
+        "exit_code": exit_code, "elapsed": elapsed, "cmd": original_command,
+        "cmd_type": cmd_type,
+        "output_line_count": int(capture.output_line_count or 0),
+        "full_output_truncated": bool(capture.full_output_truncated),
+        "full_output_available": bool(capture.full_output_available),
+        "artifact_count": int(finalize_summary.get("artifact_count") or len(workspace_artifacts or [])),
+        "finding_count": int(finalize_summary.get("finding_count") or 0),
+        "atlas_entity_count": int(finalize_summary.get("atlas_entity_count") or 0),
+        "project_target_count": int(finalize_summary.get("project_target_count") or 0),
+    })
     app_metrics.record_completed_run(
         original_command,
         run_kind_for_cmd_type(cmd_type),
@@ -833,6 +856,10 @@ def save_client_side_run():
         "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
         "exit_code": exit_code, "elapsed": elapsed, "cmd": command,
         "cmd_type": "client-builtin",
+        "output_line_count": raw_line_count,
+        "full_output_truncated": False,
+        "full_output_available": False,
+        "artifact_count": 0,
     })
     return jsonify({"ok": True, "run_id": run_id, "output_line_count": raw_line_count})
 
@@ -1089,6 +1116,25 @@ def _active_interactive_pty_count(session_id: str) -> int:
     )
 
 
+def _cmd_denied_log_extra(client_ip: str, session_id: str, command: str, reason: str) -> dict:
+    reason_text = str(reason or "")
+    deny_kind = "policy"
+    if "secret" in reason_text.lower() or "vault" in reason_text.lower():
+        deny_kind = "secret"
+    elif "workspace" in reason_text.lower() or "path" in reason_text.lower():
+        deny_kind = "workspace"
+    elif "shell operators" in reason_text.lower():
+        deny_kind = "shell_operator"
+    return {
+        "ip": client_ip,
+        "session": get_log_session_id(session_id),
+        "cmd": command,
+        "reason": reason_text,
+        "deny_kind": deny_kind,
+        "rule_id": "",
+    }
+
+
 def _prepare_interactive_pty_command(
     original_command: str,
     session_id: str,
@@ -1119,10 +1165,7 @@ def _prepare_interactive_pty_command(
         extra_allowed_prefixes=[str(spec.get("root") or tokens[0].lower())],
     )
     if not validation.allowed:
-        log.warning("CMD_DENIED", extra={
-            "ip": client_ip, "session": get_log_session_id(session_id),
-            "cmd": original_command, "reason": validation.reason,
-        })
+        log.warning("CMD_DENIED", extra=_cmd_denied_log_extra(client_ip, session_id, original_command, validation.reason))
         raise _RunPreparationError(validation.reason)
     execution_command = validation.exec_command or execution_command
     missing_runtime = runtime_missing_command_name(execution_command)
@@ -1147,18 +1190,12 @@ def _prepare_command_input(
             if expanded_command != original_command:
                 variable_notice = _variable_notice_line(expanded_command, expansion.used_names)
         except SessionVariableError as exc:
-            log.warning("CMD_DENIED", extra={
-                "ip": client_ip, "session": get_log_session_id(session_id),
-                "cmd": original_command, "reason": str(exc),
-            })
+            log.warning("CMD_DENIED", extra=_cmd_denied_log_extra(client_ip, session_id, original_command, str(exc)))
             raise _RunPreparationError(str(exc)) from exc
 
     postfilter_spec, postfilter_error = parse_synthetic_postfilter(expanded_command)
     if postfilter_error:
-        log.warning("CMD_DENIED", extra={
-            "ip": client_ip, "session": get_log_session_id(session_id),
-            "cmd": original_command, "reason": postfilter_error,
-        })
+        log.warning("CMD_DENIED", extra=_cmd_denied_log_extra(client_ip, session_id, original_command, postfilter_error))
         raise _RunPreparationError(postfilter_error)
     execution_command = postfilter_spec["base_command"] if postfilter_spec else expanded_command
     if log_pipe and postfilter_spec:
@@ -1273,10 +1310,7 @@ def _prepare_real_command(
     registry_command = execution_command
     validation = _validate_command_for_run(execution_command, session_id, workspace_cwd)
     if not validation.allowed:
-        log.warning("CMD_DENIED", extra={
-            "ip": client_ip, "session": get_log_session_id(session_id),
-            "cmd": original_command, "reason": validation.reason,
-        })
+        log.warning("CMD_DENIED", extra=_cmd_denied_log_extra(client_ip, session_id, original_command, validation.reason))
         raise _RunPreparationError(validation.reason)
     execution_command = validation.exec_command or execution_command
 

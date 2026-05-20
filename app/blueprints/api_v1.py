@@ -91,6 +91,11 @@ def _api_json_error(code: str, message: str, status: int):
 
 @api_v1_bp.errorhandler(ApiAuthError)
 def _handle_api_auth_error(exc: ApiAuthError):
+    log.warning("API_AUTH_FAILED", extra={
+        "ip": get_client_ip(),
+        "code": exc.code,
+        "status": exc.status_code,
+    })
     return _api_json_error(exc.code, exc.message, exc.status_code)
 
 
@@ -298,8 +303,13 @@ def _run_output_entries(run: dict[str, Any], *, full: bool = True) -> list[dict[
     if use_full:
         try:
             return load_full_output_entries(str(run.get("rel_path") or ""))
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("API_FULL_OUTPUT_LOAD_FAILED", extra={
+                "run_id": str(run.get("id") or ""),
+                "session": get_log_session_id(str(run.get("session_id") or "")),
+                "rel_path": str(run.get("rel_path") or ""),
+                "error": str(exc),
+            })
     return _preview_output_entries_from_run(run)
 
 
@@ -391,6 +401,7 @@ def api_health():
 
 @api_v1_bp.route("/openapi.json")
 def api_openapi():
+    log.debug("API_OPENAPI_FETCHED", extra={"ip": get_client_ip()})
     return jsonify(openapi_spec())
 
 
@@ -467,6 +478,13 @@ def api_history_run_artifact_download(run_id, artifact_id):
         handle = open_workspace_file_for_download(session_id, artifact["workspace_path"], CFG)
     except WorkspaceError as exc:
         return _api_json_error("artifact_unavailable", str(exc), 404)
+    log.info("API_ARTIFACT_DOWNLOADED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "run_id": run_id,
+        "artifact_id": artifact_id,
+        "byte_size": int(artifact.get("byte_size") or 0),
+    })
     return send_file(
         handle,
         as_attachment=True,
@@ -538,6 +556,10 @@ def api_project_packages(project_id):
 @require_api_auth
 def api_runs_start():
     if not broker_available():
+        log.warning("API_BROKER_UNAVAILABLE", extra={
+            "ip": get_client_ip(),
+            "reason": broker_unavailable_reason(),
+        })
         response, status = _api_json_error("broker_unavailable", broker_unavailable_reason(), 503)
         response.headers["Retry-After"] = "5"
         return response, status
@@ -581,6 +603,14 @@ def api_runs_start():
             exit_code,
             owner_tab_id=owner_tab_id,
         )
+        log.info("API_RUN_STARTED", extra={
+            "ip": client_ip,
+            "session": get_log_session_id(session_id),
+            "run_id": run_id,
+            "cmd": original_command,
+            "cmd_type": "builtin",
+            "project_id": link_project_id,
+        })
         return jsonify(_run_started_payload(run_id, status=_status_for_exit_code(exit_code))), 202
 
     try:
@@ -604,6 +634,14 @@ def api_runs_start():
             exit_code,
             owner_tab_id=owner_tab_id,
         )
+        log.info("API_RUN_STARTED", extra={
+            "ip": client_ip,
+            "session": get_log_session_id(session_id),
+            "run_id": run_id,
+            "cmd": original_command,
+            "cmd_type": "builtin",
+            "project_id": link_project_id,
+        })
         return jsonify(_run_started_payload(run_id, status=_status_for_exit_code(exit_code))), 202
 
     try:
@@ -633,6 +671,14 @@ def api_runs_start():
             cmd_type="missing",
             owner_tab_id=owner_tab_id,
         )
+        log.info("API_RUN_STARTED", extra={
+            "ip": client_ip,
+            "session": get_log_session_id(session_id),
+            "run_id": run_id,
+            "cmd": original_command,
+            "cmd_type": "missing",
+            "project_id": link_project_id,
+        })
         return jsonify(_run_started_payload(run_id, status="failed")), 202
 
     try:
@@ -664,6 +710,14 @@ def api_runs_start():
         name=f"api-run-broker-{started.run_id[:8]}",
         daemon=True,
     ).start()
+    log.info("API_RUN_STARTED", extra={
+        "ip": client_ip,
+        "session": get_log_session_id(session_id),
+        "run_id": started.run_id,
+        "cmd": original_command,
+        "cmd_type": "real",
+        "project_id": link_project_id,
+    })
     return jsonify(_run_started_payload(started.run_id)), 202
 
 
@@ -701,6 +755,13 @@ def api_run_stream(run_id):
     if not _run_belongs_to_session(run_id, session_id):
         return _api_json_error("not_found", "Run not found.", 404)
     after_id = _sse_after_id()
+    log.debug("API_RUN_STREAM_ATTACHED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "run_id": run_id,
+        "after_id": after_id,
+        "format": str(request.args.get("format") or "sse"),
+    })
     if str(request.args.get("format") or "").lower() == "ndjson":
         return Response(
             _ndjson_from_sse_chunks(stream_run_events(run_id, after_id=after_id)),

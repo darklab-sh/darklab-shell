@@ -153,6 +153,7 @@ def get_wrapping_key() -> bytes:
                     info=HKDF_INFO,
                 ).derive(master_key)
                 _master_key_source = source
+                log.info("VAULT_KEY_LOADED", extra={"source": source})
     assert _master_key_cache is not None
     return _master_key_cache
 
@@ -179,5 +180,6 @@ def decrypt_secret(ciphertext: bytes, nonce: bytes, *, associated_data: bytes | 
     try:
         plaintext = AESGCM(get_wrapping_key()).decrypt(bytes(nonce), bytes(ciphertext), associated_data)
     except InvalidTag as exc:
+        log.warning("VAULT_DECRYPT_FAILED", extra={"source": master_key_source()})
         raise SecretDecryptError("secret could not be decrypted with the active key") from exc
     return plaintext.decode("utf-8")

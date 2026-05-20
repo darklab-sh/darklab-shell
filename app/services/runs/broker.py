@@ -469,14 +469,32 @@ def publish_run_event(run_id: str, event_type: str, payload: dict[str, Any] | No
 
     try:
         event = _store().publish(run_id, event_type, payload)
-    except RuntimeError:
+    except RuntimeError as exc:
         app_metrics.record_broker_publish_error("redis_unavailable")
+        log.warning("BROKER_PUBLISH_FAILED", extra={
+            "run_id": run_id,
+            "event_type": event_type,
+            "reason": "redis_unavailable",
+            "error": str(exc),
+        })
         raise
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
         app_metrics.record_broker_publish_error("serialize")
+        log.warning("BROKER_PUBLISH_FAILED", extra={
+            "run_id": run_id,
+            "event_type": event_type,
+            "reason": "serialize",
+            "error": str(exc),
+        })
         raise
-    except Exception:
+    except Exception as exc:
         app_metrics.record_broker_publish_error("unknown")
+        log.warning("BROKER_PUBLISH_FAILED", extra={
+            "run_id": run_id,
+            "event_type": event_type,
+            "reason": "unknown",
+            "error": str(exc),
+        })
         raise
     app_metrics.record_broker_event(event_type)
     return event
@@ -495,6 +513,8 @@ def stream_run_events(run_id: str, after_id: str = "0-0") -> Iterator[str]:
 
     app_metrics.record_broker_subscriber_delta(1)
     current_id = _normalize_resume_event_id(after_id)
+    if not _is_beginning_event_id(current_id):
+        log.debug("BROKER_STREAM_REATTACHED", extra={"run_id": run_id, "after_id": current_id})
     block_seconds = max(1.0, float(CFG.get("run_broker_subscriber_block_seconds", 15) or 15))
     try:
         if _is_beginning_event_id(current_id):
@@ -516,7 +536,7 @@ def stream_run_events(run_id: str, after_id: str = "0-0") -> Iterator[str]:
                 if event.payload.get("type") in TERMINAL_EVENT_TYPES:
                     return
     except REDIS_STREAM_DISCONNECT_ERRORS as exc:
-        log.info("RUN_BROKER_STREAM_DISCONNECTED", extra={
+        log.debug("BROKER_STREAM_CLIENT_GONE", extra={
             "run_id": run_id,
             "reason": str(exc),
         })

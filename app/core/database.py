@@ -1065,6 +1065,7 @@ def _prune_retention(conn):
 def db_init():
     """Create the runs and snapshots tables if they don't exist, and prune old records."""
     ensure_run_output_dir()
+    log.info("DB_BACKEND_SELECTED", extra={"backend": DB_BACKEND.value})
     if DB_BACKEND == DatabaseBackend.POSTGRES:
         _postgres_db_init()
         with db_connect() as conn:

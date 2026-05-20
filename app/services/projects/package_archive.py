@@ -5,6 +5,7 @@ Evidence package archive creation and mutation helpers.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 import time
@@ -12,12 +13,14 @@ import zipfile
 
 from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
+from core.helpers import get_log_session_id
 from core.redaction import apply_redaction_rules
 from services.projects.artifacts import (
     artifact_snapshot_mismatch_reason as _artifact_snapshot_mismatch_reason,
     row_to_run_file_artifact as _row_to_run_file_artifact,
 )
 from services.projects.contracts import (
+    EvidencePackageBuildError,
     EvidencePackageTooLarge,
     MAX_ENTITY_ID_LEN,
     MAX_ENTITY_NOTE_BODY_LEN,
@@ -75,6 +78,8 @@ from services.projects.utils import (
     trim_text as _trim_text,
 )
 from services.workspace.files import WorkspaceError, resolve_workspace_path
+
+log = logging.getLogger("shell")
 
 
 def _write_bounded_archive_entry(
@@ -162,6 +167,12 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
     package = get_evidence_package(session_id, project_id, package_id)
     if package is None:
         return None
+    log.info("PACKAGE_BUILD_STARTED", extra={
+        "session": get_log_session_id(session_id),
+        "project_id": project_id,
+        "package_id": package_id,
+        "redaction_mode": package.get("redaction_mode"),
+    })
     metadata_started = time.perf_counter()
     _progress("metadata", "Collecting package metadata")
     generated_at = _now()
@@ -582,12 +593,24 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
             zip_finalize_started = time.perf_counter()
             _progress("finalizing", "Finalizing archive")
         _record_timing("zip_finalize", zip_finalize_started)
-    except Exception:
+    except EvidencePackageTooLarge:
         try:
             os.unlink(archive_path)
         except OSError:
             pass
         raise
+    except Exception as exc:
+        try:
+            os.unlink(archive_path)
+        except OSError:
+            pass
+        log.error("PACKAGE_BUILD_FAILED", exc_info=True, extra={
+            "session": get_log_session_id(session_id),
+            "project_id": project_id,
+            "package_id": package_id,
+            "stage": "archive",
+        })
+        raise EvidencePackageBuildError("evidence package archive build failed") from exc
     final_archive_bytes = os.path.getsize(archive_path)
     if max_compressed_archive_bytes and final_archive_bytes > max_compressed_archive_bytes:
         try:
@@ -613,6 +636,16 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
         "selected_artifacts": _package_selected_id_count(manifest, "artifact_ids"),
         "selected_targets": _package_selected_id_count(manifest, "target_ids"),
     }
+    log.info("PACKAGE_BUILD_COMPLETED", extra={
+        "session": get_log_session_id(session_id),
+        "project_id": project_id,
+        "package_id": package_id,
+        "archive_bytes": final_archive_bytes,
+        "projected_bytes": projected_bytes,
+        "duration_ms": metrics["duration_ms"],
+        "skipped_items": len(skipped_items),
+        "redacted_artifacts": len(redacted_artifacts),
+    })
     return {
         "filename": _package_archive_name(render_package),
         "mimetype": "application/zip",

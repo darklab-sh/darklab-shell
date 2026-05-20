@@ -10,6 +10,7 @@ from typing import Any
 from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
 from services.secrets.vault import decrypt_secret, encrypt_secret
+from services.secrets.audit import emit_secret_event
 
 SECRET_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
@@ -117,6 +118,13 @@ def upsert_secret(session_token: str, name: str, value: str, consumer_envs=None)
             (session_token, normalized_name, ciphertext, nonce, envs_json, created_at, now),
         )
         conn.commit()
+    emit_secret_event(
+        "SECRET_STORED",
+        session_token,
+        name=normalized_name,
+        consumer_envs=normalized_envs,
+        is_new_secret=created,
+    )
     return {
         "name": normalized_name,
         "consumer_envs": normalized_envs,
@@ -146,7 +154,9 @@ def get_secret_value_for_env(session_token: str, env_name: str) -> str | None:
     for row in rows:
         envs = json.loads(row["consumer_envs"] or "[]")
         if normalized_env in envs:
-            return decrypt_secret(row["ciphertext"], row["nonce"])
+            value = decrypt_secret(row["ciphertext"], row["nonce"])
+            emit_secret_event("SECRET_RETRIEVED", session_token, consumer_envs=[normalized_env])
+            return value
     return None
 
 
@@ -169,6 +179,7 @@ def rewrap_session_secrets(session_token: str) -> int:
             )
             updated += 1
         conn.commit()
+    emit_secret_event("VAULT_KEY_ROTATION_COMPLETED", session_token, count=updated)
     return updated
 
 

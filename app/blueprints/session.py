@@ -955,7 +955,13 @@ def session_run_count():
     workspace_files = 0
     try:
         workspace_files = workspace_usage(session_id).file_count
-    except Exception:
+    except Exception as exc:
+        log.warning("SESSION_ROUTE_FAILED", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "route": "session_run_count",
+            "error": str(exc),
+        })
         workspace_files = 0
     log.debug("SESSION_RUN_COUNT_VIEWED", extra={
         "ip": get_client_ip(),

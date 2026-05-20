@@ -862,7 +862,24 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
             if path == "/whoami":
                 return {"token_created": "2026-05-19 00:00:00", "last_seen_at": "2026-05-19 00:00:01"}
             if path == "/history":
-                return {"runs": [{"id": "run_cli", "status": "succeeded", "exit_code": 0, "command": "echo ok"}]}
+                return {
+                    "runs": [
+                        {
+                            "id": "run_cli",
+                            "status": "succeeded",
+                            "exit_code": 0,
+                            "finished": "2026-05-19T00:00:02+00:00",
+                            "command": "echo ok",
+                        },
+                        {
+                            "id": "run_old",
+                            "status": "succeeded",
+                            "exit_code": 0,
+                            "finished": "2026-05-19T00:00:01+00:00",
+                            "command": "date",
+                        },
+                    ],
+                }
             if path == "/history/run_cli/output":
                 return "ok\n"
             if path == "/runs/run_cli/stream" and stream:
@@ -878,8 +895,14 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
 
     assert cli_main.main(["whoami"]) == 0
     assert "token_created" in capsys.readouterr().out
+    assert cli_main.main(["history"]) == 0
+    history_lines = capsys.readouterr().out.splitlines()
+    assert history_lines[0].startswith("2026-05-19T00:00:01+00:00  run_old")
+    assert history_lines[1].startswith("2026-05-19T00:00:02+00:00  run_cli")
     assert cli_main.main(["history", "--format", "ndjson"]) == 0
-    assert '"id": "run_cli"' in capsys.readouterr().out
+    ndjson_lines = capsys.readouterr().out.splitlines()
+    assert json.loads(ndjson_lines[0])["id"] == "run_old"
+    assert json.loads(ndjson_lines[1])["id"] == "run_cli"
     assert cli_main.main(["output", "run_cli"]) == 0
     assert capsys.readouterr().out == "ok\n"
     assert cli_main.main(["run", "echo ok", "--no-follow", "--format", "json"]) == 0

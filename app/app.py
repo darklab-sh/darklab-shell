@@ -63,7 +63,7 @@ _init_metrics_environment()
 
 # Import blueprints and shared helpers after logging is configured.
 from extensions import limiter  # noqa: E402
-from core.helpers import get_client_ip, get_session_id  # noqa: E402, F401 — get_session_id re-exported
+from core.helpers import get_client_ip, get_log_session_id, get_session_id  # noqa: E402, F401 — re-exported
 from blueprints.assets import assets_bp  # noqa: E402
 from blueprints.api_v1 import api_v1_bp  # noqa: E402
 from blueprints.atlas import atlas_bp  # noqa: E402
@@ -89,8 +89,13 @@ _last_workspace_cleanup_monotonic = 0.0
 @app.errorhandler(429)
 def _rate_limit_handler(e):
     ip = get_client_ip()
-    log.warning("RATE_LIMIT", extra={"ip": ip, "path": request.path, "limit": str(e.description)})
     scope = "secrets" if request.path.startswith("/session/secrets") else "global"
+    log.warning("RATE_LIMIT", extra={
+        "ip": ip,
+        "path": request.path,
+        "limit": str(e.description),
+        "scope": scope,
+    })
     app_metrics.record_rate_limit_rejection(request.endpoint or "unknown", scope=scope)
     if request.path.startswith("/api/v1/"):
         return jsonify(json_error("rate_limited", "Rate limit exceeded. Please slow down.")), 429
@@ -107,7 +112,13 @@ def _rate_limit_handler(e):
 @app.errorhandler(500)
 def _server_error_handler(e):
     app_metrics.record_unhandled_exception(request.endpoint or "unknown")
-    log.error("UNHANDLED_EXCEPTION", exc_info=True, extra={"path": request.path})
+    log.error("UNHANDLED_EXCEPTION", exc_info=True, extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(get_session_id()),
+        "method": request.method,
+        "path": request.path,
+        "status": 500,
+    })
     if request.path.startswith("/api/v1/"):
         return jsonify(json_error("internal_error", "Internal server error.")), 500
     return jsonify({"error": "Internal server error"}), 500
@@ -180,6 +191,12 @@ app.register_blueprint(session_bp)
 app.register_blueprint(secrets_bp)
 app.register_blueprint(workspace_bp)
 app.register_blueprint(projects_bp)
+
+log.info("APP_INITIALIZED", extra={
+    "version": APP_VERSION,
+    "database_backend": str(CFG.get("database_backend") or "sqlite"),
+    "workspace_enabled": bool(CFG.get("workspace_enabled")),
+})
 
 
 if __name__ == "__main__":

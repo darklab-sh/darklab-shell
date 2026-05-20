@@ -619,10 +619,26 @@ def claim_pty_stream_owner(run_id: str, session_id: str, owner_client_id: str = 
     }
     if redis_client:
         publish_pty_event(run_id, "displaced", payload)
+        log.info("PTY_OWNERSHIP_DISPLACED", extra={
+            "run_id": run_id,
+            "session": session_id,
+            "owner_client_id": owner_client_id,
+            "owner_tab_id": owner_tab_id,
+            "displaced_client_id": payload["displaced_client_id"],
+            "displaced_tab_id": payload["displaced_tab_id"],
+        })
         return True
     run = get_pty_run(run_id, session_id)
     if run:
         run.append_event("displaced", payload)
+        log.info("PTY_OWNERSHIP_DISPLACED", extra={
+            "run_id": run_id,
+            "session": session_id,
+            "owner_client_id": owner_client_id,
+            "owner_tab_id": owner_tab_id,
+            "displaced_client_id": payload["displaced_client_id"],
+            "displaced_tab_id": payload["displaced_tab_id"],
+        })
     return True
 
 
@@ -651,8 +667,8 @@ def _queue_pty_control(run_id: str, action: str, payload: dict[str, Any]) -> Non
     redis_client.expire(_control_key(run_id), _active_ttl())
     try:
         app_metrics.PTY_CONTROL_QUEUE_DEPTH.set(int(cast(Any, redis_client.xlen(_control_key(run_id)))))
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("PTY_METRIC_WRITE_FAILED", extra={"run_id": run_id, "metric": "control_queue_depth", "error": str(exc)})
 
 
 def _read_pty_control(run: PtyRun) -> list[dict[str, Any]]:
@@ -677,6 +693,11 @@ def _apply_pty_controls(run: PtyRun) -> None:
         action = str(control.get("action", ""))
         if action == "input":
             if not run.allow_input:
+                log.warning("PTY_INPUT_DROPPED", extra={
+                    "run_id": run.run_id,
+                    "session": run.session_id,
+                    "reason": "input_disabled",
+                })
                 continue
             raw = str(control.get("data", "") or "").encode("utf-8", errors="replace")
             if raw and len(raw) <= _pty_input_max_bytes():
@@ -684,6 +705,13 @@ def _apply_pty_controls(run: PtyRun) -> None:
                     os.write(run.master_fd, raw)
                 except OSError:
                     pass
+            elif raw:
+                log.warning("PTY_INPUT_DROPPED", extra={
+                    "run_id": run.run_id,
+                    "session": run.session_id,
+                    "reason": "too_large",
+                    "bytes": len(raw),
+                })
         elif action == "resize":
             run.rows = _bounded_dimension(control.get("rows"), run.rows, 10, 60)
             run.cols = _bounded_dimension(control.get("cols"), run.cols, 40, 240)
@@ -694,8 +722,12 @@ def _apply_pty_controls(run: PtyRun) -> None:
     if redis_client:
         try:
             app_metrics.PTY_CONTROL_QUEUE_DEPTH.set(int(cast(Any, redis_client.xlen(_control_key(run.run_id)))))
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("PTY_METRIC_WRITE_FAILED", extra={
+                "run_id": run.run_id,
+                "metric": "control_queue_depth",
+                "error": str(exc),
+            })
 
 
 def _reader_loop(run: PtyRun, client_ip: str) -> None:
@@ -776,6 +808,13 @@ def _reader_loop(run: PtyRun, client_ip: str) -> None:
         exit_payload = {"code": code, "elapsed": elapsed, "interactive": True}
         exit_payload.update(completion_summary)
         _store_pty_snapshot(run, force=True)
+        log.info("PTY_SNAPSHOT_PERSISTED", extra={
+            "run_id": run.run_id,
+            "session": run.session_id,
+            "rows": run.rows,
+            "cols": run.cols,
+            "forced": True,
+        })
         run.append_event("exit", exit_payload)
         try:
             os.close(run.master_fd)
@@ -787,6 +826,13 @@ def _reader_loop(run: PtyRun, client_ip: str) -> None:
         active_run_remove(run.run_id)
         if redis_client:
             redis_client.delete(_control_key(run.run_id))
+        output_line_count = 0
+        raw_output_line_count = completion_summary.get("output_line_count", 0)
+        if isinstance(raw_output_line_count, (int, str, bytes, bytearray)):
+            try:
+                output_line_count = int(raw_output_line_count)
+            except (TypeError, ValueError):
+                output_line_count = 0
         log.info("RUN_END", extra={
             "run_id": run.run_id,
             "session": run.session_id,
@@ -795,6 +841,18 @@ def _reader_loop(run: PtyRun, client_ip: str) -> None:
             "elapsed": elapsed,
             "cmd": run.command,
             "cmd_type": "pty",
+            "output_line_count": output_line_count,
+            "full_output_truncated": bool(completion_summary.get("full_output_truncated")),
+            "full_output_available": bool(completion_summary.get("full_output_available")),
+            "artifact_count": 0,
+        })
+        log.info("PTY_SESSION_ENDED", extra={
+            "run_id": run.run_id,
+            "session": run.session_id,
+            "ip": client_ip,
+            "exit_code": code,
+            "elapsed": elapsed,
+            "cmd": run.command,
         })
         with run.condition:
             run.condition.notify_all()
@@ -895,6 +953,16 @@ def start_pty_run(
             "pid": proc.pid,
             "cmd": command,
             "cmd_type": "pty",
+        })
+        log.info("PTY_SESSION_STARTED", extra={
+            "run_id": run_id,
+            "session": session_id,
+            "ip": client_ip,
+            "pid": proc.pid,
+            "cmd": command,
+            "rows": rows_i,
+            "cols": cols_i,
+            "allow_input": bool(allow_input),
         })
         threading.Thread(
             target=_reader_loop,

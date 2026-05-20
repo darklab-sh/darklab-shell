@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -10,8 +11,11 @@ from typing import Any
 from config import CFG
 from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
+from core.helpers import get_log_session_id
 from services.intel.lookup import lookup_entity
 from services.storage.body_store import delete_text_body, inline_threshold_bytes, maybe_store_text_body
+
+log = logging.getLogger("shell")
 
 
 def _now() -> str:
@@ -52,6 +56,12 @@ def refresh_entity_intel(session_id: str, entity_id: str) -> dict[str, Any] | No
         _lookup_value(entity["type"], entity["canonical_value"]),
         session_id=session_id,
     )
+    if lookup.configured_count == 0:
+        log.warning("INTEL_PROVIDERS_DISABLED", extra={
+            "session": get_log_session_id(session_id),
+            "entity_id": entity_id,
+            "entity_type": entity["type"],
+        })
     fetched_at = _now()
     snapshots: list[dict[str, Any]] = []
     replaced_payloads: list[Any] = []
@@ -66,6 +76,21 @@ def refresh_entity_intel(session_id: str, entity_id: str) -> dict[str, Any] | No
                 status = "ok"
                 payload = provider_lookup.result.payload
                 summary = _snapshot_summary(payload)
+                log.info("INTEL_PROVIDER_LOOKUP_COMPLETED", extra={
+                    "session": get_log_session_id(session_id),
+                    "entity_id": entity_id,
+                    "provider": provider,
+                    "status": status,
+                })
+            else:
+                level = logging.WARNING if status in {"error", "rate_limited", "unreachable"} else logging.DEBUG
+                log.log(level, "INTEL_PROVIDER_LOOKUP_SKIPPED", extra={
+                    "session": get_log_session_id(session_id),
+                    "entity_id": entity_id,
+                    "provider": provider,
+                    "status": status,
+                    "provider_message": provider_lookup.message,
+                })
             snapshot_id = "intel_" + uuid.uuid4().hex
             existing = conn.execute(
                 "SELECT data_json FROM entity_intel_snapshots WHERE entity_id = ? AND provider = ?",

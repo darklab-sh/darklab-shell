@@ -5,9 +5,12 @@ Shared project workspace utility helpers.
 from __future__ import annotations
 
 import secrets
+import logging
 from datetime import datetime, timezone
 
 from services.projects.contracts import ProjectWorkspaceQuotaExceeded
+
+log = logging.getLogger("shell")
 
 
 def cfg_int(key, default, *, cfg=None):
@@ -74,6 +77,7 @@ def page_payload(items_key, items, total, limit, offset, *, has_more=None, extra
 
 
 def raise_quota(message):
+    log.warning("PROJECT_QUOTA_HIT", extra={"reason": str(message or "")})
     raise ProjectWorkspaceQuotaExceeded(message)
 
 

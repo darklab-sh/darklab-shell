@@ -264,8 +264,8 @@ def _diag_redis_stats(client):
 
     try:
         stats["dbsize"] = int(client.dbsize() or 0)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("DIAG_REDIS_SCAN_INCOMPLETE", extra={"stage": "dbsize", "error": str(exc)})
 
     namespaces: list[dict] = []
     runstream_sample: list[str] = []
@@ -284,7 +284,8 @@ def _diag_redis_stats(client):
         for key in runstream_sample[:_DIAG_REDIS_STREAM_SAMPLE_CAP]:
             try:
                 lengths.append(int(client.xlen(key) or 0))
-            except Exception:
+            except Exception as exc:
+                log.debug("DIAG_REDIS_SCAN_KEY_FAILED", extra={"stage": "stream_length", "error": str(exc)})
                 continue
         if lengths:
             lengths.sort()
@@ -314,7 +315,8 @@ def _diag_redis_stats(client):
                 run_id = key.split(":", 1)[-1]
                 try:
                     raw_val = client.get(key)
-                except Exception:
+                except Exception as exc:
+                    log.debug("DIAG_REDIS_SCAN_KEY_FAILED", extra={"stage": "orphan_get", "error": str(exc)})
                     continue
                 if raw_val is None:
                     continue
@@ -329,13 +331,14 @@ def _diag_redis_stats(client):
                 try:
                     if not client.sismember(f"sessionprocs:{session_id}", run_id):
                         orphans += 1
-                except Exception:
+                except Exception as exc:
+                    log.debug("DIAG_REDIS_SCAN_KEY_FAILED", extra={"stage": "orphan_membership", "error": str(exc)})
                     continue
             if not cursor:
                 break
         stats["orphans"] = {"probed": scanned, "orphaned": orphans}
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("DIAG_REDIS_SCAN_INCOMPLETE", extra={"stage": "orphan_probe", "error": str(exc)})
 
     try:
         memory = client.info("memory") or {}

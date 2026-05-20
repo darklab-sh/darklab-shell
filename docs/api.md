@@ -173,7 +173,7 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab run "<cmd>" [--project PROJECT_ID] [--follow\|--no-follow] [--format text\|json\|ndjson]` | Start a run. The default `--follow --format text` follows output as text, `--format ndjson` follows broker events, and `--no-follow --format json` prints the start payload. `--format json` is start-only, and `--format ndjson` is follow-only. Follow modes exit with code `2` if the stream closes before a terminal event. |
 | `darklab tail <run_id> [--format text\|ndjson] [--after EVENT_ID]` | Follow an existing run stream. Exits with code `2` if the stream closes before a terminal event. |
 | `darklab cancel <run_id>` | Cancel an active run in the same token session. |
-| `darklab history [--project PROJECT_ID] [--since ISO] [--until ISO] [--limit N] [--offset N] [--format text\|json\|ndjson]` | Read paged history. |
+| `darklab history [--project PROJECT_ID] [--since ISO] [--until ISO] [--limit N] [--offset N] [--format text\|json\|ndjson]` | Read paged history. CLI output includes each run's finished timestamp and prints the newest item last. |
 | `darklab show <run_id> [--lines N] [--format text\|json]` | Show run metadata and optional tail lines. |
 | `darklab output <run_id> [--format text\|json]` | Print stored output. |
 | `darklab artifacts <run_id>` | List run artifacts. |

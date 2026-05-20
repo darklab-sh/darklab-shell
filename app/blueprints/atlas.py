@@ -446,6 +446,7 @@ def atlas_run_cleanup(run_id):
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
         "run_id": run_id,
+        "include_curated": include_curated,
         "detached_entities": cleanup.get("detached_entities", 0),
         "detached_findings": cleanup.get("detached_findings", 0),
         "deleted_entities": cleanup.get("deleted_entities", 0),
@@ -546,6 +547,7 @@ def atlas_entity_suppression_update(entity_id):
         "session": get_log_session_id(session_id),
         "entity_id": entity_id,
         "suppressed": suppressed,
+        "reason": reason,
     })
     return jsonify({"ok": True, "entity_id": entity_id, "suppressed": suppressed})
 
@@ -583,6 +585,14 @@ def atlas_entities_bulk_suppression_update():
         {"entity_id": item_id, "status": "updated" if item_id in found_ids else "not_found"}
         for item_id in entity_ids
     ]
+    log.info("ATLAS_ENTITY_SUPPRESSION_UPDATED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "count": len(found_ids),
+        "not_found": len(entity_ids) - len(found_ids),
+        "suppressed": suppressed,
+        "bulk": True,
+    })
     return jsonify({
         "ok": True,
         "suppressed": suppressed,
@@ -742,6 +752,7 @@ def atlas_finding_suppression_update(finding_id):
         "session": get_log_session_id(session_id),
         "finding_id": finding_id,
         "suppressed": suppressed,
+        "reason": reason,
     })
     return jsonify({"ok": True, "finding_id": finding_id, "suppressed": suppressed})
 
@@ -779,6 +790,14 @@ def atlas_findings_bulk_suppression_update():
         {"finding_id": item_id, "status": "updated" if item_id in found_ids else "not_found"}
         for item_id in finding_ids
     ]
+    log.info("ATLAS_FINDING_SUPPRESSION_UPDATED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "count": len(found_ids),
+        "not_found": len(finding_ids) - len(found_ids),
+        "suppressed": suppressed,
+        "bulk": True,
+    })
     return jsonify({
         "ok": True,
         "suppressed": suppressed,

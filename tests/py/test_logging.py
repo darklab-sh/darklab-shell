@@ -455,6 +455,8 @@ class TestCmdDeniedEvent:
                 self._post_run(client, "cat /etc/passwd")
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "CMD_DENIED")
         assert call.kwargs["extra"]["cmd"] == "cat /etc/passwd"
+        assert call.kwargs["extra"]["deny_kind"] == "policy"
+        assert "rule_id" in call.kwargs["extra"]
 
     def test_shell_operator_block_also_emits_cmd_denied(self):
         # Shell operator blocks are a special case of is_command_allowed returning False
@@ -498,6 +500,7 @@ class TestRateLimitEvent:
                 shell_app._rate_limit_handler(e)
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "RATE_LIMIT")
         assert call.kwargs["extra"]["limit"] == "5 per 1 second"
+        assert call.kwargs["extra"]["scope"] == "global"
 
     def test_rate_limit_returns_json_429(self):
         from werkzeug.exceptions import TooManyRequests

@@ -14,6 +14,7 @@ from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from services import metrics as app_metrics
 from services.projects.contracts import (
     BULK_AUDIT_FAILURE_LIMIT,
+    EvidencePackageBuildError,
     EvidencePackageTooLarge,
     MAX_BULK_RUN_ACTION_ITEMS,
     ProjectWorkspaceError,
@@ -617,8 +618,16 @@ def projects_packages_download(project_id, package_id):
     except EvidencePackageTooLarge as exc:
         app_metrics.record_evidence_package_build("too_large", time.perf_counter() - build_started)
         return jsonify({"error": str(exc)}), 413
-    except Exception:
+    except EvidencePackageBuildError as exc:
         app_metrics.record_evidence_package_build("error", time.perf_counter() - build_started)
+        log.error("PACKAGE_BUILD_FAILED", exc_info=True, extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "project_id": project_id,
+            "package_id": package_id,
+            "stage": "download",
+            "error": str(exc),
+        })
         raise
     if archive is None:
         app_metrics.record_evidence_package_build("not_found", time.perf_counter() - build_started)
@@ -651,7 +660,15 @@ def projects_packages_download(project_id, package_id):
             as_attachment=True,
             download_name=archive["filename"],
         )
-    except Exception:
+    except Exception as exc:
+        log.warning("PROJECT_ROUTE_FAILED", exc_info=True, extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "project_id": project_id,
+            "package_id": package_id,
+            "route": "projects_packages_download",
+            "error": str(exc),
+        })
         try:
             os.unlink(archive_path)
         except OSError:
@@ -724,7 +741,16 @@ def projects_packages_download_job_file(project_id, package_id, job_id):
             as_attachment=True,
             download_name=archive["filename"],
         )
-    except Exception:
+    except Exception as exc:
+        log.warning("PROJECT_ROUTE_FAILED", exc_info=True, extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "project_id": project_id,
+            "package_id": package_id,
+            "job_id": job_id,
+            "route": "projects_packages_download_job_file",
+            "error": str(exc),
+        })
         discard_evidence_package_archive_job(job_id)
         raise
 

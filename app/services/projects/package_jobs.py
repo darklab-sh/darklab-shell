@@ -7,6 +7,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -14,6 +15,7 @@ import secrets
 import time
 
 from config import CFG, resolve_data_dir
+from core.helpers import get_log_session_id
 from services import metrics as app_metrics
 from services.projects.contracts import EvidencePackageTooLarge
 from services.projects.package_archive import build_evidence_package_archive
@@ -22,6 +24,7 @@ _JOB_ID_RE = re.compile(r"^epj_[a-f0-9]{24}$")
 _JOB_TTL = timedelta(hours=2)
 _JOB_DIR = Path(resolve_data_dir()) / "evidence-package-jobs"
 _EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="evidence-package")
+log = logging.getLogger("shell")
 
 
 def _now():
@@ -214,10 +217,27 @@ def _run_job(job_id, cfg_snapshot):
         )
     except EvidencePackageTooLarge as exc:
         app_metrics.record_evidence_package_build("too_large", time.perf_counter() - started)
+        log.warning("PACKAGE_BUILD_FAILED", extra={
+            "session": get_log_session_id(str(job.get("session_id") or "")),
+            "project_id": job.get("project_id"),
+            "package_id": job.get("package_id"),
+            "job_id": job_id,
+            "stage": "archive",
+            "error_status": 413,
+            "error": str(exc),
+        })
         _update("failed", "failed", str(exc), error=str(exc), error_status=413)
         return
     except Exception as exc:
         app_metrics.record_evidence_package_build("error", time.perf_counter() - started)
+        log.error("PACKAGE_JOB_FAILED", exc_info=True, extra={
+            "session": get_log_session_id(str(job.get("session_id") or "")),
+            "project_id": job.get("project_id"),
+            "package_id": job.get("package_id"),
+            "job_id": job_id,
+            "stage": "archive",
+            "error": str(exc),
+        })
         _update("failed", "failed", "Package archive build failed.", error=str(exc), error_status=500)
         return
     if archive is None:

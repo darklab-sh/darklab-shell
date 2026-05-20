@@ -5060,13 +5060,13 @@ class TestRunBrokerMemoryStore:
                 assert after_id == "0-0"
                 raise run_broker.RedisConnectionError("Connection closed by server.")
 
-        with mock.patch.object(run_broker.log, "info") as log_info, \
+        with mock.patch.object(run_broker.log, "debug") as log_debug, \
              mock.patch.object(run_broker, "_store", return_value=FakeStore()):
             events = list(run_broker.stream_run_events("run-1"))
 
         assert events == []
-        log_info.assert_called_once()
-        assert log_info.call_args.args == ("RUN_BROKER_STREAM_DISCONNECTED",)
+        log_debug.assert_called_once()
+        assert log_debug.call_args.args == ("BROKER_STREAM_CLIENT_GONE",)
 
     def test_decode_payload_accepts_redis_bytes_fields(self):
         payload = run_broker._decode_payload({b"payload": b'{"type":"output","text":"hello"}'})

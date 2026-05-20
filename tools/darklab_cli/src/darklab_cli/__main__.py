@@ -115,7 +115,13 @@ def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
             return _print_payload(client.request("POST", f"/runs/{args.run_id}/cancel"), "json")
         case "history":
             payload = client.request("GET", "/history", params=_page_params(args))
-            return _print_collection(payload, "runs", args.format, fields=("id", "status", "exit_code", "command"))
+            return _print_collection(
+                payload,
+                "runs",
+                args.format,
+                fields=("finished", "id", "status", "exit_code", "command"),
+                reverse=True,
+            )
         case "show":
             payload = client.request("GET", f"/history/{args.run_id}")
             if args.format == "json":
@@ -247,11 +253,22 @@ def _print_payload(payload: Any, output_format: str) -> int:
     return 0
 
 
-def _print_collection(payload: dict[str, Any], key: str, output_format: str, *, fields: tuple[str, ...]) -> int:
+def _print_collection(
+    payload: dict[str, Any],
+    key: str,
+    output_format: str,
+    *,
+    fields: tuple[str, ...],
+    reverse: bool = False,
+) -> int:
     items = payload.get(key) if isinstance(payload, dict) else []
     if not isinstance(items, list):
         items = []
+    if reverse:
+        items = list(reversed(items))
     if output_format == "json":
+        if isinstance(payload, dict):
+            payload = {**payload, key: items}
         print_json(payload)
         return 0
     if output_format == "ndjson":

@@ -66,3 +66,7 @@ class ProjectWorkspaceQuotaExceeded(ProjectWorkspaceError):
 
 class EvidencePackageTooLarge(ProjectWorkspaceQuotaExceeded):
     """Raised when an evidence package archive would exceed configured limits."""
+
+
+class EvidencePackageBuildError(ProjectWorkspaceError):
+    """Raised when an evidence package archive fails while being built."""
