@@ -446,6 +446,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── notifications.py    # /session/notification-channels* browser notification-channel CRUD and test-send routes
 │   │   ├── projects.py         # /projects* project workspace CRUD and relationship routes
 │   │   ├── run.py              # /runs broker starts/streams, /run/client history persistence, /kill, and run orchestration
+│   │   ├── schedules.py        # /schedules* browser scheduled-run CRUD and manual fire routes
 │   │   ├── secrets.py          # /session/secrets* encrypted per-session secret metadata and write routes
 │   │   ├── session.py          # /session/token/*, /session/preferences, /session/variables, /session/workflows*, /session/recent-values, /session/migrate, /session/starred*
 │   │   └── workspace.py        # /workspace/files* app-managed session file routes
@@ -979,6 +980,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   ├── test_request_kill_and_commands.py # /kill, request parsing, loader edges, and built-in command resolution
     │   ├── test_routes.py      # Flask integration tests via test client (all HTTP routes)
     │   ├── test_run_history_share.py # Higher-value /runs, history, share, built-in command, and persistence flows
+    │   ├── test_schedules.py   # Scheduled-run route CRUD, validation, quota, isolation, and manual fire coverage
     │   ├── test_session_routes.py # session-token generation/verify/migrate/revoke/starred/preferences route coverage
     │   └── test_validation.py  # Tests for command validation, rewrites, and runtime availability helpers
     └── ui-capture-scenes.md    # Reviewer hand-off manifest for the UI screenshot capture pack — per-scene "what to check" tables for design review

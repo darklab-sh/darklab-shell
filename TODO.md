@@ -42,16 +42,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
     - Reuse the existing `/runs` broker, command preparation path (allowlist, deny-prefix, registry rewrite, variable expansion), and history persistence so a scheduled run is indistinguishable from a manually-launched run except for the source tag.
     - Reuse the shipped outbound notification queue for scheduled-run-failed and run-complete fan-out.
     - Non-goals for v1: workflow scheduling (commands only), cross-session schedules, per-target scheduling, calendar-based holidays/blackout windows.
-  - Phase 1 — REST blueprint and validation
-    - Add `app/blueprints/schedules.py`, mounted at `/schedules`:
-      - `GET /schedules` — list current-session normal schedules (`owner_kind='user'`) with derived `next_run_at` and `enabled`.
-      - `POST /schedules` — create a normal schedule with `owner_kind='user'`. Validates: command goes through the same allowlist/deny-prefix/registry-rewrite pipeline as `/runs` (without spawning), cron expression parses as five-field POSIX cron (reject seconds-field and `@` aliases), timezone is in the IANA list, schedule count is under the per-session cap of 32.
-      - `PATCH /schedules/<id>` — partial update (enabled toggle, cron change, label, command change re-validates).
-      - `DELETE /schedules/<id>`.
-      - `POST /schedules/<id>/run-now` — operator-initiated immediate fire; uses the same dispatch/preparation path as a scheduler-driven fire but fires directly from the web worker. It does not depend on the scheduler process being healthy.
-    - Each normal scheduled fire enqueues through the existing `/runs` broker with `session_token` set to the schedule owner, `run_kind='external'`, and `metadata.scheduled = {schedule_id, fired_at, manual}`. The broker refuses if the session token is revoked; the scheduler logs the skip and writes a `skipped_revoked` `schedule_fires` row.
-    - Tests: `tests/py/test_schedules.py` covering CRUD, cross-session 404, allowlist rejection on create, allowlist re-validation on PATCH, manual run-now path.
-  - Phase 2 — Fire path and broker integration
+  - Phase 1 — Fire path and broker integration
     - The scheduler `worker.py` polls `schedules` for the next fire roughly every 5 seconds. For each due row:
       - Resolve the session token. If revoked since the schedule was saved, write `skipped_revoked`, disable the schedule, and emit `SCHEDULE_DISABLED_REVOKED`.
       - Apply the v1 overlap policy: if the previous fire's run is still active, skip with `skipped_overlap`. Queueing and kill-and-fire are intentionally deferred so a stuck or long-running scan does not create backlog or destroy useful evidence.
@@ -64,22 +55,22 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
       - Scheduled runs show the same badge in Run Details with a `schedule_id` link that opens the Schedules modal at that schedule.
       - A schedule whose token is revoked stops firing and is disabled.
       - Two due schedules with overlapping windows still fire in a deterministic order (by `next_run_at`, then `id`).
-  - Phase 3 — Terminal `schedule` built-in
+  - Phase 2 — Terminal `schedule` built-in
     - Add `schedule` to the session built-in family with subcommands: `list`, `create --cron "<expr>" -- <cmd>`, `create --every hourly|daily|weekly -- <cmd>`, `pause <id>`, `resume <id>`, `delete <id>`, `run <id>`, `info <id>`.
     - Browser-owned (like `theme`, `config`, `session-token`) because output is transcript-shaped and confirmations belong inline. Reuses the shared pending-confirm state used by `session-token`.
     - Autocomplete: schedule IDs complete against the active session's schedule list.
-  - Phase 4 — Browser Schedules modal
+  - Phase 3 — Browser Schedules modal
     - New `app/static/js/features/schedules/`. Modal lives beside Workflows. Two-column layout: list on left, detail/edit on right.
     - Cadence editor: preset chips (Every hour / day / week / custom cron) plus a live "next 3 fires" preview computed via a token-authenticated, no-body, no-write server endpoint (`GET /schedules/preview?cron=...&tz=...`) so the browser does not bundle a croniter clone.
     - History rows for a schedule's past fires link to their run detail.
     - Run Details gets a "Schedule this command" action that opens the Schedules modal pre-filled from that run's command, giving operators a visible path from a completed run to a recurring schedule.
     - Revoked-token state appears as a clear paused badge: "this schedule is paused because its session token was revoked." The schedule is disabled, not deleted, so the operator can re-enable after re-issuing the token.
     - Pressables and confirms follow the design-system primitives.
-  - Phase 5 — CLI and API surfaces
+  - Phase 4 — CLI and API surfaces
     - `/api/v1/schedules` GET/POST/PATCH/DELETE plus `/api/v1/schedules/<id>/run-now` and `/api/v1/schedules/<id>/fires` (paginated audit).
     - CLI: `darklab schedule list / create / pause / resume / delete / run / info / fires`.
     - CLI `darklab schedule create` accepts both `--cron "0 * * * *" -- <cmd>` and `--every hourly|daily|weekly -- <cmd>` for symmetry with the modal. The CLI joins `argv_after_dashdash` with spaces and submits that as the command body, so operators can pass normal shell-shaped command arguments without wrapping the whole command in one quoted string.
-  - Phase 6 — hardening, docs, release
+  - Phase 5 — hardening, docs, release
     - Docs: new `docs/schedules.md` covering cron support, timezone handling, missed-fire behavior, overlap policy, fan-out to notifications, and the per-session schedule cap.
     - `CONFIGURATION.md` updates for `scheduler.{lock_path, tick_seconds, max_per_session, missed_fire_policy, max_catchup_window_seconds, default_timezone}`. `scheduler.max_per_session` defaults to 32.
     - `ARCHITECTURE.md` gains a "Scheduler process" subsection under Runtime Topology and lists the reserved advisory-lock namespaces used by migrations, scheduler, notification worker, and notification sweep.

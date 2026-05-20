@@ -117,6 +117,22 @@ def _bool_param(value: Any) -> Any:
     return dialect_for_backend(database.DB_BACKEND).boolean_param(value)
 
 
+def _max_schedules_per_session() -> int:
+    try:
+        configured = int(database.CFG.get("scheduler", {}).get("max_per_session") or 32)
+    except (TypeError, ValueError):
+        configured = 32
+    return max(1, configured)
+
+
+def _normal_schedule_count(conn, session_token: str) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) AS count FROM schedules WHERE session_token = ? AND owner_kind = ?",
+        (session_token, OWNER_KIND_USER),
+    ).fetchone()
+    return int(_value(row, "count", 0) or 0)
+
+
 def _next_fire_iso(cron_expr: str, timezone_name: str, after: datetime | None = None) -> str:
     return next_fire(cron_expr, after or _utc_now_dt(), timezone_name).isoformat()
 
@@ -181,6 +197,8 @@ def create_schedule(
         conn = ctx.__enter__()
     assert conn is not None
     try:
+        if schedule.owner_kind == OWNER_KIND_USER and _normal_schedule_count(conn, session) >= _max_schedules_per_session():
+            raise ScheduleError("schedule quota exceeded for this session")
         conn.execute(
             """
             INSERT INTO schedules (

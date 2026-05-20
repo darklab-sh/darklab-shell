@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,031
+- behavior tests: 3,037
 - docs/inventory meta-tests: 32
-- `pytest`: 1631 (1599 behavior + 32 meta)
+- `pytest`: 1637 (1605 behavior + 32 meta)
 - `vitest`: 1185
 - `playwright`: 252
-- total: 3,068
+- total: 3,074
 
 This document is organized in two parts:
 
@@ -1686,6 +1686,17 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestHistoryIsolation.test_public_run_permalink_omits_intel_output_for_non_owner` | Verifies that public non-owner run permalink JSON omits app-native intel response bodies. |
 | `TestShareRoundTrip.test_share_json_roundtrip_preserves_structured_content` | Checks that share JSON roundtrip preserves structured content. |
 | `TestShareRoundTrip.test_share_omits_intel_output_even_when_raw_requested` | Verifies that raw snapshot sharing omits app-native intel response bodies from JSON and HTML. |
+
+#### `test_schedules.py`
+
+| Test | Description |
+| --- | --- |
+| `TestSchedulesRoutes.test_schedule_crud_for_current_session` | Verifies current-session schedule create, list, update, delete, cadence normalization, and enabled-state shaping through the browser routes. |
+| `TestSchedulesRoutes.test_schedule_routes_hide_cross_session_rows` | Verifies schedules are session-isolated and cross-session patch/delete attempts return 404. |
+| `TestSchedulesRoutes.test_schedule_create_rejects_disallowed_command` | Verifies schedule creation rejects commands that fail the shared command policy. |
+| `TestSchedulesRoutes.test_schedule_patch_revalidates_changed_command` | Verifies schedule updates re-run command validation when the command changes. |
+| `TestSchedulesRoutes.test_schedule_run_now_records_fire_without_scheduler_process` | Verifies manual run-now records a schedule fire and advances schedule metadata without depending on the scheduler worker. |
+| `TestSchedulesRoutes.test_schedule_create_enforces_session_cap` | Verifies normal schedules respect the configured per-session schedule cap. |
 
 #### `test_session_routes.py`
 

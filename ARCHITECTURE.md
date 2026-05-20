@@ -333,6 +333,16 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | `POST` | `/atlas/entities/<entity_id>/project_links` | Adds an Atlas entity to a project through the shared project-link model. |
 | `DELETE` | `/atlas/entities/<entity_id>/project_links/<project_id>` | Removes an Atlas entity from a project. |
 
+### Schedule Routes
+
+| Method | Endpoint | Description |
+| -------- | ---------- | ------------- |
+| `GET` | `/schedules` | Lists normal scheduled runs for the current durable session token. |
+| `POST` | `/schedules` | Creates a normal scheduled run after validating the command, cadence, timezone, and per-session schedule cap. |
+| `PATCH` | `/schedules/<schedule_id>` | Updates one current-session schedule and re-validates changed command or cadence fields. |
+| `DELETE` | `/schedules/<schedule_id>` | Deletes one current-session normal schedule. |
+| `POST` | `/schedules/<schedule_id>/run-now` | Fires one current-session schedule immediately from the web worker and records a schedule fire audit row. |
+
 ### Session Routes
 
 | Method | Endpoint | Description |
@@ -1613,12 +1623,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,031
+- behavior tests: 3,037
 - docs/inventory meta-tests: 32
-- `pytest`: 1631 (1599 behavior + 32 meta)
+- `pytest`: 1637 (1605 behavior + 32 meta)
 - `vitest`: 1185
 - `playwright`: 252
-- total: 3,068
+- total: 3,074
 
 ### Testing Architecture
 
