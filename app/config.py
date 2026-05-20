@@ -236,6 +236,7 @@ def load_config(conf_dir=None):
         "notifications": {
             "do_not_disturb": False,
             "delivery_rate_per_minute": 10,
+            "http_timeout_seconds": 8,
             "retry": {
                 "max_attempts": 6,
                 "max_age_hours": 24,

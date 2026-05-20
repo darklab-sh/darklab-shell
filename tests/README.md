@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,962
+- behavior tests: 2,971
 - docs/inventory meta-tests: 32
-- `pytest`: 1562 (1530 behavior + 32 meta)
+- `pytest`: 1571 (1539 behavior + 32 meta)
 - `vitest`: 1180
 - `playwright`: 252
-- total: 2,994
+- total: 3,003
 
 This document is organized in two parts:
 
@@ -1016,6 +1016,19 @@ Prometheus `/metrics` route, runtime collector, label, and histogram-bucket cove
 | `TestMetricsDefinitionDrift.test_histograms_have_explicit_buckets` | Verifies that every histogram declares explicit buckets. |
 | `TestMetricsDefinitionDrift.test_labeled_metrics_have_cardinality_policies` | Verifies that every labeled metric has an explicit cardinality policy and fails on unreviewed labels. |
 | `TestMetricsDefinitionDrift.test_route_label_normalizer_does_not_use_raw_paths` | Verifies that route labels do not preserve raw path or query-string characters. |
+
+#### `test_notifications_webhook.py`
+
+Generic JSON webhook notification channel delivery and payload-shape coverage.
+
+| Test | Description |
+| --- | --- |
+| `test_webhook_channel_posts_json_payload` | Verifies the webhook channel resolves its vault-backed URL and sends a JSON POST with the configured timeout. |
+| `test_webhook_channel_retries_5xx_then_succeeds` | Verifies 5xx webhook responses are retryable and a later 2xx response succeeds. |
+| `test_webhook_channel_treats_4xx_as_terminal` | Verifies 4xx webhook responses fail terminally instead of retrying. |
+| `test_webhook_channel_rejects_malformed_urls` | Verifies malformed or non-http(s) webhook URLs are rejected before an HTTP request is attempted. |
+| `test_webhook_channel_retries_timeout` | Verifies network timeouts are retryable webhook delivery failures. |
+| `test_run_complete_payload_exposes_command_root_without_full_command` | Verifies run-complete payloads include only command root, not full command arguments. |
 
 #### `test_output_search.py`
 

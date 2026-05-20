@@ -11,6 +11,7 @@ from typing import Any, Iterable
 
 from core import database
 from core.database_backend import dialect_for_backend
+import services.notifications.channels  # noqa: F401 - registers built-in channel implementations
 from services.notifications.base import channel_class_for_kind
 from services.notifications.models import (
     STATUS_DEAD,

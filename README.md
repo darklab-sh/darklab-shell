@@ -564,6 +564,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── notifications/
 │   │   │   ├── __init__.py     # Outbound notification service package marker
 │   │   │   ├── base.py         # Registerable notification channel base class and registry
+│   │   │   ├── channels/
+│   │   │   │   ├── __init__.py # Built-in outbound notification channel registrations
+│   │   │   │   └── webhook.py  # Generic JSON webhook notification channel
 │   │   │   ├── dispatcher.py   # Notification event enqueue, claim, retry, and synchronous delivery helpers
 │   │   │   ├── models.py       # Notification channel/event dataclasses and constants
 │   │   │   ├── payloads.py     # Stable payload builders for notification triggers
@@ -943,6 +946,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   ├── test_docs.py        # Doc-drift meta-tests — appendix counts, documented totals, and README project-structure coverage
     │   ├── test_logging.py     # Structured logging: formatters, configure_logging, and event coverage
     │   ├── test_metrics_endpoint.py # Prometheus /metrics gate, label, bucket, and runtime-gauge coverage
+    │   ├── test_notifications_webhook.py # Generic webhook notification channel delivery and payload-shape coverage
     │   ├── test_output_search.py # SQLite FTS history-search coverage and fallback behavior
     │   ├── test_postgres_backend.py # Postgres backend smoke and migration-helper integration coverage
     │   ├── test_request_kill_and_commands.py # /kill, request parsing, loader edges, and built-in command resolution
