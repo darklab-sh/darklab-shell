@@ -103,6 +103,13 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `GET` | `/api/v1/projects/<project_id>/runs` | Read-only project run page. |
 | `GET` | `/api/v1/projects/<project_id>/entities` | Read-only project entity page with optional `entity_type`, `run_id`, and `target_id` filters. |
 | `GET` | `/api/v1/projects/<project_id>/packages` | Read-only evidence package page. |
+| `GET` | `/api/v1/schedules` | Scheduled-command page for the token session. |
+| `POST` | `/api/v1/schedules` | Create a scheduled command with `command`, `cron_expr` or `cadence_preset`, optional `timezone`, and optional `label`. |
+| `GET` | `/api/v1/schedules/<schedule_id>` | One scheduled command. |
+| `PATCH` | `/api/v1/schedules/<schedule_id>` | Update a scheduled command's command, cadence, timezone, label, or enabled state. |
+| `DELETE` | `/api/v1/schedules/<schedule_id>` | Delete a scheduled command. |
+| `POST` | `/api/v1/schedules/<schedule_id>/run-now` | Fire a scheduled command immediately and return the updated schedule row. |
+| `GET` | `/api/v1/schedules/<schedule_id>/fires` | Read paged fire audit rows for a scheduled command. |
 | `GET` | `/api/v1/notification-channels` | List masked outbound notification channels for the token session. |
 | `POST` | `/api/v1/notification-channels` | Create one notification channel with write-only secret values. |
 | `PATCH` | `/api/v1/notification-channels/<channel_id>` | Update one notification channel's label, config, triggers, muted state, or replacement secret values. |
@@ -214,6 +221,28 @@ Entity and finding list routes use the same `limit`, `offset`, and filter contra
 
 ---
 
+## Schedules
+
+Durable `tok_` sessions can manage normal scheduled commands through `/api/v1/schedules` and `darklab schedule`. Schedule create and update calls use the same command-policy checks as browser schedules, so saved commands are validated before they can fire later.
+
+```bash
+darklab schedule create --every hourly -- nmap -p 80 darklab.sh
+darklab schedule create --cron "0 2 * * *" --label "Nightly HTTP check" -- curl -I https://darklab.sh
+darklab schedule list
+darklab schedule info sch_123
+darklab schedule pause sch_123
+darklab schedule resume sch_123
+darklab schedule run sch_123
+darklab schedule fires sch_123
+darklab schedule delete sch_123
+```
+
+`--every` accepts `hourly`, `daily`, or `weekly`. `--cron` accepts the same strict five-field cron expressions as the browser schedule routes. The CLI joins everything after `--` with spaces and sends that as the command body, so normal shell-shaped command arguments do not need to be wrapped as one quoted string.
+
+Schedule list and fire-audit routes use the normal `limit`, `offset`, and `has_more` envelope. `darklab schedule list` and `darklab schedule fires` default to 50 rows and cap at 100.
+
+---
+
 ## Notifications
 
 Durable `tok_` sessions can manage outbound notification channels through the API and CLI. GET responses never include raw secret values. Create and update calls accept `secret_values`, store those values in the server vault, and return only `secret_fields` metadata that says which required fields are configured.
@@ -296,6 +325,10 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab project-runs <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List runs linked to a project. `--limit` defaults to 50 and caps at 100. |
 | `darklab project-entities <project_id> [--entity-type TYPE] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas entities linked to a project. `--limit` defaults to 50 and caps at 100. |
 | `darklab project-packages <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List evidence packages. `--limit` defaults to 50 and caps at 100. |
+| `darklab schedule list [--limit N] [--offset N] [--format text\|json\|ndjson]` | List scheduled commands. `--limit` defaults to 50 and caps at 100. |
+| `darklab schedule create (--cron CRON \| --every hourly\|daily\|weekly) [--label TEXT] [--timezone TZ] -- COMMAND` | Create a scheduled command from shell-shaped arguments after `--`. |
+| `darklab schedule info\|pause\|resume\|delete\|run <schedule_id>` | Inspect, pause, resume, delete, or immediately fire one scheduled command. |
+| `darklab schedule fires <schedule_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List fire audit rows for a scheduled command. `--limit` defaults to 50 and caps at 100. |
 | `darklab notify list\|create\|update\|mute\|unmute\|delete\|test\|events ...` | Manage outbound notification channels and read delivery audit rows. `notify events --limit` defaults to 50 and caps at 100. Channel secrets come from prompts or `--secret-file`, never command-line secret flags. |
 | `darklab download <run_id> --artifact ARTIFACT_ID --out DIR` | Download one artifact. |
 

@@ -166,6 +166,47 @@ def _parser() -> argparse.ArgumentParser:
     )
     download.add_argument("--out", default=".", help="Destination directory.")
 
+    schedule = sub.add_parser("schedule", help="Manage recurring scheduled commands.")
+    schedule_sub = schedule.add_subparsers(dest="schedule_command", required=True)
+
+    schedule_list = schedule_sub.add_parser("list", help="List scheduled commands.")
+    schedule_list.add_argument("--limit", type=int, default=50, help="Rows to return; default 50, max 100.")
+    schedule_list.add_argument("--offset", type=int, default=0)
+    schedule_list.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
+
+    schedule_create = schedule_sub.add_parser("create", help="Create a scheduled command.")
+    schedule_create.add_argument("--cron")
+    schedule_create.add_argument("--every", choices=("hourly", "daily", "weekly"))
+    schedule_create.add_argument("--label")
+    schedule_create.add_argument("--timezone")
+    schedule_create.add_argument("--format", choices=("text", "json"), default="text")
+    schedule_create.add_argument("schedule_argv", nargs=argparse.REMAINDER, metavar="-- COMMAND")
+
+    schedule_info = schedule_sub.add_parser("info", help="Show one scheduled command.")
+    schedule_info.add_argument("schedule_id")
+    schedule_info.add_argument("--format", choices=("text", "json"), default="text")
+
+    schedule_pause = schedule_sub.add_parser("pause", help="Pause a scheduled command.")
+    schedule_pause.add_argument("schedule_id")
+    schedule_pause.add_argument("--format", choices=("text", "json"), default="text")
+
+    schedule_resume = schedule_sub.add_parser("resume", help="Resume a scheduled command.")
+    schedule_resume.add_argument("schedule_id")
+    schedule_resume.add_argument("--format", choices=("text", "json"), default="text")
+
+    schedule_delete = schedule_sub.add_parser("delete", help="Delete a scheduled command.")
+    schedule_delete.add_argument("schedule_id")
+
+    schedule_run = schedule_sub.add_parser("run", help="Fire a scheduled command immediately.")
+    schedule_run.add_argument("schedule_id")
+    schedule_run.add_argument("--format", choices=("text", "json"), default="text")
+
+    schedule_fires = schedule_sub.add_parser("fires", help="List fire audit rows for a scheduled command.")
+    schedule_fires.add_argument("schedule_id")
+    schedule_fires.add_argument("--limit", type=int, default=50, help="Rows to return; default 50, max 100.")
+    schedule_fires.add_argument("--offset", type=int, default=0)
+    schedule_fires.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
+
     notify = sub.add_parser("notify", help="Manage outbound notification channels and delivery events.")
     notify_sub = notify.add_subparsers(dest="notify_command", required=True)
 
@@ -302,6 +343,8 @@ def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
             return _print_collection(payload, "packages", args.format, fields=("id", "status", "name"))
         case "atlas":
             return _atlas(client, args)
+        case "schedule":
+            return _schedule(client, args)
         case "notify":
             return _notify(client, args)
         case "download":
@@ -312,6 +355,90 @@ def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
             print(target)
             return 0
     return die("unknown command")
+
+
+def _schedule(client: DarklabClient, args: argparse.Namespace) -> int:
+    match args.schedule_command:
+        case "list":
+            payload = client.request("GET", "/schedules", params=_page_window_params(args))
+            return _print_collection(
+                payload,
+                "schedules",
+                args.format,
+                fields=("id", "enabled", "next_run_at", "label", "command_text"),
+            )
+        case "create":
+            if bool(args.cron) == bool(args.every):
+                raise DarklabCliError("schedule create needs exactly one of --cron or --every.")
+            body = {
+                "command": _schedule_command_text(args.schedule_argv),
+                "cron_expr": args.cron,
+                "cadence_preset": args.every,
+                "label": args.label,
+                "timezone": args.timezone,
+            }
+            return _print_schedule(client.request("POST", "/schedules", body=body), args.format)
+        case "info":
+            return _print_schedule(client.request("GET", f"/schedules/{args.schedule_id}"), args.format)
+        case "pause":
+            payload = client.request(
+                "PATCH",
+                f"/schedules/{args.schedule_id}",
+                body={"enabled": False, "paused_reason": "paused"},
+            )
+            return _print_schedule(payload, args.format)
+        case "resume":
+            payload = client.request(
+                "PATCH",
+                f"/schedules/{args.schedule_id}",
+                body={"enabled": True, "paused_reason": ""},
+            )
+            return _print_schedule(payload, args.format)
+        case "delete":
+            return _print_payload(client.request("DELETE", f"/schedules/{args.schedule_id}"), "json")
+        case "run":
+            return _print_schedule_fire(client.request("POST", f"/schedules/{args.schedule_id}/run-now"), args.format)
+        case "fires":
+            payload = client.request("GET", f"/schedules/{args.schedule_id}/fires", params=_page_window_params(args))
+            return _print_collection(
+                payload,
+                "fires",
+                args.format,
+                fields=("fired_at", "status", "run_id", "reason"),
+            )
+    return die("unknown schedule command")
+
+
+def _schedule_command_text(argv: list[str]) -> str:
+    parts = list(argv or [])
+    if parts and parts[0] == "--":
+        parts = parts[1:]
+    command = " ".join(parts).strip()
+    if not command:
+        raise DarklabCliError("schedule create needs a command after --.")
+    return command
+
+
+def _print_schedule(payload: dict[str, Any], output_format: str) -> int:
+    if output_format == "json":
+        return _print_payload(payload, "json")
+    schedule = payload.get("schedule") if isinstance(payload, dict) else {}
+    if isinstance(schedule, dict):
+        _print_table([schedule], ("id", "enabled", "next_run_at", "label", "command_text"))
+    return 0
+
+
+def _print_schedule_fire(payload: dict[str, Any], output_format: str) -> int:
+    if output_format == "json":
+        return _print_payload(payload, "json")
+    schedule = payload.get("schedule") if isinstance(payload, dict) else {}
+    if isinstance(schedule, dict):
+        _print_table([schedule], ("id", "enabled", "last_run_at", "last_run_id", "command_text"))
+    status = payload.get("status") if isinstance(payload, dict) else ""
+    fired_at = payload.get("fired_at") if isinstance(payload, dict) else ""
+    if status or fired_at:
+        print(f"fire: {status} {fired_at}".rstrip())
+    return 0
 
 
 NOTIFICATION_SECRET_FIELDS = {

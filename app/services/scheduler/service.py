@@ -385,6 +385,33 @@ def record_schedule_fire(
     return fire
 
 
+def list_schedule_fires(schedule_id: str, *, limit: int = 50, offset: int = 0, conn=None) -> tuple[list[ScheduleFire], int]:
+    ctx = None
+    if conn is None:
+        ctx = database.db_connect()
+        conn = ctx.__enter__()
+    assert conn is not None
+    try:
+        total_row = conn.execute(
+            "SELECT COUNT(*) AS count FROM schedule_fires WHERE schedule_id = ?",
+            (schedule_id,),
+        ).fetchone()
+        total = int(_value(total_row, "count", 0) or 0)
+        rows = conn.execute(
+            """
+            SELECT * FROM schedule_fires
+            WHERE schedule_id = ?
+            ORDER BY fired_at DESC, id DESC
+            LIMIT ? OFFSET ?
+            """,
+            (schedule_id, max(0, int(limit)), max(0, int(offset))),
+        ).fetchall()
+        return [row_to_schedule_fire(row) for row in rows], total
+    finally:
+        if ctx is not None:
+            ctx.__exit__(None, None, None)
+
+
 def due_schedules(conn, *, now: str | None = None, limit: int = 50) -> list[Schedule]:
     cutoff = now or _utc_now()
     rows = conn.execute(

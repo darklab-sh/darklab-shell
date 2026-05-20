@@ -752,6 +752,93 @@ def test_api_v1_explicit_project_link_uses_finalized_run_path(monkeypatch):
     ) in audit_events
 
 
+def test_api_v1_schedules_crud_run_now_and_fire_audit_are_token_scoped(monkeypatch):
+    import blueprints.api_v1 as api_blueprint
+
+    client = get_client()
+    token = _token(client)
+    other_token = _token(client)
+    monkeypatch.setattr(api_blueprint, "validate_schedule_command", lambda command, *_args, **_kwargs: command.strip())
+
+    create = client.post(
+        "/api/v1/schedules",
+        headers=_headers(token),
+        json={
+            "command": "echo scheduled api",
+            "cadence_preset": "hourly",
+            "label": "API Schedule",
+            "timezone": "UTC",
+        },
+    )
+    schedule = json.loads(create.data)["schedule"]
+
+    assert create.status_code == 201
+    assert schedule["command_text"] == "echo scheduled api"
+    assert schedule["cadence_preset"] == "hourly"
+    assert schedule["enabled"] is True
+    assert "session_token" not in schedule
+
+    listed = json.loads(client.get("/api/v1/schedules?limit=10&offset=0", headers=_headers(token)).data)
+    other_listed = json.loads(client.get("/api/v1/schedules", headers=_headers(other_token)).data)
+    detail = json.loads(client.get(f"/api/v1/schedules/{schedule['id']}", headers=_headers(token)).data)["schedule"]
+    cross_detail = client.get(f"/api/v1/schedules/{schedule['id']}", headers=_headers(other_token))
+    patched = json.loads(
+        client.patch(
+            f"/api/v1/schedules/{schedule['id']}",
+            headers=_headers(token),
+            json={"enabled": False, "label": "Paused API Schedule"},
+        ).data
+    )["schedule"]
+    fired = json.loads(client.post(f"/api/v1/schedules/{schedule['id']}/run-now", headers=_headers(token)).data)
+    fires = json.loads(client.get(f"/api/v1/schedules/{schedule['id']}/fires", headers=_headers(token)).data)
+    deleted = json.loads(client.delete(f"/api/v1/schedules/{schedule['id']}", headers=_headers(token)).data)
+    deleted_detail = client.get(f"/api/v1/schedules/{schedule['id']}", headers=_headers(token))
+
+    assert listed["total"] == 1
+    assert listed["schedules"][0]["id"] == schedule["id"]
+    assert other_listed["schedules"] == []
+    assert detail["label"] == "API Schedule"
+    assert cross_detail.status_code == 404
+    assert json.loads(cross_detail.data)["error"]["code"] == "not_found"
+    assert patched["enabled"] is False
+    assert patched["label"] == "Paused API Schedule"
+    assert fired["status"] == "fired"
+    assert fired["schedule"]["last_run_at"]
+    assert fires["total"] == 1
+    assert fires["fires"][0]["status"] == "fired"
+    assert deleted == {"removed": True}
+    assert deleted_detail.status_code == 404
+
+
+def test_api_v1_schedules_reject_invalid_body_and_disallowed_command(monkeypatch):
+    import blueprints.api_v1 as api_blueprint
+
+    client = get_client()
+    token = _token(client)
+
+    def reject_command(*_args, **_kwargs):
+        raise api_blueprint.ScheduleCommandValidationError("command is not allowed")
+
+    monkeypatch.setattr(api_blueprint, "validate_schedule_command", reject_command)
+
+    invalid_body = client.post(
+        "/api/v1/schedules",
+        headers=_headers(token),
+        data="[]",
+        content_type="application/json",
+    )
+    disallowed = client.post(
+        "/api/v1/schedules",
+        headers=_headers(token),
+        json={"command": "nmap darklab.sh", "cadence_preset": "daily"},
+    )
+
+    assert invalid_body.status_code == 400
+    assert json.loads(invalid_body.data)["error"]["code"] == "invalid_body"
+    assert disallowed.status_code == 400
+    assert json.loads(disallowed.data)["error"]["code"] == "invalid_command"
+
+
 def test_api_v1_openapi_route_matches_checked_in_contract():
     client = get_client()
     live = json.loads(client.get("/api/v1/openapi.json").data)
@@ -1016,6 +1103,97 @@ def test_darklab_cli_notify_commands_use_secret_file_and_event_reader(monkeypatc
     ]
 
 
+def test_darklab_cli_schedule_commands_manage_api_schedules(monkeypatch, capsys):
+    cli_main = import_module("darklab_cli.__main__")
+    calls = []
+    schedule = {
+        "id": "sch_cli",
+        "enabled": True,
+        "next_run_at": "2026-05-20T00:00:00+00:00",
+        "last_run_at": "",
+        "last_run_id": "",
+        "label": "Hourly Echo",
+        "command_text": "echo cli",
+    }
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def request(self, method, path, *, params=None, body=None, **_kwargs):
+            calls.append((method, path, params, body))
+            if path == "/schedules" and method == "POST":
+                assert body == {
+                    "command": "echo cli",
+                    "cron_expr": None,
+                    "cadence_preset": "hourly",
+                    "label": "Hourly Echo",
+                    "timezone": None,
+                }
+                return {"schedule": schedule}
+            if path == "/schedules" and method == "GET":
+                assert params == {"limit": 10, "offset": 0}
+                return {"schedules": [schedule], "total": 1, "limit": 10, "offset": 0, "has_more": False}
+            if path == "/schedules/sch_cli" and method == "GET":
+                return {"schedule": schedule}
+            if path == "/schedules/sch_cli" and method == "PATCH":
+                assert body is not None
+                updated = {**schedule, "enabled": bool(body["enabled"])}
+                return {"schedule": updated}
+            if path == "/schedules/sch_cli/run-now":
+                return {
+                    "status": "fired",
+                    "fired_at": "2026-05-20T00:00:00+00:00",
+                    "schedule": {**schedule, "last_run_at": "2026-05-20T00:00:00+00:00"},
+                }
+            if path == "/schedules/sch_cli/fires":
+                assert params == {"limit": 5, "offset": 0}
+                return {
+                    "fires": [{
+                        "fired_at": "2026-05-20T00:00:00+00:00",
+                        "status": "fired",
+                        "run_id": "",
+                        "reason": "dispatch pending run integration",
+                    }]
+                }
+            if path == "/schedules/sch_cli" and method == "DELETE":
+                return {"removed": True}
+            raise cli_main.DarklabCliError("not_found: missing")
+
+    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
+
+    assert cli_main.main(["schedule", "create", "--every", "hourly", "--label", "Hourly Echo", "--", "echo", "cli"]) == 0
+    assert "sch_cli" in capsys.readouterr().out
+    assert cli_main.main(["schedule", "list", "--limit", "10"]) == 0
+    list_output = capsys.readouterr().out
+    assert "ENABLED" in list_output
+    assert "Hourly Echo" in list_output
+    assert cli_main.main(["schedule", "info", "sch_cli"]) == 0
+    assert "echo cli" in capsys.readouterr().out
+    assert cli_main.main(["schedule", "pause", "sch_cli"]) == 0
+    assert "no" in capsys.readouterr().out
+    assert cli_main.main(["schedule", "resume", "sch_cli"]) == 0
+    assert "yes" in capsys.readouterr().out
+    assert cli_main.main(["schedule", "run", "sch_cli"]) == 0
+    assert "fire: fired" in capsys.readouterr().out
+    assert cli_main.main(["schedule", "fires", "sch_cli", "--limit", "5"]) == 0
+    assert "dispatch pending run integration" in capsys.readouterr().out
+    assert cli_main.main(["schedule", "delete", "sch_cli"]) == 0
+    assert json.loads(capsys.readouterr().out)["removed"] is True
+
+    assert [call[1] for call in calls] == [
+        "/schedules",
+        "/schedules",
+        "/schedules/sch_cli",
+        "/schedules/sch_cli",
+        "/schedules/sch_cli",
+        "/schedules/sch_cli/run-now",
+        "/schedules/sch_cli/fires",
+        "/schedules/sch_cli",
+    ]
+
+
 def test_api_v1_openapi_generator_snapshot_is_current():
     from services.api_v1.openapi import openapi_spec
 
@@ -1071,6 +1249,14 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "RunPage",
         "RunStartRequest",
         "RunStarted",
+        "Schedule",
+        "ScheduleCreateRequest",
+        "ScheduleFire",
+        "ScheduleFirePage",
+        "SchedulePage",
+        "ScheduleResponse",
+        "ScheduleRunNowResponse",
+        "ScheduleUpdateRequest",
     }.issubset(schemas)
     assert spec["paths"]["/runs"]["post"]["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/RunStartRequest"
@@ -1087,6 +1273,17 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert schemas["AtlasEntityPage"]["properties"]["entities"]["items"] == {"$ref": "#/components/schemas/AtlasEntity"}
     assert schemas["AtlasFindingPage"]["properties"]["findings"]["items"] == {"$ref": "#/components/schemas/AtlasFinding"}
     assert schemas["PackagePage"]["properties"]["packages"]["items"] == {"$ref": "#/components/schemas/EvidencePackage"}
+    assert schemas["SchedulePage"]["properties"]["schedules"]["items"] == {"$ref": "#/components/schemas/Schedule"}
+    assert schemas["ScheduleFirePage"]["properties"]["fires"]["items"] == {"$ref": "#/components/schemas/ScheduleFire"}
+    assert spec["paths"]["/schedules"]["post"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ScheduleCreateRequest"
+    }
+    schedule_patch_schema = spec["paths"]["/schedules/{schedule_id}"]["patch"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"]
+    assert schedule_patch_schema == {"$ref": "#/components/schemas/ScheduleUpdateRequest"}
+    schedule_fire_params = {param["name"] for param in spec["paths"]["/schedules/{schedule_id}/fires"]["get"]["parameters"]}
+    assert {"schedule_id", "limit", "offset"}.issubset(schedule_fire_params)
     assert {"id", "run_id", "workspace_path", "display_name", "file_status"}.issubset(
         set(schemas["ArtifactSummary"]["required"])
     )

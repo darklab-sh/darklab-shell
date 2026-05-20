@@ -234,6 +234,13 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/api/v1/projects/<project_id>/runs` | Returns a read-only paged project run response using project query services. |
 | `GET` | `/api/v1/projects/<project_id>/entities` | Returns a read-only paged project Atlas entity response using project query services. |
 | `GET` | `/api/v1/projects/<project_id>/packages` | Returns a read-only paged evidence package list for one project. |
+| `GET` | `/api/v1/schedules` | Returns a paged list of normal scheduled commands owned by the token session. |
+| `POST` | `/api/v1/schedules` | Creates a normal scheduled command after the same command-policy validation used by browser schedules. |
+| `GET` | `/api/v1/schedules/<schedule_id>` | Returns one normal scheduled command owned by the token session. |
+| `PATCH` | `/api/v1/schedules/<schedule_id>` | Updates one normal scheduled command's cadence, command, label, timezone, or enabled state. |
+| `DELETE` | `/api/v1/schedules/<schedule_id>` | Deletes one normal scheduled command owned by the token session. |
+| `POST` | `/api/v1/schedules/<schedule_id>/run-now` | Fires one normal scheduled command immediately and returns the updated schedule row. |
+| `GET` | `/api/v1/schedules/<schedule_id>/fires` | Returns paged fire audit rows for one normal scheduled command. |
 | `GET` | `/api/v1/notification-channels` | Returns masked outbound notification channel metadata for the token session. |
 | `POST` | `/api/v1/notification-channels` | Creates one outbound notification channel with write-only vault-backed secret values. |
 | `PATCH` | `/api/v1/notification-channels/<channel_id>` | Updates one outbound notification channel's label, config, triggers, muted state, or replacement secret values. |
@@ -1623,12 +1630,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,042
+- behavior tests: 3,045
 - docs/inventory meta-tests: 32
-- `pytest`: 1641 (1609 behavior + 32 meta)
+- `pytest`: 1644 (1612 behavior + 32 meta)
 - `vitest`: 1186
 - `playwright`: 252
-- total: 3,079
+- total: 3,082
 
 ### Testing Architecture
 

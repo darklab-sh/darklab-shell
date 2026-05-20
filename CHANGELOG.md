@@ -22,6 +22,10 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Why:** operators should be able to set up, inspect, pause, resume, delete, and manually fire recurring commands without waiting for the browser management modal.
   - **What:** added the `schedule` built-in with `list`, `create --cron`, `create --every`, `info`, `pause`, `resume`, `delete`, and `run`, reused the route command-validation path, and added autocomplete grammar for the schedule subcommands and cadence hints.
   - **Tests:** added backend coverage for built-in create/list/info, pause/resume/delete state changes, disallowed-command rejection, manual fire audit rows, durable-token enforcement, and autocomplete context shaping, plus browser autocomplete coverage for schedule-id action hints.
+- **Scheduled run API and CLI** — automation can now manage normal scheduled commands without opening the browser.
+  - **Why:** scripts and CI jobs need the same recurring-command controls that the browser routes and terminal built-in expose.
+  - **What:** added `/api/v1/schedules` list/create/detail/update/delete routes, manual `run-now`, paged fire-audit reads, OpenAPI schemas, and `darklab schedule list/create/info/pause/resume/delete/run/fires`.
+  - **Tests:** added API coverage for schedule CRUD, fire audit rows, cross-session isolation, invalid body handling, command-policy rejection, OpenAPI contract drift, and CLI schedule command wiring.
 - **Outbound notifications** — the app now has durable storage, browser channel management, a supervised worker, and webhook, chat, push, and email senders for webhook, Slack, Discord, Telegram, Pushover, and SMTP email notification channels.
   - **Why:** scheduled runs and watchers need a real delivery queue instead of building their own one-off notification paths later.
   - **What:**

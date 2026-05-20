@@ -62,11 +62,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
     - Run Details gets a "Schedule this command" action that opens the Schedules modal pre-filled from that run's command, giving operators a visible path from a completed run to a recurring schedule.
     - Revoked-token state appears as a clear paused badge: "this schedule is paused because its session token was revoked." The schedule is disabled, not deleted, so the operator can re-enable after re-issuing the token.
     - Pressables and confirms follow the design-system primitives.
-  - Phase 3 — CLI and API surfaces
-    - `/api/v1/schedules` GET/POST/PATCH/DELETE plus `/api/v1/schedules/<id>/run-now` and `/api/v1/schedules/<id>/fires` (paginated audit).
-    - CLI: `darklab schedule list / create / pause / resume / delete / run / info / fires`.
-    - CLI `darklab schedule create` accepts both `--cron "0 * * * *" -- <cmd>` and `--every hourly|daily|weekly -- <cmd>` for symmetry with the modal. The CLI joins `argv_after_dashdash` with spaces and submits that as the command body, so operators can pass normal shell-shaped command arguments without wrapping the whole command in one quoted string.
-  - Phase 4 — hardening, docs, release
+  - Phase 3 — hardening, docs, release
     - Docs: new `docs/schedules.md` covering cron support, timezone handling, missed-fire behavior, overlap policy, fan-out to notifications, and the per-session schedule cap.
     - `CONFIGURATION.md` updates for `scheduler.{lock_path, tick_seconds, max_per_session, missed_fire_policy, max_catchup_window_seconds, default_timezone}`. `scheduler.max_per_session` defaults to 32.
     - `ARCHITECTURE.md` gains a "Scheduler process" subsection under Runtime Topology and lists the reserved advisory-lock namespaces used by migrations, scheduler, notification worker, and notification sweep.

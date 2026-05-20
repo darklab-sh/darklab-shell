@@ -62,6 +62,7 @@ RUN_ID_PARAM = _path_param("run_id", "Run id")
 PROJECT_ID_PARAM = _path_param("project_id", "Project id")
 ARTIFACT_ID_PARAM = _path_param("artifact_id", "Artifact id")
 NOTIFICATION_CHANNEL_ID_PARAM = _path_param("channel_id", "Notification channel id")
+SCHEDULE_ID_PARAM = _path_param("schedule_id", "Schedule id")
 
 
 OPENAPI_SPEC: dict = {
@@ -662,6 +663,131 @@ OPENAPI_SPEC: dict = {
                     "updated": {"type": "string", "nullable": True},
                     "labels": {"type": "array", "items": _ref("Label")},
                     "note": {"nullable": True, "allOf": [_ref("Note")]},
+                },
+            },
+            "Schedule": {
+                "type": "object",
+                "required": [
+                    "id",
+                    "owner_kind",
+                    "owner_id",
+                    "kind",
+                    "command_text",
+                    "cron_expr",
+                    "timezone",
+                    "enabled",
+                    "next_run_at",
+                    "last_run_at",
+                    "last_run_id",
+                    "overlap_policy",
+                    "consecutive_failures",
+                    "label",
+                    "paused_reason",
+                    "last_error",
+                    "created",
+                    "updated",
+                ],
+                "properties": {
+                    "id": {"type": "string"},
+                    "owner_kind": {"type": "string", "enum": ["user"]},
+                    "owner_id": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["command"]},
+                    "command_text": {"type": "string"},
+                    "cron_expr": {"type": "string"},
+                    "cadence_preset": {"type": "string", "nullable": True, "enum": ["hourly", "daily", "weekly"]},
+                    "timezone": {"type": "string"},
+                    "enabled": {"type": "boolean"},
+                    "next_run_at": {"type": "string", "nullable": True},
+                    "last_run_at": {"type": "string"},
+                    "last_run_id": {"type": "string"},
+                    "overlap_policy": {"type": "string", "enum": ["skip"]},
+                    "consecutive_failures": {"type": "integer"},
+                    "label": {"type": "string"},
+                    "paused_reason": {"type": "string"},
+                    "last_error": {"type": "string"},
+                    "created": {"type": "string", "nullable": True},
+                    "updated": {"type": "string", "nullable": True},
+                },
+            },
+            "SchedulePage": {
+                "type": "object",
+                "required": ["schedules", "total", "limit", "offset", "has_more"],
+                "properties": {
+                    "schedules": {"type": "array", "items": _ref("Schedule")},
+                    "total": {"type": "integer"},
+                    "limit": {"type": "integer"},
+                    "offset": {"type": "integer"},
+                    "has_more": {"type": "boolean"},
+                },
+            },
+            "ScheduleResponse": {
+                "type": "object",
+                "required": ["schedule"],
+                "properties": {"schedule": _ref("Schedule")},
+            },
+            "ScheduleCreateRequest": {
+                "type": "object",
+                "required": ["command"],
+                "properties": {
+                    "command": {"type": "string"},
+                    "command_text": {"type": "string"},
+                    "cron_expr": {"type": "string"},
+                    "cadence_preset": {"type": "string", "enum": ["hourly", "daily", "weekly"]},
+                    "timezone": {"type": "string"},
+                    "label": {"type": "string"},
+                    "enabled": {"type": "boolean"},
+                    "workspace_cwd": {"type": "string"},
+                },
+            },
+            "ScheduleUpdateRequest": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string"},
+                    "command_text": {"type": "string"},
+                    "cron_expr": {"type": "string"},
+                    "cadence_preset": {"type": "string", "enum": ["hourly", "daily", "weekly"]},
+                    "timezone": {"type": "string"},
+                    "label": {"type": "string"},
+                    "enabled": {"type": "boolean"},
+                    "paused_reason": {"type": "string"},
+                    "workspace_cwd": {"type": "string"},
+                },
+            },
+            "ScheduleFire": {
+                "type": "object",
+                "required": ["id", "schedule_id", "owner_kind", "owner_id", "fired_at", "run_id", "status", "reason"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "schedule_id": {"type": "string"},
+                    "owner_kind": {"type": "string"},
+                    "owner_id": {"type": "string"},
+                    "fired_at": {"type": "string", "nullable": True},
+                    "run_id": {"type": "string"},
+                    "status": {
+                        "type": "string",
+                        "enum": ["skipped_overlap", "skipped_revoked", "fired", "fire_failed"],
+                    },
+                    "reason": {"type": "string"},
+                },
+            },
+            "ScheduleFirePage": {
+                "type": "object",
+                "required": ["fires", "total", "limit", "offset", "has_more"],
+                "properties": {
+                    "fires": {"type": "array", "items": _ref("ScheduleFire")},
+                    "total": {"type": "integer"},
+                    "limit": {"type": "integer"},
+                    "offset": {"type": "integer"},
+                    "has_more": {"type": "boolean"},
+                },
+            },
+            "ScheduleRunNowResponse": {
+                "type": "object",
+                "required": ["status", "fired_at", "schedule"],
+                "properties": {
+                    "status": {"type": "string"},
+                    "fired_at": {"type": "string"},
+                    "schedule": _ref("Schedule"),
                 },
             },
             "NotificationSecretField": {
@@ -1276,6 +1402,78 @@ OPENAPI_SPEC: dict = {
                 "responses": {
                     "200": _json_response("Evidence packages", _ref("PackagePage")),
                     **_common_errors(not_found="Project not found"),
+                },
+            },
+        },
+        "/schedules": {
+            "get": {
+                "parameters": [*PAGE_PARAMS],
+                "responses": {
+                    "200": _json_response("Scheduled commands", _ref("SchedulePage")),
+                    **_common_errors(),
+                },
+            },
+            "post": {
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": _ref("ScheduleCreateRequest")}},
+                },
+                "responses": {
+                    "201": _json_response("Schedule created", _ref("ScheduleResponse")),
+                    "400": _error_response("Invalid schedule or command"),
+                    "401": _error_response("Missing, invalid, or revoked token"),
+                    "409": _error_response("Schedule quota exceeded"),
+                    "429": _error_response("Rate limit exceeded"),
+                },
+            },
+        },
+        "/schedules/{schedule_id}": {
+            "get": {
+                "parameters": [SCHEDULE_ID_PARAM],
+                "responses": {
+                    "200": _json_response("Schedule detail", _ref("ScheduleResponse")),
+                    **_common_errors(not_found="Schedule not found"),
+                },
+            },
+            "patch": {
+                "parameters": [SCHEDULE_ID_PARAM],
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": _ref("ScheduleUpdateRequest")}},
+                },
+                "responses": {
+                    "200": _json_response("Schedule updated", _ref("ScheduleResponse")),
+                    "400": _error_response("Invalid schedule or command"),
+                    "401": _error_response("Missing, invalid, or revoked token"),
+                    "404": _error_response("Schedule not found"),
+                    "409": _error_response("Schedule quota exceeded"),
+                    "429": _error_response("Rate limit exceeded"),
+                },
+            },
+            "delete": {
+                "parameters": [SCHEDULE_ID_PARAM],
+                "responses": {
+                    "200": _json_response("Schedule deleted", _ref("DeleteResponse")),
+                    **_common_errors(not_found="Schedule not found"),
+                },
+            },
+        },
+        "/schedules/{schedule_id}/run-now": {
+            "post": {
+                "parameters": [SCHEDULE_ID_PARAM],
+                "responses": {
+                    "200": _json_response("Schedule fired immediately", _ref("ScheduleRunNowResponse")),
+                    "400": _error_response("Invalid schedule"),
+                    **_common_errors(not_found="Schedule not found"),
+                },
+            },
+        },
+        "/schedules/{schedule_id}/fires": {
+            "get": {
+                "parameters": [SCHEDULE_ID_PARAM, *PAGE_PARAMS],
+                "responses": {
+                    "200": _json_response("Schedule fire audit rows", _ref("ScheduleFirePage")),
+                    **_common_errors(not_found="Schedule not found"),
                 },
             },
         },
