@@ -59,6 +59,11 @@ def _raise(exc: BaseException):
     raise exc
 
 
+@pytest.fixture(autouse=True)
+def _skip_real_dns(monkeypatch):
+    monkeypatch.setattr("services.notifications.channels._http.socket.getaddrinfo", lambda *_args, **_kwargs: [])
+
+
 def test_webhook_channel_posts_json_payload(monkeypatch):
     captured = {}
 
@@ -86,6 +91,27 @@ def test_webhook_channel_posts_json_payload(monkeypatch):
         "body": {"ok": True, "trigger": "test"},
         "content_type": "application/json",
     }
+
+
+def test_webhook_channel_uses_short_timeout_for_test_send(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["timeout"] = timeout
+        return FakeResponse(204)
+
+    monkeypatch.setattr("services.notifications.channels.webhook.get_channel_secret", lambda *_: "https://example.invalid/hook")
+    monkeypatch.setattr("services.notifications.channels._http.urlopen", fake_urlopen)
+    monkeypatch.setitem(
+        config.CFG,
+        "notifications",
+        {"http_timeout_seconds": 9, "test_timeout_seconds": 2},
+    )
+
+    result = WebhookChannel(_channel(config={"timeout_seconds": 9})).send({"trigger": "test", "ok": True})
+
+    assert result == ChannelResult.success()
+    assert captured["timeout"] == 2.0
 
 
 def test_webhook_channel_retries_5xx_then_succeeds(monkeypatch):
@@ -142,6 +168,70 @@ def test_webhook_channel_rejects_malformed_urls(monkeypatch, bad_url):
     assert result.retryable is False
     assert "URL" in result.error
     assert not urlopen_called
+
+
+@pytest.mark.parametrize(
+    "blocked_url",
+    [
+        "http://127.0.0.1/hook",
+        "http://localhost/hook",
+        "http://169.254.169.254/latest/meta-data",
+        "http://10.0.0.5/hook",
+        "http://172.16.0.5/hook",
+        "http://192.168.1.5/hook",
+        "http://[::1]/hook",
+    ],
+)
+def test_webhook_channel_rejects_private_and_local_urls(monkeypatch, blocked_url):
+    urlopen_called = False
+
+    def fake_urlopen(request, timeout):
+        nonlocal urlopen_called
+        urlopen_called = True
+        return FakeResponse(200)
+
+    monkeypatch.setitem(config.CFG, "notifications", {"http_private_host_allowlist": []})
+    monkeypatch.setattr("services.notifications.channels.webhook.get_channel_secret", lambda *_: blocked_url)
+    monkeypatch.setattr("services.notifications.channels._http.urlopen", fake_urlopen)
+
+    result = WebhookChannel(_channel()).send({"trigger": "test"})
+
+    assert result.ok is False
+    assert result.retryable is False
+    assert "not allowed" in result.error
+    assert not urlopen_called
+
+
+def test_webhook_channel_rejects_dns_resolved_private_hosts(monkeypatch):
+    monkeypatch.setitem(config.CFG, "notifications", {"http_private_host_allowlist": []})
+    monkeypatch.setattr("services.notifications.channels.webhook.get_channel_secret", lambda *_: "https://hooks.example.test")
+    monkeypatch.setattr(
+        "services.notifications.channels._http.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("10.0.0.10", 443))],
+    )
+
+    result = WebhookChannel(_channel()).send({"trigger": "test"})
+
+    assert result.ok is False
+    assert result.retryable is False
+    assert "not allowed" in result.error
+
+
+def test_webhook_channel_allows_explicit_private_host_allowlist(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        return FakeResponse(200)
+
+    monkeypatch.setitem(config.CFG, "notifications", {"http_private_host_allowlist": ["10.0.0.5"]})
+    monkeypatch.setattr("services.notifications.channels.webhook.get_channel_secret", lambda *_: "http://10.0.0.5/hook")
+    monkeypatch.setattr("services.notifications.channels._http.urlopen", fake_urlopen)
+
+    result = WebhookChannel(_channel()).send({"trigger": "test"})
+
+    assert result == ChannelResult.success()
+    assert captured["url"] == "http://10.0.0.5/hook"
 
 
 def test_webhook_channel_retries_timeout(monkeypatch):

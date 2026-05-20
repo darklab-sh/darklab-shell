@@ -752,10 +752,22 @@ OPENAPI_SPEC: dict = {
             },
             "NotificationTestResponse": {
                 "type": "object",
-                "required": ["queued", "event_ids"],
+                "required": ["queued", "event_ids", "events"],
                 "properties": {
                     "queued": {"type": "integer"},
                     "event_ids": {"type": "array", "items": {"type": "string"}},
+                    "events": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["event_id", "status", "last_error"],
+                            "properties": {
+                                "event_id": {"type": "string"},
+                                "status": {"type": "string", "enum": ["pending", "retry_wait", "sent", "dead"]},
+                                "last_error": {"type": "string"},
+                            },
+                        },
+                    },
                 },
             },
             "NotificationEvent": {

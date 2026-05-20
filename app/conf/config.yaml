@@ -226,6 +226,8 @@
 #   do_not_disturb: false
 #   delivery_rate_per_minute: 10
 #   http_timeout_seconds: 8
+#   test_timeout_seconds: 4
+#   http_private_host_allowlist: []  # Exact hosts, IPs, or CIDR ranges allowed for private webhook targets.
 #   smtp:
 #     host: ""
 #     port: 587
@@ -237,6 +239,8 @@
 #     max_attempts: 6
 #     max_age_hours: 24
 #     base_delay_seconds: 30
+#   events:
+#     retention_days: 30
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 

@@ -6,7 +6,7 @@ import logging
 import signal
 import time
 
-from services.notifications.dispatcher import dispatch_due_events
+from services.notifications.dispatcher import dispatch_due_events, prune_sent_events
 
 log = logging.getLogger("shell")
 
@@ -20,7 +20,9 @@ def _handle_stop(signum, frame):  # noqa: ANN001
 
 
 def run_once(*, limit: int = 100) -> int:
-    return dispatch_due_events(limit=limit)
+    delivered = dispatch_due_events(limit=limit)
+    prune_sent_events()
+    return delivered
 
 
 def run_forever(*, poll_seconds: float = DEFAULT_POLL_SECONDS, limit: int = 100) -> None:

@@ -10,6 +10,7 @@ from urllib.parse import parse_qs
 
 from services.notifications.base import Channel, registered_channels
 from services.notifications.channels import register_builtin_channels
+from services.notifications.channels._format import format_summary_fields
 from services.notifications.channels.discord import DiscordChannel
 from services.notifications.channels.pushover import PushoverChannel
 from services.notifications.channels.slack import SlackChannel
@@ -120,6 +121,12 @@ def test_slack_channel_formats_blocks(monkeypatch):
         "text": {"type": "plain_text", "text": "Test Shell run complete: nmap"},
     }
     assert {"type": "mrkdwn", "text": "*Command*\nnmap"} in captured["body"]["blocks"][1]["fields"]
+
+
+def test_summary_fields_truncate_long_run_ids():
+    fields = format_summary_fields({"run_id": "12345678-1234-5678-1234-abcdef123456"})
+
+    assert ("Run", "...ef123456") in fields
 
 
 def test_discord_channel_formats_embed(monkeypatch):

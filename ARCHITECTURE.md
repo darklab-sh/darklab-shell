@@ -235,7 +235,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `POST` | `/api/v1/notification-channels` | Creates one outbound notification channel with write-only vault-backed secret values. |
 | `PATCH` | `/api/v1/notification-channels/<channel_id>` | Updates one outbound notification channel's label, config, triggers, muted state, or replacement secret values. |
 | `DELETE` | `/api/v1/notification-channels/<channel_id>` | Deletes one outbound notification channel from the token session. |
-| `POST` | `/api/v1/notification-channels/<channel_id>/test` | Queues and synchronously dispatches a canned `test` notification through one channel. |
+| `POST` | `/api/v1/notification-channels/<channel_id>/test` | Queues and synchronously dispatches a canned `test` notification through one channel and returns its delivery status. |
 | `GET` | `/api/v1/notification-events` | Returns paged notification delivery audit rows with optional channel, trigger, and status filters. |
 | `POST` | `/api/v1/runs` | Starts a non-interactive command through the same validation, rewrite, broker, and persistence path as browser runs. |
 | `GET` | `/api/v1/runs/<run_id>` | Returns active broker status or completed history status for a current-token run. |
@@ -348,7 +348,7 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | `POST` | `/session/notification-channels` | Creates one outbound notification channel with write-only vault-backed secret values. |
 | `PATCH` | `/session/notification-channels/<channel_id>` | Updates one outbound notification channel's label, config, triggers, muted state, or replacement secret values. |
 | `DELETE` | `/session/notification-channels/<channel_id>` | Removes one outbound notification channel from the current durable session token. |
-| `POST` | `/session/notification-channels/<channel_id>/test` | Queues and synchronously dispatches a canned `test` notification through one channel. |
+| `POST` | `/session/notification-channels/<channel_id>/test` | Queues and synchronously dispatches a canned `test` notification through one channel and returns its delivery status. |
 | `GET` | `/session/preferences` | Returns the current session's normalized saved Options snapshot. |
 | `POST` | `/session/preferences` | Persists the current session's normalized saved Options snapshot. |
 | `POST` | `/session/tour-seen` | Records that the current session opened the current onboarding tour version. |
@@ -783,13 +783,13 @@ This boundary view answers a different question than the dependency graph above:
 
 Outbound notifications use the same durable session-token ownership model as the headless API and encrypted secrets. Durable `tok_` sessions can create session-owned channels from the Options **Notifications** tab, `/api/v1/notification-channels`, or the bundled CLI. Anonymous browser sessions cannot create channels because delivery needs an owner that survives browser restarts and can be revoked.
 
-The route layer only validates, masks, and queues. `app/blueprints/notifications.py` and the `/api/v1/notification-channels` routes both call `services.notifications.channels_store`, which owns channel CRUD, trigger/config validation, secret-field masking, and write-only secret replacement. Channel rows store metadata, trigger subscriptions, muted state, and references to vault entries; plaintext webhook URLs, bot tokens, and Pushover keys are not stored in channel payloads. SMTP email is intentionally split: recipients and reply-to live on each channel row, while relay host, user, password environment variable name, from address, and TLS mode come from operator config.
+The route layer only validates, masks, and queues. `app/blueprints/notifications.py` and the `/api/v1/notification-channels` routes both call `services.notifications.channels_store`, which owns channel CRUD, trigger/config validation, secret-field masking, and write-only secret replacement. Channel rows store metadata, trigger subscriptions, muted state, and references to vault entries; plaintext webhook URLs, bot tokens, and Pushover keys are not stored in channel payloads. Channel row writes and replacement vault secret writes use one database transaction so a failed channel update does not leave a half-applied secret replacement behind. SMTP email is intentionally split: recipients and reply-to live on each channel row, while relay host, user, password environment variable name, from address, and TLS mode come from operator config.
 
-Delivery is asynchronous. App event sources build stable payloads in `services.notifications.payloads` and enqueue one row per subscribed channel in `notification_events` through `services.notifications.dispatcher.enqueue()`. External non-PTY run finalization emits one `run_complete` payload with `app_name`, command root, exit code, token hint, and summary counts; built-in commands and PTY sessions do not participate in default `run_complete` fan-out. Test sends use the same queue with a fixed `test` payload so the UI, API, and CLI exercise the real delivery path.
+Delivery is asynchronous. App event sources build stable payloads in `services.notifications.payloads` and enqueue one row per subscribed channel in `notification_events` through `services.notifications.dispatcher.enqueue()`. External non-PTY run finalization emits one `run_complete` payload with `app_name`, command root, exit code, token hint, and summary counts; built-in commands and PTY sessions do not participate in default `run_complete` fan-out. Test sends use the same queue with a fixed `test` payload and target only the requested channel, so the UI, API, and CLI exercise the real delivery path without surprising every configured destination. Chat and email summary formatters shorten long run ids to a readable suffix while generic webhooks receive the raw payload.
 
-`services.notifications.base.Channel` is the registerable delivery contract. Built-in channel implementations cover generic JSON webhooks, Slack, Discord, Telegram, Pushover, and SMTP email. Formatting helpers keep chat/push/email titles aligned, while generic webhooks receive the raw JSON payload. Each channel returns a `ChannelResult` so the dispatcher can decide whether a failure is retryable or terminal without coupling the queue to provider-specific exceptions.
+`services.notifications.base.Channel` is the registerable delivery contract. Built-in channel implementations cover generic JSON webhooks, Slack, Discord, Telegram, Pushover, and SMTP email. Formatting helpers keep chat/push/email titles aligned, while generic webhooks receive the raw JSON payload. Webhook-style HTTP senders reject non-public destinations by default and allow trusted internal receivers only through `notifications.http_private_host_allowlist`. Each channel returns a `ChannelResult` so the dispatcher can decide whether a failure is retryable or terminal without coupling the queue to provider-specific exceptions.
 
-The notification worker is a dedicated Gunicorn-sibling process started and supervised by `entrypoint.sh` when `NOTIFICATION_WORKER_ENABLED` is not disabled. It claims due event rows from the database, applies global do-not-disturb and per-channel delivery-rate settings, sends through the registered channel class, and then marks each event `sent`, `retry_wait`, or `dead`. Retryable failures use exponential backoff capped by `notifications.retry.max_attempts` and `notifications.retry.max_age_hours`; terminal failures and expired retry windows become dead-letter audit rows. Postgres deployments reserve separate advisory-lock namespaces for notification delivery and notification sweeps so future worker coordination cannot collide with migrations or the scheduler.
+The notification worker is a dedicated Gunicorn-sibling process started and supervised by `entrypoint.sh` when `NOTIFICATION_WORKER_ENABLED` is not disabled. It claims due event rows from the database, applies global do-not-disturb and per-channel delivery-rate settings, sends through the registered channel class, and then marks each event `sent`, `retry_wait`, or `dead`. Local gates such as do-not-disturb and per-channel rate limits defer events without consuming provider retry attempts. Retryable provider failures use exponential backoff capped by `notifications.retry.max_attempts` and `notifications.retry.max_age_hours`; terminal failures and expired retry windows become dead-letter audit rows. The worker prunes sent delivery audit rows after `notifications.events.retention_days`; retry and dead-letter rows remain available for triage. Postgres deployments reserve separate advisory-lock namespaces for notification delivery and notification sweeps so future worker coordination cannot collide with migrations or the scheduler.
 
 ---
 
@@ -1454,7 +1454,9 @@ The current event inventory is:
 | INFO | `VAULT_KEY_LOADED` | secrets vault | source |
 | INFO | `VAULT_KEY_ROTATION_COMPLETED` | secrets vault storage | session, count |
 | INFO | `INTEL_PROVIDER_LOOKUP_COMPLETED` | Atlas intel refresh | session, entity_id, provider, status |
-| INFO | `NOTIFICATION_DISPATCHED` | notification dispatcher | event_id, channel_id |
+| INFO | `NOTIFICATION_DISPATCHED` | notification dispatcher | event_id, channel_id, trigger, session |
+| INFO | `NOTIFICATION_DEFERRED` | notification dispatcher | event_id, channel_id, trigger, session, reason |
+| INFO | `NOTIFICATION_EVENTS_PRUNED` | notification dispatcher | count, retention_days |
 | WARN | `FTS_SEARCH_FALLBACK` | `get_history` | session, q, error |
 | INFO | `HISTORY_DELETED` | `delete_run` | ip, run_id, session |
 | INFO | `HISTORY_CLEARED` | `clear_history` | ip, session, count |
@@ -1469,8 +1471,10 @@ The current event inventory is:
 | WARN | `RUN_FULL_OUTPUT_INDEX_FALLBACK` | run finalization | run_id, session, rel_path, error |
 | WARN | `BROKER_PUBLISH_FAILED` | broker event publish | run_id, event_type, reason, error |
 | WARN | `PTY_INPUT_DROPPED` | interactive PTY control handling | run_id, session, reason, bytes |
-| WARN | `NOTIFICATION_RETRIED` | notification dispatcher | event_id, channel_id, attempts |
-| WARN | `NOTIFICATION_DELIVERY_FAILED` | notification dispatcher | event_id, channel_id, attempts |
+| WARN | `NOTIFICATION_CHANNEL_REGISTRY_MISS` | notification dispatcher | event_id, channel_id, kind |
+| WARN | `NOTIFICATION_RETRIED` | notification dispatcher | event_id, channel_id, trigger, session, attempts |
+| WARN | `NOTIFICATION_DELIVERY_FAILED` | notification dispatcher | event_id, channel_id, trigger, session, attempts |
+| WARN | `API_NOTIFICATION_CHANNEL_REJECTED` | API notification routes | ip, session, code, status, route, method |
 | WARN | `PROJECT_QUOTA_HIT` | project quota helper | reason |
 | WARN | `PROJECT_ROUTE_FAILED` | project download routes | ip, session, project_id, package_id, route, error |
 | WARN | `SESSION_ROUTE_FAILED` | session routes | ip, session, route, error |
@@ -1597,12 +1601,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,000
+- behavior tests: 3,024
 - docs/inventory meta-tests: 32
-- `pytest`: 1600 (1568 behavior + 32 meta)
-- `vitest`: 1180
+- `pytest`: 1625 (1593 behavior + 32 meta)
+- `vitest`: 1184
 - `playwright`: 252
-- total: 3,032
+- total: 3,061
 
 ### Testing Architecture
 

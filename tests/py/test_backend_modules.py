@@ -956,8 +956,7 @@ class TestNotificationsPhase0:
     def test_dispatcher_sync_delivery_fans_out_once_per_channel(self, monkeypatch, tmp_path):
         from services.notifications import dispatcher
         from services.notifications.base import Channel, _reset_channel_registry_for_tests, register_channel
-        from services.notifications.models import ChannelResult, TRIGGER_TEST
-        from services.notifications.payloads import build_test_payload
+        from services.notifications.models import ChannelResult, TRIGGER_RUN_COMPLETE
 
         delivered = []
 
@@ -970,11 +969,11 @@ class TestNotificationsPhase0:
         register_channel("webhook", FakeChannel)
         conn = self._notification_db(monkeypatch, tmp_path)
         try:
-            self._insert_channel(conn, "ntc_one")
-            self._insert_channel(conn, "ntc_two")
+            self._insert_channel(conn, "ntc_one", trigger=TRIGGER_RUN_COMPLETE)
+            self._insert_channel(conn, "ntc_two", trigger=TRIGGER_RUN_COMPLETE)
             event_ids = dispatcher.enqueue(
-                TRIGGER_TEST,
-                build_test_payload(),
+                TRIGGER_RUN_COMPLETE,
+                {"run_id": "run-fanout"},
                 "tok_notifications",
                 conn=conn,
                 dispatch_sync=True,
@@ -988,7 +987,7 @@ class TestNotificationsPhase0:
             _reset_channel_registry_for_tests()
 
         assert len(event_ids) == 2
-        assert sorted(delivered) == [("ntc_one", "test"), ("ntc_two", "test")]
+        assert sorted(delivered) == [("ntc_one", "run_complete"), ("ntc_two", "run_complete")]
         assert [(row["status"], row["attempts"]) for row in rows] == [("sent", 1), ("sent", 1)]
 
     def test_dispatcher_event_claims_are_single_use(self, monkeypatch, tmp_path):
@@ -1024,6 +1023,370 @@ class TestNotificationsPhase0:
             assert not dispatcher._claim_event(conn, "nte_claim", now=now)
         finally:
             conn.close()
+
+    def test_dispatcher_dnd_defers_without_consuming_attempts(self, monkeypatch, tmp_path):
+        from services.notifications import dispatcher
+        from services.notifications.base import Channel, _reset_channel_registry_for_tests, register_channel
+        from services.notifications.models import STATUS_PENDING, ChannelResult, TRIGGER_TEST
+
+        delivered = []
+
+        class FakeChannel(Channel):
+            def send(self, payload):
+                delivered.append(payload)
+                return ChannelResult.success()
+
+        _reset_channel_registry_for_tests()
+        register_channel("webhook", FakeChannel)
+        conn = self._notification_db(monkeypatch, tmp_path)
+        database.CFG["notifications"] = {"do_not_disturb": True, "retry": {"base_delay_seconds": 1}}
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            self._insert_channel(conn, "ntc_dnd")
+            conn.execute(
+                "INSERT INTO notification_events "
+                "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
+                "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "nte_dnd",
+                    "tok_notifications",
+                    "ntc_dnd",
+                    TRIGGER_TEST,
+                    json.dumps({"trigger": TRIGGER_TEST}),
+                    STATUS_PENDING,
+                    0,
+                    "",
+                    "",
+                    "",
+                    "",
+                    now,
+                    "",
+                ),
+            )
+            dispatcher.dispatch_due_events(conn=conn)
+            row = conn.execute(
+                "SELECT status, attempts, next_attempt_at, last_error, dead_at FROM notification_events WHERE id = ?",
+                ("nte_dnd",),
+            ).fetchone()
+        finally:
+            conn.close()
+            _reset_channel_registry_for_tests()
+
+        assert delivered == []
+        assert row["status"] == "retry_wait"
+        assert row["attempts"] == 0
+        assert row["next_attempt_at"]
+        assert row["last_error"] == "notification do-not-disturb is active"
+        assert row["dead_at"] == ""
+
+    def test_dispatcher_rate_limit_defers_without_consuming_attempts(self, monkeypatch, tmp_path):
+        from services.notifications import dispatcher
+        from services.notifications.base import Channel, _reset_channel_registry_for_tests, register_channel
+        from services.notifications.models import STATUS_PENDING, STATUS_SENT, ChannelResult, TRIGGER_TEST
+
+        delivered = []
+
+        class FakeChannel(Channel):
+            def send(self, payload):
+                delivered.append(payload)
+                return ChannelResult.success()
+
+        _reset_channel_registry_for_tests()
+        register_channel("webhook", FakeChannel)
+        conn = self._notification_db(monkeypatch, tmp_path)
+        database.CFG["notifications"] = {"delivery_rate_per_minute": 1}
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            self._insert_channel(conn, "ntc_rate")
+            for event_id, status, last_attempt_at in (
+                ("nte_recent_sent", STATUS_SENT, now),
+                ("nte_rate", STATUS_PENDING, ""),
+            ):
+                conn.execute(
+                    "INSERT INTO notification_events "
+                    "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
+                    "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        event_id,
+                        "tok_notifications",
+                        "ntc_rate",
+                        TRIGGER_TEST,
+                        json.dumps({"trigger": TRIGGER_TEST}),
+                        status,
+                        1 if status == STATUS_SENT else 0,
+                        "",
+                        last_attempt_at,
+                        "",
+                        "",
+                        now,
+                        "",
+                    ),
+                )
+            dispatcher.dispatch_due_events(conn=conn)
+            row = conn.execute(
+                "SELECT status, attempts, next_attempt_at, last_error, dead_at FROM notification_events WHERE id = ?",
+                ("nte_rate",),
+            ).fetchone()
+        finally:
+            conn.close()
+            _reset_channel_registry_for_tests()
+
+        assert delivered == []
+        assert row["status"] == "retry_wait"
+        assert row["attempts"] == 0
+        assert row["next_attempt_at"]
+        assert row["last_error"] == "notification channel rate limit reached"
+        assert row["dead_at"] == ""
+
+    def test_dispatcher_rate_limit_counts_retry_attempts(self, monkeypatch, tmp_path):
+        from services.notifications import dispatcher
+        from services.notifications.base import Channel, _reset_channel_registry_for_tests, register_channel
+        from services.notifications.models import STATUS_PENDING, STATUS_RETRY_WAIT, ChannelResult, TRIGGER_TEST
+
+        delivered = []
+
+        class FakeChannel(Channel):
+            def send(self, payload):
+                delivered.append(payload)
+                return ChannelResult.success()
+
+        _reset_channel_registry_for_tests()
+        register_channel("webhook", FakeChannel)
+        conn = self._notification_db(monkeypatch, tmp_path)
+        database.CFG["notifications"] = {"delivery_rate_per_minute": 1}
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            self._insert_channel(conn, "ntc_retry_rate")
+            for event_id, status, attempts, last_attempt_at in (
+                ("nte_recent_retry", STATUS_RETRY_WAIT, 1, now),
+                ("nte_rate_retry", STATUS_PENDING, 0, ""),
+            ):
+                conn.execute(
+                    "INSERT INTO notification_events "
+                    "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
+                    "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        event_id,
+                        "tok_notifications",
+                        "ntc_retry_rate",
+                        TRIGGER_TEST,
+                        json.dumps({"trigger": TRIGGER_TEST}),
+                        status,
+                        attempts,
+                        "" if status == STATUS_PENDING else "2099-01-01T00:00:00+00:00",
+                        last_attempt_at,
+                        "",
+                        "",
+                        now,
+                        "",
+                    ),
+                )
+            dispatcher.dispatch_due_events(conn=conn)
+            row = conn.execute(
+                "SELECT status, attempts, last_error FROM notification_events WHERE id = ?",
+                ("nte_rate_retry",),
+            ).fetchone()
+        finally:
+            conn.close()
+            _reset_channel_registry_for_tests()
+
+        assert delivered == []
+        assert row["status"] == "retry_wait"
+        assert row["attempts"] == 0
+        assert row["last_error"] == "notification channel rate limit reached"
+
+    def test_dispatcher_retry_delay_increases_after_first_failure(self, monkeypatch, tmp_path):
+        from services.notifications import dispatcher
+
+        self._notification_db(monkeypatch, tmp_path).close()
+        database.CFG["notifications"] = {"retry": {"base_delay_seconds": 30}}
+
+        assert dispatcher._retry_delay_seconds(1) == 60
+        assert dispatcher._retry_delay_seconds(2) == 120
+
+    def test_dispatcher_dead_letters_retryable_events_after_max_age(self, monkeypatch, tmp_path):
+        from services.notifications import dispatcher
+        from services.notifications.base import Channel, _reset_channel_registry_for_tests, register_channel
+        from services.notifications.models import STATUS_PENDING, ChannelResult, TRIGGER_TEST
+
+        class FakeChannel(Channel):
+            def send(self, payload):
+                return ChannelResult.retry("temporary outage")
+
+        _reset_channel_registry_for_tests()
+        register_channel("webhook", FakeChannel)
+        conn = self._notification_db(monkeypatch, tmp_path)
+        database.CFG["notifications"] = {"retry": {"max_age_hours": 24, "max_attempts": 6}}
+        now = datetime.now(timezone.utc)
+        old_created = (now - timedelta(hours=25)).isoformat()
+        try:
+            self._insert_channel(conn, "ntc_old_retry")
+            conn.execute(
+                "INSERT INTO notification_events "
+                "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
+                "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "nte_old_retry",
+                    "tok_notifications",
+                    "ntc_old_retry",
+                    TRIGGER_TEST,
+                    json.dumps({"trigger": TRIGGER_TEST}),
+                    STATUS_PENDING,
+                    0,
+                    "",
+                    "",
+                    "",
+                    "",
+                    old_created,
+                    "",
+                ),
+            )
+            dispatcher.dispatch_due_events(conn=conn)
+            row = conn.execute(
+                "SELECT status, attempts, next_attempt_at, last_error, dead_at FROM notification_events WHERE id = ?",
+                ("nte_old_retry",),
+            ).fetchone()
+        finally:
+            conn.close()
+            _reset_channel_registry_for_tests()
+
+        assert row["status"] == "dead"
+        assert row["attempts"] == 1
+        assert row["next_attempt_at"] == ""
+        assert row["last_error"] == "temporary outage"
+        assert row["dead_at"]
+
+    def test_dispatcher_records_retry_terminal_and_exception_outcomes(self, monkeypatch, tmp_path):
+        from services.notifications import dispatcher
+        from services.notifications.base import Channel, _reset_channel_registry_for_tests, register_channel
+        from services.notifications.models import STATUS_PENDING, ChannelResult, TRIGGER_TEST
+
+        class FakeChannel(Channel):
+            def send(self, payload):
+                mode = payload["mode"]
+                if mode == "retry":
+                    return ChannelResult.retry("temporary outage")
+                if mode == "terminal":
+                    return ChannelResult.terminal("bad destination")
+                raise RuntimeError("sender exploded")
+
+        _reset_channel_registry_for_tests()
+        register_channel("webhook", FakeChannel)
+        conn = self._notification_db(monkeypatch, tmp_path)
+        database.CFG["notifications"] = {"retry": {"base_delay_seconds": 1, "max_attempts": 6, "max_age_hours": 24}}
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            self._insert_channel(conn, "ntc_failure_modes")
+            for event_id, mode in (
+                ("nte_retry", "retry"),
+                ("nte_terminal", "terminal"),
+                ("nte_exception", "exception"),
+            ):
+                conn.execute(
+                    "INSERT INTO notification_events "
+                    "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
+                    "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        event_id,
+                        "tok_notifications",
+                        "ntc_failure_modes",
+                        TRIGGER_TEST,
+                        json.dumps({"trigger": TRIGGER_TEST, "mode": mode}),
+                        STATUS_PENDING,
+                        0,
+                        "",
+                        "",
+                        "",
+                        "",
+                        now,
+                        "",
+                    ),
+                )
+
+            dispatcher.dispatch_due_events(conn=conn)
+            rows = conn.execute(
+                "SELECT id, status, attempts, next_attempt_at, last_error, dead_at "
+                "FROM notification_events ORDER BY id"
+            ).fetchall()
+        finally:
+            conn.close()
+            _reset_channel_registry_for_tests()
+
+        statuses = {row["id"]: dict(row) for row in rows}
+        assert statuses["nte_retry"]["status"] == "retry_wait"
+        assert statuses["nte_retry"]["attempts"] == 1
+        assert statuses["nte_retry"]["next_attempt_at"]
+        assert statuses["nte_retry"]["last_error"] == "temporary outage"
+        assert statuses["nte_retry"]["dead_at"] == ""
+        assert statuses["nte_terminal"]["status"] == "dead"
+        assert statuses["nte_terminal"]["attempts"] == 1
+        assert statuses["nte_terminal"]["next_attempt_at"] == ""
+        assert statuses["nte_terminal"]["last_error"] == "bad destination"
+        assert statuses["nte_terminal"]["dead_at"]
+        assert statuses["nte_exception"]["status"] == "retry_wait"
+        assert statuses["nte_exception"]["attempts"] == 1
+        assert statuses["nte_exception"]["next_attempt_at"]
+        assert statuses["nte_exception"]["last_error"] == "sender exploded"
+        assert statuses["nte_exception"]["dead_at"] == ""
+
+    def test_dispatcher_prunes_sent_events_after_retention(self, monkeypatch, tmp_path):
+        from services.notifications import dispatcher
+        from services.notifications.models import STATUS_DEAD, STATUS_SENT, TRIGGER_TEST
+
+        conn = self._notification_db(monkeypatch, tmp_path)
+        database.CFG["notifications"] = {"events": {"retention_days": 30}}
+        now = datetime(2026, 5, 20, tzinfo=timezone.utc).isoformat()
+        old_created = (datetime(2026, 5, 20, tzinfo=timezone.utc) - timedelta(days=31)).isoformat()
+        fresh_created = (datetime(2026, 5, 20, tzinfo=timezone.utc) - timedelta(days=1)).isoformat()
+        try:
+            self._insert_channel(conn, "ntc_prune")
+            for event_id, status, created in (
+                ("nte_old_sent", STATUS_SENT, old_created),
+                ("nte_fresh_sent", STATUS_SENT, fresh_created),
+                ("nte_old_dead", STATUS_DEAD, old_created),
+            ):
+                conn.execute(
+                    "INSERT INTO notification_events "
+                    "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
+                    "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        event_id,
+                        "tok_notifications",
+                        "ntc_prune",
+                        TRIGGER_TEST,
+                        json.dumps({"trigger": TRIGGER_TEST}),
+                        status,
+                        1,
+                        "",
+                        created,
+                        "",
+                        "",
+                        created,
+                        "",
+                    ),
+                )
+
+            pruned = dispatcher.prune_sent_events(conn=conn, now=now)
+            rows = conn.execute("SELECT id FROM notification_events ORDER BY id").fetchall()
+        finally:
+            conn.close()
+
+        assert pruned == 1
+        assert [row["id"] for row in rows] == ["nte_fresh_sent", "nte_old_dead"]
+
+    def test_notification_channel_ids_use_full_uuid_hex(self):
+        from services.notifications import channels_store
+
+        channel_id = channels_store._channel_id()
+
+        assert channel_id.startswith("ntc_")
+        assert len(channel_id) == 36
 
     def test_notification_helpers_do_not_import_blueprints(self):
         notification_dir = REPO_ROOT / "app" / "services" / "notifications"

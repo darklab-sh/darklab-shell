@@ -9,12 +9,13 @@ from typing import Any
 
 from jinja2 import Environment, select_autoescape
 
-from core import database
-from services.notifications.base import Channel, register_channel
-from services.notifications.channels._format import format_plain_text, format_summary_fields
-from services.notifications.models import CHANNEL_KIND_EMAIL, ChannelResult, notification_app_name
+from services.notifications import notification_cfg
+from services.notifications.base import Channel
+from services.notifications.channels._format import format_plain_text, format_summary_fields, parse_email_recipients
+from services.notifications.models import ChannelResult, notification_app_name
 
 DEFAULT_SMTP_TIMEOUT_SECONDS = 15.0
+DEFAULT_SMTP_TEST_TIMEOUT_SECONDS = 4.0
 EMAIL_HTML_ENV = Environment(autoescape=select_autoescape(default=True))
 EMAIL_HTML_TEMPLATE = EMAIL_HTML_ENV.from_string(
     """
@@ -38,25 +39,13 @@ EMAIL_HTML_TEMPLATE = EMAIL_HTML_ENV.from_string(
 )
 
 
-def _notifications_cfg() -> dict[str, Any]:
-    cfg = database.CFG.get("notifications", {})
-    return cfg if isinstance(cfg, dict) else {}
-
-
-def _smtp_cfg() -> dict[str, Any]:
-    cfg = _notifications_cfg().get("smtp", {})
+def _smtp_cfg(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    cfg = (cfg if isinstance(cfg, dict) else notification_cfg()).get("smtp", {})
     return cfg if isinstance(cfg, dict) else {}
 
 
 def _recipients(config: dict[str, Any]) -> list[str]:
-    value = config.get("recipients")
-    if isinstance(value, list):
-        candidates = value
-    elif isinstance(value, str):
-        candidates = value.replace(";", ",").split(",")
-    else:
-        candidates = []
-    return [str(item).strip() for item in candidates if str(item or "").strip()]
+    return parse_email_recipients(config.get("recipients"))
 
 
 def _port(value: Any) -> int | None:
@@ -67,14 +56,20 @@ def _port(value: Any) -> int | None:
     return port if 1 <= port <= 65535 else None
 
 
-def _timeout_seconds(config: dict[str, Any]) -> float:
-    raw = config.get("timeout_seconds", _notifications_cfg().get("http_timeout_seconds", DEFAULT_SMTP_TIMEOUT_SECONDS))
+def _timeout_seconds(config: dict[str, Any], *, cfg: dict[str, Any] | None = None, test_send: bool = False) -> float:
+    cfg = cfg if isinstance(cfg, dict) else notification_cfg()
+    if test_send:
+        raw = cfg.get("test_timeout_seconds", DEFAULT_SMTP_TEST_TIMEOUT_SECONDS)
+        default = DEFAULT_SMTP_TEST_TIMEOUT_SECONDS
+    else:
+        raw = config.get("timeout_seconds", cfg.get("http_timeout_seconds", DEFAULT_SMTP_TIMEOUT_SECONDS))
+        default = DEFAULT_SMTP_TIMEOUT_SECONDS
     if raw is None:
-        return DEFAULT_SMTP_TIMEOUT_SECONDS
+        return default
     try:
         return max(1.0, min(60.0, float(raw)))
     except (TypeError, ValueError):
-        return DEFAULT_SMTP_TIMEOUT_SECONDS
+        return default
 
 
 def _tls_mode(value: Any) -> str:
@@ -128,7 +123,7 @@ class EmailChannel(Channel):
     """Send notifications through the operator-configured SMTP relay."""
 
     def validate_config(self, config: dict[str, Any]) -> list[str]:
-        errors = _smtp_config_errors(_smtp_cfg())
+        errors = _smtp_config_errors(_smtp_cfg(notification_cfg()))
         recipients = _recipients(config)
         if not recipients:
             errors.append("at least one email recipient is required")
@@ -138,7 +133,8 @@ class EmailChannel(Channel):
         return errors
 
     def send(self, payload: dict[str, Any]) -> ChannelResult:
-        config = _smtp_cfg()
+        cfg = notification_cfg()
+        config = _smtp_cfg(cfg)
         errors = _smtp_config_errors(config)
         if errors:
             return ChannelResult.terminal("; ".join(errors))
@@ -166,7 +162,7 @@ class EmailChannel(Channel):
         if port is None:
             return ChannelResult.terminal("SMTP port must be between 1 and 65535")
         tls_mode = _tls_mode(config.get("tls"))
-        timeout = _timeout_seconds(self.channel.config)
+        timeout = _timeout_seconds(self.channel.config, cfg=cfg, test_send=str(payload.get("trigger") or "") == "test")
         try:
             if tls_mode == "ssl":
                 with smtplib.SMTP_SSL(host, port, timeout=timeout) as smtp:
@@ -181,6 +177,3 @@ class EmailChannel(Channel):
         except (OSError, smtplib.SMTPException) as exc:
             return ChannelResult.retry(f"email delivery failed: {exc}")
         return ChannelResult.success()
-
-
-register_channel(CHANNEL_KIND_EMAIL, EmailChannel)

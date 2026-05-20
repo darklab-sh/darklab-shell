@@ -228,6 +228,8 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `notifications.do_not_disturb` | `false` | Server-side only. Stops outbound notification delivery before channel sends while keeping queued event storage available |
 | `notifications.delivery_rate_per_minute` | `10` | Server-side only. Per-channel outbound notification send cap used by the worker claim path |
 | `notifications.http_timeout_seconds` | `8` | Server-side only. HTTP timeout for outbound webhook-style notification channel sends |
+| `notifications.test_timeout_seconds` | `4` | Server-side only. Shorter timeout used for manual notification test sends |
+| `notifications.http_private_host_allowlist` | `[]` | Server-side only. Exact hostnames, IPs, or CIDR ranges that webhook-style channels may post to even when they resolve to private, loopback, link-local, or otherwise non-public addresses |
 | `notifications.smtp.host` | _(empty)_ | Server-side only. SMTP relay host required before email notification channels can send |
 | `notifications.smtp.port` | `587` | Server-side only. SMTP relay port for email notification channels |
 | `notifications.smtp.user` | _(empty)_ | Server-side only. SMTP username for the operator-managed relay |
@@ -237,6 +239,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `notifications.retry.max_attempts` | `6` | Server-side only. Maximum delivery attempts before a notification event moves to dead-letter state |
 | `notifications.retry.max_age_hours` | `24` | Server-side only. Maximum retry window before a notification event moves to dead-letter state |
 | `notifications.retry.base_delay_seconds` | `30` | Server-side only. Base delay for exponential notification retry backoff |
+| `notifications.events.retention_days` | `30` | Server-side only. Number of days to keep sent notification delivery audit rows; set to `0` to disable pruning |
 | `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` means disabled |
 | `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
 | `run_broker_enabled` | `true` | Enables the brokered run model for command start, output replay, and live reattachment |
@@ -616,6 +619,7 @@ WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 # POSTGRES_USER=darklab
 # POSTGRES_PASSWORD=darklab_dev_password
 # SECRETS_MASTER_KEY=
+# NOTIFICATION_WORKER_ENABLED=1
 # DOCKER_GELF_ADDRESS=udp://loghost.darklab.sh:12201/
 ```
 

@@ -978,13 +978,42 @@
             },
             "type": "array"
           },
+          "events": {
+            "items": {
+              "properties": {
+                "event_id": {
+                  "type": "string"
+                },
+                "last_error": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "pending",
+                    "retry_wait",
+                    "sent",
+                    "dead"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "event_id",
+                "status",
+                "last_error"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "queued": {
             "type": "integer"
           }
         },
         "required": [
           "queued",
-          "event_ids"
+          "event_ids",
+          "events"
         ],
         "type": "object"
       },

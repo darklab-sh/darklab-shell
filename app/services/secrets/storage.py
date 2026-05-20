@@ -82,54 +82,63 @@ def list_secret_metadata(session_token: str) -> list[dict[str, str | list[str]]]
     return [_metadata_from_row(row) for row in rows]
 
 
-def upsert_secret(session_token: str, name: str, value: str, consumer_envs=None) -> tuple[dict, bool]:
+def upsert_secret_with_connection(conn, session_token: str, name: str, value: str, consumer_envs=None) -> tuple[dict, bool]:
     normalized_name = normalize_secret_name(name)
     normalized_envs = normalize_consumer_envs(consumer_envs, default_name=normalized_name)
     ciphertext, nonce = encrypt_secret(value)
     now = _utc_now()
     envs_json = json.dumps(normalized_envs, separators=(",", ":"))
 
-    with db_connect() as conn:
-        existing = conn.execute(
-            "SELECT created_at FROM secrets WHERE session_token = ? AND name = ?",
-            (session_token, normalized_name),
-        ).fetchone()
-        rows = conn.execute(
-            "SELECT name, consumer_envs FROM secrets WHERE session_token = ? AND name <> ? ORDER BY name",
-            (session_token, normalized_name),
-        ).fetchall()
-        requested_envs = set(normalized_envs)
-        for row in rows:
-            existing_envs = set(json.loads(row["consumer_envs"] or "[]"))
-            conflicts = sorted(requested_envs & existing_envs)
-            if conflicts:
-                raise SecretConsumerEnvConflict(conflicts[0], row["name"])
-        created = existing is None
-        created_at = now if created else existing["created_at"]
-        conn.execute(
-            "INSERT INTO secrets "
-            "(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(session_token, name) DO UPDATE SET "
-            "ciphertext = excluded.ciphertext, "
-            "nonce = excluded.nonce, "
-            "consumer_envs = excluded.consumer_envs, "
-            "updated_at = excluded.updated_at",
-            (session_token, normalized_name, ciphertext, nonce, envs_json, created_at, now),
-        )
-        conn.commit()
-    emit_secret_event(
-        "SECRET_STORED",
-        session_token,
-        name=normalized_name,
-        consumer_envs=normalized_envs,
-        is_new_secret=created,
+    existing = conn.execute(
+        "SELECT created_at FROM secrets WHERE session_token = ? AND name = ?",
+        (session_token, normalized_name),
+    ).fetchone()
+    rows = conn.execute(
+        "SELECT name, consumer_envs FROM secrets WHERE session_token = ? AND name <> ? ORDER BY name",
+        (session_token, normalized_name),
+    ).fetchall()
+    requested_envs = set(normalized_envs)
+    for row in rows:
+        existing_envs = set(json.loads(row["consumer_envs"] or "[]"))
+        conflicts = sorted(requested_envs & existing_envs)
+        if conflicts:
+            raise SecretConsumerEnvConflict(conflicts[0], row["name"])
+    created = existing is None
+    created_at = now if created else existing["created_at"]
+    conn.execute(
+        "INSERT INTO secrets "
+        "(session_token, name, ciphertext, nonce, consumer_envs, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(session_token, name) DO UPDATE SET "
+        "ciphertext = excluded.ciphertext, "
+        "nonce = excluded.nonce, "
+        "consumer_envs = excluded.consumer_envs, "
+        "updated_at = excluded.updated_at",
+        (session_token, normalized_name, ciphertext, nonce, envs_json, created_at, now),
     )
     return {
         "name": normalized_name,
         "consumer_envs": normalized_envs,
         "updated_at": now,
     }, created
+
+
+def emit_secret_upsert_audit(session_token: str, metadata: dict, created: bool) -> None:
+    emit_secret_event(
+        "SECRET_STORED",
+        session_token,
+        name=str(metadata["name"]),
+        consumer_envs=metadata["consumer_envs"],
+        is_new_secret=created,
+    )
+
+
+def upsert_secret(session_token: str, name: str, value: str, consumer_envs=None) -> tuple[dict, bool]:
+    with db_connect() as conn:
+        metadata, created = upsert_secret_with_connection(conn, session_token, name, value, consumer_envs)
+        conn.commit()
+    emit_secret_upsert_audit(session_token, metadata, created)
+    return metadata, created
 
 
 def delete_secret(session_token: str, name: str) -> bool:

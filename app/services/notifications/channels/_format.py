@@ -17,6 +17,23 @@ def truncate_text(value: Any, limit: int = MAX_FIELD_VALUE_LENGTH) -> str:
     return text[: max(0, limit - 1)].rstrip() + "..."
 
 
+def truncate_run_id(value: Any) -> str:
+    text = str(value if value is not None else "").strip()
+    if len(text) <= 18:
+        return text
+    return f"...{text[-8:]}"
+
+
+def parse_email_recipients(value: Any) -> list[str]:
+    if isinstance(value, list):
+        candidates = value
+    elif isinstance(value, str):
+        candidates = value.replace(";", ",").split(",")
+    else:
+        candidates = []
+    return [str(item).strip() for item in candidates if str(item or "").strip()]
+
+
 def humanize_key(value: str) -> str:
     return str(value or "").replace("_", " ").strip().title()
 
@@ -41,7 +58,8 @@ def format_summary_fields(payload: dict[str, Any]) -> list[tuple[str, str]]:
     ):
         value = payload.get(key)
         if value not in ("", None):
-            fields.append((label, truncate_text(value)))
+            display_value = truncate_run_id(value) if key == "run_id" else truncate_text(value)
+            fields.append((label, display_value))
 
     summary_fields = payload.get("summary_fields")
     if isinstance(summary_fields, dict):

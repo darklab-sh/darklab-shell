@@ -677,13 +677,14 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - SMTP email uses operator-owned transport settings from `notifications.smtp.*`, while each email channel chooses its recipients and optional reply-to address.
 - External non-PTY run finalization queues a `run_complete` notification with the configured `app_name`, run id, command root, exit code, token hint, and summary counts. Built-in commands and PTY sessions do not send `run_complete` by default.
 - The trigger list also includes `pty_session_ended`, `scheduled_run_failed`, `watcher_changed`, `watcher_error`, `watcher_recovered`, and `test`; a channel sends only when a matching app source queues that trigger.
-- Test sends use the same queue and delivery path as real notifications, so a successful test verifies both channel config and delivery plumbing.
-- Delivery events are queued, claimed by the notification worker, retried with backoff when failures are retryable, and moved to dead-letter state when attempts or retry age are exhausted.
-- Delivery audit rows are available through `/api/v1/notification-events` and `darklab notify events`.
+- Test sends use the same queue and delivery path as real notifications, so a successful test verifies both channel config and delivery plumbing. Muted channels stay configured but do not queue test sends or other deliveries until unmuted.
+- Delivery events are queued, claimed by the notification worker, retried with backoff when failures are retryable, and moved to dead-letter state when attempts or retry age are exhausted. Sent delivery audit rows are pruned after the configured retention window.
+- Webhook-style channels reject non-public destinations by default, with an operator allowlist for trusted internal receivers.
+- Delivery audit rows are available through `/api/v1/notification-events` and `darklab notify events`; the CLI can also update, mute, unmute, test, and delete channels.
 
 **Limits:** anonymous browser sessions cannot create outbound channels. Email channels require SMTP settings before they can be saved or tested. Channel payloads are intentionally compact and should still be sent only to destinations you trust.
 
-**Configuration:** `notifications.*` controls do-not-disturb, per-channel delivery rate, HTTP timeout, SMTP transport, and retry behavior. `app_name` controls outbound titles/messages. See [CONFIGURATION.md](CONFIGURATION.md) and [docs/notifications.md](docs/notifications.md).
+**Configuration:** `notifications.*` controls do-not-disturb, per-channel delivery rate, HTTP/test timeouts, private webhook destination allowlisting, SMTP transport, sent-event retention, and retry behavior. `app_name` controls outbound titles/messages. See [CONFIGURATION.md](CONFIGURATION.md) and [docs/notifications.md](docs/notifications.md).
 
 **Related files:** `app/services/notifications/` (channel registry, payload builders, queue dispatcher, worker, and secret helpers), `app/blueprints/notifications.py` (browser channel routes), `app/blueprints/api_v1.py` (API channel and audit routes), `app/static/js/features/preferences/notification_channels.js` (Options **Notifications** tab), `docs/notifications.md` (setup and payload guide).
 

@@ -5,6 +5,7 @@ import uuid
 from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import app as shell_app
 import config
@@ -765,7 +766,7 @@ def test_api_v1_notification_channels_crud_masks_secrets_and_lists_events(monkey
     monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
     secrets_vault.reset_master_key_cache_for_tests()
 
-    def fake_post_json(_url, payload, _config, *, label):
+    def fake_post_json(_url, payload, _config, *, label, **_kwargs):
         sent_payloads.append((label, payload))
         return ChannelResult.success()
 
@@ -798,6 +799,7 @@ def test_api_v1_notification_channels_crud_masks_secrets_and_lists_events(monkey
 
     assert tested.status_code == 200
     assert test_payload["queued"] == 1
+    assert test_payload["events"] == [{"event_id": test_payload["event_ids"][0], "status": "sent", "last_error": ""}]
     assert sent_payloads[0][0] == "webhook"
     assert sent_payloads[0][1]["trigger"] == "test"
     assert sent_payloads[0][1]["app_name"] == "darklab_shell"
@@ -851,6 +853,33 @@ def test_api_v1_notification_channels_are_token_scoped(monkeypatch):
     assert json.loads(other_delete.data)["error"]["code"] == "not_found"
 
 
+def test_api_v1_notification_channel_rejections_are_logged():
+    import blueprints.api_v1 as api_v1
+
+    client = get_client()
+    token = _token(client)
+    with mock.patch.object(api_v1.log, "warning") as log_warning:
+        resp = client.post(
+            "/api/v1/notification-channels",
+            headers=_headers(token),
+            json={"kind": "bogus"},
+        )
+
+    assert resp.status_code == 400
+    assert json.loads(resp.data)["error"]["code"] == "invalid_kind"
+    log_warning.assert_any_call(
+        "API_NOTIFICATION_CHANNEL_REJECTED",
+        extra={
+            "ip": "127.0.0.1",
+            "session": "tok_" + token[4:8] + "********",
+            "code": "invalid_kind",
+            "status": 400,
+            "route": "/api/v1/notification-channels",
+            "method": "POST",
+        },
+    )
+
+
 def test_darklab_cli_notify_commands_use_secret_file_and_event_reader(monkeypatch, capsys, tmp_path):
     cli_main = import_module("darklab_cli.__main__")
     secret_file = tmp_path / "webhook.json"
@@ -874,6 +903,14 @@ def test_darklab_cli_notify_commands_use_secret_file_and_event_reader(monkeypatc
                 return {"channel": {"id": "ntc_cli", "kind": "webhook", "muted": False, "label": "CLI Hook"}}
             if path == "/notification-channels" and method == "GET":
                 return {"channels": [{"id": "ntc_cli", "kind": "webhook", "muted": False, "label": "CLI Hook"}]}
+            if path == "/notification-channels/ntc_cli" and method == "PATCH":
+                if body == {"label": "Updated Hook", "triggers": ["run_complete", "watcher_changed"]}:
+                    return {"channel": {"id": "ntc_cli", "kind": "webhook", "muted": False, "label": "Updated Hook"}}
+                if body == {"muted": True}:
+                    return {"channel": {"id": "ntc_cli", "kind": "webhook", "muted": True, "label": "Updated Hook"}}
+                if body == {"muted": False}:
+                    return {"channel": {"id": "ntc_cli", "kind": "webhook", "muted": False, "label": "Updated Hook"}}
+                raise cli_main.DarklabCliError(f"unexpected patch body: {body}")
             if path == "/notification-channels/ntc_cli/test":
                 return {"queued": 1, "event_ids": ["nte_cli"]}
             if path == "/notification-events":
@@ -920,6 +957,22 @@ def test_darklab_cli_notify_commands_use_secret_file_and_event_reader(monkeypatc
     assert "ntc_cli" in capsys.readouterr().out
     assert cli_main.main(["notify", "list"]) == 0
     assert "CLI Hook" in capsys.readouterr().out
+    assert cli_main.main([
+        "notify",
+        "update",
+        "ntc_cli",
+        "--label",
+        "Updated Hook",
+        "--trigger",
+        "run_complete",
+        "--trigger",
+        "watcher_changed",
+    ]) == 0
+    assert "Updated Hook" in capsys.readouterr().out
+    assert cli_main.main(["notify", "mute", "ntc_cli"]) == 0
+    assert "True" in capsys.readouterr().out
+    assert cli_main.main(["notify", "unmute", "ntc_cli"]) == 0
+    assert "False" in capsys.readouterr().out
     assert cli_main.main(["notify", "test", "ntc_cli"]) == 0
     assert "nte_cli" in capsys.readouterr().out
     assert cli_main.main([
@@ -941,6 +994,9 @@ def test_darklab_cli_notify_commands_use_secret_file_and_event_reader(monkeypatc
     assert [call[1] for call in calls] == [
         "/notification-channels",
         "/notification-channels",
+        "/notification-channels/ntc_cli",
+        "/notification-channels/ntc_cli",
+        "/notification-channels/ntc_cli",
         "/notification-channels/ntc_cli/test",
         "/notification-events",
         "/notification-channels/ntc_cli",

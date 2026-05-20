@@ -353,6 +353,8 @@ class TestNotificationChannelRoutes:
                 patcher.stop()
 
     def test_notification_channel_crud_masks_secret_values(self, monkeypatch, tmp_path):
+        from services.notifications.secrets import channel_secret_name, get_channel_secret
+
         client, patchers = self._notification_client(monkeypatch, tmp_path)
         try:
             session_id = "tok_notification_routes"
@@ -364,11 +366,28 @@ class TestNotificationChannelRoutes:
             assert payload["label"] == "Ops webhook"
             assert payload["triggers"] == ["run_complete"]
             assert payload["secret_fields"] == [{"name": "url", "configured": True}]
+            secret_name = channel_secret_name(payload["id"], "url")
+            assert get_channel_secret(session_id, secret_name) == "https://example.invalid/hook"
 
             listed = client.get("/session/notification-channels", headers={"X-Session-ID": session_id})
             assert listed.status_code == 200
             assert "https://example.invalid/hook" not in listed.get_data(as_text=True)
             assert listed.get_json()["channels"][0]["id"] == payload["id"]
+
+            kind_change = client.patch(
+                f"/session/notification-channels/{payload['id']}",
+                headers={"X-Session-ID": session_id},
+                json={
+                    "kind": "telegram",
+                    "label": "Wrong type",
+                    "config": {"chat_id": "-100123"},
+                    "secret_values": {"bot_token": "secret-token"},
+                    "triggers": ["watcher_error"],
+                },
+            )
+            assert kind_change.status_code == 400
+            assert kind_change.get_json()["error"] == "kind_locked"
+            assert get_channel_secret(session_id, secret_name) == "https://example.invalid/hook"
 
             updated = client.patch(
                 f"/session/notification-channels/{payload['id']}",
@@ -388,6 +407,59 @@ class TestNotificationChannelRoutes:
             assert updated_payload["triggers"] == ["watcher_error"]
             assert updated_payload["muted"] is True
             assert updated_payload["secret_fields"] == [{"name": "url", "configured": True}]
+            assert get_channel_secret(session_id, secret_name) == "https://example.invalid/hook"
+
+            secret_replaced = client.patch(
+                f"/session/notification-channels/{payload['id']}",
+                headers={"X-Session-ID": session_id},
+                json={
+                    "kind": "webhook",
+                    "label": "Replacement webhook",
+                    "config": {"timeout_seconds": "6"},
+                    "secret_values": {"url": "https://replacement.example.invalid/hook"},
+                    "triggers": ["run_complete"],
+                    "muted": False,
+                },
+            )
+            assert secret_replaced.status_code == 200
+            assert get_channel_secret(session_id, secret_name) == "https://replacement.example.invalid/hook"
+            assert "https://replacement.example.invalid/hook" not in secret_replaced.get_data(as_text=True)
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_notification_channel_create_rolls_back_secret_when_row_insert_fails(self, monkeypatch, tmp_path):
+        from services.notifications import channels_store
+        from services.notifications.secrets import channel_secret_name, get_channel_secret
+
+        _client, patchers = self._notification_client(monkeypatch, tmp_path)
+        try:
+            session_id = "tok_notification_atomic_secret"
+            self._register_session_token(session_id)
+            monkeypatch.setattr(channels_store, "_channel_id", lambda: "ntc_atomic_secret")
+            created = channels_store.create_notification_channel(
+                session_id,
+                {
+                    "kind": "webhook",
+                    "label": "Atomic webhook",
+                    "secret_values": {"url": "https://first.example.invalid/hook"},
+                    "triggers": ["run_complete"],
+                },
+            )
+            with pytest.raises(Exception):
+                channels_store.create_notification_channel(
+                    session_id,
+                    {
+                        "kind": "webhook",
+                        "label": "Duplicate webhook",
+                        "secret_values": {"url": "https://second.example.invalid/hook"},
+                        "triggers": ["run_complete"],
+                    },
+                )
+
+            assert created["id"] == "ntc_atomic_secret"
+            secret_name = channel_secret_name("ntc_atomic_secret", "url")
+            assert get_channel_secret(session_id, secret_name) == "https://first.example.invalid/hook"
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -400,7 +472,7 @@ class TestNotificationChannelRoutes:
         monkeypatch.setitem(config.CFG, "app_name", "darklab_shell")
         monkeypatch.setattr(
             "services.notifications.channels.webhook.post_json",
-            lambda url, payload, config, label: delivered.append((url, payload, label)) or ChannelResult.success(),
+            lambda url, payload, config, label, **_kwargs: delivered.append((url, payload, label)) or ChannelResult.success(),
         )
         try:
             session_id = "tok_notification_test_send"
@@ -413,7 +485,9 @@ class TestNotificationChannelRoutes:
                 headers={"X-Session-ID": session_id},
             )
             assert resp.status_code == 200
-            assert resp.get_json()["queued"] == 1
+            payload = resp.get_json()
+            assert payload["queued"] == 1
+            assert payload["events"] == [{"event_id": payload["event_ids"][0], "status": "sent", "last_error": ""}]
             assert delivered[0][0] == "https://example.invalid/hook"
             assert delivered[0][1]["trigger"] == "test"
             assert delivered[0][1]["app_name"] == "darklab_shell"
@@ -428,13 +502,189 @@ class TestNotificationChannelRoutes:
             for patcher in reversed(patchers):
                 patcher.stop()
 
-    def test_notification_channel_delete_removes_channel(self, monkeypatch, tmp_path):
+    def test_notification_channel_test_endpoint_targets_requested_channel(self, monkeypatch, tmp_path):
+        from services.notifications.models import ChannelResult
+
+        delivered = []
+        client, patchers = self._notification_client(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            "services.notifications.channels.webhook.post_json",
+            lambda url, payload, config, label, **_kwargs: delivered.append((url, payload, label)) or ChannelResult.success(),
+        )
+        try:
+            session_id = "tok_notification_test_single"
+            first = self._create_webhook_channel(client, session_id).get_json()["channel"]
+            second_resp = client.post(
+                "/session/notification-channels",
+                headers={"X-Session-ID": session_id},
+                json={
+                    "kind": "webhook",
+                    "label": "Second webhook",
+                    "secret_values": {"url": "https://second.example.invalid/hook"},
+                    "triggers": ["run_complete"],
+                },
+            )
+            second = second_resp.get_json()["channel"]
+
+            resp = client.post(
+                f"/session/notification-channels/{second['id']}/test",
+                headers={"X-Session-ID": session_id},
+            )
+
+            assert resp.status_code == 200
+            payload = resp.get_json()
+            assert payload["queued"] == 1
+            assert payload["events"] == [{"event_id": payload["event_ids"][0], "status": "sent", "last_error": ""}]
+            assert delivered == [
+                (
+                    "https://second.example.invalid/hook",
+                    {
+                        "trigger": "test",
+                        "app_name": "darklab_shell",
+                        "channel_id": second["id"],
+                        "message": "darklab_shell test notification",
+                        "occurred_at": delivered[0][1]["occurred_at"],
+                    },
+                    "webhook",
+                )
+            ]
+            with db_connect() as conn:
+                rows = conn.execute(
+                    "SELECT channel_id, status FROM notification_events ORDER BY created"
+                ).fetchall()
+            assert [(row["channel_id"], row["status"]) for row in rows] == [(second["id"], "sent")]
+            assert first["id"] != second["id"]
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_notification_channel_test_endpoint_reports_delivery_failure_status(self, monkeypatch, tmp_path):
+        from services.notifications.models import ChannelResult
+
+        client, patchers = self._notification_client(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            "services.notifications.channels.webhook.post_json",
+            lambda url, payload, config, label, **_kwargs: ChannelResult.retry("webhook rejected the test"),
+        )
+        try:
+            session_id = "tok_notification_test_failure"
+            created = self._create_webhook_channel(client, session_id)
+            channel_id = created.get_json()["channel"]["id"]
+
+            resp = client.post(
+                f"/session/notification-channels/{channel_id}/test",
+                headers={"X-Session-ID": session_id},
+            )
+
+            payload = resp.get_json()
+            assert resp.status_code == 200
+            assert payload["queued"] == 1
+            assert payload["events"] == [
+                {
+                    "event_id": payload["event_ids"][0],
+                    "status": "retry_wait",
+                    "last_error": "webhook rejected the test",
+                }
+            ]
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_notification_channels_migrate_with_session_token_and_secrets(self, monkeypatch, tmp_path):
+        from services.notifications.models import ChannelResult
+
+        delivered = []
+        client, patchers = self._notification_client(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            "services.notifications.channels.webhook.post_json",
+            lambda url, payload, config, label, **_kwargs: delivered.append((url, payload, label)) or ChannelResult.success(),
+        )
+        try:
+            source_session_id = "tok_notification_migrate_source"
+            destination_token = "tok_notification_migrate_dest"
+            self._register_session_token(source_session_id)
+            self._register_session_token(destination_token)
+            created = self._create_webhook_channel(client, source_session_id).get_json()["channel"]
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO notification_events "
+                    "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
+                    "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "nte_migrates_with_channel",
+                        source_session_id,
+                        created["id"],
+                        "test",
+                        json.dumps({"trigger": "test"}),
+                        "pending",
+                        0,
+                        "",
+                        "",
+                        "",
+                        "",
+                        datetime.now(timezone.utc).isoformat(),
+                        "",
+                    ),
+                )
+                conn.commit()
+
+            migrate_resp = client.post(
+                "/session/migrate",
+                headers={"X-Session-ID": source_session_id},
+                json={"from_session_id": source_session_id, "to_session_id": destination_token},
+            )
+            listed = client.get("/session/notification-channels", headers={"X-Session-ID": destination_token})
+            test_resp = client.post(
+                f"/session/notification-channels/{created['id']}/test",
+                headers={"X-Session-ID": destination_token},
+            )
+
+            assert migrate_resp.status_code == 200
+            assert migrate_resp.get_json()["migrated_notification_channels"] == 1
+            assert migrate_resp.get_json()["migrated_notification_events"] == 1
+            assert listed.status_code == 200
+            assert listed.get_json()["channels"][0]["id"] == created["id"]
+            assert test_resp.status_code == 200
+            assert delivered[0][0] == "https://example.invalid/hook"
+            with db_connect() as conn:
+                source_channel_count = conn.execute(
+                    "SELECT COUNT(*) AS count FROM notification_channels WHERE session_token = ?",
+                    (source_session_id,),
+                ).fetchone()["count"]
+                migrated_event = conn.execute(
+                    "SELECT session_token FROM notification_events WHERE id = ?",
+                    ("nte_migrates_with_channel",),
+                ).fetchone()
+            assert int(source_channel_count) == 0
+            assert migrated_event["session_token"] == destination_token
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_notification_channel_delete_removes_channel_and_vault_secrets(self, monkeypatch, tmp_path):
+        from services.notifications.secrets import channel_secret_name, get_channel_secret
+
         client, patchers = self._notification_client(monkeypatch, tmp_path)
         try:
             session_id = "tok_notification_delete"
-            created = self._create_webhook_channel(client, session_id)
+            self._register_session_token(session_id)
+            created = client.post(
+                "/session/notification-channels",
+                headers={"X-Session-ID": session_id},
+                json={
+                    "kind": "pushover",
+                    "label": "Push alerts",
+                    "secret_values": {"app_token": "app-secret", "user_key": "user-secret"},
+                    "triggers": ["run_complete"],
+                },
+            )
             assert created.status_code == 201
             channel_id = created.get_json()["channel"]["id"]
+            app_secret_name = channel_secret_name(channel_id, "app_token")
+            user_secret_name = channel_secret_name(channel_id, "user_key")
+            assert get_channel_secret(session_id, app_secret_name) == "app-secret"
+            assert get_channel_secret(session_id, user_secret_name) == "user-secret"
 
             deleted = client.delete(
                 f"/session/notification-channels/{channel_id}",
@@ -446,6 +696,8 @@ class TestNotificationChannelRoutes:
             listed = client.get("/session/notification-channels", headers={"X-Session-ID": session_id})
             assert listed.status_code == 200
             assert listed.get_json()["channels"] == []
+            assert get_channel_secret(session_id, app_secret_name) is None
+            assert get_channel_secret(session_id, user_secret_name) is None
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()

@@ -4,22 +4,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from services.notifications.base import Channel, register_channel
+from services.notifications.base import Channel
 from services.notifications.channels._format import format_plain_text
 from services.notifications.channels._http import post_json
-from services.notifications.models import CHANNEL_KIND_TELEGRAM, ChannelResult
-from services.notifications.secrets import get_channel_secret
+from services.notifications.models import ChannelResult
+from services.notifications.secrets import first_secret_ref, get_channel_secret
 
 TELEGRAM_TOKEN_SECRET_KEYS = ("bot_token", "token")
 TELEGRAM_SEND_MESSAGE_URL = "https://api.telegram.org/bot{token}/sendMessage"
 
 
 def _secret_name(secrets: dict[str, Any]) -> str:
-    for key in TELEGRAM_TOKEN_SECRET_KEYS:
-        value = str(secrets.get(key) or "").strip()
-        if value:
-            return value
-    return ""
+    return first_secret_ref(secrets, TELEGRAM_TOKEN_SECRET_KEYS)
 
 
 class TelegramChannel(Channel):
@@ -54,7 +50,5 @@ class TelegramChannel(Channel):
             body,
             self.channel.config,
             label="telegram",
+            test_send=str(payload.get("trigger") or "") == "test",
         )
-
-
-register_channel(CHANNEL_KIND_TELEGRAM, TelegramChannel)

@@ -799,6 +799,64 @@ class TestRunStreaming:
         assert "hello\\n" in body
         assert "world\\n" in body
 
+    def test_completed_external_run_queues_run_complete_notification(self):
+        client = get_client()
+        session_id = "tok_run_complete_notification"
+        channel_id = "ntc_run_complete_notification"
+        now = datetime.now(timezone.utc).isoformat()
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+                (session_id, now, ""),
+            )
+            conn.execute(
+                "INSERT INTO notification_channels "
+                "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    channel_id,
+                    session_id,
+                    "webhook",
+                    "Run complete hook",
+                    "{}",
+                    "{}",
+                    json.dumps(["run_complete"]),
+                    0,
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+
+        fake_proc = _FakeProc(lines=["finished\n", ""])
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            resp = _post_run(
+                client,
+                json={"command": "echo notify"},
+                headers={"X-Session-ID": session_id},
+            )
+
+        assert resp.status_code == 200
+        with db_connect() as conn:
+            row = conn.execute(
+                "SELECT trigger, payload_json, status, attempts, run_id FROM notification_events WHERE channel_id = ?",
+                (channel_id,),
+            ).fetchone()
+        assert row is not None
+        payload = json.loads(row["payload_json"])
+        assert row["trigger"] == "run_complete"
+        assert row["status"] == "pending"
+        assert row["attempts"] == 0
+        assert row["run_id"] == payload["run_id"]
+        assert payload["command_root"] == "echo"
+        assert payload["exit_code"] == 0
+        assert payload["summary_fields"]["finding_count"] == 0
+
     def test_run_output_events_include_signal_metadata(self):
         client = get_client()
         fake_proc = _FakeProc(lines=["darklab.sh has address 104.21.4.35\n", ""])

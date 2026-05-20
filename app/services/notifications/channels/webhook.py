@@ -4,20 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from services.notifications.base import Channel, register_channel
+from services.notifications.base import Channel
 from services.notifications.channels._http import post_json
-from services.notifications.models import CHANNEL_KIND_WEBHOOK, ChannelResult
-from services.notifications.secrets import get_channel_secret
+from services.notifications.models import ChannelResult
+from services.notifications.secrets import first_secret_ref, get_channel_secret
 
 WEBHOOK_URL_SECRET_KEYS = ("url", "webhook_url")
 
 
 def _webhook_url_secret_name(secrets: dict[str, Any]) -> str:
-    for key in WEBHOOK_URL_SECRET_KEYS:
-        value = str(secrets.get(key) or "").strip()
-        if value:
-            return value
-    return ""
+    return first_secret_ref(secrets, WEBHOOK_URL_SECRET_KEYS)
 
 
 class WebhookChannel(Channel):
@@ -48,13 +44,10 @@ class WebhookChannel(Channel):
         return get_channel_secret(self.channel.session_token, secret_name)
 
     def send(self, payload: dict[str, Any]) -> ChannelResult:
-        return self._send_payload(payload, label="webhook")
+        return self._send_payload(payload, label="webhook", test_send=str(payload.get("trigger") or "") == "test")
 
-    def _send_payload(self, payload: dict[str, Any], *, label: str) -> ChannelResult:
+    def _send_payload(self, payload: dict[str, Any], *, label: str, test_send: bool = False) -> ChannelResult:
         url = self._webhook_url()
         if not url:
             return ChannelResult.terminal(f"{label} URL secret is unavailable")
-        return post_json(url, payload, self.channel.config, label=label)
-
-
-register_channel(CHANNEL_KIND_WEBHOOK, WebhookChannel)
+        return post_json(url, payload, self.channel.config, label=label, test_send=test_send)

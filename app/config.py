@@ -237,6 +237,8 @@ def load_config(conf_dir=None):
             "do_not_disturb": False,
             "delivery_rate_per_minute": 10,
             "http_timeout_seconds": 8,
+            "test_timeout_seconds": 4,
+            "http_private_host_allowlist": [],
             "smtp": {
                 "host": "",
                 "port": 587,
@@ -249,6 +251,9 @@ def load_config(conf_dir=None):
                 "max_attempts": 6,
                 "max_age_hours": 24,
                 "base_delay_seconds": 30,
+            },
+            "events": {
+                "retention_days": 30,
             },
         },
         "max_tabs":                   8,

@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,000
+- behavior tests: 3,024
 - docs/inventory meta-tests: 32
-- `pytest`: 1600 (1568 behavior + 32 meta)
-- `vitest`: 1180
+- `pytest`: 1625 (1593 behavior + 32 meta)
+- `vitest`: 1184
 - `playwright`: 252
-- total: 3,032
+- total: 3,061
 
 This document is organized in two parts:
 
@@ -390,6 +390,7 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `test_api_v1_openapi_route_matches_checked_in_contract` | Verifies live `/api/v1/openapi.json` matches the checked-in OpenAPI snapshot. |
 | `test_api_v1_notification_channels_crud_masks_secrets_and_lists_events` | Verifies notification channel API CRUD, secret masking, test-send payloads, and delivery event audit rows. |
 | `test_api_v1_notification_channels_are_token_scoped` | Verifies notification channel API reads and writes are scoped to the owning token. |
+| `test_api_v1_notification_channel_rejections_are_logged` | Verifies notification channel API rejections emit structured warning logs with session-safe context. |
 | `test_darklab_cli_notify_commands_use_secret_file_and_event_reader` | Verifies CLI notification commands read secrets from a JSON file, avoid command-line secret flags, and list delivery events. |
 | `test_api_v1_openapi_generator_snapshot_is_current` | Verifies the checked-in OpenAPI JSON matches the generator output byte-for-byte. |
 | `test_api_v1_openapi_contract_describes_public_shapes` | Verifies the OpenAPI contract includes core request, response, parameter, stream, and error shapes. |
@@ -454,8 +455,16 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPostgresMigrations.test_postgres_search_migration_adds_trigram_indexes` | Verifies the Postgres run-search migration creates `pg_trgm` and trigram indexes for command and output search. |
 | `TestPostgresMigrations.test_migration_runner_serializes_with_advisory_lock_and_records_versions` | Verifies the Postgres migration runner takes a transaction-scoped advisory lock and records applied migration versions. |
 | `TestPostgresMigrations.test_database_init_runs_postgres_migrations_without_sqlite_bootstrap` | Verifies Postgres startup runs migrations without entering the SQLite bootstrap path. |
-| `TestNotificationsPhase0.test_dispatcher_sync_delivery_fans_out_once_per_channel` | Verifies the notification dispatcher can synchronously fan out one trigger to two subscribed channels exactly once each. |
+| `TestNotificationsPhase0.test_dispatcher_sync_delivery_fans_out_once_per_channel` | Verifies the notification dispatcher can synchronously fan out a run-complete trigger to two subscribed channels exactly once each. |
 | `TestNotificationsPhase0.test_dispatcher_event_claims_are_single_use` | Verifies notification event claims are leased so two workers cannot claim the same due event at the same time. |
+| `TestNotificationsPhase0.test_dispatcher_dnd_defers_without_consuming_attempts` | Verifies notification do-not-disturb defers delivery without burning provider retry attempts. |
+| `TestNotificationsPhase0.test_dispatcher_rate_limit_defers_without_consuming_attempts` | Verifies notification rate limiting defers delivery without burning provider retry attempts. |
+| `TestNotificationsPhase0.test_dispatcher_rate_limit_counts_retry_attempts` | Verifies notification rate limiting counts recent failed delivery attempts, not only successful sends. |
+| `TestNotificationsPhase0.test_dispatcher_retry_delay_increases_after_first_failure` | Verifies notification retry backoff grows after the first failed delivery attempt. |
+| `TestNotificationsPhase0.test_dispatcher_dead_letters_retryable_events_after_max_age` | Verifies retryable notification events older than the retry max-age window are dead-lettered instead of rescheduled. |
+| `TestNotificationsPhase0.test_dispatcher_records_retry_terminal_and_exception_outcomes` | Verifies retryable failures, terminal failures, and sender exceptions persist the correct notification event statuses. |
+| `TestNotificationsPhase0.test_dispatcher_prunes_sent_events_after_retention` | Verifies old sent notification delivery rows are pruned while fresh sent rows and dead-letter rows remain. |
+| `TestNotificationsPhase0.test_notification_channel_ids_use_full_uuid_hex` | Verifies notification channel ids use the same full UUID hex length as notification event ids. |
 | `TestNotificationsPhase0.test_notification_helpers_do_not_import_blueprints` | Verifies notification service helpers stay independent from Flask blueprint modules. |
 | `TestNotificationsPhase0.test_notification_channels_require_durable_session_tokens` | Verifies outbound notification channels reject anonymous session ids and require durable session tokens. |
 | `TestRunHistorySearchClauses.test_sqlite_history_search_prefers_fts_for_output_scope` | Verifies SQLite history search still prefers FTS for output-capable searches with indexable terms. |
@@ -1029,6 +1038,7 @@ Slack, Discord, Telegram, and Pushover notification channel coverage.
 | `test_phase2_channels_are_registered` | Verifies Slack, Discord, Telegram, and Pushover channel classes register with the shared notification channel registry. |
 | `test_registered_channels_implement_delivery_contract` | Verifies every registered notification channel implements the shared validation and send contract. |
 | `test_slack_channel_formats_blocks` | Verifies Slack notifications use incoming-webhook blocks with a header and summary fields. |
+| `test_summary_fields_truncate_long_run_ids` | Verifies chat/email notification summary fields shorten long run ids to a readable suffix. |
 | `test_discord_channel_formats_embed` | Verifies Discord notifications use embeds with a title, fields, and timestamp footer. |
 | `test_chat_webhook_channels_share_retry_and_terminal_outcomes` | Verifies chat-webhook channels share retryable 5xx and terminal 4xx handling. |
 | `test_telegram_channel_requires_chat_id` | Verifies Telegram channels require a non-secret chat id in channel config. |
@@ -1070,9 +1080,13 @@ Generic JSON webhook notification channel delivery and payload-shape coverage.
 | Test | Description |
 | --- | --- |
 | `test_webhook_channel_posts_json_payload` | Verifies the webhook channel resolves its vault-backed URL and sends a JSON POST with the configured timeout. |
+| `test_webhook_channel_uses_short_timeout_for_test_send` | Verifies manual webhook test sends use the shorter notification test timeout instead of the normal delivery timeout. |
 | `test_webhook_channel_retries_5xx_then_succeeds` | Verifies 5xx webhook responses are retryable and a later 2xx response succeeds. |
 | `test_webhook_channel_treats_4xx_as_terminal` | Verifies 4xx webhook responses fail terminally instead of retrying. |
 | `test_webhook_channel_rejects_malformed_urls` | Verifies malformed or non-http(s) webhook URLs are rejected before an HTTP request is attempted. |
+| `test_webhook_channel_rejects_private_and_local_urls` | Verifies webhook delivery rejects loopback, link-local, private-network, and localhost destinations before sending. |
+| `test_webhook_channel_rejects_dns_resolved_private_hosts` | Verifies webhook delivery rejects hostnames that resolve to private addresses. |
+| `test_webhook_channel_allows_explicit_private_host_allowlist` | Verifies the private-host allowlist can intentionally permit trusted internal webhook receivers. |
 | `test_webhook_channel_retries_timeout` | Verifies network timeouts are retryable webhook delivery failures. |
 | `test_run_complete_payload_exposes_command_root_without_full_command` | Verifies run-complete payloads include only command root, not full command arguments. |
 
@@ -1195,9 +1209,13 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestSecretsRoutes.test_session_secrets_require_valid_session_id` | Verifies session secret routes reject missing or invalid session headers instead of using a shared empty namespace. |
 | `TestSecretsRoutes.test_session_secrets_reject_duplicate_consumer_env_binding` | Verifies the routes return a conflict when another secret already owns the requested consumer env binding. |
 | `TestNotificationChannelRoutes.test_notification_channels_require_durable_session_tokens` | Verifies browser notification-channel routes require durable session tokens. |
-| `TestNotificationChannelRoutes.test_notification_channel_crud_masks_secret_values` | Verifies notification-channel create, list, and update routes return masked metadata while preserving vault-backed secret references. |
+| `TestNotificationChannelRoutes.test_notification_channel_crud_masks_secret_values` | Verifies notification-channel create, list, update, and kind-lock routes return masked metadata while preserving vault-backed secret references. |
+| `TestNotificationChannelRoutes.test_notification_channel_create_rolls_back_secret_when_row_insert_fails` | Verifies notification-channel secret writes roll back with the channel row when creation fails. |
 | `TestNotificationChannelRoutes.test_notification_channel_test_endpoint_dispatches_sync_event` | Verifies the channel test route queues and synchronously dispatches a canned test payload. |
-| `TestNotificationChannelRoutes.test_notification_channel_delete_removes_channel` | Verifies deleting a notification channel removes it from subsequent list responses. |
+| `TestNotificationChannelRoutes.test_notification_channel_test_endpoint_targets_requested_channel` | Verifies a channel test send targets only the requested notification channel. |
+| `TestNotificationChannelRoutes.test_notification_channel_test_endpoint_reports_delivery_failure_status` | Verifies a channel test send reports the persisted retry/failure status instead of showing queued success only. |
+| `TestNotificationChannelRoutes.test_notification_channels_migrate_with_session_token_and_secrets` | Verifies session-token migration carries notification channels, queued events, and usable secret references forward. |
+| `TestNotificationChannelRoutes.test_notification_channel_delete_removes_channel_and_vault_secrets` | Verifies deleting a notification channel removes it from subsequent list responses and removes all channel-owned vault secrets. |
 | `TestProjectRoutes.test_project_host_target_ip_is_stored_as_ip_entity` | Verifies manual host targets that contain an IP literal are stored as IP Atlas entities instead of domain entities. |
 | `TestProjectRoutes.test_builtin_runs_do_not_record_findings_even_with_legacy_project_link` | Verifies built-in runs stay out of persisted findings even if old data links them to a project. |
 | `TestProjectRoutes.test_project_write_routes_are_rate_limited` | Verifies project workspace write routes are wrapped by the shared limiter. |
@@ -1560,6 +1578,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestRunStreaming.test_broker_worker_times_out_and_publishes_timeout_notice` | Verifies that the broker worker terminates timed-out commands and publishes the timeout notice before exit. |
 | `TestRunStreaming.test_broker_worker_publishes_error_and_cleans_up_when_stdout_is_missing` | Verifies that broker worker startup errors publish an error event and still clean up process tracking. |
 | `TestRunStreaming.test_run_emits_started_notice_output_and_exit` | Checks that run emits started notice output and exit. |
+| `TestRunStreaming.test_completed_external_run_queues_run_complete_notification` | Verifies a completed external run queues a run-complete notification event for subscribed session channels. |
 | `TestRunStreaming.test_run_output_events_include_signal_metadata` | Verifies that live `/runs` output events include backend signal metadata for classified lines. |
 | `TestRunStreaming.test_history_restore_json_preserves_signal_metadata` | Verifies that history restore JSON preserves per-line signal metadata from persisted run output. |
 | `TestRunStreaming.test_project_findings_strip_ansi_codes_before_storage` | Verifies that persisted project findings store ANSI-normalized plain text even when scanner output includes terminal formatting. |
@@ -2170,6 +2189,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `no source file references retired class 'modal-secondary-neutral'` | Regression guard: fails if the retired `modal-secondary-neutral` class reappears in app source. |
 | `no source file references retired class 'search-toggle'` | Regression guard: fails if the retired `search-toggle` class reappears in app source. Uses token-boundary matching so `search-toggles` and `#search-toggle-btn` stay valid. |
 | `native select elements compose the form-select primitive` | Regression guard: fails if app source adds native select markup or JS-created selects without the shared `.form-select` primitive. |
+| `notification rows use badge primitives for passive metadata` | Regression guard: fails if the Notifications options panel stops using shared badge primitives or re-adds a duplicate tab-click refresh handler. |
 
 #### `button_primitives_allowlist.test.js`
 
@@ -2379,6 +2399,14 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `chip tap cycles through the running set and wraps around` | Checks that chip tap cycles through the running set and wraps around. |
 | `re-syncs the chip count from tab lifecycle events instead of DOM mutation observers` | Checks that re-syncs the chip count from tab lifecycle events instead of DOM mutation observers. |
 | `hides the chip and edge glows when the body is not in mobile-terminal-mode` | Checks that hides the chip and edge glows when the body is not in mobile-terminal-mode. |
+
+#### `notification_channels.test.js`
+
+| Test | Description |
+| --- | --- |
+| `renders token-required and empty states from refresh responses` | Verifies the Notifications tab surfaces durable-token errors and the empty-channel nudge from refresh responses. |
+| `validates required secrets and submits editor payloads without exposing them in the list` | Verifies the channel editor blocks missing secrets, then submits secret/config/trigger payloads through the channel route. |
+| `renders channel actions and routes test, mute, and delete requests` | Verifies notification channel rows expose the expected actions and route test, mute, and delete requests through the panel helpers. |
 
 #### `output.test.js`
 

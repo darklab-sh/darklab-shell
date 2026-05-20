@@ -103,4 +103,16 @@ describe('button primitive regression guard', () => {
     }
     expect(hits).toEqual([])
   })
+
+  it('notification rows use badge primitives for passive metadata', () => {
+    const source = readFileSync(join(REPO_ROOT, 'app/static/js/features/preferences/notification_channels.js'), 'utf8')
+
+    expect(source).not.toContain('metadata-chip options-secret-chip')
+    expect(source).not.toContain('querySelector(\'[data-options-tab="notifications"]\')')
+    expect(source).not.toContain('btn btn-secondary btn-danger btn-compact')
+    expect(source).toContain('badge badge-tone-muted options-secret-chip')
+    expect(source).toContain('badge-tone-green')
+    expect(source).toContain('btn btn-destructive btn-compact')
+    expect(source).toContain('form-control form-control-compact options-token-input')
+  })
 })

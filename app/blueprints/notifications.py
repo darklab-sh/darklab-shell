@@ -121,7 +121,7 @@ def session_notification_channels_test(channel_id):
     if error_response:
         return error_response
     try:
-        event_ids = send_test_notification(session_id, channel_id)
+        result = send_test_notification(session_id, channel_id)
     except (NotificationChannelError, MasterKeyError, SecretDecryptError, ValueError) as exc:
         return _notification_error(exc)
-    return jsonify({"queued": len(event_ids), "event_ids": event_ids})
+    return jsonify(result)

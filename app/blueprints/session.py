@@ -16,6 +16,7 @@ from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
 from services.commands.registry import load_tour
 from core.helpers import get_client_ip, get_log_session_id, get_session_id, is_valid_anonymous_session_id
+from services.notifications.channels_store import migrate_notification_channels_session
 from services.projects.migration import migrate_project_workspace_session
 from services.secrets.storage import migrate_session_secrets
 from services.session.variables import list_session_variables
@@ -696,6 +697,7 @@ def session_migrate():
             migrated_workspace_file_paths=getattr(workspace_migration, "migrated_file_paths", ()),
         )
         migrated_secrets = migrate_session_secrets(conn, from_session_id, to_session_id)
+        notification_migration = migrate_notification_channels_session(conn, from_session_id, to_session_id)
         migrated_recent_values = _migrate_recent_values(conn, from_session_id, to_session_id)
         conn.execute(
             "DELETE FROM starred_commands WHERE session_id = ?",
@@ -737,6 +739,7 @@ def session_migrate():
         "migrated_variables": migrated_variables,
         "migrated_workflows": migrated_workflows,
         **project_migration,
+        **notification_migration,
         "migrated_recent_values": migrated_recent_values,
         "migrated_secrets": migrated_secrets,
         "migrated_workspace_files": workspace_migration.migrated_files,
@@ -753,6 +756,7 @@ def session_migrate():
         "migrated_variables": migrated_variables,
         "migrated_workflows": migrated_workflows,
         **project_migration,
+        **notification_migration,
         "migrated_recent_values": migrated_recent_values,
         "migrated_secrets": migrated_secrets,
         "migrated_workspace_files": workspace_migration.migrated_files,

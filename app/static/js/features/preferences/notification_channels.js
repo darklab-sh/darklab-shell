@@ -96,7 +96,7 @@
 
   function _input(value = '', attrs = {}) {
     const input = document.createElement('input');
-    input.className = 'options-token-input';
+    input.className = 'form-control form-control-compact options-token-input';
     input.type = attrs.type || 'text';
     input.value = value || '';
     Object.entries(attrs).forEach(([key, attrValue]) => {
@@ -159,8 +159,13 @@
     list.innerHTML = '';
     if (!Array.isArray(channels) || channels.length === 0) {
       const empty = document.createElement('div');
-      empty.className = 'options-secret-empty';
-      empty.textContent = 'No notification channels yet.';
+      empty.className = 'options-secret-empty options-secret-empty-state';
+      const title = document.createElement('div');
+      title.textContent = 'No notification channels yet.';
+      const hint = document.createElement('div');
+      hint.className = 'options-secret-meta';
+      hint.textContent = 'Add a channel to get pinged when long runs finish.';
+      empty.append(title, hint);
       list.appendChild(empty);
       return;
     }
@@ -174,10 +179,16 @@
       name.textContent = channel.label || _kindLabel(channel.kind);
       const chips = document.createElement('div');
       chips.className = 'options-secret-chips';
-      [_kindLabel(channel.kind), channel.muted ? 'muted' : 'active'].forEach((text) => {
+      [
+        { text: _kindLabel(channel.kind), className: 'badge badge-tone-muted options-secret-chip' },
+        {
+          text: channel.muted ? 'muted' : 'active',
+          className: `badge ${channel.muted ? 'badge-tone-muted is-muted' : 'badge-tone-green'} options-secret-chip`,
+        },
+      ].forEach((chipConfig) => {
         const chip = document.createElement('span');
-        chip.className = `metadata-chip options-secret-chip${channel.muted && text === 'muted' ? ' is-muted' : ''}`;
-        chip.textContent = text;
+        chip.className = chipConfig.className;
+        chip.textContent = chipConfig.text;
         chips.appendChild(chip);
       });
       const meta = document.createElement('div');
@@ -206,7 +217,7 @@
       edit.addEventListener('click', () => openNotificationChannelEditor(channel));
       const remove = document.createElement('button');
       remove.type = 'button';
-      remove.className = 'btn btn-secondary btn-danger btn-compact';
+      remove.className = 'btn btn-destructive btn-compact';
       remove.textContent = 'Delete';
       remove.addEventListener('click', () => deleteNotificationChannel(channel));
       actions.append(mute, test, edit, remove);
@@ -419,7 +430,15 @@
       });
       const data = await resp.json().catch(() => ({}));
       if (resp && resp.ok === false) throw new Error(data.message || data.error || `HTTP ${resp.status}`);
-      _msg(data.queued ? 'Test notification sent.' : 'No test notification was queued for this channel.');
+      const event = Array.isArray(data.events) ? data.events[0] : null;
+      if (event?.status === 'sent') {
+        _msg('Test notification delivered.');
+      } else if (event?.status === 'retry_wait' || event?.status === 'dead') {
+        const detail = event.last_error ? `: ${event.last_error}` : '.';
+        _msg(`Test notification failed${detail}`, { error: true });
+      } else {
+        _msg(data.queued ? 'Test notification queued.' : 'No test notification was queued for this channel.');
+      }
     } catch (error) {
       _msg(`Test failed: ${error.message || 'network error'}`, { error: true });
     } finally {
@@ -465,9 +484,6 @@
     _bound = true;
     _el('options-notification-refresh-btn')?.addEventListener('click', () => refreshNotificationChannels({ force: true }));
     _el('options-notification-new-btn')?.addEventListener('click', () => openNotificationChannelEditor());
-    document.querySelector('[data-options-tab="notifications"]')?.addEventListener('click', () => {
-      refreshNotificationChannels({ force: true });
-    });
     if (!document.querySelector('[data-options-panel="notifications"]')?.hidden) {
       refreshNotificationChannels({ force: true });
     }

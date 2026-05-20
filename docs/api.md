@@ -107,7 +107,7 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `POST` | `/api/v1/notification-channels` | Create one notification channel with write-only secret values. |
 | `PATCH` | `/api/v1/notification-channels/<channel_id>` | Update one notification channel's label, config, triggers, muted state, or replacement secret values. |
 | `DELETE` | `/api/v1/notification-channels/<channel_id>` | Delete one notification channel. |
-| `POST` | `/api/v1/notification-channels/<channel_id>/test` | Send the canned `test` notification payload through one channel. |
+| `POST` | `/api/v1/notification-channels/<channel_id>/test` | Send the canned `test` notification payload through one channel and return the queued event's delivery status. |
 | `GET` | `/api/v1/notification-events` | Read paged notification delivery audit rows with optional channel, trigger, and status filters. |
 | `POST` | `/api/v1/runs` | Start a non-interactive command run. |
 | `GET` | `/api/v1/runs/<run_id>` | Active or completed run status. |
@@ -219,6 +219,9 @@ darklab notify create webhook \
   --label "Ops Hook" \
   --trigger run_complete \
   --secret-file ./webhook-secrets.json
+darklab notify update ntc_123 --label "Ops Hook Primary"
+darklab notify mute ntc_123
+darklab notify unmute ntc_123
 darklab notify test ntc_123
 darklab notify events --channel ntc_123 --status sent
 ```
@@ -230,13 +233,14 @@ Test sends use the fixed trigger `test` with a canned payload shaped like:
 ```json
 {
   "trigger": "test",
+  "app_name": "darklab_shell",
   "message": "darklab_shell test notification",
   "channel_id": "ntc_123",
   "occurred_at": "2026-05-19T00:00:00+00:00"
 }
 ```
 
-Delivery audit rows are paged with the normal API envelope and can be filtered by `channel_id`, `trigger`, or `status` (`pending`, `retry_wait`, `sent`, or `dead`).
+Muted channels stay configured but do not queue test sends or other deliveries until unmuted. Delivery audit rows are paged with the normal API envelope and can be filtered by `channel_id`, `trigger`, or `status` (`pending`, `retry_wait`, `sent`, or `dead`).
 
 ---
 
@@ -287,7 +291,7 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab project-runs <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List runs linked to a project. |
 | `darklab project-entities <project_id> [--entity-type TYPE] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas entities linked to a project. |
 | `darklab project-packages <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List evidence packages. |
-| `darklab notify list\|create\|delete\|test\|events ...` | Manage outbound notification channels and read delivery audit rows. Channel secrets come from prompts or `--secret-file`, never command-line secret flags. |
+| `darklab notify list\|create\|update\|mute\|unmute\|delete\|test\|events ...` | Manage outbound notification channels and read delivery audit rows. Channel secrets come from prompts or `--secret-file`, never command-line secret flags. |
 | `darklab download <run_id> --artifact ARTIFACT_ID --out DIR` | Download one artifact. |
 
 `darklab download` requires `--artifact`; without it, use `darklab artifacts <run_id>` first. Downloads use the server's attachment filename only after reducing it to a safe local basename, and the CLI refuses to overwrite an existing file. Workspace ZIP download is not exposed in API v1.

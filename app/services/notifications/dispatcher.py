@@ -11,6 +11,8 @@ from typing import Any, Iterable
 
 from core import database
 from core.database_backend import dialect_for_backend
+from core.helpers import get_log_session_id
+from services.notifications import notification_cfg
 from services.notifications.channels import register_builtin_channels
 from services.notifications.base import channel_class_for_kind
 from services.notifications.models import (
@@ -32,22 +34,22 @@ MAX_ATTEMPTS = 6
 RETRY_MAX_AGE_HOURS = 24
 
 
-def _notification_cfg() -> dict[str, Any]:
-    cfg = database.CFG.get("notifications", {})
+def _retry_cfg() -> dict[str, Any]:
+    cfg = notification_cfg().get("retry", {})
     return cfg if isinstance(cfg, dict) else {}
 
 
-def _retry_cfg() -> dict[str, Any]:
-    cfg = _notification_cfg().get("retry", {})
+def _events_cfg() -> dict[str, Any]:
+    cfg = notification_cfg().get("events", {})
     return cfg if isinstance(cfg, dict) else {}
 
 
 def _delivery_rate_limit_per_minute() -> int:
-    return max(1, int(_notification_cfg().get("delivery_rate_per_minute") or CHANNEL_DELIVERY_LIMIT_PER_MINUTE))
+    return max(1, int(notification_cfg().get("delivery_rate_per_minute") or CHANNEL_DELIVERY_LIMIT_PER_MINUTE))
 
 
 def _do_not_disturb() -> bool:
-    return bool(_notification_cfg().get("do_not_disturb"))
+    return bool(notification_cfg().get("do_not_disturb"))
 
 
 def _max_attempts() -> int:
@@ -56,6 +58,13 @@ def _max_attempts() -> int:
 
 def _retry_max_age_hours() -> int:
     return max(1, int(_retry_cfg().get("max_age_hours") or RETRY_MAX_AGE_HOURS))
+
+
+def _events_retention_days() -> int:
+    raw = _events_cfg().get("retention_days")
+    if raw in ("", None):
+        return 30
+    return max(0, int(raw))
 
 
 def _base_retry_delay_seconds() -> int:
@@ -105,7 +114,14 @@ def _managed_connection(conn=None):
         yield opened, True
 
 
-def _channel_rows_for_trigger(conn, session_token: str, trigger: str) -> list[Any]:
+def _channel_rows_for_trigger(
+    conn,
+    session_token: str,
+    trigger: str,
+    *,
+    channel_ids: Iterable[str] | None = None,
+) -> list[Any]:
+    selected_channel_ids = {str(channel_id) for channel_id in channel_ids or () if str(channel_id or "").strip()}
     rows = conn.execute(
         "SELECT id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated "
         "FROM notification_channels WHERE session_token = ? AND muted = ? ORDER BY updated DESC",
@@ -113,6 +129,8 @@ def _channel_rows_for_trigger(conn, session_token: str, trigger: str) -> list[An
     ).fetchall()
     channels = []
     for row in rows:
+        if selected_channel_ids and str(row["id"]) not in selected_channel_ids:
+            continue
         channel = NotificationChannel.from_row(row)
         if trigger in channel.triggers:
             channels.append(row)
@@ -127,6 +145,7 @@ def enqueue(
     conn=None,
     dispatch_sync: bool = False,
     run_id: str | None = None,
+    channel_ids: Iterable[str] | None = None,
 ) -> list[str]:
     """Queue one notification event for every matching channel."""
     normalized_trigger = _normalize_trigger(trigger)
@@ -134,7 +153,12 @@ def enqueue(
     now = _utc_now()
     queued_ids: list[str] = []
     with _managed_connection(conn) as (active_conn, owns_conn):
-        for channel_row in _channel_rows_for_trigger(active_conn, session_token, normalized_trigger):
+        for channel_row in _channel_rows_for_trigger(
+            active_conn,
+            session_token,
+            normalized_trigger,
+            channel_ids=channel_ids,
+        ):
             event_id = _event_id()
             queued_ids.append(event_id)
             active_conn.execute(
@@ -207,12 +231,12 @@ def _claim_event(conn, event_id: str, *, now: str) -> bool:
     return int(getattr(cur, "rowcount", 0) or 0) == 1
 
 
-def _channel_sends_this_minute(conn, channel_id: str, *, now: str) -> int:
+def _channel_sends_this_minute(conn, channel_id: str, *, now: str, exclude_event_id: str = "") -> int:
     minute_start = (datetime.fromisoformat(now) - timedelta(seconds=60)).isoformat()
     row = conn.execute(
         "SELECT COUNT(*) AS count FROM notification_events "
-        "WHERE channel_id = ? AND status = ? AND last_attempt_at >= ?",
-        (channel_id, STATUS_SENT, minute_start),
+        "WHERE channel_id = ? AND id <> ? AND status IN (?, ?, ?) AND attempts > ? AND last_attempt_at >= ?",
+        (channel_id, str(exclude_event_id or ""), STATUS_SENT, STATUS_RETRY_WAIT, STATUS_DEAD, 0, minute_start),
     ).fetchone()
     return int(row["count"] or 0) if row else 0
 
@@ -235,11 +259,19 @@ def _mark_sent(conn, event: NotificationEvent, now: str) -> None:
         "WHERE id = ?",
         (STATUS_SENT, event.attempts + 1, now, event.id),
     )
-    log.info("NOTIFICATION_DISPATCHED", extra={"event_id": event.id, "channel_id": event.channel_id})
+    log.info(
+        "NOTIFICATION_DISPATCHED",
+        extra={
+            "event_id": event.id,
+            "channel_id": event.channel_id,
+            "trigger": event.trigger,
+            "session": get_log_session_id(event.session_token),
+        },
+    )
 
 
 def _retry_delay_seconds(attempts: int) -> int:
-    return min(3600, 2 ** max(1, attempts) * _base_retry_delay_seconds())
+    return min(3600, 2 ** max(0, int(attempts)) * _base_retry_delay_seconds())
 
 
 def _mark_failed(conn, event: NotificationEvent, result: ChannelResult, now: str) -> None:
@@ -257,7 +289,13 @@ def _mark_failed(conn, event: NotificationEvent, result: ChannelResult, now: str
         )
         log.warning(
             "NOTIFICATION_RETRIED",
-            extra={"event_id": event.id, "channel_id": event.channel_id, "attempts": attempts},
+            extra={
+                "event_id": event.id,
+                "channel_id": event.channel_id,
+                "trigger": event.trigger,
+                "session": get_log_session_id(event.session_token),
+                "attempts": attempts,
+            },
         )
         return
     conn.execute(
@@ -268,7 +306,33 @@ def _mark_failed(conn, event: NotificationEvent, result: ChannelResult, now: str
     )
     log.warning(
         "NOTIFICATION_DELIVERY_FAILED",
-        extra={"event_id": event.id, "channel_id": event.channel_id, "attempts": attempts},
+        extra={
+            "event_id": event.id,
+            "channel_id": event.channel_id,
+            "trigger": event.trigger,
+            "session": get_log_session_id(event.session_token),
+            "attempts": attempts,
+        },
+    )
+
+
+def _defer_event(conn, event: NotificationEvent, now: str, *, reason: str, delay_seconds: int) -> None:
+    next_attempt = (datetime.fromisoformat(now) + timedelta(seconds=max(1, int(delay_seconds)))).isoformat()
+    conn.execute(
+        "UPDATE notification_events "
+        "SET status = ?, last_attempt_at = ?, next_attempt_at = ?, last_error = ? "
+        "WHERE id = ?",
+        (STATUS_RETRY_WAIT, now, next_attempt, reason[:500], event.id),
+    )
+    log.info(
+        "NOTIFICATION_DEFERRED",
+        extra={
+            "event_id": event.id,
+            "channel_id": event.channel_id,
+            "trigger": event.trigger,
+            "session": get_log_session_id(event.session_token),
+            "reason": reason[:80],
+        },
     )
 
 
@@ -279,13 +343,29 @@ def _dispatch_event(conn, row: Any, *, now: str) -> bool:
         _mark_failed(conn, event, ChannelResult.terminal("notification channel is unavailable"), now)
         return False
     if _do_not_disturb():
-        _mark_failed(conn, event, ChannelResult.retry("notification do-not-disturb is active"), now)
+        _defer_event(
+            conn,
+            event,
+            now,
+            reason="notification do-not-disturb is active",
+            delay_seconds=_base_retry_delay_seconds(),
+        )
         return False
-    if _channel_sends_this_minute(conn, channel.id, now=now) >= _delivery_rate_limit_per_minute():
-        _mark_failed(conn, event, ChannelResult.retry("notification channel rate limit reached"), now)
+    if _channel_sends_this_minute(conn, channel.id, now=now, exclude_event_id=event.id) >= _delivery_rate_limit_per_minute():
+        _defer_event(
+            conn,
+            event,
+            now,
+            reason="notification channel rate limit reached",
+            delay_seconds=60,
+        )
         return False
     channel_cls = channel_class_for_kind(channel.kind)
     if channel_cls is None:
+        log.warning(
+            "NOTIFICATION_CHANNEL_REGISTRY_MISS",
+            extra={"event_id": event.id, "channel_id": event.channel_id, "kind": channel.kind},
+        )
         register_builtin_channels()
         channel_cls = channel_class_for_kind(channel.kind)
     if channel_cls is None:
@@ -315,6 +395,26 @@ def dispatch_due_events(conn=None, *, limit: int = 100, event_ids: list[str] | N
         if owns_conn:
             active_conn.commit()
     return delivered
+
+
+def prune_sent_events(conn=None, *, now: str | None = None) -> int:
+    """Delete old sent notification audit rows and return the number pruned."""
+    retention_days = _events_retention_days()
+    if retention_days <= 0:
+        return 0
+    current = now or _utc_now()
+    cutoff = (datetime.fromisoformat(current) - timedelta(days=retention_days)).isoformat()
+    with _managed_connection(conn) as (active_conn, owns_conn):
+        cur = active_conn.execute(
+            "DELETE FROM notification_events WHERE status = ? AND created < ?",
+            (STATUS_SENT, cutoff),
+        )
+        pruned = int(getattr(cur, "rowcount", 0) or 0)
+        if owns_conn:
+            active_conn.commit()
+    if pruned:
+        log.info("NOTIFICATION_EVENTS_PRUNED", extra={"count": pruned, "retention_days": retention_days})
+    return pruned
 
 
 def payload_from_row(row: Any) -> dict[str, Any]:

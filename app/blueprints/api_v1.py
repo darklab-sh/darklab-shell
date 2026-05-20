@@ -126,12 +126,32 @@ def _project_workspace_api_error(exc: ProjectWorkspaceError):
 
 def _notification_api_error(exc: Exception):
     if isinstance(exc, NotificationChannelError):
-        return _api_json_error(exc.code, str(exc), exc.status_code)
-    if isinstance(exc, (MasterKeyError, SecretDecryptError)):
-        return _api_json_error("vault_unavailable", "Notification channel secrets are unavailable.", 503)
-    if isinstance(exc, ValueError):
-        return _api_json_error("invalid_notification_channel", str(exc), 400)
-    raise exc
+        code = exc.code
+        message = str(exc)
+        status_code = exc.status_code
+    elif isinstance(exc, (MasterKeyError, SecretDecryptError)):
+        code = "vault_unavailable"
+        message = "Notification channel secrets are unavailable."
+        status_code = 503
+    elif isinstance(exc, ValueError):
+        code = "invalid_notification_channel"
+        message = str(exc)
+        status_code = 400
+    else:
+        raise exc
+    try:
+        session = get_log_session_id(current_api_session().token)
+    except Exception:
+        session = ""
+    log.warning("API_NOTIFICATION_CHANNEL_REJECTED", extra={
+        "ip": get_client_ip(),
+        "session": session,
+        "code": code,
+        "status": status_code,
+        "route": str(request.path or ""),
+        "method": str(request.method or ""),
+    })
+    return _api_json_error(code, message, status_code)
 
 
 @api_v1_bp.errorhandler(ApiAuthError)
@@ -950,16 +970,16 @@ def api_notification_channel_delete(channel_id):
 @require_api_auth
 def api_notification_channel_test(channel_id):
     try:
-        event_ids = send_test_notification(_require_session_id(), channel_id)
+        result = send_test_notification(_require_session_id(), channel_id)
     except (NotificationChannelError, MasterKeyError, SecretDecryptError, ValueError) as exc:
         return _notification_api_error(exc)
     log.info("API_NOTIFICATION_CHANNEL_TESTED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(_require_session_id()),
         "channel_id": channel_id,
-        "event_count": len(event_ids),
+        "event_count": int(result.get("queued") or 0),
     })
-    return jsonify({"queued": len(event_ids), "event_ids": event_ids})
+    return jsonify(result)
 
 
 @api_v1_bp.route("/notification-events")

@@ -61,7 +61,8 @@ Every outbound payload includes:
   "summary_fields": {
     "artifact_count": 2,
     "finding_count": 4,
-    "atlas_entity_count": 12
+    "atlas_entity_count": 12,
+    "project_target_count": 1
   }
 }
 ```
@@ -78,7 +79,7 @@ Every outbound payload includes:
 }
 ```
 
-Watcher payloads use `watcher_id` plus `summary_fields`. Scheduled-run failures use `schedule_id`, `command_root`, and `summary_fields.error`.
+Other accepted trigger names do not produce deliveries unless an app source queues them.
 
 ## Redaction
 
@@ -91,6 +92,8 @@ Notification payloads are intentionally small:
 
 Receivers still see the payload fields needed for the notification. Send channels only to destinations you trust.
 
+Webhook-style channels only post to public HTTP(S) destinations by default. The sender rejects localhost, loopback, link-local, private-network, multicast, reserved, and other non-public addresses, including hosts that resolve to those addresses. If your deployment intentionally posts to an internal receiver, add that exact host, IP, or CIDR range to `notifications.http_private_host_allowlist`.
+
 ## Retry And Dead Letters
 
 Notifications are queued in `notification_events`. A dedicated worker claims due rows, sends them through the registered channel, and records the final state.
@@ -101,7 +104,8 @@ Notifications are queued in `notification_events`. A dedicated worker claims due
 - `notifications.retry.max_attempts` controls attempts.
 - `notifications.retry.max_age_hours` defaults to `24` and caps how long an event can keep retrying.
 - `notifications.delivery_rate_per_minute` caps each channel's sends.
-- `notifications.do_not_disturb` pauses delivery attempts without deleting events.
+- `notifications.do_not_disturb` pauses delivery attempts without deleting events or consuming retry attempts.
+- Muted channels stay configured, but they do not queue test sends or other deliveries until unmuted.
 
 The delivery audit is visible through `/api/v1/notification-events` and `darklab notify events`.
 
@@ -131,15 +135,19 @@ curl -sS \
   "$DARKLAB_API_URL/api/v1/notification-channels"
 ```
 
-The CLI can create the same channel without putting the secret on the command line:
+The CLI can create the same channel without putting the secret on the command line by prompting for required fields:
 
 ```bash
-printf '{"url":"https://example.test/webhook"}\n' > webhook-secrets.json
-darklab notify create webhook --label "Ops Hook" --trigger run_complete --secret-file webhook-secrets.json
+darklab notify create webhook --label "Ops Hook" --trigger run_complete
 darklab notify list
+darklab notify update ntc_... --label "Ops Hook Primary"
+darklab notify mute ntc_...
+darklab notify unmute ntc_...
 darklab notify test ntc_...
 darklab notify events --channel ntc_...
 ```
+
+`--secret-file ./webhook-secrets.json` is also supported when you already have a safely created local JSON file. Avoid building that file with a command that puts the secret literal in shell history.
 
 ## Telegram Setup
 
@@ -167,7 +175,9 @@ The SMTP password is read from the environment variable named by `notifications.
 
 - The notification worker runs beside Gunicorn and is supervised by the container entrypoint when enabled.
 - API and CLI channel management require a durable session token.
-- Test sends use the same queued dispatcher path as real events.
+- Test sends use the same queued dispatcher path as real events and report whether the selected channel delivered, deferred, or failed the test event.
+- Manual test sends use `notifications.test_timeout_seconds`, so a broken webhook or SMTP relay returns feedback faster than normal background delivery.
+- Sent delivery audit rows are kept for `notifications.events.retention_days` days. Retry and dead-letter rows remain until they are retried, deleted with their channel/session data, or handled by a future cleanup path.
 - Delivery history stays attached to the session token even if a channel row is later deleted.
 
 ## Related Docs

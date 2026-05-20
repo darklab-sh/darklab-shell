@@ -1465,6 +1465,12 @@ body.mobile-terminal-mode .output-follow-btn {
   line-height: 1.45;
 }
 
+.options-secret-empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .options-secret-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1472,7 +1478,7 @@ body.mobile-terminal-mode .output-follow-btn {
   gap: 6px;
 }
 
-#options-notification-refresh-btn {
+.options-field-heading .btn-ghost.btn-icon-only.btn-compact {
   min-width: 30px;
   min-height: 30px;
   padding: 0;
@@ -1483,8 +1489,8 @@ body.mobile-terminal-mode .output-follow-btn {
   line-height: 1;
 }
 
-#options-notification-refresh-btn:hover,
-#options-notification-refresh-btn:focus-visible {
+.options-field-heading .btn-ghost.btn-icon-only.btn-compact:hover,
+.options-field-heading .btn-ghost.btn-icon-only.btn-compact:focus-visible {
   border-color: transparent;
   background: var(--theme-button-ghost-hover-bg);
   color: var(--green);
@@ -1499,9 +1505,9 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 
 #options-panel-notifications .options-secret-actions {
-  flex: 0 0 176px;
+  flex: 0 0 336px;
   display: grid;
-  grid-template-columns: repeat(2, minmax(76px, 1fr));
+  grid-template-columns: repeat(4, minmax(72px, 1fr));
   gap: 8px;
 }
 
@@ -1518,6 +1524,7 @@ body.mobile-terminal-mode .output-follow-btn {
   #options-panel-notifications .options-secret-actions {
     flex: 0 0 auto;
     width: min(100%, 176px);
+    grid-template-columns: repeat(2, minmax(76px, 1fr));
   }
 }
 

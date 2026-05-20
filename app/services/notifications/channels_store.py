@@ -11,6 +11,8 @@ from core import database
 from core.database_backend import dialect_for_backend
 from services.notifications import dispatcher
 from services.notifications.base import channel_class_for_kind
+from services.notifications.channels import register_builtin_channels
+from services.notifications.channels._format import parse_email_recipients
 from services.notifications.models import (
     CHANNEL_KIND_DISCORD,
     CHANNEL_KIND_EMAIL,
@@ -28,7 +30,7 @@ from services.notifications.models import (
     require_durable_session_token,
 )
 from services.notifications.payloads import build_test_payload
-from services.notifications.secrets import channel_secret_name, store_channel_secret
+from services.notifications.secrets import channel_secret_name, emit_channel_secret_audits, store_channel_secret_with_connection
 from services.secrets.storage import delete_secret
 from services.secrets.vault import MasterKeyError, SecretDecryptError
 
@@ -67,7 +69,7 @@ def _utc_now() -> str:
 
 
 def _channel_id() -> str:
-    return f"ntc_{uuid.uuid4().hex[:24]}"
+    return f"ntc_{uuid.uuid4().hex}"
 
 
 def _json_param(value: Any) -> Any:
@@ -141,10 +143,7 @@ def _normalize_config(kind: str, raw: Any) -> dict[str, Any]:
     for key in allowed:
         value = source.get(key)
         if key == "recipients":
-            if isinstance(value, list):
-                recipients = [str(item).strip() for item in value if str(item or "").strip()]
-            else:
-                recipients = [item.strip() for item in str(value or "").replace(";", ",").split(",") if item.strip()]
+            recipients = parse_email_recipients(value)
             if recipients:
                 config[key] = recipients
             continue
@@ -172,16 +171,22 @@ def _secret_refs_for_values(channel_id: str, kind: str, raw_secret_values: Any) 
     }
 
 
-def _store_secret_values(session_token: str, channel_id: str, kind: str, raw_secret_values: Any) -> None:
+def _store_secret_values(conn, session_token: str, channel_id: str, kind: str, raw_secret_values: Any) -> list[tuple[dict, bool]]:
     values = _secret_values(raw_secret_values)
     allowed = set(CHANNEL_SECRET_FIELDS[kind])
+    audit_records = []
     for field in allowed:
         if field in values:
-            store_channel_secret(session_token, channel_id, field, values[field])
+            _, metadata, created = store_channel_secret_with_connection(conn, session_token, channel_id, field, values[field])
+            audit_records.append((metadata, created))
+    return audit_records
 
 
 def _validate_channel(channel: NotificationChannel) -> None:
     channel_cls = channel_class_for_kind(channel.kind)
+    if channel_cls is None:
+        register_builtin_channels()
+        channel_cls = channel_class_for_kind(channel.kind)
     if channel_cls is None:
         raise NotificationChannelError("invalid_kind", "Notification channel type is not registered.")
     errors = channel_cls(channel).validate_config(channel.config)
@@ -222,6 +227,32 @@ def _serialize_event(event: NotificationEvent) -> dict[str, Any]:
         "created": event.created,
         "dead_at": event.dead_at,
     }
+
+
+def _serialize_test_event(event: NotificationEvent) -> dict[str, Any]:
+    return {
+        "event_id": event.id,
+        "status": event.status,
+        "last_error": event.last_error,
+    }
+
+
+def _test_event_statuses(conn, event_ids: list[str]) -> list[dict[str, Any]]:
+    if not event_ids:
+        return []
+    placeholders = ", ".join("?" for _ in event_ids)
+    rows = conn.execute(
+        "SELECT id, session_token, channel_id, trigger, payload_json, status, attempts, "
+        "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at "
+        f"FROM notification_events WHERE id IN ({placeholders})",  # nosec B608
+        event_ids,
+    ).fetchall()
+    events_by_id = {str(row["id"]): NotificationEvent.from_row(row) for row in rows}
+    return [
+        _serialize_test_event(events_by_id[event_id])
+        for event_id in event_ids
+        if event_id in events_by_id
+    ]
 
 
 def list_notification_channels(session_token: str) -> list[dict[str, Any]]:
@@ -302,8 +333,9 @@ def create_notification_channel(session_token: str, data: dict[str, Any]) -> dic
         updated=now,
     )
     _validate_channel(channel)
-    _store_secret_values(session_token, channel_id, kind, data.get("secret_values"))
+    audit_records = []
     with database.db_connect() as conn:
+        audit_records = _store_secret_values(conn, session_token, channel_id, kind, data.get("secret_values"))
         conn.execute(
             "INSERT INTO notification_channels "
             "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
@@ -322,6 +354,7 @@ def create_notification_channel(session_token: str, data: dict[str, Any]) -> dic
             ),
         )
         conn.commit()
+    emit_channel_secret_audits(session_token, audit_records)
     return _serialize_channel(channel)
 
 
@@ -347,7 +380,7 @@ def update_notification_channel(session_token: str, channel_id: str, data: dict[
             updated=_utc_now(),
         )
         _validate_channel(channel)
-        _store_secret_values(session_token, channel_id, kind, secret_values)
+        audit_records = _store_secret_values(conn, session_token, channel_id, kind, secret_values)
         conn.execute(
             "UPDATE notification_channels "
             "SET label = ?, secrets_json = ?, config_json = ?, triggers_json = ?, muted = ?, updated = ? "
@@ -364,6 +397,7 @@ def update_notification_channel(session_token: str, channel_id: str, data: dict[
             ),
         )
         conn.commit()
+    emit_channel_secret_audits(session_token, audit_records)
     return _serialize_channel(channel)
 
 
@@ -379,7 +413,7 @@ def delete_notification_channel(session_token: str, channel_id: str) -> bool:
         removed = int(getattr(cur, "rowcount", 0) or 0) > 0
         conn.commit()
     if removed:
-        for secret_name in _loads_json_dict(channel.secrets).values():
+        for secret_name in channel.secrets.values():
             try:
                 delete_secret(session_token, str(secret_name))
             except (ValueError, MasterKeyError, SecretDecryptError):
@@ -387,7 +421,22 @@ def delete_notification_channel(session_token: str, channel_id: str) -> bool:
     return removed
 
 
-def send_test_notification(session_token: str, channel_id: str) -> list[str]:
+def migrate_notification_channels_session(conn, from_session_id: str, to_session_id: str) -> dict[str, int]:
+    channels_result = conn.execute(
+        "UPDATE notification_channels SET session_token = ? WHERE session_token = ?",
+        (to_session_id, from_session_id),
+    )
+    events_result = conn.execute(
+        "UPDATE notification_events SET session_token = ? WHERE session_token = ?",
+        (to_session_id, from_session_id),
+    )
+    return {
+        "migrated_notification_channels": int(getattr(channels_result, "rowcount", 0) or 0),
+        "migrated_notification_events": int(getattr(events_result, "rowcount", 0) or 0),
+    }
+
+
+def send_test_notification(session_token: str, channel_id: str) -> dict[str, Any]:
     session_token = require_durable_session_token(session_token)
     with database.db_connect() as conn:
         _get_channel(conn, session_token, channel_id)
@@ -397,6 +446,8 @@ def send_test_notification(session_token: str, channel_id: str) -> list[str]:
             session_token,
             conn=conn,
             dispatch_sync=True,
+            channel_ids=[channel_id],
         )
+        events = _test_event_statuses(conn, event_ids)
         conn.commit()
-    return event_ids
+    return {"queued": len(event_ids), "event_ids": event_ids, "events": events}

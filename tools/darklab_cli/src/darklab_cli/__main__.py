@@ -166,6 +166,21 @@ def _parser() -> argparse.ArgumentParser:
     notify_create.add_argument("--config", action="append", default=[], help="Channel config as KEY=VALUE.")
     notify_create.add_argument("--secret-file", help="JSON file containing write-only secret fields.")
 
+    notify_update = notify_sub.add_parser("update")
+    notify_update.add_argument("channel_id")
+    notify_update.add_argument("--label")
+    notify_update.add_argument("--trigger", action="append", default=[])
+    notify_update.add_argument("--config", action="append", default=[], help="Channel config as KEY=VALUE.")
+    notify_update.add_argument("--format", choices=("text", "json"), default="text")
+
+    notify_mute = notify_sub.add_parser("mute")
+    notify_mute.add_argument("channel_id")
+    notify_mute.add_argument("--format", choices=("text", "json"), default="text")
+
+    notify_unmute = notify_sub.add_parser("unmute")
+    notify_unmute.add_argument("channel_id")
+    notify_unmute.add_argument("--format", choices=("text", "json"), default="text")
+
     notify_delete = notify_sub.add_parser("delete")
     notify_delete.add_argument("channel_id")
 
@@ -305,10 +320,25 @@ def _notify(client: DarklabClient, args: argparse.Namespace) -> int:
                 "secret_values": _notification_secret_values(args.kind, args.secret_file),
             }
             payload = client.request("POST", "/notification-channels", body=body)
-            channel = payload.get("channel") if isinstance(payload, dict) else {}
-            if isinstance(channel, dict):
-                print("  ".join(str(channel.get(field, "")) for field in ("id", "kind", "muted", "label")))
-            return 0
+            return _print_notification_channel(payload, "text")
+        case "update":
+            body: dict[str, Any] = {}
+            if args.label is not None:
+                body["label"] = args.label
+            if args.trigger:
+                body["triggers"] = args.trigger
+            if args.config:
+                body["config"] = _parse_key_values(args.config)
+            if not body:
+                raise DarklabCliError("notify update needs at least one of --label, --trigger, or --config.")
+            payload = client.request("PATCH", f"/notification-channels/{args.channel_id}", body=body)
+            return _print_notification_channel(payload, args.format)
+        case "mute":
+            payload = client.request("PATCH", f"/notification-channels/{args.channel_id}", body={"muted": True})
+            return _print_notification_channel(payload, args.format)
+        case "unmute":
+            payload = client.request("PATCH", f"/notification-channels/{args.channel_id}", body={"muted": False})
+            return _print_notification_channel(payload, args.format)
         case "delete":
             return _print_payload(client.request("DELETE", f"/notification-channels/{args.channel_id}"), "json")
         case "test":
@@ -334,6 +364,15 @@ def _notify(client: DarklabClient, args: argparse.Namespace) -> int:
                 fields=("created", "id", "status", "trigger", "channel_id", "run_id"),
             )
     return die("unknown notify command")
+
+
+def _print_notification_channel(payload: dict[str, Any], output_format: str) -> int:
+    if output_format == "json":
+        return _print_payload(payload, "json")
+    channel = payload.get("channel") if isinstance(payload, dict) else {}
+    if isinstance(channel, dict):
+        print("  ".join(str(channel.get(field, "")) for field in ("id", "kind", "muted", "label")))
+    return 0
 
 
 def _parse_key_values(values: list[str]) -> dict[str, str]:

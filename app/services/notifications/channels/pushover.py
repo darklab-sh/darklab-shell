@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from services.notifications.base import Channel, register_channel
+from services.notifications.base import Channel
 from services.notifications.channels._format import format_plain_text, notification_title
 from services.notifications.channels._http import post_form
-from services.notifications.models import CHANNEL_KIND_PUSHOVER, ChannelResult
-from services.notifications.secrets import get_channel_secret
+from services.notifications.models import ChannelResult
+from services.notifications.secrets import first_secret_ref, get_channel_secret
 
 PUSHOVER_MESSAGE_URL = "https://api.pushover.net/1/messages.json"
 PUSHOVER_APP_TOKEN_SECRET_KEYS = ("app_token", "token")
@@ -16,11 +16,7 @@ PUSHOVER_USER_KEY_SECRET_KEYS = ("user_key", "user")
 
 
 def _secret_name(secrets: dict[str, Any], keys: tuple[str, ...]) -> str:
-    for key in keys:
-        value = str(secrets.get(key) or "").strip()
-        if value:
-            return value
-    return ""
+    return first_secret_ref(secrets, keys)
 
 
 def _optional_config(config: dict[str, Any], key: str) -> str:
@@ -63,7 +59,10 @@ class PushoverChannel(Channel):
             "sound": _optional_config(self.channel.config, "sound"),
             "device": _optional_config(self.channel.config, "device"),
         }
-        return post_form(PUSHOVER_MESSAGE_URL, fields, self.channel.config, label="pushover")
-
-
-register_channel(CHANNEL_KIND_PUSHOVER, PushoverChannel)
+        return post_form(
+            PUSHOVER_MESSAGE_URL,
+            fields,
+            self.channel.config,
+            label="pushover",
+            test_send=str(payload.get("trigger") or "") == "test",
+        )
