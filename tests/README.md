@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,992
+- behavior tests: 2,996
 - docs/inventory meta-tests: 32
-- `pytest`: 1592 (1560 behavior + 32 meta)
+- `pytest`: 1596 (1564 behavior + 32 meta)
 - `vitest`: 1180
 - `playwright`: 252
-- total: 3,024
+- total: 3,028
 
 This document is organized in two parts:
 
@@ -1190,6 +1190,10 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestSecretsRoutes.test_session_secrets_reject_invalid_name` | Verifies session secret routes reject invalid secret names with the expected error shape. |
 | `TestSecretsRoutes.test_session_secrets_require_valid_session_id` | Verifies session secret routes reject missing or invalid session headers instead of using a shared empty namespace. |
 | `TestSecretsRoutes.test_session_secrets_reject_duplicate_consumer_env_binding` | Verifies the routes return a conflict when another secret already owns the requested consumer env binding. |
+| `TestNotificationChannelRoutes.test_notification_channels_require_durable_session_tokens` | Verifies browser notification-channel routes require durable session tokens. |
+| `TestNotificationChannelRoutes.test_notification_channel_crud_masks_secret_values` | Verifies notification-channel create, list, and update routes return masked metadata while preserving vault-backed secret references. |
+| `TestNotificationChannelRoutes.test_notification_channel_test_endpoint_dispatches_sync_event` | Verifies the channel test route queues and synchronously dispatches a canned test payload. |
+| `TestNotificationChannelRoutes.test_notification_channel_delete_removes_channel` | Verifies deleting a notification channel removes it from subsequent list responses. |
 | `TestProjectRoutes.test_project_host_target_ip_is_stored_as_ip_entity` | Verifies manual host targets that contain an IP literal are stored as IP Atlas entities instead of domain entities. |
 | `TestProjectRoutes.test_builtin_runs_do_not_record_findings_even_with_legacy_project_link` | Verifies built-in runs stay out of persisted findings even if old data links them to a project. |
 | `TestProjectRoutes.test_project_write_routes_are_rate_limited` | Verifies project workspace write routes are wrapped by the shared limiter. |

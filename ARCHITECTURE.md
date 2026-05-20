@@ -338,6 +338,11 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | `POST` | `/session/secrets` | Creates or replaces one encrypted current-session secret value. |
 | `POST` | `/session/secrets/rotate` | Re-wraps the current session's encrypted secret rows under the active master key. |
 | `DELETE` | `/session/secrets/<name>` | Removes one encrypted secret from the current session. |
+| `GET` | `/session/notification-channels` | Lists masked outbound notification channel metadata for the current durable session token. |
+| `POST` | `/session/notification-channels` | Creates one outbound notification channel with write-only vault-backed secret values. |
+| `PATCH` | `/session/notification-channels/<channel_id>` | Updates one outbound notification channel's label, config, triggers, muted state, or replacement secret values. |
+| `DELETE` | `/session/notification-channels/<channel_id>` | Removes one outbound notification channel from the current durable session token. |
+| `POST` | `/session/notification-channels/<channel_id>/test` | Queues and synchronously dispatches a canned `test` notification through one channel. |
 | `GET` | `/session/preferences` | Returns the current session's normalized saved Options snapshot. |
 | `POST` | `/session/preferences` | Persists the current session's normalized saved Options snapshot. |
 | `POST` | `/session/tour-seen` | Records that the current session opened the current onboarding tour version. |
@@ -480,7 +485,7 @@ This is still a classic-script frontend, not an ES-module app. The architecture 
 
 Prompt ownership lives in `composerState`, not in whichever DOM input happened to update last.
 
-The options modal is part of that same browser-owned layer. It does not change backend config; it owns user-specific UX preferences (timestamp/line-number quick toggles, welcome-intro behavior, snapshot redaction defaults, project run/entity capture toggles, run-notification state, HUD clock timezone mode), session-token shortcuts, and encrypted secret management for the active session. The modal is split into a **Preferences** tab for display, identity, run, and compare controls and a **Secrets** tab for Provider Status, add/refresh actions, and the dynamic secret list; the selected tab is saved with the session preference snapshot. The modal feeds preference changes back into the classic-script runtime during boot and session changes. The terminal-native `config` command calls the same preference application path as the modal, so terminal and modal changes stay equivalent. Browser-owned terminal commands (`theme`, `config`, `workflow`, `secret set`, and `session-token`) render locally, then persist their masked command and transcript output through `/run/client` so history, recents, and reload hydration use the same server-backed history model as brokered `/runs`. `secret set NAME` opens the same replace-only Options value prompt and never accepts the value on the command line. `workflow run` uses that local command path for catalog lookup, input prompting, and queue setup, then submits the rendered workflow steps through the normal `/runs` execution path. Those preferences now persist server-side per session through the session-token model, while browser cookies/local storage remain the local cache and anonymous-session fallback layer. On mobile, that same shared Options surface hides the desktop-only `HUD Clock` and `Run Notifications` rows even though the underlying preference set remains shared with desktop.
+The options modal is part of that same browser-owned layer. It does not change backend config; it owns user-specific UX preferences (timestamp/line-number quick toggles, welcome-intro behavior, snapshot redaction defaults, project run/entity capture toggles, run-notification state, HUD clock timezone mode), session-token shortcuts, encrypted secret management, and outbound notification channels for the active session. The modal is split into a **Preferences** tab for display, identity, run, and compare controls, a **Secrets** tab for Provider Status, add/refresh actions, and the dynamic secret list, and a **Notifications** tab for session-owned delivery destinations; the selected tab is saved with the session preference snapshot. The modal feeds preference changes back into the classic-script runtime during boot and session changes. The terminal-native `config` command calls the same preference application path as the modal, so terminal and modal changes stay equivalent. Browser-owned terminal commands (`theme`, `config`, `workflow`, `secret set`, and `session-token`) render locally, then persist their masked command and transcript output through `/run/client` so history, recents, and reload hydration use the same server-backed history model as brokered `/runs`. `secret set NAME` opens the same replace-only Options value prompt and never accepts the value on the command line. `workflow run` uses that local command path for catalog lookup, input prompting, and queue setup, then submits the rendered workflow steps through the normal `/runs` execution path. Those preferences now persist server-side per session through the session-token model, while browser cookies/local storage remain the local cache and anonymous-session fallback layer. On mobile, that same shared Options surface hides the desktop-only `HUD Clock` and `Run Notifications` rows even though the underlying preference set remains shared with desktop.
 
 ### Browser Runtime
 
@@ -1078,7 +1083,7 @@ erDiagram
 
 `ENTITY_LABELS` and `ENTITY_NOTES` are polymorphic on `(entity_type, entity_id)` and attach to several record types — projects, runs, snapshots, workspace files, run file artifacts, Atlas entities, findings, and packages — without separate FKs per type, which is why they sit under `LOGICAL_SESSION` rather than chaining off one specific parent.
 
-`NOTIFICATION_CHANNELS` stores session-owned delivery destinations without plaintext secrets. Registered channel kinds cover generic JSON webhooks, Slack, Discord, Telegram, Pushover, and SMTP email, with channel-specific secret references resolved through the existing vault and operator SMTP credentials read from server config. External run finalization enqueues one `run_complete` notification payload with artifact, finding, Atlas entity, and project-target counts; built-in and PTY runs stay out of that default fan-out. `NOTIFICATION_EVENTS` is the queue and audit trail used by the dedicated notification worker, with the session token copied onto each event so delivery history does not depend on joining a still-existing channel row.
+`NOTIFICATION_CHANNELS` stores session-owned delivery destinations without plaintext secrets. Registered channel kinds cover generic JSON webhooks, Slack, Discord, Telegram, Pushover, and SMTP email, with channel-specific secret references resolved through the existing vault and operator SMTP credentials read from server config. Durable session-token users can manage those rows from the Options **Notifications** tab through `/session/notification-channels`, where secret fields are write-only, list payloads expose only configured/missing state, and `test` sends use the same queued dispatcher path as real app events. External run finalization enqueues one `run_complete` notification payload with artifact, finding, Atlas entity, and project-target counts; built-in and PTY runs stay out of that default fan-out. `NOTIFICATION_EVENTS` is the queue and audit trail used by the dedicated notification worker, with the session token copied onto each event so delivery history does not depend on joining a still-existing channel row.
 
 #### Atlas entity model
 
@@ -1570,12 +1575,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,992
+- behavior tests: 2,996
 - docs/inventory meta-tests: 32
-- `pytest`: 1592 (1560 behavior + 32 meta)
+- `pytest`: 1596 (1564 behavior + 32 meta)
 - `vitest`: 1180
 - `playwright`: 252
-- total: 3,024
+- total: 3,028
 
 ### Testing Architecture
 

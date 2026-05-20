@@ -46,7 +46,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Interactive PTY mode** — optional live terminal windows for registry-approved interactive tools such as `nc --interactive`, `telnet --interactive`, `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`, with guarded input/resize routes, bounded runtime/concurrency, Redis-backed reattach in multi-worker deployments, and completed transcripts saved back into normal history
 - **Session tokens** — persistent `tok_` session tokens carry history, shell identity, command variables, workspace files, project workspace records, active-project context, user workflows, recent target autocomplete, and saved options across browsers and devices. A phone or second browser using the same token can attach to a live command, replay earlier output, follow new output, and kill the run from the terminal or Status Monitor. `session-token generate/set/copy/clear/rotate/list/revoke` manage the token lifecycle with migration, rollback-safe rotate, confirmations, cross-tab sync, revocation, masked token history, and Options-panel shortcuts
 - **Safer sharing** — a built-in basic redaction baseline can mask common secrets or infrastructure details on snapshot permalinks, with optional operator regex rules appended on top. Permalink creation can choose raw vs redacted sharing per snapshot without changing the stored run history; app-native intel response bodies are omitted from share/styled export surfaces, while local text exports remain raw
-- **Run notifications** — optional browser desktop notifications fire on run completion (any exit code or kill); toggled from the Options panel on desktop and intentionally hidden from the mobile Options sheet; uses only the command root in the notification title to avoid exposing arguments or token values
+- **Run notifications** — optional browser desktop notifications fire on run completion, while durable `tok_` sessions can add outbound webhook, Slack, Discord, Telegram, Pushover, or email channels from the Options **Notifications** tab. Channel secrets are stored in the vault, list responses stay masked, and test sends let you verify a destination before waiting for a real run
 - **Themes and presentation** — named theme variants, a terminal-native `theme` command, theme-aware permalink/export rendering, mobile/desktop theme parity, browser-aligned permalink/saved-HTML export styling with best-effort PDF parity, MOTD support, a customizable welcome animation (ASCII art, sampled commands, rotating hints), a guided onboarding tour in the terminal and desktop carousel, a section-grouped operator-configurable FAQ modal, and user options for welcome-intro behavior plus default share-snapshot redaction that now follow the active session token instead of staying browser-local
 - **Built-in commands** — native shell commands like `help`, `commands`, `history`, `last`, `limits`, `status`, `runs`, `stats`, `project`, `workflow`, `file`, `ls`, `cat`, `mv`, `rm`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available. `project` manages project selection, links, and targets from the terminal; `commands info <tool>` and the desktop/mobile Command Registry expose supported external-tool descriptions, examples, flags, and subcommands from `commands.yaml`; `runs` / `jobs` show active app-run metadata with CPU and RSS memory, `runs --json` prints an automation-friendly snapshot, and `stats` summarizes session activity by command root
 - **Headless API and CLI** — `/api/v1` and the bundled `darklab` CLI let scripts and CI jobs authenticate with a session token, start non-interactive runs, wait for final status, tail broker events as SSE or NDJSON, cancel active runs, read history/ranged output/artifacts, grep saved output with line context, inspect Atlas and project data, and link or unlink completed runs from active projects without driving the browser
@@ -441,6 +441,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── atlas.py           # /atlas* session entity summary, list, and detail routes
 │   │   ├── content.py          # /, /config, /themes, /faq, /autocomplete, /welcome*
 │   │   ├── history.py          # /history*, /share*; preview/full-output shaping helpers
+│   │   ├── notifications.py    # /session/notification-channels* browser notification-channel CRUD and test-send routes
 │   │   ├── projects.py         # /projects* project workspace CRUD and relationship routes
 │   │   ├── run.py              # /runs broker starts/streams, /run/client history persistence, /kill, and run orchestration
 │   │   ├── secrets.py          # /session/secrets* encrypted per-session secret metadata and write routes
@@ -574,6 +575,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   │   ├── slack.py    # Slack incoming-webhook notification channel
 │   │   │   │   ├── telegram.py # Telegram Bot API notification channel
 │   │   │   │   └── webhook.py  # Generic JSON webhook notification channel
+│   │   │   ├── channels_store.py # Session-owned notification channel validation, masking, CRUD, and test-send helpers
 │   │   │   ├── dispatcher.py   # Notification event enqueue, claim, retry, and synchronous delivery helpers
 │   │   │   ├── hooks.py        # Application event hooks that enqueue notification payloads
 │   │   │   ├── models.py       # Notification channel/event dataclasses and constants
@@ -707,6 +709,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── mobile_running_indicator.js # Mobile background-running tab chip and tab-edge glow behavior
 │   │       │   │   └── mobile_shell_layout.js # Mobile shell DOM reparenting, viewport mode, and keyboard state
 │   │       │   ├── preferences/
+│   │       │   │   ├── notification_channels.js # Options modal outbound notification channel list, editor, mute, delete, and test-send helpers
 │   │       │   │   ├── preferences.js # Session preference loading, persistence, and Options modal control syncing
 │   │       │   │   ├── secrets_panel.js # Options modal encrypted secret list, replace, delete, and terminal value prompt helpers
 │   │       │   │   └── session_token_controls.js # Options modal session token generation, migration, and clearing controls

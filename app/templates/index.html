@@ -990,6 +990,7 @@
       <div id="options-tabs" class="options-tabs tab-strip" role="tablist" aria-label="Options sections">
         <button type="button" id="options-tab-preferences" class="tab-strip-item is-active" data-options-tab="preferences" role="tab" aria-selected="true" aria-controls="options-panel-preferences">Preferences</button>
         <button type="button" id="options-tab-secrets" class="tab-strip-item" data-options-tab="secrets" role="tab" aria-selected="false" aria-controls="options-panel-secrets">Secrets</button>
+        <button type="button" id="options-tab-notifications" class="tab-strip-item" data-options-tab="notifications" role="tab" aria-selected="false" aria-controls="options-panel-notifications">Notifications</button>
       </div>
     </div>
     <div class="faq-body options-body nice-scroll">
@@ -1137,6 +1138,22 @@
           </div>
         </div>
       </div>
+      <div id="options-panel-notifications" class="options-tab-panel" data-options-panel="notifications" role="tabpanel" aria-labelledby="options-tab-notifications" hidden>
+        <div class="faq-item">
+          <div class="faq-q options-field-heading">
+            <span>Notifications</span>
+            <button id="options-notification-refresh-btn" class="btn btn-ghost btn-icon-only btn-compact" type="button" aria-label="Refresh notification channels" title="Refresh notification channels">⟳</button>
+          </div>
+          <div class="faq-a form-fieldset">
+            <div class="options-session-token-desc">Send run, schedule, and watcher updates to destinations owned by this session token. Secret values are stored in the vault and never shown again.</div>
+            <div class="options-session-token-actions">
+              <button id="options-notification-new-btn" class="btn btn-secondary btn-compact" type="button">Add channel</button>
+            </div>
+            <div id="options-notification-msg" class="options-session-token-msg" role="status" aria-live="polite" style="display:none"></div>
+            <div id="options-notification-list" class="options-secrets-list" aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -1228,6 +1245,7 @@
 <script src="/static/js/features/tabs/tab_session_state.js"></script>
 <script src="/static/js/features/preferences/preferences.js"></script>
 <script src="/static/js/features/preferences/secrets_panel.js"></script>
+<script src="/static/js/features/preferences/notification_channels.js"></script>
 <script src="/static/js/features/preferences/session_token_controls.js"></script>
 <script src="/static/js/features/command-registry/command_registry.js"></script>
 <script src="/static/js/features/theme/theme.js"></script>

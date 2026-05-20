@@ -250,6 +250,9 @@ function activateOptionsTab(tab, { persist = true, focus = false } = {}) {
   if (persist) {
     try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist options tab preference', err); }
   }
+  if (nextTab === 'notifications' && typeof refreshNotificationChannels === 'function') {
+    void refreshNotificationChannels({ force: true });
+  }
   return nextTab;
 }
 

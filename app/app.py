@@ -70,6 +70,7 @@ from blueprints.atlas import atlas_bp  # noqa: E402
 from blueprints.content import content_bp  # noqa: E402
 from blueprints.run import run_bp, SUDO_BIN, KILL_BIN  # noqa: E402, F401 — re-exported
 from blueprints.history import history_bp  # noqa: E402
+from blueprints.notifications import notifications_bp  # noqa: E402
 from blueprints.session import session_bp  # noqa: E402
 from blueprints.secrets import secrets_bp  # noqa: E402
 from blueprints.workspace import workspace_bp  # noqa: E402
@@ -187,6 +188,7 @@ app.register_blueprint(atlas_bp)
 app.register_blueprint(content_bp)
 app.register_blueprint(run_bp)
 app.register_blueprint(history_bp)
+app.register_blueprint(notifications_bp)
 app.register_blueprint(session_bp)
 app.register_blueprint(secrets_bp)
 app.register_blueprint(workspace_bp)

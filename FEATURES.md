@@ -1052,7 +1052,7 @@ wget -q -O /dev/null --server-response https://example.com
 **Behavior:**
 
 - Click **≡ options** in the desktop rail (or the **☰** menu on mobile) to open the modal.
-- The modal has two tabs: **Preferences** for display, identity, run, and compare controls, and **Secrets** for provider readiness plus stored API keys. The last tab you used is remembered with the rest of your session preferences.
+- The modal has three tabs: **Preferences** for display, identity, run, and compare controls, **Secrets** for provider readiness plus stored API keys, and **Notifications** for outbound delivery channels. The last tab you used is remembered with the rest of your session preferences.
 - Run `config`, `config list`, `config get <option>`, or `config set <option> <value>` in the terminal to inspect or update the same user options without opening the modal. Option names are suggested after `config get` or `config set`, and option values are suggested after a selected option.
 - Timestamp and line-number settings mirror the tabbar quick toggles — changing either surface updates the other immediately.
 - The HUD clock setting chooses whether the desktop `CLOCK` pill renders in `UTC` or browser-local time. This control is intentionally hidden from the mobile Options sheet because the HUD itself is desktop-only.
@@ -1060,10 +1060,11 @@ wget -q -O /dev/null --server-response https://example.com
 - The share-snapshot redaction setting selects the default redaction choice (prompt / redacted / raw) so the share prompt is skipped once a preference is saved.
 - The project capture settings control whether completed external command runs are added to the active project and whether generated Atlas entities are added with those auto-linked runs.
 - Run notifications fire a browser desktop notification each time a run exits or is killed; the title shows only the command root (`$ curl`) and the body shows exit code and elapsed time. Enabling triggers the native permission prompt; if notifications are blocked, the toggle reverts with a toast. This toggle is intentionally hidden from the mobile Options sheet because the feature is treated as desktop-oriented chrome behavior.
+- The **Notifications** tab lists outbound channels for durable session tokens. You can add, edit, mute, delete, and send a test notification for webhook, Slack, Discord, Telegram, Pushover, or SMTP email destinations. Webhook URLs and app tokens are write-only values stored through the encrypted vault, so channel rows show only whether each required secret is configured.
 - Preferences are stored server-side per session and mirrored into browser cookies/local storage for reload continuity, so a named session token restores the same option set across browsers and devices.
 - The **Secrets** tab includes Provider Status, Add secret, Refresh, and the stored secret list so a long list of saved keys does not push the preference controls out of view.
 
-**Limits:** anonymous UUID sessions remain browser-local by design, so only named session tokens carry preferences across devices. Blocked notification permission cannot be re-prompted by the toggle — it must be re-enabled in browser settings.
+**Limits:** anonymous UUID sessions remain browser-local by design, so only named session tokens carry preferences and outbound notification channels across devices. Blocked browser notification permission cannot be re-prompted by the toggle — it must be re-enabled in browser settings. Email channels require operator SMTP settings before they can be saved or tested.
 
 **Configuration:**
 
@@ -1080,7 +1081,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Terminal option keys:** `line-numbers`, `timestamps`, `welcome`, `share-redaction`, `project-auto-link-runs`, `project-auto-link-run-entities`, `run-notifications`, `hud-clock`, `compare-view`, `compare-context`, `prompt-username`.
 
-**Related files:** `app/static/js/features/preferences/preferences.js` (Options modal state, notification preference, and session preference persistence), `app/static/js/features/terminal/local_commands.js` (terminal `config` command), `app/static/js/features/preferences/secrets_panel.js` (encrypted secret rows and value prompt), `app/static/js/runner.js` (run-completion notification dispatch and browser-owned terminal command routing), `app/static/js/shell_chrome.js` (desktop options navigation), `app/static/js/mobile_chrome.js` (mobile menu wiring).
+**Related files:** `app/static/js/features/preferences/preferences.js` (Options modal state, notification preference, and session preference persistence), `app/static/js/features/preferences/notification_channels.js` (outbound channel list, editor, mute/delete, and test sends), `app/static/js/features/terminal/local_commands.js` (terminal `config` command), `app/static/js/features/preferences/secrets_panel.js` (encrypted secret rows and value prompt), `app/static/js/runner.js` (run-completion notification dispatch and browser-owned terminal command routing), `app/static/js/shell_chrome.js` (desktop options navigation), `app/static/js/mobile_chrome.js` (mobile menu wiring).
 
 ---
 
