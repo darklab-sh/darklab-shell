@@ -12,7 +12,7 @@ from flask import Blueprint, jsonify, request
 from config import CFG
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from extensions import limiter
-from services.commands.registry import command_root, rewrite_command, validate_command
+from services.scheduler.commands import ScheduleCommandValidationError, validate_schedule_command
 from services.scheduler.cron import ScheduleCronError
 from services.scheduler.dispatch import fire_schedule
 from services.scheduler.models import OWNER_KIND_USER
@@ -24,7 +24,7 @@ from services.scheduler.service import (
     list_for_session,
     update_schedule,
 )
-from services.session.variables import SessionVariableError, expand_session_variables
+from services.session.variables import SessionVariableError
 
 log = logging.getLogger("shell")
 
@@ -74,10 +74,12 @@ def _schedule_error_response(exc):
     if isinstance(exc, ScheduleError):
         status = 409 if "quota" in str(exc).lower() else 400
         return jsonify({"error": "invalid_schedule", "message": str(exc)}), status
-    if isinstance(exc, ScheduleRouteError):
+    if isinstance(exc, ScheduleCommandValidationError):
         return jsonify({"error": "invalid_schedule", "message": str(exc)}), 400
     if isinstance(exc, SessionVariableError):
         return jsonify({"error": "invalid_command", "message": str(exc)}), 400
+    if isinstance(exc, ScheduleRouteError):
+        return jsonify({"error": "invalid_schedule", "message": str(exc)}), 400
     if isinstance(exc, ValueError):
         return jsonify({"error": "invalid_schedule", "message": str(exc)}), 400
     return jsonify({"error": "invalid_schedule"}), 400
@@ -88,27 +90,6 @@ def _schedule_for_session_or_404(schedule_id: str, session_id: str):
     if schedule is None or schedule.session_token != session_id or schedule.owner_kind != OWNER_KIND_USER:
         raise ScheduleNotFound("schedule not found")
     return schedule
-
-
-def _validate_schedule_command(command: Any, session_id: str, *, workspace_cwd: str = "") -> str:
-    if not isinstance(command, str):
-        raise ScheduleRouteError("command must be a string")
-    original_command = command.strip()
-    if not original_command:
-        raise ScheduleRouteError("command is required")
-    expanded_command = original_command
-    if command_root(original_command) != "var":
-        expanded_command = expand_session_variables(original_command, session_id).command
-    validation = validate_command(
-        expanded_command,
-        session_id=session_id,
-        cfg=CFG,
-        workspace_cwd=str(workspace_cwd or "").strip()[:1024],
-    )
-    if not validation.allowed:
-        raise ScheduleRouteError(validation.reason or "command is not allowed")
-    rewrite_command(validation.exec_command or expanded_command, session_id=session_id, cfg=CFG)
-    return original_command
 
 
 @schedules_bp.route("/schedules")
@@ -135,7 +116,7 @@ def schedules_create():
     if data is None:
         return jsonify({"error": "Request body must be a JSON object"}), 400
     try:
-        command = _validate_schedule_command(
+        command = validate_schedule_command(
             data.get("command"),
             session_id,
             workspace_cwd=str(data.get("workspace_cwd") or ""),
@@ -149,7 +130,14 @@ def schedules_create():
             label=str(data.get("label") or ""),
             enabled=bool(data.get("enabled", True)),
         )
-    except (ScheduleError, ScheduleCronError, ScheduleRouteError, SessionVariableError, ValueError) as exc:
+    except (
+        ScheduleError,
+        ScheduleCronError,
+        ScheduleCommandValidationError,
+        ScheduleRouteError,
+        SessionVariableError,
+        ValueError,
+    ) as exc:
         return _schedule_error_response(exc)
     log.info("SCHEDULE_CREATED", extra={
         "ip": get_client_ip(),
@@ -177,7 +165,7 @@ def schedules_update(schedule_id):
     updates = dict(data)
     try:
         if "command" in updates or "command_text" in updates:
-            updates["command_text"] = _validate_schedule_command(
+            updates["command_text"] = validate_schedule_command(
                 updates.get("command", updates.get("command_text")),
                 session_id,
                 workspace_cwd=str(updates.get("workspace_cwd") or ""),
@@ -185,7 +173,14 @@ def schedules_update(schedule_id):
         if "timezone_name" in updates and "timezone" not in updates:
             updates["timezone"] = updates.pop("timezone_name")
         updated = update_schedule(schedule.id, updates)
-    except (ScheduleError, ScheduleCronError, ScheduleRouteError, SessionVariableError, ValueError) as exc:
+    except (
+        ScheduleError,
+        ScheduleCronError,
+        ScheduleCommandValidationError,
+        ScheduleRouteError,
+        SessionVariableError,
+        ValueError,
+    ) as exc:
         return _schedule_error_response(exc)
     if updated is None:
         return jsonify({"error": "schedule_not_found"}), 404

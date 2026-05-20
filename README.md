@@ -516,6 +516,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── builtins_misc.py # Miscellaneous and guardrail-flavored built-in command handlers
 │   │   │   ├── builtins_project.py # Project workspace built-in command family and project target helpers
 │   │   │   ├── builtins_runtime.py # Runtime/history/status built-in command handlers
+│   │   │   ├── builtins_schedule.py # Scheduled-run built-in command family
 │   │   │   ├── builtins_secrets.py # Encrypted session secret built-in command handlers
 │   │   │   ├── builtins_session.py # Session token status and session variable built-in command handlers
 │   │   │   ├── builtins_shortcuts.py # Keyboard shortcut reference and shortcuts built-in command handler
@@ -623,6 +624,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── workspace_artifacts.py # Run-scoped workspace artifact detection and size helpers
 │   │   ├── scheduler/
 │   │   │   ├── __init__.py     # Scheduled-run service package marker and config helper
+│   │   │   ├── commands.py     # Shared scheduled-command validation helpers
 │   │   │   ├── cron.py         # Strict cron, cadence preset, timezone, and next-fire helpers
 │   │   │   ├── dispatch.py     # Schedule fire audit boundary for normal and watcher-owned schedules
 │   │   │   ├── models.py       # Schedule and schedule-fire dataclasses, constants, and allowed values
@@ -980,7 +982,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   ├── test_request_kill_and_commands.py # /kill, request parsing, loader edges, and built-in command resolution
     │   ├── test_routes.py      # Flask integration tests via test client (all HTTP routes)
     │   ├── test_run_history_share.py # Higher-value /runs, history, share, built-in command, and persistence flows
-    │   ├── test_schedules.py   # Scheduled-run route CRUD, validation, quota, isolation, and manual fire coverage
+    │   ├── test_schedules.py   # Scheduled-run route and terminal built-in CRUD, validation, quota, isolation, and manual fire coverage
     │   ├── test_session_routes.py # session-token generation/verify/migrate/revoke/starred/preferences route coverage
     │   └── test_validation.py  # Tests for command validation, rewrites, and runtime availability helpers
     └── ui-capture-scenes.md    # Reviewer hand-off manifest for the UI screenshot capture pack — per-scene "what to check" tables for design review

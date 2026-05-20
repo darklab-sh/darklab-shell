@@ -539,6 +539,75 @@ commands:
           description: "Show full IDs, started timestamps, and metadata source"
         - value: --json
           description: "Print active-run metadata as JSON"
+  - root: schedule
+    description: "built-in: manage saved recurring commands"
+    autocomplete:
+      subcommands:
+        list:
+          description: "List current-session schedules"
+          closes: true
+        create:
+          description: "Create a saved schedule"
+          flags:
+            - value: --cron
+              takes_value: true
+              description: "Five-field cron expression"
+              suggest:
+                - value: "0 * * * *"
+                  description: "Every hour"
+                - value: "0 0 * * *"
+                  description: "Every day"
+                - value: "0 0 * * 0"
+                  description: "Every week"
+            - value: --every
+              takes_value: true
+              description: "Cadence preset"
+              suggest:
+                - value: hourly
+                  description: "Every hour"
+                - value: daily
+                  description: "Every day"
+                - value: weekly
+                  description: "Every week"
+            - value: --label
+              takes_value: true
+              description: "Display label"
+            - value: --timezone
+              takes_value: true
+              description: "IANA timezone"
+          arguments:
+            - value: --
+              description: "Start of command to schedule"
+        pause:
+          description: "Pause a schedule"
+          arguments:
+            - value: "<schedule-id>"
+              hint_only: true
+              description: "Schedule id"
+        resume:
+          description: "Resume a schedule"
+          arguments:
+            - value: "<schedule-id>"
+              hint_only: true
+              description: "Schedule id"
+        delete:
+          description: "Delete a schedule"
+          arguments:
+            - value: "<schedule-id>"
+              hint_only: true
+              description: "Schedule id"
+        run:
+          description: "Fire a schedule now"
+          arguments:
+            - value: "<schedule-id>"
+              hint_only: true
+              description: "Schedule id"
+        info:
+          description: "Show schedule details"
+          arguments:
+            - value: "<schedule-id>"
+              hint_only: true
+              description: "Schedule id"
   - root: providers
     description: "built-in: show app-native intel provider setup status"
     autocomplete:

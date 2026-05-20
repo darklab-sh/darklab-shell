@@ -4239,6 +4239,14 @@ class TestDerivedCommandRegistry:
         assert context["commands"]["arg_hints"]["__positional__"][0]["value"] == "info"
         assert "info" in context["commands"]["expects_value"]
         assert context["runs"]["flags"][-1]["value"] == "--json"
+        assert [item["value"] for item in context["schedule"]["arg_hints"]["__positional__"][:4]] == [
+            "list",
+            "create",
+            "pause",
+            "resume",
+        ]
+        assert context["schedule"]["subcommands"]["create"]["arg_hints"]["--every"][0]["value"] == "hourly"
+        assert context["schedule"]["subcommands"]["info"]["arg_hints"]["__positional__"][0]["value"] == "<schedule-id>"
         assert context["session-token"]["arg_hints"]["set"][0]["value"] == "<token>"
         assert [item["value"] for item in context["project"]["arg_hints"]["__positional__"][:4]] == [
             "list",

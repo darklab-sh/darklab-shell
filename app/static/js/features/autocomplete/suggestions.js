@@ -84,6 +84,7 @@ let acRecentValues = {
 const acRecentValuePersistPromises = new Set();
 let acProjectTargets = [];
 let acProjects = [];
+let acSchedules = [];
 
 function _readRecentValues(kind = '') {
   const normalizedKind = String(kind || '').trim().toLowerCase();
@@ -99,6 +100,10 @@ function _readProjectTargets() {
 
 function _readAutocompleteProjects() {
   return acProjects.slice(0, 200);
+}
+
+function _readAutocompleteSchedules() {
+  return acSchedules.slice(0, 200);
 }
 
 function _setRecentValuesByKind(valuesByKind) {
@@ -182,6 +187,26 @@ function setProjectAutocompleteProjects(items) {
   return _readAutocompleteProjects();
 }
 
+function setScheduleAutocompleteSchedules(items) {
+  const seen = new Set();
+  acSchedules = (Array.isArray(items) ? items : [])
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const id = String(item.id || '').trim();
+      if (!id) return null;
+      const label = String(item.label || item.command_text || id).trim();
+      const enabled = item.enabled !== false;
+      return { id, label, enabled };
+    })
+    .filter((item) => {
+      if (!item || !item.id || seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    })
+    .slice(0, 200);
+  return _readAutocompleteSchedules();
+}
+
 function loadProjectAutocompleteTargets() {
   if (typeof apiFetch !== 'function') return Promise.resolve(_readProjectTargets());
   const projectListRequest = apiFetch('/projects?include_archived=1', { cache: 'no-store' })
@@ -204,6 +229,18 @@ function loadProjectAutocompleteTargets() {
       setProjectAutocompleteTargets([]);
       if (typeof logClientError === 'function') logClientError('failed to load project autocomplete targets', err);
       return _readProjectTargets();
+    });
+}
+
+function loadScheduleAutocompleteHints() {
+  if (typeof apiFetch !== 'function') return Promise.resolve(_readAutocompleteSchedules());
+  return apiFetch('/schedules', { cache: 'no-store' })
+    .then(resp => (resp && resp.ok && typeof resp.json === 'function' ? resp.json() : { schedules: [] }))
+    .then(data => setScheduleAutocompleteSchedules(data && data.schedules))
+    .catch((err) => {
+      setScheduleAutocompleteSchedules([]);
+      if (typeof logClientError === 'function') logClientError('failed to load schedule autocomplete hints', err);
+      return _readAutocompleteSchedules();
     });
 }
 

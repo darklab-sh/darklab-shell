@@ -53,6 +53,7 @@ from services.commands.builtins_runtime import (
     run_builtin_stats as _run_builtin_stats_impl,
     run_builtin_status as _run_builtin_status_impl,
 )
+from services.commands.builtins_schedule import run_builtin_schedule as _run_builtin_schedule
 from services.commands.builtins_session import (
     run_builtin_session_token as _run_builtin_session_token,
     run_builtin_var as _run_builtin_var,
@@ -326,6 +327,7 @@ _BUILTIN_COMMAND_DISPATCH = {
     "rm_root":   lambda cmd, sid: _run_builtin_rm_root(),
     "route":     lambda cmd, sid: _run_builtin_route(),
     "runs":      lambda cmd, sid: _run_builtin_runs(cmd, sid),
+    "schedule":  lambda cmd, sid: _run_builtin_schedule(cmd, sid),
     "secret":    lambda cmd, sid: _run_builtin_secret(cmd, sid),
     "session-token": lambda cmd, sid: _run_builtin_session_token(cmd, sid),
     "shortcuts": lambda cmd, sid: _run_builtin_shortcuts(),

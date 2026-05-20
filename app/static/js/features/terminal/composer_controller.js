@@ -252,6 +252,7 @@ apiFetch('/autocomplete').then(r => r.json()).then(data => {
   if (typeof loadSessionVariables === 'function') loadSessionVariables().catch(() => {});
   if (typeof loadRecentValues === 'function') loadRecentValues().catch(() => {});
   if (typeof loadProjectAutocompleteTargets === 'function') loadProjectAutocompleteTargets().catch(() => {});
+  if (typeof loadScheduleAutocompleteHints === 'function') loadScheduleAutocompleteHints().catch(() => {});
   if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache().catch(() => {});
   if (typeof scheduleSearchDiscoverabilityRefresh === 'function') scheduleSearchDiscoverabilityRefresh();
   else if (typeof refreshSearchDiscoverabilityUi === 'function') refreshSearchDiscoverabilityUi();

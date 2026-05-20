@@ -55,22 +55,18 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
       - Scheduled runs show the same badge in Run Details with a `schedule_id` link that opens the Schedules modal at that schedule.
       - A schedule whose token is revoked stops firing and is disabled.
       - Two due schedules with overlapping windows still fire in a deterministic order (by `next_run_at`, then `id`).
-  - Phase 2 — Terminal `schedule` built-in
-    - Add `schedule` to the session built-in family with subcommands: `list`, `create --cron "<expr>" -- <cmd>`, `create --every hourly|daily|weekly -- <cmd>`, `pause <id>`, `resume <id>`, `delete <id>`, `run <id>`, `info <id>`.
-    - Browser-owned (like `theme`, `config`, `session-token`) because output is transcript-shaped and confirmations belong inline. Reuses the shared pending-confirm state used by `session-token`.
-    - Autocomplete: schedule IDs complete against the active session's schedule list.
-  - Phase 3 — Browser Schedules modal
+  - Phase 2 — Browser Schedules modal
     - New `app/static/js/features/schedules/`. Modal lives beside Workflows. Two-column layout: list on left, detail/edit on right.
     - Cadence editor: preset chips (Every hour / day / week / custom cron) plus a live "next 3 fires" preview computed via a token-authenticated, no-body, no-write server endpoint (`GET /schedules/preview?cron=...&tz=...`) so the browser does not bundle a croniter clone.
     - History rows for a schedule's past fires link to their run detail.
     - Run Details gets a "Schedule this command" action that opens the Schedules modal pre-filled from that run's command, giving operators a visible path from a completed run to a recurring schedule.
     - Revoked-token state appears as a clear paused badge: "this schedule is paused because its session token was revoked." The schedule is disabled, not deleted, so the operator can re-enable after re-issuing the token.
     - Pressables and confirms follow the design-system primitives.
-  - Phase 4 — CLI and API surfaces
+  - Phase 3 — CLI and API surfaces
     - `/api/v1/schedules` GET/POST/PATCH/DELETE plus `/api/v1/schedules/<id>/run-now` and `/api/v1/schedules/<id>/fires` (paginated audit).
     - CLI: `darklab schedule list / create / pause / resume / delete / run / info / fires`.
     - CLI `darklab schedule create` accepts both `--cron "0 * * * *" -- <cmd>` and `--every hourly|daily|weekly -- <cmd>` for symmetry with the modal. The CLI joins `argv_after_dashdash` with spaces and submits that as the command body, so operators can pass normal shell-shaped command arguments without wrapping the whole command in one quoted string.
-  - Phase 5 — hardening, docs, release
+  - Phase 4 — hardening, docs, release
     - Docs: new `docs/schedules.md` covering cron support, timezone handling, missed-fire behavior, overlap policy, fan-out to notifications, and the per-session schedule cap.
     - `CONFIGURATION.md` updates for `scheduler.{lock_path, tick_seconds, max_per_session, missed_fire_policy, max_catchup_window_seconds, default_timezone}`. `scheduler.max_per_session` defaults to 32.
     - `ARCHITECTURE.md` gains a "Scheduler process" subsection under Runtime Topology and lists the reserved advisory-lock namespaces used by migrations, scheduler, notification worker, and notification sweep.

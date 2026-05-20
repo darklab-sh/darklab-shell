@@ -1088,6 +1088,62 @@ describe('autocomplete helpers', () => {
     expect(getAutocompleteMatches('project delete ', 15).map(item => item.value)).toEqual(['active-case', 'archived-case'])
   })
 
+  it('suggests schedule ids for terminal schedule actions', () => {
+    const { getAutocompleteMatches, setScheduleAutocompleteSchedules } = fromDomScripts(
+      [
+        'app/static/js/core/utils.js',
+        'app/static/js/core/autocomplete_core.js',
+        'app/static/js/features/autocomplete/suggestions.js',
+        'app/static/js/features/autocomplete/runtime_context.js',
+        'app/static/js/autocomplete.js',
+      ],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => '',
+        allowedCommandsFaqData: { commands: [] },
+        _cliThemeEntries: () => [],
+        _cliConfigEntries: () => [],
+        sessionVariables: [],
+        acSuggestions: [],
+        acContextRegistry: {
+          schedule: {
+            flags: [],
+            expects_value: [],
+            arg_hints: {
+              __positional__: [
+                { value: 'list', insertValue: 'list ', description: 'List schedules' },
+                { value: 'pause', insertValue: 'pause ', description: 'Pause a schedule' },
+              ],
+            },
+            subcommands: {
+              pause: { flags: [], arg_hints: { __positional__: [{ value: '<schedule-id>', hintOnly: true }] } },
+              info: { flags: [], arg_hints: { __positional__: [{ value: '<schedule-id>', hintOnly: true }] } },
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+      setScheduleAutocompleteSchedules,
+    }`,
+    )
+
+    setScheduleAutocompleteSchedules([
+      { id: 'sch_hourly', label: 'Hourly ping', enabled: true },
+      { id: 'sch_paused', command_text: 'nmap -sV ip.darklab.sh', enabled: false },
+    ])
+
+    expect(getAutocompleteMatches('schedule pause ', 15).map(item => item.value)).toEqual(['sch_hourly', 'sch_paused'])
+    expect(getAutocompleteMatches('schedule info sch_p', 19).map(item => item.value)).toEqual(['sch_paused'])
+  })
+
   it('tracks recent values from structured flag and positional slots, capped per kind in memory', () => {
     const { rememberRecentValuesFromCommand, _readRecentValues } = fromDomScripts(
       ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],

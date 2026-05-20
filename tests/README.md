@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,037
+- behavior tests: 3,042
 - docs/inventory meta-tests: 32
-- `pytest`: 1637 (1605 behavior + 32 meta)
-- `vitest`: 1185
+- `pytest`: 1641 (1609 behavior + 32 meta)
+- `vitest`: 1186
 - `playwright`: 252
-- total: 3,074
+- total: 3,079
 
 This document is organized in two parts:
 
@@ -1697,6 +1697,10 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestSchedulesRoutes.test_schedule_patch_revalidates_changed_command` | Verifies schedule updates re-run command validation when the command changes. |
 | `TestSchedulesRoutes.test_schedule_run_now_records_fire_without_scheduler_process` | Verifies manual run-now records a schedule fire and advances schedule metadata without depending on the scheduler worker. |
 | `TestSchedulesRoutes.test_schedule_create_enforces_session_cap` | Verifies normal schedules respect the configured per-session schedule cap. |
+| `TestScheduleBuiltin.test_schedule_builtin_create_list_info_and_state_changes` | Verifies the terminal schedule command creates, lists, inspects, pauses, resumes, and deletes current-session schedules. |
+| `TestScheduleBuiltin.test_schedule_builtin_rejects_disallowed_command` | Verifies the terminal schedule command rejects commands that fail command policy before persistence. |
+| `TestScheduleBuiltin.test_schedule_builtin_run_records_fire` | Verifies the terminal schedule run subcommand records a schedule fire and advances schedule metadata. |
+| `TestScheduleBuiltin.test_schedule_builtin_requires_durable_session_token` | Verifies the terminal schedule command requires a persistent session token. |
 
 #### `test_session_routes.py`
 
@@ -2143,6 +2147,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `keeps ambiguous partial subcommands as token suggestions instead of examples` | Verifies that ambiguous partial subcommands such as `gobuster d` keep showing matching subcommand tokens instead of prematurely expanding examples. |
 | `uses subcommand-scoped value hints` | Verifies that value hints for repeated flags such as `-o` come from the active subcommand context. |
 | `walks nested subcommands before suggesting the next project argument` | Verifies that nested project subcommands continue into their next argument hints instead of restarting autocomplete at command-root suggestions. |
+| `suggests schedule ids for terminal schedule actions` | Verifies that terminal schedule action autocomplete uses the current session's loaded schedule ids. |
 | `tracks recent values from structured flag and positional slots, capped per kind in memory` | Verifies that recent target capture reads known typed argument slots, skips file-list inputs, preserves recency order, and enforces the autocomplete cap per kind without using browser storage. |
 | `stores complete IPv4 values from host slots without keeping partial numeric hosts` | Verifies that recent value capture preserves complete IPv4 addresses from host slots without saving partial numeric host values. |
 | `loads recent values from the session endpoint` | Verifies that recent target autocomplete loads persisted session domains, IPs, URLs, and port sets from the backend and normalizes the returned values. |

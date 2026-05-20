@@ -8,6 +8,7 @@ import unittest.mock as mock
 
 import app as shell_app
 from core.database import db_init, db_connect
+from services.commands.builtins import execute_builtin_command
 
 
 def get_client():
@@ -177,3 +178,89 @@ class TestSchedulesRoutes:
         assert first.status_code == 201
         assert second.status_code == 409
         assert second.get_json()["message"] == "schedule quota exceeded for this session"
+
+
+class TestScheduleBuiltin:
+    def test_schedule_builtin_create_list_info_and_state_changes(self, monkeypatch, tmp_path):
+        _client, _db_path = _schedule_client(monkeypatch, tmp_path)
+        token = "tok_schedule_builtin"
+
+        lines, exit_code = execute_builtin_command(
+            "schedule create --every hourly -- ping -c 1 darklab.sh",
+            token,
+        )
+        assert exit_code == 0
+        assert "schedule: created sch_" in lines[0]["text"]
+        with db_connect() as conn:
+            row = conn.execute("SELECT id, enabled FROM schedules WHERE session_token = ?", (token,)).fetchone()
+        schedule_id = row["id"]
+        assert row["enabled"] == 1
+
+        listed, _ = execute_builtin_command("schedule list", token)
+        assert any(schedule_id in line["text"] and "ping -c 1 darklab.sh" in line["text"] for line in listed)
+
+        info, _ = execute_builtin_command(f"schedule info {schedule_id}", token)
+        assert any("command" in line["text"] and "ping -c 1 darklab.sh" in line["text"] for line in info)
+
+        paused, _ = execute_builtin_command(f"schedule pause {schedule_id}", token)
+        assert paused[0]["text"] == f"schedule: paused {schedule_id}"
+        with db_connect() as conn:
+            paused_row = conn.execute("SELECT enabled, paused_reason FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
+        assert paused_row["enabled"] == 0
+        assert paused_row["paused_reason"] == "paused"
+
+        resumed, _ = execute_builtin_command(f"schedule resume {schedule_id}", token)
+        assert resumed[0]["text"] == f"schedule: resumed {schedule_id}"
+        with db_connect() as conn:
+            resumed_row = conn.execute("SELECT enabled FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
+        assert resumed_row["enabled"] == 1
+
+        deleted, _ = execute_builtin_command(f"schedule delete {schedule_id}", token)
+        assert deleted[0]["text"] == f"schedule: deleted {schedule_id}"
+        with db_connect() as conn:
+            count = conn.execute("SELECT COUNT(*) AS count FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
+        assert count["count"] == 0
+
+    def test_schedule_builtin_rejects_disallowed_command(self, monkeypatch, tmp_path):
+        _client, _db_path = _schedule_client(monkeypatch, tmp_path)
+        token = "tok_schedule_builtin_reject"
+
+        lines, exit_code = execute_builtin_command("schedule create --every hourly -- rm -rf /", token)
+
+        assert exit_code == 0
+        assert "Command not allowed" in lines[0]["text"]
+        with db_connect() as conn:
+            count = conn.execute("SELECT COUNT(*) AS count FROM schedules WHERE session_token = ?", (token,)).fetchone()
+        assert count["count"] == 0
+
+    def test_schedule_builtin_run_records_fire(self, monkeypatch, tmp_path):
+        _client, db_path = _schedule_client(monkeypatch, tmp_path)
+        token = "tok_schedule_builtin_run"
+        execute_builtin_command("schedule create --cron \"0 * * * *\" -- ping -c 1 darklab.sh", token)
+        with db_connect() as conn:
+            schedule_id = conn.execute("SELECT id FROM schedules WHERE session_token = ?", (token,)).fetchone()["id"]
+
+        lines, exit_code = execute_builtin_command(f"schedule run {schedule_id}", token)
+
+        assert exit_code == 0
+        assert lines[0]["text"] == f"schedule: fired {schedule_id}"
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT schedule_id, status, reason FROM schedule_fires WHERE schedule_id = ?",
+            (schedule_id,),
+        ).fetchone()
+        conn.close()
+        assert dict(row) == {
+            "schedule_id": schedule_id,
+            "status": "fired",
+            "reason": "dispatch pending run integration",
+        }
+
+    def test_schedule_builtin_requires_durable_session_token(self, monkeypatch, tmp_path):
+        _client, _db_path = _schedule_client(monkeypatch, tmp_path)
+
+        lines, exit_code = execute_builtin_command("schedule list", "anonymous-session")
+
+        assert exit_code == 0
+        assert lines[0]["text"] == "schedule: persistent session token required. Run `session-token generate` first."
