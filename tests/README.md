@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,955
+- behavior tests: 2,962
 - docs/inventory meta-tests: 32
-- `pytest`: 1558 (1526 behavior + 32 meta)
+- `pytest`: 1562 (1530 behavior + 32 meta)
 - `vitest`: 1180
 - `playwright`: 252
-- total: 2,990
+- total: 2,994
 
 This document is organized in two parts:
 
@@ -451,6 +451,10 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPostgresMigrations.test_postgres_search_migration_adds_trigram_indexes` | Verifies the Postgres run-search migration creates `pg_trgm` and trigram indexes for command and output search. |
 | `TestPostgresMigrations.test_migration_runner_serializes_with_advisory_lock_and_records_versions` | Verifies the Postgres migration runner takes a transaction-scoped advisory lock and records applied migration versions. |
 | `TestPostgresMigrations.test_database_init_runs_postgres_migrations_without_sqlite_bootstrap` | Verifies Postgres startup runs migrations without entering the SQLite bootstrap path. |
+| `TestNotificationsPhase0.test_dispatcher_sync_delivery_fans_out_once_per_channel` | Verifies the notification dispatcher can synchronously fan out one trigger to two subscribed channels exactly once each. |
+| `TestNotificationsPhase0.test_dispatcher_event_claims_are_single_use` | Verifies notification event claims are leased so two workers cannot claim the same due event at the same time. |
+| `TestNotificationsPhase0.test_notification_helpers_do_not_import_blueprints` | Verifies notification service helpers stay independent from Flask blueprint modules. |
+| `TestNotificationsPhase0.test_notification_channels_require_durable_session_tokens` | Verifies outbound notification channels reject anonymous session ids and require durable session tokens. |
 | `TestRunHistorySearchClauses.test_sqlite_history_search_prefers_fts_for_output_scope` | Verifies SQLite history search still prefers FTS for output-capable searches with indexable terms. |
 | `TestRunHistorySearchClauses.test_sqlite_history_search_falls_back_to_like_for_short_terms` | Verifies SQLite history search falls back to substring `LIKE` for short terms that FTS trigram tokenization cannot match. |
 | `TestRunHistorySearchClauses.test_sqlite_command_scope_searches_command_only` | Verifies command-scoped history search only matches the command text. |

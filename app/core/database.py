@@ -205,6 +205,7 @@ def _create_schema(conn):
         )
     """)
     _create_secrets_schema(conn)
+    _create_notification_schema(conn)
     _create_project_workspace_schema(conn)
 
 
@@ -220,6 +221,54 @@ def _create_secrets_schema(conn):
             created_at    TEXT NOT NULL,
             updated_at    TEXT NOT NULL,
             PRIMARY KEY (session_token, name)
+        )
+    """)
+
+
+def _create_notification_schema(conn):
+    """Create outbound notification channel and delivery audit storage."""
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS notification_channels (
+            id            TEXT PRIMARY KEY,
+            session_token TEXT NOT NULL,
+            kind          TEXT NOT NULL,
+            label         TEXT NOT NULL DEFAULT '',
+            secrets_json  {_json_column_sql("{}")},
+            config_json   {_json_column_sql("{}")},
+            triggers_json {_json_column_sql("[]")},
+            muted         INTEGER NOT NULL DEFAULT 0,
+            created       TEXT NOT NULL,
+            updated       TEXT NOT NULL,
+            CHECK (kind IN ('webhook', 'slack', 'discord', 'telegram', 'pushover', 'email'))
+        )
+    """)
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS notification_events (
+            id              TEXT PRIMARY KEY,
+            session_token   TEXT NOT NULL,
+            channel_id      TEXT NOT NULL,
+            trigger         TEXT NOT NULL,
+            payload_json    {_json_column_sql("{}")},
+            status          TEXT NOT NULL DEFAULT 'pending',
+            attempts        INTEGER NOT NULL DEFAULT 0,
+            next_attempt_at TEXT NOT NULL DEFAULT '',
+            last_attempt_at TEXT NOT NULL DEFAULT '',
+            last_error      TEXT NOT NULL DEFAULT '',
+            run_id          TEXT NOT NULL DEFAULT '',
+            created         TEXT NOT NULL,
+            dead_at         TEXT NOT NULL DEFAULT '',
+            CHECK (
+                trigger IN (
+                    'run_complete',
+                    'pty_session_ended',
+                    'watcher_changed',
+                    'watcher_error',
+                    'watcher_recovered',
+                    'scheduled_run_failed',
+                    'test'
+                )
+            ),
+            CHECK (status IN ('pending', 'retry_wait', 'sent', 'dead'))
         )
     """)
 
@@ -429,6 +478,30 @@ def _create_indexes(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_secrets_session_updated "
         "ON secrets (session_token, updated_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_notification_channels_session_kind_updated "
+        "ON notification_channels (session_token, kind, updated DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_notification_channels_session_muted "
+        "ON notification_channels (session_token, muted)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_notification_events_status_next_attempt "
+        "ON notification_events (status, next_attempt_at, created)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_notification_events_session_created "
+        "ON notification_events (session_token, created DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_notification_events_channel_created "
+        "ON notification_events (channel_id, created DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_notification_events_run "
+        "ON notification_events (run_id)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_projects_session_status_updated "
@@ -846,6 +919,10 @@ def _migrate_schema(conn):
 
     try:
         _create_secrets_schema(conn)
+    except SQLiteOperationalError:
+        pass
+    try:
+        _create_notification_schema(conn)
     except SQLiteOperationalError:
         pass
 

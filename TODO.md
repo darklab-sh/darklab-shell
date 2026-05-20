@@ -36,83 +36,51 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-- **Outbound notifications (webhooks, Slack, Discord, SMTP email)**
+- **Outbound notifications (webhooks, Slack, Discord, Telegram, Pushover, SMTP email)**
   - Goal
-    - Ship a pluggable `Channel`-based delivery layer so app events (run finalization, finding classification, watcher fires, scheduled-run failures) can be sent to external destinations per session token.
+    - Ship a pluggable `Channel`-based delivery layer so app events (run finalization with finding summaries, opt-in PTY session endings, watcher fires, scheduled-run failures, and test sends) can be sent to external destinations per session token.
     - Existing notifications are browser-foreground only. This closes the loop for solo operators running long scans away from the tab and is the delivery surface the scheduler and watchers features will depend on.
     - Land this **before** scheduler/watchers so the automation features can hook into a real delivery surface rather than building one inline.
     - Non-goals for v1: web-push (covered by the PWA Idea), per-project channels (sessions only), per-channel templating, real-time delivery dashboards.
-  - Phase 0 — schema, base class, and dispatcher
-    - Add `app/core/migrations/v0009_notification_channels.py` (and the equivalent SQLite `CREATE TABLE` in `core/database.py`) for two tables:
-      - `notification_channels` — `id, session_token, kind ('webhook'|'slack'|'discord'|'email'), label, secret_kid, config_json, triggers_json, muted, created, updated`. Plain labels and identifiers stay TEXT; webhook URL, bot token, SMTP password go through the existing encrypted-secrets vault — `secret_kid` is the vault row reference, plaintext is never stored on this table.
-      - `notification_events` — `id, channel_id, trigger ('run_complete'|'finding_classified'|'watcher_fired'|'scheduled_run_failed'), payload_json, status ('pending'|'sent'|'failed'|'dead'), attempts, last_attempt_at, last_error, run_id, created`. Used for delivery audit and retry.
-    - Add `app/services/notifications/`:
-      - `models.py` — `Channel` dataclass, `NotificationEvent` dataclass, trigger-name string constants.
-      - `base.py` — abstract `Channel` with `send(payload: dict) -> ChannelResult` and `validate_config(config: dict) -> list[str]`.
-      - `dispatcher.py` — `enqueue(trigger, payload, session_token)` writes a row to `notification_events`, then either dispatches synchronously (test/dev) or hands off to the delivery worker.
-      - `worker.py` — background thread that drains `pending` rows, applies exponential-backoff retry, moves rows `failed → dead` after the configured retry count.
-      - `secrets.py` — thin wrapper around the existing secrets vault for read/store of channel secrets, with a small per-call audit row written through the existing secrets-audit path.
-    - Acceptance criteria
-      - `Channel` is registerable: `register_channel("webhook", WebhookChannel)`.
-      - Dispatcher can be invoked synchronously from tests without spawning the worker.
-      - All secret storage rides on the existing vault; no new ciphertext column path is invented.
-      - Helpers in `services/notifications/*` import nothing from `blueprints/*`.
   - Phase 1 — `WebhookChannel` (generic JSON)
     - First concrete implementation in `app/services/notifications/channels/webhook.py`.
-    - Payload shape (stable across channels): `{trigger, occurred_at, session_token_hint (last 4 chars), run_id, command_root, exit_code, summary_fields:{...}, schedule_id?, watcher_id?}`. **Never** include full command text or argv — match the existing browser desktop-notification policy that exposes command root only.
+    - Payload shape (stable across channels): `{trigger, occurred_at, session_token_hint (last 4 chars), run_id, command_root, exit_code, summary_fields:{...}, schedule_id?, watcher_id?}`. **Never** include full command text or argv — match the existing browser desktop-notification policy that exposes command root only. `run_complete` includes post-run finding counts/severity/status summaries when findings were classified for the run, so a run does not produce a second near-duplicate findings notification.
     - HTTP client uses `urllib.request` (stdlib) with a configurable timeout; 2xx is success, 3xx follows the same redirect rules as the API client, 5xx and timeouts retry up to the configured max, 4xx is terminal.
     - Tests: `tests/py/test_notifications_webhook.py` covering 2xx success, 5xx retry then success, 4xx terminal, malformed-URL rejection, timeout retry, payload shape stability.
-  - Phase 2 — `SlackChannel` and `DiscordChannel`
+  - Phase 2 — `SlackChannel`, `DiscordChannel`, `TelegramChannel`, and `PushoverChannel`
     - `app/services/notifications/channels/slack.py` + `channels/discord.py`. Both use incoming-webhook URLs (no bot scopes, no OAuth) for v1 simplicity.
     - Format payloads with their native shapes: Slack `blocks` with a header + key-value section; Discord `embeds` with a title + fields. Share a `format_summary_fields(payload)` helper in `channels/_format.py`.
-    - Reuse the webhook delivery primitive from Phase 1; only the body differs.
-    - Tests: format-output snapshot tests plus the same delivery-matrix as the webhook channel.
+    - Add `app/services/notifications/channels/telegram.py`. Uses the Telegram Bot API `sendMessage` endpoint with a vault-stored bot token and non-secret `chat_id` in `config_json`. Use plain text or conservative Markdown/HTML formatting only after escaping user-controlled fields.
+    - Add `app/services/notifications/channels/pushover.py`. Uses Pushover's message endpoint with vault-stored app token and user/group key. Non-secret options can include priority, sound, and device when operators configure them.
+    - Reuse the webhook delivery primitive from Phase 1 where possible; only request shape, auth placement, and response parsing differ.
+    - Tests: format-output snapshot tests plus the same delivery-matrix as the webhook channel for Slack, Discord, Telegram, and Pushover. Telegram/Pushover tests assert secrets are never echoed in logs or API responses.
   - Phase 3 — `EmailChannel` (SMTP)
     - `app/services/notifications/channels/email.py`. Uses `smtplib` + `email.message.EmailMessage` (stdlib).
-    - Operator-gated: requires `notifications.smtp.{host, port, user, password_secret_id, from_address, tls}` in `app/conf/config.yaml`. If unset, the email channel kind is rejected at create time with a clear error.
+    - Operator-gated: requires global SMTP transport config at `notifications.smtp.{host, port, user, password_secret_id, from_address, tls}` in `app/conf/config.yaml`. If unset, the email channel kind is rejected at create time with a clear error. Session-owned email channels store recipients, labels, triggers, and optional reply-to metadata, not per-session SMTP host credentials.
     - Subject line: `[darklab] {trigger}: {command_root}`. Body is plain-text key/value first, HTML alternative second; HTML is rendered through Jinja autoescape (matches the package HTML rendering pattern).
     - Tests: `tests/py/test_notifications_email.py` using `aiosmtpd` in-process or mocking `smtplib.SMTP`.
   - Phase 4 — Hook points and trigger fan-out
-    - Run finalization: in `app/blueprints/run.py`, after the existing post-finalize code in `_brokered_real_run_worker`, call `notifications.dispatcher.enqueue("run_complete", build_payload(run), session_token)` for the owning session. Add a separate `finding_classified` enqueue when post-run finding classification rows are written.
-    - Synthetic and PTY runs participate the same way; gate fan-out on `run_kind == 'external'` so noisy builtin runs (e.g., `help`) don't fan out by default.
-    - `scheduled_run_failed` and `watcher_fired` hooks are stubbed in the dispatcher here; their actual call sites land with Scheduler and Watchers.
-    - Redaction: the same `_history_safe_command_for_storage`-style masking used for permalinks runs over `summary_fields` before enqueue.
+    - Run finalization: in `app/blueprints/run.py`, after the existing post-finalize code in `_brokered_real_run_worker`, call `notifications.dispatcher.enqueue("run_complete", build_run_complete_payload(run, findings_summary), session_token)` for the owning session.
+    - Post-run finding classification is folded into the `run_complete` payload for that run. The dispatcher does not emit a separate post-run findings trigger, which keeps chat, push, and email channels from receiving two near-identical messages seconds apart.
+    - External runs participate in `run_complete` by default. PTY sessions do **not** trigger `run_complete` by default; they use a separate opt-in `pty_session_ended` trigger for operators who explicitly want interactive-session completion pings. Built-in administrative commands (for example `help`, `config`, and `theme`) do not fan out unless a future setting opts them in.
+    - `scheduled_run_failed`, `watcher_changed`, `watcher_error`, and `watcher_recovered` hooks are stubbed in the dispatcher here; their actual call sites land with Scheduler and Watchers.
+    - Redaction: the same `_history_safe_command_for_storage`-style masking used for permalinks runs over `summary_fields` before enqueue. Scrubbing happens before `notification_events.payload_json` is written so queued, retried, replayed, or exported events do not contain secrets.
     - Per-channel mute and a global `notifications.do_not_disturb` config knob short-circuit the dispatcher before any HTTP call.
   - Phase 5 — Browser Options surface
-    - New `app/static/js/features/preferences/notification_channels.js`. Add a "Notifications" section to the Options modal with: channel list (kind icon, label, mute toggle), create/edit form per kind (URL field for webhook/slack/discord, host/port/auth for SMTP), trigger checkboxes, "Send test notification" button.
-    - Secrets entered in the form are submitted through the existing secrets-vault flow; channel rows store only the `secret_kid` reference, never the plaintext.
+    - New `app/static/js/features/preferences/notification_channels.js`. Add a "Notifications" section to the Options modal with: channel list (kind icon, label, mute toggle), create/edit form per kind (URL field for webhook/slack/discord, bot token + chat id for Telegram, app/user keys for Pushover, recipients for SMTP), trigger checkboxes, "Send test notification" button.
+    - Secrets entered in the form are submitted through the existing secrets-vault flow; channel rows store only `secrets_json` vault references, never plaintext.
     - Confirms use `showConfirm()`. Pressables follow the button primitive family.
   - Phase 6 — CLI and API surfaces
     - Add `/api/v1/notification-channels` GET/POST/PATCH/DELETE in `app/blueprints/api_v1.py`. Read endpoints return channels for the calling token; write endpoints accept the same JSON the browser sends. Secret material is write-only — GETs return masked metadata.
+    - Add `POST /api/v1/notification-channels/<id>/test` so the browser and CLI can validate a channel without waiting for a real run. Test sends use trigger `test` and a fixed canned payload shaped like `{trigger: "test", message: "darklab test notification", channel_id, occurred_at}` so receivers can whitelist or ignore it intentionally.
     - Add `/api/v1/notification-events` GET (paginated) for delivery audit.
     - CLI: `darklab notify list / create / delete / test / events`. The CLI never accepts a plaintext secret on the command line; it prompts via stdin or reads from `--secret-file PATH`.
   - Phase 7 — hardening, docs, release
-    - Docs: new `docs/notifications.md` covering payload shape, channel-kind matrix, retry/dead-letter policy, redaction guarantees, SMTP operator config, and a webhook curl quickstart.
-    - `CONFIGURATION.md` updates for the `notifications.*` config tree.
+    - Docs: new `docs/notifications.md` covering payload shape, trigger inventory (`run_complete`, `pty_session_ended`, watcher triggers, `scheduled_run_failed`, `test`), channel-kind matrix, retry/dead-letter policy, redaction guarantees, Telegram/Pushover setup, SMTP relay guidance, and a webhook curl quickstart.
+    - `CONFIGURATION.md` updates for the `notifications.*` config tree, including SMTP transport, retry max attempts, `notifications.retry.max_age_hours` defaulting to 24, do-not-disturb, and the fixed per-channel rate settings.
     - `ARCHITECTURE.md` gains a short "Notifications surface" subsection under Backend Architecture and log-event entries for `NOTIFICATION_DISPATCHED` / `NOTIFICATION_DELIVERY_FAILED` / `NOTIFICATION_RETRIED`.
     - `CHANGELOG.md`, v2.0 merge-request, and release-notes updates.
     - Contract test: assert every `register_channel(name, cls)` channel implements both `validate_config` and `send`.
-  - Open Decisions
-    - **Delivery model** — synchronous-from-hook, in-process worker thread, dedicated worker process, or external queue (Redis/Celery)?
-      - *Recommended:* in-process worker thread with a database-backed queue. Synchronous-from-hook blocks run finalization on a flaky third party; an external queue adds infrastructure for a feature that may see one delivery per hour. A worker thread with the existing `notification_events` table as the queue is the smallest model that retries safely and does not couple delivery to request lifecycle.
-    - **Retry policy shape** — fixed retries, exponential backoff, or operator-tunable?
-      - *Recommended:* exponential backoff with jitter, three attempts (1s → 10s → 60s), then move to `failed`; a periodic sweep re-queues `failed → pending` for up to 24 hours before marking `dead`. Attempt count is operator-tunable in `notifications.retry.max_attempts`; the backoff curve is fixed.
-    - **Channel secrets storage** — new ciphertext column on `notification_channels`, or reuse the existing encrypted-secrets vault?
-      - *Recommended:* reuse the vault. It already solves KEK rotation, audit logging, and operator-key bootstrap; introducing a parallel ciphertext column duplicates that work and creates two key rotation surfaces. Store only `secret_kid` on the channel row.
-    - **Trigger configuration** — channels declare which triggers they accept, or triggers declare which channels they fan out to?
-      - *Recommended:* channels declare. Each row carries `triggers_json: ["run_complete", "watcher_fired"]`. Trigger sources call `dispatcher.enqueue(trigger, payload, session_token)` and the dispatcher fans out to all channels whose `triggers_json` includes that trigger and whose `muted` flag is false.
-    - **Notification body content** — command root only, or include exit code, line count, and finding count?
-      - *Recommended:* command root, exit code, elapsed, run_id, and a small `summary_fields` map per trigger (e.g., `{"new_findings": 4}` for `finding_classified`). Argv, full command text, and workspace paths are never included. Matches the browser desktop-notification policy and keeps webhooks safe to point at shared channels.
-    - **Slack/Discord auth method** — incoming webhooks or bot tokens?
-      - *Recommended:* incoming webhooks for v1. No OAuth scopes, no app-install dance, single URL per channel. Promote to bot-token in v2 when operators ask for threading or @mentions.
-    - **SMTP library** — stdlib `smtplib` or third-party (e.g., `emails`, `yagmail`)?
-      - *Recommended:* stdlib `smtplib` + `email.message.EmailMessage`. The feature is one transactional message per fire; the stdlib is sufficient and avoids a third-party runtime dependency.
-    - **Do-not-disturb scope** — global only, per-channel only, or both?
-      - *Recommended:* both. Global is the "I'm in a meeting" switch; per-channel is for "this Slack webhook is currently noisy." Two booleans, no extra schema.
-    - **PII / secret scrubbing** — at enqueue time or at send time?
-      - *Recommended:* at enqueue time, before any row is written to `notification_events`. Once a payload is in the queue it may be retried, replayed for audit, or exported during diagnostics — scrubbing at send only protects the outbound HTTP body, not the audit trail.
-    - **Per-channel rate limiting** — none, fixed cap, or operator-tunable?
-      - *Recommended:* fixed cap of 10 deliveries per channel per minute, enforced inside the dispatcher. Beyond that, deliveries queue. Stays well under Slack/Discord's published webhook limits without operator tuning. Cap is exposed as `notifications.per_channel_rate.{minute, second}` for later tuning.
 
 - **Scheduled and recurring runs**
   - Goal
@@ -122,79 +90,66 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
     - Non-goals for v1: workflow scheduling (commands only), cross-session schedules, per-target scheduling, calendar-based holidays/blackout windows.
   - Phase 0 — schema, scheduler process, and tick infrastructure
     - Add `app/core/migrations/v0010_schedules.py` (plus SQLite equivalent in `core/database.py`):
-      - `schedules` — `id, session_token, kind ('command'), command_text, cron_expr, cadence_preset ('hourly'|'daily'|'weekly'|null), timezone, enabled, next_run_at, last_run_at, last_run_id, consecutive_failures, label, created, updated`.
-      - `schedule_fires` — `id, schedule_id, fired_at, run_id, status ('skipped_overlap'|'skipped_revoked'|'fired'|'fire_failed'), reason`. Append-only audit.
+      - `schedules` — `id, session_token, owner_kind ('user'|'watcher'), owner_id, kind ('command'), command_text, cron_expr, cadence_preset ('hourly'|'daily'|'weekly'|null), timezone, enabled, next_run_at, last_run_at, last_run_id, overlap_policy ('skip'), consecutive_failures, label, paused_reason, last_error, created, updated`. One physical table stores both normal schedules and watcher-owned schedules; `owner_kind` controls dispatch. `overlap_policy` is stored for forward compatibility, but v1 always writes and enforces `skip`.
+      - `schedule_fires` — `id, schedule_id, owner_kind, owner_id, fired_at, run_id, status ('skipped_overlap'|'skipped_revoked'|'fired'|'fire_failed'), reason`. Append-only audit.
     - Add `app/services/scheduler/`:
       - `models.py` — `Schedule`, `ScheduleFire` dataclasses.
       - `cron.py` — cron parsing and `next_fire(cron_expr, after, timezone)` using `croniter` (single new pip dependency). Cadence presets normalize to canonical cron strings on save.
       - `service.py` — `create / update / delete / pause / resume / list_for_session` library functions, backend-agnostic.
       - `worker.py` — the dedicated scheduler process entry point. Computes `next_run_at` for each enabled row, sleeps until the soonest, fires, writes back `last_run_at` / `next_run_at`.
-      - `recovery.py` — at worker startup, scan for schedules whose `next_run_at` is in the past and apply the missed-fire policy.
-    - Process model: the scheduler runs as a dedicated Gunicorn-sibling process started by `entrypoint.sh`. It does **not** run inside Flask workers — worker rotation must not lose ticks. Exactly one scheduler process per deployment; coordination uses a Postgres advisory lock (`pg_advisory_lock` on a fixed namespace string) or, for SQLite deployments, a filesystem lock at `data/scheduler.lock`. If the lock is held by another process, the second scheduler exits cleanly.
+      - `recovery.py` — at worker startup, scan for schedules whose `next_run_at` is in the past and apply the missed-fire policy: coalesce missed fires into one catch-up fire within `scheduler.max_catchup_window_seconds`, skip older missed windows with an audit row, then resume normal cadence.
+      - `dispatch.py` — routes due rows by ownership. `owner_kind='user'` starts a normal scheduled command; `owner_kind='watcher'` calls watcher orchestration instead of launching a generic scheduled run.
+    - Process model: the scheduler runs as a dedicated Gunicorn-sibling process started by `entrypoint.sh`. It does **not** run inside Flask workers — worker rotation must not lose ticks. Exactly one scheduler process per deployment; coordination uses a Postgres advisory lock (`pg_advisory_lock` on the reserved `darklab_shell_scheduler` namespace) or, for SQLite deployments, a filesystem lock at `data/scheduler.lock`. If the lock is held by another process, the second scheduler exits cleanly. `entrypoint.sh` supervises the scheduler in a small restart loop with crash logging and a short sleep/backoff so unexpected worker exit is visible and self-healing.
+    - Timezone model: `scheduler.default_timezone` is the operator default (UTC out of the box), and each schedule can override it. Cron input is strict five-field POSIX cron; cadence presets are stored as canonical five-field cron strings.
+    - Schedule creation requires a durable `tok_` session owner. Anonymous UUID sessions cannot create schedules because scheduled work must survive browser restarts and token revocation must be enforceable.
     - Acceptance criteria
       - `croniter` parses every documented cadence preset.
       - Two simultaneously-started scheduler processes do not both fire a schedule.
       - A schedule whose `next_run_at` is now-50min still fires according to the missed-fire policy.
+      - A watcher-owned schedule never appears as an editable normal schedule and never double-starts both a scheduled run and a watcher run.
   - Phase 1 — REST blueprint and validation
     - Add `app/blueprints/schedules.py`, mounted at `/schedules`:
-      - `GET /schedules` — list current-session schedules with derived `next_run_at` and `enabled`.
-      - `POST /schedules` — create. Validates: command goes through the same allowlist/deny-prefix/registry-rewrite pipeline as `/runs` (without spawning), cron expression parses, timezone is in the IANA list, schedule count under the per-session cap.
+      - `GET /schedules` — list current-session normal schedules (`owner_kind='user'`) with derived `next_run_at` and `enabled`.
+      - `POST /schedules` — create a normal schedule with `owner_kind='user'`. Validates: command goes through the same allowlist/deny-prefix/registry-rewrite pipeline as `/runs` (without spawning), cron expression parses as five-field POSIX cron (reject seconds-field and `@` aliases), timezone is in the IANA list, schedule count is under the per-session cap of 32.
       - `PATCH /schedules/<id>` — partial update (enabled toggle, cron change, label, command change re-validates).
       - `DELETE /schedules/<id>`.
-      - `POST /schedules/<id>/run-now` — operator-initiated immediate fire; uses the same code path as a scheduler-driven fire.
-    - Each scheduled fire enqueues through the existing `/runs` broker with `session_token` set to the schedule owner, `run_kind='external'`, and `metadata.scheduled = {schedule_id, fired_at, manual}`. The broker refuses if the session token is revoked; the scheduler logs the skip and writes a `skipped_revoked` `schedule_fires` row.
+      - `POST /schedules/<id>/run-now` — operator-initiated immediate fire; uses the same dispatch/preparation path as a scheduler-driven fire but fires directly from the web worker. It does not depend on the scheduler process being healthy.
+    - Each normal scheduled fire enqueues through the existing `/runs` broker with `session_token` set to the schedule owner, `run_kind='external'`, and `metadata.scheduled = {schedule_id, fired_at, manual}`. The broker refuses if the session token is revoked; the scheduler logs the skip and writes a `skipped_revoked` `schedule_fires` row.
     - Tests: `tests/py/test_schedules.py` covering CRUD, cross-session 404, allowlist rejection on create, allowlist re-validation on PATCH, manual run-now path.
   - Phase 2 — Fire path and broker integration
     - The scheduler `worker.py` polls `schedules` for the next fire roughly every 5 seconds. For each due row:
       - Resolve the session token. If revoked since the schedule was saved, write `skipped_revoked`, disable the schedule, and emit `SCHEDULE_DISABLED_REVOKED`.
-      - Apply the overlap policy (see Open Decisions): if the previous fire's run is still active, either skip with `skipped_overlap` or kill-and-restart.
-      - Reuse `_validate_command_for_run` from `blueprints/run.py` (extracted to a shared helper in `services/runs/preparation.py` so the scheduler does not import a blueprint). On rejection, log and write `fire_failed`.
-      - On success, call into the broker the same way the API v1 `POST /api/v1/runs` does, then record the resulting `run_id` on both `schedules.last_run_id` and a new `schedule_fires` row.
-    - Hook into the notification dispatcher: on `fire_failed` and on `run_complete` for a scheduled run, enqueue with triggers `scheduled_run_failed` / `run_complete` respectively. The dispatcher decides which channels are interested.
+      - Apply the v1 overlap policy: if the previous fire's run is still active, skip with `skipped_overlap`. Queueing and kill-and-fire are intentionally deferred so a stuck or long-running scan does not create backlog or destroy useful evidence.
+      - Route through `scheduler.dispatch.fire(schedule)`. For `owner_kind='user'`, reuse `_validate_command_for_run` from `blueprints/run.py` (extracted to a shared helper in `services/runs/preparation.py` so the scheduler does not import a blueprint). On rejection, log and write `fire_failed`.
+      - For `owner_kind='watcher'`, call the watcher fire entry point; the watcher service starts the run and later computes the diff from the run-finalization hook. The scheduler does not also start a normal scheduled command.
+      - On success, record the resulting `run_id` on both `schedules.last_run_id` and a new `schedule_fires` row.
+    - Hook into the notification dispatcher: on `fire_failed` for normal schedules and on `run_complete` for a scheduled run, enqueue with triggers `scheduled_run_failed` / `run_complete` respectively. Watcher-owned schedule failures use `watcher_error` from the watcher service so channel routing stays precise.
     - Acceptance criteria
       - Scheduled runs appear in `/history` with a visible "scheduled" badge tied to `schedule_id`.
+      - Scheduled runs show the same badge in Run Details with a `schedule_id` link that opens the Schedules modal at that schedule.
       - A schedule whose token is revoked stops firing and is disabled.
       - Two due schedules with overlapping windows still fire in a deterministic order (by `next_run_at`, then `id`).
   - Phase 3 — Terminal `schedule` built-in
-    - Add `schedule` to the session built-in family with subcommands: `list`, `create <cron> "<cmd>"`, `pause <id>`, `resume <id>`, `delete <id>`, `run <id>`, `info <id>`.
+    - Add `schedule` to the session built-in family with subcommands: `list`, `create --cron "<expr>" -- <cmd>`, `create --every hourly|daily|weekly -- <cmd>`, `pause <id>`, `resume <id>`, `delete <id>`, `run <id>`, `info <id>`.
     - Browser-owned (like `theme`, `config`, `session-token`) because output is transcript-shaped and confirmations belong inline. Reuses the shared pending-confirm state used by `session-token`.
     - Autocomplete: schedule IDs complete against the active session's schedule list.
   - Phase 4 — Browser Schedules modal
     - New `app/static/js/features/schedules/`. Modal lives beside Workflows. Two-column layout: list on left, detail/edit on right.
-    - Cadence editor: preset chips (Every hour / day / week / custom cron) plus a live "next 3 fires" preview computed via a server endpoint (`GET /schedules/preview?cron=...&tz=...`) so the browser does not bundle a croniter clone.
+    - Cadence editor: preset chips (Every hour / day / week / custom cron) plus a live "next 3 fires" preview computed via a token-authenticated, no-body, no-write server endpoint (`GET /schedules/preview?cron=...&tz=...`) so the browser does not bundle a croniter clone.
     - History rows for a schedule's past fires link to their run detail.
+    - Run Details gets a "Schedule this command" action that opens the Schedules modal pre-filled from that run's command, giving operators a visible path from a completed run to a recurring schedule.
+    - Revoked-token state appears as a clear paused badge: "this schedule is paused because its session token was revoked." The schedule is disabled, not deleted, so the operator can re-enable after re-issuing the token.
     - Pressables and confirms follow the design-system primitives.
   - Phase 5 — CLI and API surfaces
     - `/api/v1/schedules` GET/POST/PATCH/DELETE plus `/api/v1/schedules/<id>/run-now` and `/api/v1/schedules/<id>/fires` (paginated audit).
     - CLI: `darklab schedule list / create / pause / resume / delete / run / info / fires`.
-    - CLI `darklab schedule create` accepts both `--cron "0 * * * *"` and `--every hourly|daily|weekly` for symmetry with the modal.
+    - CLI `darklab schedule create` accepts both `--cron "0 * * * *" -- <cmd>` and `--every hourly|daily|weekly -- <cmd>` for symmetry with the modal. The CLI joins `argv_after_dashdash` with spaces and submits that as the command body, so operators can pass normal shell-shaped command arguments without wrapping the whole command in one quoted string.
   - Phase 6 — hardening, docs, release
     - Docs: new `docs/schedules.md` covering cron support, timezone handling, missed-fire behavior, overlap policy, fan-out to notifications, and the per-session schedule cap.
-    - `CONFIGURATION.md` updates for `scheduler.{lock_path, tick_seconds, max_per_session, missed_fire_policy, overlap_policy, default_timezone}`.
-    - `ARCHITECTURE.md` gains a "Scheduler process" subsection under Runtime Topology.
+    - `CONFIGURATION.md` updates for `scheduler.{lock_path, tick_seconds, max_per_session, missed_fire_policy, max_catchup_window_seconds, default_timezone}`. `scheduler.max_per_session` defaults to 32.
+    - `ARCHITECTURE.md` gains a "Scheduler process" subsection under Runtime Topology and lists the reserved advisory-lock namespaces used by migrations, scheduler, notification worker, and notification sweep.
     - Log events: `SCHEDULE_FIRED`, `SCHEDULE_SKIPPED_OVERLAP`, `SCHEDULE_FIRE_FAILED`, `SCHEDULER_PROCESS_BOOTED`, `SCHEDULER_MISSED_FIRES_RECOVERED`, `SCHEDULE_DISABLED_REVOKED`.
     - Smoke tests cover a full create → fire → history-link cycle against a fast tick-rate test config.
-  - Open Decisions
-    - **Scheduler implementation** — APScheduler, `croniter` + custom loop, or Redis sorted-set tick?
-      - *Recommended:* `croniter` for parsing plus a small custom loop in `services/scheduler/worker.py`. APScheduler adds API surface (jobstores, executors, listeners) for a feature that is fundamentally "wake up, query SQL, fire, sleep." `croniter` is one well-scoped dependency. Revisit APScheduler if multi-process job affinity or triggers other than cron land.
-    - **Scheduler process model** — dedicated process, in-worker thread with leader election, or APScheduler in Gunicorn `on_starting`?
-      - *Recommended:* dedicated process started from `entrypoint.sh`, coordinated with a Postgres advisory lock (or filesystem lock on SQLite). Worker threads are fragile under Gunicorn restarts; in-worker means N workers all want to be the leader. A separate process matches the model already used by the broker.
-    - **Missed-fire policy** — run all missed fires on recovery, run the most recent only, or skip and reset `next_run_at`?
-      - *Recommended:* coalesce — fire **once** if any missed-fire window exists, then resume normal cadence. "All missed" stampedes after long downtime; "skip entirely" silently masks degraded operation. The single catch-up fire restores intent without amplifying load.
-    - **Overlap policy when the previous fire is still running** — skip-this-fire, kill-previous-and-fire, queue-this-fire, or operator-configurable per schedule?
-      - *Recommended:* skip-this-fire by default, operator-configurable per schedule to `kill-and-fire` for "always run the latest" workflows. Queueing creates an unbounded backlog under a stuck previous run.
-    - **Timezone handling** — UTC only, operator-default with per-schedule override, or per-session default?
-      - *Recommended:* operator-default in `scheduler.default_timezone` (UTC out of the box) with per-schedule override. Per-session defaults make every UI surface harder to reason about; per-schedule overrides are the unit of work operators actually think in.
-    - **What can be scheduled** — single commands only in v1, or commands plus workflows?
-      - *Recommended:* commands only in v1. Workflow scheduling needs a stable workflow-fire record shape and the existing workflow surface is still evolving. Promote once workflow runs are first-class in History.
-    - **Per-session schedule cap** — yes/no and the number?
-      - *Recommended:* yes, cap at 32 schedules per session. Prevents accidental misuse and gives the scheduler a known upper bound for the tick loop. Operator-tunable in `scheduler.max_per_session`.
-    - **Cron validation surface** — strict POSIX-cron only, or the croniter extensions (`@hourly`, seconds field)?
-      - *Recommended:* five-field POSIX cron only on input. Reject seconds-field and `@`-aliases at create time and translate the cadence presets to canonical five-field cron internally. The surface is small enough to document on one line.
-    - **Run-tag visibility** — show "scheduled" badge in History, in Run Details, both, or neither?
-      - *Recommended:* both, plus a schedule_id link in Run Details that opens the Schedules modal at that schedule.
-    - **Token revocation behavior** — disable the schedule, delete it, or keep firing-then-skipping?
-      - *Recommended:* disable on first `skipped_revoked` (do not delete; the operator may want to re-enable after re-issuing the token). Add a "this schedule is paused because its session token was revoked" badge in the modal.
 
 - **Watchers (change-detection monitors)**
   - Goal
@@ -204,44 +159,55 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
     - Non-goals for v1: watchers across multiple commands, watcher graphs, threshold-based alerting (e.g., "only fire if 3 new ports"), watcher history retention beyond a fixed cap.
   - Phase 0 — schema and data model
     - Add `app/core/migrations/v0011_watchers.py` (plus SQLite equivalent):
-      - `watchers` — `id, session_token, label, command_text, schedule_id, baseline_run_id, last_run_id, last_diff_summary_json, state ('ok'|'changed'|'firing'|'paused'|'error'), consecutive_no_change, consecutive_changed, created, updated`.
-      - `watcher_fires` — `id, watcher_id, run_id, diff_summary_json, diff_kind ('signal'|'textual'|'none'), fired_notifications_count, state_at_fire, created`. Append-only audit.
-    - The watcher row owns its schedule, so deleting a watcher cascades to deleting its schedule row. A schedule cannot be shared between a watcher and a regular scheduled run (keeps the data model unambiguous).
+      - `watchers` — `id, session_token, label, command_text, schedule_id, baseline_run_id, last_run_id, last_diff_summary_json, state ('ok'|'changed'|'firing'|'paused'|'error'), state_reason, last_error, options_json, consecutive_no_change, consecutive_changed, consecutive_failures, created, updated`. `options_json` stores strictly validated watcher policy flags such as `suppress_removals` and `notify_metadata_changes`; additions and removals count as diffs by default, while metadata/severity-only changes stay opt-in until classifiers stabilize. Promote these flags to typed columns if the validated option set grows beyond three fields.
+      - `watcher_fires` — `id, watcher_id, baseline_run_id, run_id, diff_summary_json, diff_kind ('signal'|'textual'|'none'), truncated, notification_event_ids_json, state_at_fire, created`. Append-only audit with a unique constraint on `(watcher_id, run_id)` so duplicate run-finalization paths cannot create duplicate watcher fires.
+    - The watcher row owns its schedule. The paired schedule uses `owner_kind='watcher'` and `owner_id=<watcher_id>` in the shared `schedules` table, and `watchers.schedule_id` is unique so a schedule cannot be shared between a watcher and a regular scheduled run.
+    - Watchers are capped at 32 per session by default (`watchers.max_per_session`), mirroring the schedule cap because each watcher owns one schedule.
+    - Watcher creation requires a durable `tok_` session owner. Anonymous UUID sessions cannot create watchers because watcher cadence, baseline state, and notifications must survive browser restarts.
     - Acceptance criteria
       - A new watcher inserts both a `watchers` row and a `schedules` row in one transaction.
       - Deleting a watcher removes both rows atomically.
+      - A normal schedule cannot claim a watcher-owned schedule row, and the Schedules UI/API does not expose watcher-owned rows as ordinary schedules.
+      - Two watchers wrapping the same command still fire separate runs; watcher state and baseline acceptance are never shared across watchers.
+      - Duplicate finalize calls for the same `(watcher_id, run_id)` are idempotent and never emit duplicate notifications.
   - Phase 1 — Service composition
     - Add `app/services/watchers/`:
       - `models.py` — `Watcher`, `WatcherFire`, `WatcherDiff` dataclasses.
       - `service.py` — `create / update / delete / pause / resume / accept_baseline / list_for_session` library functions.
-      - `runner.py` — the watcher fire hook called by the scheduler worker when it fires a watcher-owned schedule. Responsibilities: kick the run through the broker, wait for completion, compute the diff against `baseline_run_id`, update state, enqueue a notification on `changed`.
+      - `runner.py` — the watcher fire hook called by the scheduler worker when it fires a watcher-owned schedule. Responsibilities: kick the run through the broker, record the pending watcher fire, and return quickly so the scheduler is not blocked by a long scan.
+      - `finalize.py` — run-finalization hook that claims the pending watcher fire for the completed run, computes the diff against `baseline_run_id`, updates watcher state, and enqueues `watcher_changed`, `watcher_error`, or `watcher_recovered` notifications as appropriate. The state machine is explicit: non-empty diff after `ok` or `recovered` emits `watcher_changed`; empty diff after `changed` emits optional `watcher_recovered`; empty diff after `ok` stays quiet; failed watcher runs set `state='error'`, do not promote the failed run to baseline, and emit `watcher_error`. After five consecutive failures, disable the watcher and log `WATCHER_DISABLED_AFTER_ERRORS`.
       - `diff.py` — thin wrapper over `services/runs/comparison.py` that returns a normalized `WatcherDiff` regardless of which comparator fired (signal-based, textual added/removed).
-    - Scheduler hook: extend `scheduler/worker.py` to call `watchers.runner.handle_fire(schedule, run_id)` after `run_complete` for any schedule whose row has a corresponding `watchers.schedule_id`. Watchers do not have a separate timer; they ride the scheduler.
+    - Scheduler hook: extend `scheduler.dispatch` so `owner_kind='watcher'` rows call `watchers.runner.handle_fire(schedule)`. Watchers do not have a separate timer; they ride the scheduler, but the scheduler never waits for watcher run completion.
+    - Run cleanup hook: if a baseline run is deleted from history, pause the watcher, set `state='error'`, set `state_reason='baseline_deleted'`, and emit the documented log event.
   - Phase 2 — Diff classifier policies
-    - First-class signal classifiers in `watchers/classifiers/`:
+    - First classifier slice:
+      - `findings.py` — when the source run carries structured findings, diff finding fingerprints directly.
+      - `textual.py` — line-level added/removed fallback when no structured classifier matches. Documented as "noisy on tools with non-deterministic output ordering — prefer a signal classifier when one fits."
+    - Follow-up classifier slice in the same phase after the service contract is stable:
       - `ports.py` — `nmap`-shaped output: added ports, removed ports, service or state changes.
       - `hosts.py` — subdomain/host lists: added names, removed names.
       - `tls.py` — `openssl s_client` output: issuer, subject, SAN, validity, fingerprint changes.
-      - `findings.py` — when the source run carries structured findings, diff finding fingerprints directly.
-    - Fallback `textual.py` — line-level added/removed when no classifier matches. Documented as "noisy on tools with non-deterministic output ordering — prefer a signal classifier when one fits."
-    - Each classifier exposes `applies_to(command_text, run) -> bool` and `diff(baseline_run, current_run) -> WatcherDiff`. The runner picks the first that applies, falling back to textual.
+    - Classifiers register through a decorator inside `watchers/classifiers/`. Each classifier exposes `applies_to(command_text, run) -> bool` and `diff(baseline_run, current_run) -> WatcherDiff`. The runner picks the first that applies, falling back to textual.
+    - Diff input uses full stored output when available. If only capped transcript output is available, the `WatcherDiff` carries `truncated=true` and the notification says the diff may be incomplete. Each fire stores at most 1,000 changed signals with a `truncated` flag so one runaway scan cannot fill the audit table.
     - Tests: golden inputs for each classifier in `tests/py/test_watchers_classifiers.py`, asserting the structured diff shape.
   - Phase 3 — REST blueprint
     - Add `app/blueprints/watchers.py`, mounted at `/watchers`:
       - `GET /watchers` — list current-session watchers with derived state.
-      - `POST /watchers` — create. Requires a `baseline_run_id` from a completed run in the current session, a `cron_expr`, and either inherits command text from the baseline or accepts an override.
+      - `POST /watchers` — create. Requires a `baseline_run_id` from a completed run in the current `tok_` session, a `cron_expr`, and either inherits command text from the baseline or accepts an override.
       - `PATCH /watchers/<id>` — pause/resume, change cadence, change label.
       - `DELETE /watchers/<id>` — cascades through to the watcher's owning schedule row.
-      - `POST /watchers/<id>/accept-baseline` — promotes the most recent fire's run to the new baseline. Idempotent.
+      - `POST /watchers/<id>/accept-baseline` — manually promotes the most recent fire's run to the new baseline. Idempotent. Baselines do not rotate automatically in v1.
       - `POST /watchers/<id>/run-now` — operator-initiated immediate fire.
-    - Tests: cross-session 404, baseline validation, accept-baseline state transitions, cascade delete.
+    - Tests: cross-session 404, baseline validation, accept-baseline state transitions, cascade delete, no shared fires across watchers with the same command.
   - Phase 4 — Terminal `watch` built-in
-    - Add `watch` to the session built-in family with subcommands: `list`, `create <baseline_run_id> <cron>`, `pause <id>`, `resume <id>`, `delete <id>`, `accept <id>`, `run <id>`, `info <id>`.
+    - Add `watch` to the session built-in family with subcommands: `list`, `create <baseline_run_id> --cron "<expr>"`, `create <baseline_run_id> --every hourly|daily|weekly`, `pause <id>`, `resume <id>`, `delete <id>`, `accept <id>`, `run <id>`, `info <id>`.
     - Symmetric with the `schedule` built-in. Autocomplete completes watcher IDs against the current session.
   - Phase 5 — Browser Watchers modal
     - New `app/static/js/features/watchers/`. Modal lives beside Schedules.
     - Watcher row state: `ok` (last fire matched baseline) / `changed` (last fire had a non-empty diff and is awaiting accept) / `firing` (fire in progress) / `paused` / `error`.
     - Detail pane shows the last diff using a reusable component shared with the existing Run Comparison overlay so visual treatment stays consistent.
+    - Empty-diff fires are visible in watcher audit as `diff_kind='none'` so operators can confirm a watcher is still running even when nothing changed.
+    - Run Details gets a "Create watcher from this baseline" action that opens the Watchers modal pre-filled with that run as the baseline.
     - Accept-baseline is a confirm modal (discards the prior baseline); resume from paused is a single click.
   - Phase 6 — CLI and API surfaces
     - `/api/v1/watchers` GET/POST/PATCH/DELETE plus `/api/v1/watchers/<id>/accept-baseline`, `/run-now`, and `/fires` (paginated audit).
@@ -249,29 +215,8 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - Phase 7 — hardening, docs, release
     - Docs: new `docs/watchers.md` covering the diff model, classifier inventory, baseline lifecycle, and how watchers interact with the scheduler and notifications.
     - `ARCHITECTURE.md` gains a "Watchers" subsection under Backend Architecture.
-    - Log events: `WATCHER_FIRED`, `WATCHER_CHANGED`, `WATCHER_BASELINE_ACCEPTED`, `WATCHER_DIFF_FAILED`, `WATCHER_DISABLED_AFTER_ERRORS`.
+    - Log events: `WATCHER_FIRED`, `WATCHER_CHANGED`, `WATCHER_RECOVERED`, `WATCHER_ERROR`, `WATCHER_BASELINE_ACCEPTED`, `WATCHER_DIFF_FAILED`, `WATCHER_DISABLED_AFTER_ERRORS`.
     - Smoke tests cover a full create → fire (no change) → fire (changed) → notify → accept-baseline cycle.
-  - Open Decisions
-    - **Signal model — what counts as a diff worth notifying on** — additions only, removals only, both, or all changes?
-      - *Recommended:* additions and removals by default, with a per-watcher option to suppress removals (`ports went from open to closed` is interesting for some workflows, noise for others). "Severity or metadata changed" is interesting once findings are structured, but keep it gated behind a per-watcher toggle until classifiers stabilize.
-    - **Baseline rotation** — manual accept-only, auto-accept after N stable fires, or both?
-      - *Recommended:* manual accept-only in v1. Auto-baselines silently swallow gradual drift (slowly-changing subdomain list) and produce "this watcher never fires" reports that turn out to be a stale baseline. Add auto-accept in v2 once operators ask for it explicitly.
-    - **Empty-diff fires** — write a `watcher_fires` row with `diff_kind='none'`, or skip the row entirely?
-      - *Recommended:* write the row. The audit "this watcher ran at 14:00 and there was nothing new" is itself a signal; skipping it makes "is this watcher actually firing?" untestable from the audit table.
-    - **Failed scheduled run for a watcher (exit≠0)** — treat as `changed`, treat as `error` state, or operator-configurable?
-      - *Recommended:* watcher state goes to `error` and a single `scheduled_run_failed` notification fires; the watcher does not promote the failed run to baseline. Consecutive failures escalate to a `WATCHER_DISABLED_AFTER_ERRORS` event after 5 failures so a broken watcher does not pollute notifications indefinitely.
-    - **Where classifiers register** — Python entry point, registry decorator inside `watchers/classifiers/`, or operator-config in YAML?
-      - *Recommended:* registry decorator inside `watchers/classifiers/`. Entry points overengineer for a feature unlikely to want third-party classifiers in v1; YAML can't express the `applies_to` predicate cleanly. Promote to entry points if a "bring your own classifier" use case appears.
-    - **Diff size cap per fire** — unbounded, fixed cap, or operator-tunable?
-      - *Recommended:* fixed cap of 1,000 changed signals per fire with a `truncated` flag on the `WatcherDiff`. Operators chasing larger diffs can use Run Comparison directly. Prevents one runaway scan from filling the audit table.
-    - **Watcher cap per session** — yes/no and the number?
-      - *Recommended:* yes, cap at 32 watchers per session (mirrors the scheduler cap because each watcher owns a schedule). Operator-tunable in `watchers.max_per_session`.
-    - **Notification trigger granularity** — one `watcher_fired` trigger, or split into `watcher_changed` / `watcher_recovered` / `watcher_error`?
-      - *Recommended:* split. `watcher_changed` is the noisy one operators may want on Slack; `watcher_error` belongs in an ops channel; `watcher_recovered` ("the diff went away again") is optional and off-by-default. Keeps channel routing precise without inflating the schema.
-    - **Baseline run lifetime** — what if the baseline run is deleted from history?
-      - *Recommended:* on delete, pause the watcher and surface `state='error'` with a clear "baseline was deleted" reason. Do not silently promote the next fire to baseline — that hides the operator's prior decision.
-    - **Cross-watcher coordination** — if two watchers wrap the same command, do they share a fire?
-      - *Recommended:* no, each watcher fires its own run. Sharing fires couples watcher state in confusing ways (accept-baseline on one would affect the other). The marginal cost of an extra run is small; the simplicity payoff is large.
 
 ## Known Issues
 

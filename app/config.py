@@ -233,6 +233,15 @@ def load_config(conf_dir=None):
         "evidence_package_max_artifacts": 100,
         "evidence_package_download_rate_limit_per_minute": 10,
         "evidence_package_download_rate_limit_per_second": 2,
+        "notifications": {
+            "do_not_disturb": False,
+            "delivery_rate_per_minute": 10,
+            "retry": {
+                "max_attempts": 6,
+                "max_age_hours": 24,
+                "base_delay_seconds": 30,
+            },
+        },
         "max_tabs":                   8,
         "command_timeout_seconds":    3600,
         "heartbeat_interval_seconds": 20,

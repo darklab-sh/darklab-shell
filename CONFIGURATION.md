@@ -224,6 +224,12 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `evidence_package_max_artifacts` | `100` | Maximum workspace artifacts included in one evidence package archive. The package wizard also uses this value when presenting archive constraints |
 | `evidence_package_download_rate_limit_per_minute` | `10` | Server-side only. Per-session evidence package download limit per minute |
 | `evidence_package_download_rate_limit_per_second` | `2` | Server-side only. Per-session evidence package download burst limit per second |
+| `notifications` | see nested defaults | Server-side only. Outbound notification delivery guardrails for do-not-disturb, per-channel send rate, and retry behavior |
+| `notifications.do_not_disturb` | `false` | Server-side only. Stops outbound notification delivery before channel sends while keeping queued event storage available |
+| `notifications.delivery_rate_per_minute` | `10` | Server-side only. Per-channel outbound notification send cap used by the worker claim path |
+| `notifications.retry.max_attempts` | `6` | Server-side only. Maximum delivery attempts before a notification event moves to dead-letter state |
+| `notifications.retry.max_age_hours` | `24` | Server-side only. Maximum retry window before a notification event moves to dead-letter state |
+| `notifications.retry.base_delay_seconds` | `30` | Server-side only. Base delay for exponential notification retry backoff |
 | `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` means disabled |
 | `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
 | `run_broker_enabled` | `true` | Enables the brokered run model for command start, output replay, and live reattachment |
@@ -612,6 +618,7 @@ WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 | `WORKSPACE_ROOT` | Docker entrypoint, Compose environment, Flask app | Path prepared by the container before dropping privileges. When set, it also overrides `workspace_root` in app config so Compose deployments only need one workspace path setting |
 | `WEB_CONCURRENCY` | Gunicorn entrypoint | Number of Gunicorn worker processes |
 | `WEB_THREADS` | Gunicorn entrypoint | Number of threads per Gunicorn worker |
+| `NOTIFICATION_WORKER_ENABLED` | Docker entrypoint | Starts the outbound notification worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
 | `PROMETHEUS_MULTIPROC_DIR` | Docker Compose, Flask app, Prometheus client | Optional override for `prometheus_multiproc_dir`. The app creates this scratch directory and exports it for `prometheus_client` multiprocess metrics |
 | `COMPOSE_PROFILES` | Docker Compose | Optional comma-separated Compose profiles to enable. Set to `postgres` when you want the profile-gated Postgres service included without passing `--profile postgres` |
 | `DATABASE_BACKEND` | Flask app | Optional override for `database_backend`. Use `sqlite` for the default local/single-user path or `postgres` for a Postgres-backed deployment |

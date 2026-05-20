@@ -581,6 +581,11 @@ class TestDatabaseBackend:
         assert database_backend.quote_identifier('odd"name', "sqlite") == '"odd""name"'
         assert database_backend.quote_identifier('odd"name', database_backend.DatabaseBackend.POSTGRES) == '"odd""name"'
         assert database_backend.postgres_advisory_lock_id() == database_backend.postgres_advisory_lock_id()
+        lock_ids = [
+            database_backend.postgres_advisory_lock_id(namespace)
+            for namespace in database_backend.POSTGRES_ADVISORY_LOCK_NAMESPACES
+        ]
+        assert len(lock_ids) == len(set(lock_ids))
         with pytest.raises(ValueError):
             database_backend.quote_postgres_identifier("")
 
@@ -639,6 +644,8 @@ class TestPostgresMigrations:
         "user_workflows",
         "recent_values",
         "secrets",
+        "notification_channels",
+        "notification_events",
         "projects",
         "project_links",
         "entities",
@@ -665,6 +672,8 @@ class TestPostgresMigrations:
                 if not line:
                     continue
                 keyword = line.split()[0].upper()
+                if keyword.startswith("'"):
+                    continue
                 if keyword in {"PRIMARY", "UNIQUE", "FOREIGN", "CHECK", "CONSTRAINT"}:
                     continue
                 columns.add(line.split()[0].strip('"'))
@@ -705,6 +714,7 @@ class TestPostgresMigrations:
             "0006",
             "0007",
             "0008",
+            "0009",
         ]
         for table_name in (
             "runs",
@@ -717,6 +727,8 @@ class TestPostgresMigrations:
             "user_workflows",
             "recent_values",
             "secrets",
+            "notification_channels",
+            "notification_events",
             "projects",
             "project_links",
             "entities",
@@ -908,6 +920,122 @@ class TestPostgresMigrations:
         assert fake_app_conn.committed is True
         migration_runner.assert_called_once()
         prune_retention.assert_called_once_with(fake_app_conn)
+
+
+class TestNotificationsPhase0:
+    def _notification_db(self, monkeypatch, tmp_path):
+        db_path = tmp_path / "notifications.db"
+        monkeypatch.setattr(database, "DB_PATH", str(db_path))
+        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
+        monkeypatch.setattr(database, "CFG", {"permalink_retention_days": 0})
+        database.db_init()
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _insert_channel(self, conn, channel_id: str, *, trigger: str = "test") -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "INSERT INTO notification_channels "
+            "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                channel_id,
+                "tok_notifications",
+                "webhook",
+                channel_id,
+                "{}",
+                "{}",
+                json.dumps([trigger]),
+                0,
+                now,
+                now,
+            ),
+        )
+
+    def test_dispatcher_sync_delivery_fans_out_once_per_channel(self, monkeypatch, tmp_path):
+        from services.notifications import dispatcher
+        from services.notifications.base import Channel, _reset_channel_registry_for_tests, register_channel
+        from services.notifications.models import ChannelResult, TRIGGER_TEST
+        from services.notifications.payloads import build_test_payload
+
+        delivered = []
+
+        class FakeChannel(Channel):
+            def send(self, payload):
+                delivered.append((self.channel.id, payload["trigger"]))
+                return ChannelResult.success()
+
+        _reset_channel_registry_for_tests()
+        register_channel("webhook", FakeChannel)
+        conn = self._notification_db(monkeypatch, tmp_path)
+        try:
+            self._insert_channel(conn, "ntc_one")
+            self._insert_channel(conn, "ntc_two")
+            event_ids = dispatcher.enqueue(
+                TRIGGER_TEST,
+                build_test_payload(),
+                "tok_notifications",
+                conn=conn,
+                dispatch_sync=True,
+            )
+            conn.commit()
+            rows = conn.execute(
+                "SELECT status, attempts FROM notification_events ORDER BY channel_id"
+            ).fetchall()
+        finally:
+            conn.close()
+            _reset_channel_registry_for_tests()
+
+        assert len(event_ids) == 2
+        assert sorted(delivered) == [("ntc_one", "test"), ("ntc_two", "test")]
+        assert [(row["status"], row["attempts"]) for row in rows] == [("sent", 1), ("sent", 1)]
+
+    def test_dispatcher_event_claims_are_single_use(self, monkeypatch, tmp_path):
+        from services.notifications import dispatcher
+        from services.notifications.models import STATUS_PENDING, TRIGGER_TEST
+
+        conn = self._notification_db(monkeypatch, tmp_path)
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            self._insert_channel(conn, "ntc_claim")
+            conn.execute(
+                "INSERT INTO notification_events "
+                "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
+                "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "nte_claim",
+                    "tok_notifications",
+                    "ntc_claim",
+                    TRIGGER_TEST,
+                    json.dumps({"trigger": TRIGGER_TEST}),
+                    STATUS_PENDING,
+                    0,
+                    "",
+                    "",
+                    "",
+                    "",
+                    now,
+                    "",
+                ),
+            )
+            assert dispatcher._claim_event(conn, "nte_claim", now=now)
+            assert not dispatcher._claim_event(conn, "nte_claim", now=now)
+        finally:
+            conn.close()
+
+    def test_notification_helpers_do_not_import_blueprints(self):
+        notification_dir = REPO_ROOT / "app" / "services" / "notifications"
+        for path in sorted(notification_dir.glob("*.py")):
+            assert "blueprints" not in path.read_text(encoding="utf-8")
+
+    def test_notification_channels_require_durable_session_tokens(self):
+        from services.notifications.models import require_durable_session_token
+
+        assert require_durable_session_token("tok_notifications") == "tok_notifications"
+        with pytest.raises(ValueError, match="durable session token"):
+            require_durable_session_token("sess-anonymous")
 
 
 class TestRunHistorySearchClauses:

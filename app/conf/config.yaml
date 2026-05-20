@@ -217,6 +217,19 @@
 # Server default if unset: 2
 # evidence_package_download_rate_limit_per_second: 2
 
+# ── Outbound Notifications ───────────────────────────────────────────────────
+#
+# Server-side delivery guardrails for outbound notification channels. Channel
+# CRUD and concrete channel senders are built on this storage/worker foundation.
+# Server default if unset:
+# notifications:
+#   do_not_disturb: false
+#   delivery_rate_per_minute: 10
+#   retry:
+#     max_attempts: 6
+#     max_age_hours: 24
+#     base_delay_seconds: 30
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 # Log verbosity level . Options: ERROR, WARN, INFO, DEBUG

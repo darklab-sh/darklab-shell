@@ -478,7 +478,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0005_postgres_project_findings_indexes.py # Postgres Project Findings paging indexes
 │   │   │   ├── v0006_postgres_atlas_suppression.py # Postgres Atlas suppression columns and indexes
 │   │   │   ├── v0007_postgres_atlas_metadata_search.py # Postgres Atlas label/note search indexes
-│   │   │   └── v0008_postgres_session_token_last_seen.py # Postgres API token last-seen column
+│   │   │   ├── v0008_postgres_session_token_last_seen.py # Postgres API token last-seen column
+│   │   │   └── v0009_notification_channels.py # Postgres outbound notification channel and event tables
 │   │   ├── output_signals.py   # Server-side output signal and entity classifier
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and in-process fallback
 │   │   └── redaction.py        # Snapshot-share redaction helpers and built-in rule application
@@ -560,6 +561,14 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── metrics/
 │   │   │   ├── __init__.py     # Prometheus metric definitions, label normalizers, and render helpers
 │   │   │   └── collectors.py   # Scrape-time DB, Redis, workspace, Atlas, findings, and provider gauges
+│   │   ├── notifications/
+│   │   │   ├── __init__.py     # Outbound notification service package marker
+│   │   │   ├── base.py         # Registerable notification channel base class and registry
+│   │   │   ├── dispatcher.py   # Notification event enqueue, claim, retry, and synchronous delivery helpers
+│   │   │   ├── models.py       # Notification channel/event dataclasses and constants
+│   │   │   ├── payloads.py     # Stable payload builders for notification triggers
+│   │   │   ├── secrets.py      # Notification-channel secret references backed by the existing vault
+│   │   │   └── worker.py       # Dedicated notification delivery worker entrypoint
 │   │   ├── projects/
 │   │   │   ├── __init__.py     # Project service package marker
 │   │   │   ├── active.py       # Active project preference and lookup helpers

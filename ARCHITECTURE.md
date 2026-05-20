@@ -111,6 +111,7 @@ flowchart TB
   Database["SQLite/Postgres"]
   Artifacts["Artifacts"]
   Scanner["Scanner subprocesses"]
+  Notifier["Notification worker"]
 
   Browser -->|HTTP bootstrap reads| Flask
   Browser -->|HTTP POST /runs + SSE stream| Flask
@@ -121,6 +122,7 @@ flowchart TB
   Flask <--> |SQL reads/writes| Database
   Flask <--> |filesystem artifact I/O| Artifacts
   Flask -->|spawn / signal process groups| Scanner
+  Notifier <--> |claim/deliver notification events| Database
 ```
 
 This is the transport and boundary view. It focuses on stable communication paths rather than the internal modules that implement them.
@@ -129,6 +131,7 @@ This is the transport and boundary view. It focuses on stable communication path
 - Redis is used for shared worker coordination and brokered active-run event replay, not as a general application datastore
 - The configured database and output files are the durable history/share boundary
 - command execution remains out-of-process, which keeps the Flask worker lifecycle separate from tool execution
+- outbound notification delivery runs in its own supervised process and claims queued delivery rows from the database, so Flask workers do not send external notifications inline
 
 ---
 
@@ -1027,7 +1030,7 @@ That split is what allows the app to keep the interactive shell fast while still
 
 ### Database
 
-SQLite is the default database backend and stores data in `<data_dir>/history.db` with WAL mode, twenty-two persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable. Postgres is the supported production-scaling backend for deployments that need a server database. The server has a `database_backend` selector and a database backend/dialect helper for connection setup, JSON column types and parameters, boolean storage and parameters, timestamps, placeholders, `IN` clauses, limit/offset clauses, upsert clauses, text search expressions, concatenation, SQLite diagnostics, Postgres identifier quoting, advisory-lock IDs, lazy psycopg pool setup, `pg_trgm` availability checks, and storage rows. History search has a backend-aware SQL helper: SQLite keeps its FTS5-first path with `LIKE` fallback for short terms, while Postgres uses substring `ILIKE` clauses backed by trigram indexes. Atlas entity and finding searches use the same backend-aware substring shape so Postgres can use trigram indexes for entity values and finding text. The History list, command recents, stats routes, terminal `stats` built-in, completed-run inserts, full-output artifact metadata writes, snapshot share routes, session preferences, recent values, starred commands, user workflows, secret session migration path, Projects workspace create/link/target paths, Files metadata paths, Atlas list/detail/finding paths, `/diag`, and `/metrics` use the normal backend-aware app query path on both SQLite and Postgres. Postgres startup runs app-owned migrations from `app/core/migrations/` behind a transaction-scoped advisory lock; the first migration is a baseline schema for the current app tables, indexes, JSONB columns, booleans, bytea secret payloads, and triggers, then later migrations add run-history search indexes, Atlas search/detail indexes, and Project Findings paging indexes. When `database_backend` is `postgres`, normal app `db_connect()` calls go through the Postgres pool with an app-compatibility wrapper for the existing `?` placeholder style, PostgreSQL JIT disabled by default for lower-latency interactive requests, and a narrow read-only transient-error retry.
+SQLite is the default database backend and stores data in `<data_dir>/history.db` with WAL mode, twenty-four persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable. Postgres is the supported production-scaling backend for deployments that need a server database. The server has a `database_backend` selector and a database backend/dialect helper for connection setup, JSON column types and parameters, boolean storage and parameters, timestamps, placeholders, `IN` clauses, limit/offset clauses, upsert clauses, text search expressions, concatenation, SQLite diagnostics, Postgres identifier quoting, advisory-lock IDs, lazy psycopg pool setup, `pg_trgm` availability checks, and storage rows. History search has a backend-aware SQL helper: SQLite keeps its FTS5-first path with `LIKE` fallback for short terms, while Postgres uses substring `ILIKE` clauses backed by trigram indexes. Atlas entity and finding searches use the same backend-aware substring shape so Postgres can use trigram indexes for entity values and finding text. The History list, command recents, stats routes, terminal `stats` built-in, completed-run inserts, full-output artifact metadata writes, snapshot share routes, session preferences, recent values, starred commands, user workflows, secret session migration path, Projects workspace create/link/target paths, Files metadata paths, Atlas list/detail/finding paths, notification event storage, `/diag`, and `/metrics` use the normal backend-aware app query path on both SQLite and Postgres. Postgres startup runs app-owned migrations from `app/core/migrations/` behind a transaction-scoped advisory lock; the first migration is a baseline schema for the current app tables, indexes, JSONB columns, booleans, bytea secret payloads, notification channel/event rows, and triggers, then later migrations add run-history search indexes, Atlas search/detail indexes, Project Findings paging indexes, API token last-seen tracking, and notification storage. The reserved Postgres advisory-lock namespaces are `darklab_shell_migrations`, `darklab_shell_scheduler`, `darklab_shell_notification_worker`, and `darklab_shell_notification_sweep`. When `database_backend` is `postgres`, normal app `db_connect()` calls go through the Postgres pool with an app-compatibility wrapper for the existing `?` placeholder style, PostgreSQL JIT disabled by default for lower-latency interactive requests, and a narrow read-only transient-error retry.
 
 Logical relationships are owned by the app rather than SQLite foreign-key constraints. Anonymous browser sessions can appear as `session_id` values without a matching `session_tokens` row.
 
@@ -1057,6 +1060,8 @@ erDiagram
   LOGICAL_SESSION ||--o{ ENTITY_NOTES : "notes"
   LOGICAL_SESSION ||--o{ PROJECTS : "owns"
   LOGICAL_SESSION ||--o{ EVIDENCE_PACKAGES : "packages"
+  LOGICAL_SESSION ||--o{ NOTIFICATION_CHANNELS : "sends"
+  LOGICAL_SESSION ||--o{ NOTIFICATION_EVENTS : "queues"
   RUNS ||--o| RUN_OUTPUT_ARTIFACTS : "full output"
   RUNS ||--o| RUNS_FTS : "search index"
   RUNS ||--o{ RUN_FILE_ARTIFACTS : "creates"
@@ -1068,9 +1073,12 @@ erDiagram
   FINDINGS ||--o{ FINDINGS_OCCURRENCES : "seen in runs"
   PROJECTS ||--o{ PROJECT_LINKS : "membership"
   PROJECTS ||--o{ EVIDENCE_PACKAGES : "exports"
+  NOTIFICATION_CHANNELS ||--o{ NOTIFICATION_EVENTS : "delivers"
 ```
 
 `ENTITY_LABELS` and `ENTITY_NOTES` are polymorphic on `(entity_type, entity_id)` and attach to several record types — projects, runs, snapshots, workspace files, run file artifacts, Atlas entities, findings, and packages — without separate FKs per type, which is why they sit under `LOGICAL_SESSION` rather than chaining off one specific parent.
+
+`NOTIFICATION_CHANNELS` stores session-owned delivery destinations without plaintext secrets. `NOTIFICATION_EVENTS` is the queue and audit trail used by the dedicated notification worker, with the session token copied onto each event so delivery history does not depend on joining a still-existing channel row.
 
 #### Atlas entity model
 
@@ -1562,12 +1570,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,956
+- behavior tests: 2,962
 - docs/inventory meta-tests: 32
-- `pytest`: 1558 (1526 behavior + 32 meta)
+- `pytest`: 1562 (1530 behavior + 32 meta)
 - `vitest`: 1180
 - `playwright`: 252
-- total: 2,990
+- total: 2,994
 
 ### Testing Architecture
 

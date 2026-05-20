@@ -553,6 +553,14 @@ def convert_positional_placeholders(sql: str, placeholder: str) -> str:
     return "".join(result)
 
 
+POSTGRES_ADVISORY_LOCK_NAMESPACES = (
+    "darklab_shell_migrations",
+    "darklab_shell_scheduler",
+    "darklab_shell_notification_worker",
+    "darklab_shell_notification_sweep",
+)
+
+
 def postgres_advisory_lock_id(namespace: str = "darklab_shell") -> int:
     # Deterministic signed 63-bit lock id suitable for Postgres advisory locks.
     import hashlib

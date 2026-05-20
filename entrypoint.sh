@@ -53,6 +53,17 @@ WEB_CONCURRENCY="${WEB_CONCURRENCY:-4}"
 WEB_THREADS="${WEB_THREADS:-4}"
 export WEB_CONCURRENCY WEB_THREADS
 
+if [ "${NOTIFICATION_WORKER_ENABLED:-1}" = "1" ]; then
+    gosu appuser sh -c "
+        while true; do
+            python -m services.notifications.worker
+            status=\$?
+            echo \"notification worker exited with status \${status}; restarting in 5s\" >&2
+            sleep 5
+        done
+    " &
+fi
+
 exec gosu appuser gunicorn \
     --config /app/gunicorn_conf.py \
     --bind "0.0.0.0:${APP_PORT:-8888}" \
