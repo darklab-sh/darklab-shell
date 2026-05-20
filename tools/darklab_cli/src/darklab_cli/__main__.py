@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
+from pathlib import Path
 import sys
 from typing import Any
 
@@ -151,6 +153,34 @@ def _parser() -> argparse.ArgumentParser:
     )
     download.add_argument("--out", default=".", help="Destination directory.")
 
+    notify = sub.add_parser("notify")
+    notify_sub = notify.add_subparsers(dest="notify_command", required=True)
+
+    notify_list = notify_sub.add_parser("list")
+    notify_list.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
+
+    notify_create = notify_sub.add_parser("create")
+    notify_create.add_argument("kind", choices=("webhook", "slack", "discord", "telegram", "pushover", "email"))
+    notify_create.add_argument("--label")
+    notify_create.add_argument("--trigger", action="append", default=[])
+    notify_create.add_argument("--config", action="append", default=[], help="Channel config as KEY=VALUE.")
+    notify_create.add_argument("--secret-file", help="JSON file containing write-only secret fields.")
+
+    notify_delete = notify_sub.add_parser("delete")
+    notify_delete.add_argument("channel_id")
+
+    notify_test = notify_sub.add_parser("test")
+    notify_test.add_argument("channel_id")
+    notify_test.add_argument("--format", choices=("text", "json"), default="text")
+
+    notify_events = notify_sub.add_parser("events")
+    notify_events.add_argument("--status")
+    notify_events.add_argument("--channel", dest="channel_id")
+    notify_events.add_argument("--trigger")
+    notify_events.add_argument("--limit", type=int, default=50)
+    notify_events.add_argument("--offset", type=int, default=0)
+    notify_events.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
+
     return parser
 
 
@@ -239,6 +269,8 @@ def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
             return _print_collection(payload, "packages", args.format, fields=("id", "status", "name"))
         case "atlas":
             return _atlas(client, args)
+        case "notify":
+            return _notify(client, args)
         case "download":
             target = client.download(
                 f"/history/{args.run_id}/artifacts/{args.artifact}",
@@ -247,6 +279,97 @@ def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
             print(target)
             return 0
     return die("unknown command")
+
+
+NOTIFICATION_SECRET_FIELDS = {
+    "webhook": ("url",),
+    "slack": ("url",),
+    "discord": ("url",),
+    "telegram": ("bot_token",),
+    "pushover": ("app_token", "user_key"),
+    "email": (),
+}
+
+
+def _notify(client: DarklabClient, args: argparse.Namespace) -> int:
+    match args.notify_command:
+        case "list":
+            payload = client.request("GET", "/notification-channels")
+            return _print_collection(payload, "channels", args.format, fields=("id", "kind", "muted", "label"))
+        case "create":
+            body = {
+                "kind": args.kind,
+                "label": args.label,
+                "triggers": args.trigger,
+                "config": _parse_key_values(args.config),
+                "secret_values": _notification_secret_values(args.kind, args.secret_file),
+            }
+            payload = client.request("POST", "/notification-channels", body=body)
+            channel = payload.get("channel") if isinstance(payload, dict) else {}
+            if isinstance(channel, dict):
+                print("  ".join(str(channel.get(field, "")) for field in ("id", "kind", "muted", "label")))
+            return 0
+        case "delete":
+            return _print_payload(client.request("DELETE", f"/notification-channels/{args.channel_id}"), "json")
+        case "test":
+            payload = client.request("POST", f"/notification-channels/{args.channel_id}/test")
+            if args.format == "json":
+                return _print_payload(payload, "json")
+            print(f"queued: {payload.get('queued', 0)}")
+            for event_id in payload.get("event_ids", []):
+                print(event_id)
+            return 0
+        case "events":
+            payload = client.request("GET", "/notification-events", params={
+                "status": args.status,
+                "channel_id": args.channel_id,
+                "trigger": args.trigger,
+                "limit": args.limit,
+                "offset": args.offset,
+            })
+            return _print_collection(
+                payload,
+                "events",
+                args.format,
+                fields=("created", "id", "status", "trigger", "channel_id", "run_id"),
+            )
+    return die("unknown notify command")
+
+
+def _parse_key_values(values: list[str]) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for item in values:
+        if "=" not in item:
+            raise DarklabCliError("--config values must use KEY=VALUE.")
+        key, value = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise DarklabCliError("--config keys cannot be empty.")
+        parsed[key] = value.strip()
+    return parsed
+
+
+def _notification_secret_values(kind: str, secret_file: str | None) -> dict[str, str]:
+    expected = NOTIFICATION_SECRET_FIELDS.get(kind, ())
+    if not expected:
+        return {}
+    if secret_file:
+        path = Path(secret_file)
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except OSError as exc:
+            raise DarklabCliError(f"could not read secret file: {exc}") from exc
+        except json.JSONDecodeError as exc:
+            raise DarklabCliError(f"secret file must be JSON: {exc}") from exc
+        if not isinstance(raw, dict):
+            raise DarklabCliError("secret file must contain a JSON object.")
+        values = {field: str(raw.get(field) or "") for field in expected}
+    else:
+        values = {field: getpass.getpass(f"{kind} {field}: ") for field in expected}
+    missing = [field for field in expected if not str(values.get(field) or "").strip()]
+    if missing:
+        raise DarklabCliError(f"missing secret field(s): {', '.join(missing)}")
+    return values
 
 
 def _atlas(client: DarklabClient, args: argparse.Namespace) -> int:

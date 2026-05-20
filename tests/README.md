@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,996
+- behavior tests: 2,999
 - docs/inventory meta-tests: 32
-- `pytest`: 1596 (1564 behavior + 32 meta)
+- `pytest`: 1599 (1567 behavior + 32 meta)
 - `vitest`: 1180
 - `playwright`: 252
-- total: 3,028
+- total: 3,031
 
 This document is organized in two parts:
 
@@ -388,6 +388,9 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `test_api_v1_run_stream_and_cancel_are_token_scoped` | Verifies run streams, wait requests, and cancel requests are scoped to the owning token. |
 | `test_api_v1_explicit_project_link_uses_finalized_run_path` | Verifies explicit project linking for API-started runs plus API run/project link and unlink routes use the guarded project-link path. |
 | `test_api_v1_openapi_route_matches_checked_in_contract` | Verifies live `/api/v1/openapi.json` matches the checked-in OpenAPI snapshot. |
+| `test_api_v1_notification_channels_crud_masks_secrets_and_lists_events` | Verifies notification channel API CRUD, secret masking, test-send payloads, and delivery event audit rows. |
+| `test_api_v1_notification_channels_are_token_scoped` | Verifies notification channel API reads and writes are scoped to the owning token. |
+| `test_darklab_cli_notify_commands_use_secret_file_and_event_reader` | Verifies CLI notification commands read secrets from a JSON file, avoid command-line secret flags, and list delivery events. |
 | `test_api_v1_openapi_generator_snapshot_is_current` | Verifies the checked-in OpenAPI JSON matches the generator output byte-for-byte. |
 | `test_api_v1_openapi_contract_describes_public_shapes` | Verifies the OpenAPI contract includes core request, response, parameter, stream, and error shapes. |
 | `test_api_v1_whoami_last_seen_is_current_auth_timestamp` | Verifies `whoami` reports and stores the current successful API authentication timestamp. |

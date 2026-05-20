@@ -19,10 +19,12 @@ from services.notifications.models import (
     CHANNEL_KIND_TELEGRAM,
     CHANNEL_KIND_WEBHOOK,
     CHANNEL_KINDS,
+    EVENT_STATUSES,
     TRIGGER_RUN_COMPLETE,
     TRIGGER_TEST,
     TRIGGERS,
     NotificationChannel,
+    NotificationEvent,
     require_durable_session_token,
 )
 from services.notifications.payloads import build_test_payload
@@ -205,10 +207,80 @@ def _serialize_channel(channel: NotificationChannel) -> dict[str, Any]:
     }
 
 
+def _serialize_event(event: NotificationEvent) -> dict[str, Any]:
+    return {
+        "id": event.id,
+        "channel_id": event.channel_id,
+        "trigger": event.trigger,
+        "payload": event.payload,
+        "status": event.status,
+        "attempts": event.attempts,
+        "next_attempt_at": event.next_attempt_at,
+        "last_attempt_at": event.last_attempt_at,
+        "last_error": event.last_error,
+        "run_id": event.run_id,
+        "created": event.created,
+        "dead_at": event.dead_at,
+    }
+
+
 def list_notification_channels(session_token: str) -> list[dict[str, Any]]:
     session_token = require_durable_session_token(session_token)
     with database.db_connect() as conn:
         return [_serialize_channel(NotificationChannel.from_row(row)) for row in _channel_rows(conn, session_token)]
+
+
+def list_notification_events(
+    session_token: str,
+    *,
+    limit: int,
+    offset: int,
+    status: str = "",
+    channel_id: str = "",
+    trigger: str = "",
+) -> dict[str, Any]:
+    session_token = require_durable_session_token(session_token)
+    normalized_status = str(status or "").strip()
+    normalized_channel_id = str(channel_id or "").strip()
+    normalized_trigger = str(trigger or "").strip()
+    if normalized_status and normalized_status not in EVENT_STATUSES:
+        raise NotificationChannelError("invalid_status", "Choose a supported notification event status.")
+    if normalized_trigger and normalized_trigger not in TRIGGERS:
+        raise NotificationChannelError("invalid_trigger", "Choose a supported notification trigger.")
+
+    clauses = ["session_token = ?"]
+    params: list[Any] = [session_token]
+    if normalized_status:
+        clauses.append("status = ?")
+        params.append(normalized_status)
+    if normalized_channel_id:
+        clauses.append("channel_id = ?")
+        params.append(normalized_channel_id)
+    if normalized_trigger:
+        clauses.append("trigger = ?")
+        params.append(normalized_trigger)
+    where_sql = " AND ".join(clauses)
+    with database.db_connect() as conn:
+        total_row = conn.execute(
+            f"SELECT COUNT(*) AS count FROM notification_events WHERE {where_sql}",  # nosec B608
+            params,
+        ).fetchone()
+        total = int(total_row["count"] or 0) if total_row else 0
+        rows = conn.execute(
+            "SELECT id, session_token, channel_id, trigger, payload_json, status, attempts, "
+            "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at "
+            f"FROM notification_events WHERE {where_sql} "  # nosec
+            "ORDER BY created DESC, id DESC LIMIT ? OFFSET ?",
+            [*params, int(limit), int(offset)],
+        ).fetchall()
+    events = [_serialize_event(NotificationEvent.from_row(row)) for row in rows]
+    return {
+        "events": events,
+        "total": total,
+        "limit": int(limit),
+        "offset": int(offset),
+        "has_more": int(offset) + len(events) < total,
+    }
 
 
 def create_notification_channel(session_token: str, data: dict[str, Any]) -> dict[str, Any]:

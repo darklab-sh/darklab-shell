@@ -180,7 +180,7 @@ def _due_event_rows(conn, *, limit: int, event_ids: list[str] | None, now: str) 
             "SELECT id, session_token, channel_id, trigger, payload_json, status, attempts, "
             "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at "
             "FROM notification_events "
-            f"WHERE {where_sql} AND status IN (?, ?) "  # nosec B608
+            f"WHERE {where_sql} AND status IN (?, ?) "  # nosec
             "AND (next_attempt_at = '' OR next_attempt_at <= ?) "
             "ORDER BY created ASC LIMIT ?",
             [*params, STATUS_PENDING, STATUS_RETRY_WAIT, now, int(limit)],

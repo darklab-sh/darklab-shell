@@ -61,6 +61,7 @@ PAGE_PARAMS = [
 RUN_ID_PARAM = _path_param("run_id", "Run id")
 PROJECT_ID_PARAM = _path_param("project_id", "Project id")
 ARTIFACT_ID_PARAM = _path_param("artifact_id", "Artifact id")
+NOTIFICATION_CHANNEL_ID_PARAM = _path_param("channel_id", "Notification channel id")
 
 
 OPENAPI_SPEC: dict = {
@@ -663,6 +664,134 @@ OPENAPI_SPEC: dict = {
                     "note": {"nullable": True, "allOf": [_ref("Note")]},
                 },
             },
+            "NotificationSecretField": {
+                "type": "object",
+                "required": ["name", "configured"],
+                "properties": {
+                    "name": {"type": "string"},
+                    "configured": {"type": "boolean"},
+                },
+            },
+            "NotificationChannel": {
+                "type": "object",
+                "required": ["id", "kind", "label", "config", "triggers", "secret_fields", "muted", "created", "updated"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "kind": {
+                        "type": "string",
+                        "enum": ["webhook", "slack", "discord", "telegram", "pushover", "email"],
+                    },
+                    "label": {"type": "string"},
+                    "config": {"type": "object", "additionalProperties": True},
+                    "triggers": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "run_complete",
+                                "pty_session_ended",
+                                "watcher_changed",
+                                "watcher_error",
+                                "watcher_recovered",
+                                "scheduled_run_failed",
+                            ],
+                        },
+                    },
+                    "secret_fields": {"type": "array", "items": _ref("NotificationSecretField")},
+                    "muted": {"type": "boolean"},
+                    "created": {"type": "string", "nullable": True},
+                    "updated": {"type": "string", "nullable": True},
+                },
+            },
+            "NotificationChannelList": {
+                "type": "object",
+                "required": ["channels"],
+                "properties": {"channels": {"type": "array", "items": _ref("NotificationChannel")}},
+            },
+            "NotificationChannelCreateRequest": {
+                "type": "object",
+                "required": ["kind"],
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": ["webhook", "slack", "discord", "telegram", "pushover", "email"],
+                    },
+                    "label": {"type": "string"},
+                    "config": {"type": "object", "additionalProperties": True},
+                    "triggers": {"type": "array", "items": {"type": "string"}},
+                    "muted": {"type": "boolean"},
+                    "secret_values": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                        "writeOnly": True,
+                    },
+                },
+            },
+            "NotificationChannelUpdateRequest": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": ["webhook", "slack", "discord", "telegram", "pushover", "email"],
+                    },
+                    "label": {"type": "string"},
+                    "config": {"type": "object", "additionalProperties": True},
+                    "triggers": {"type": "array", "items": {"type": "string"}},
+                    "muted": {"type": "boolean"},
+                    "secret_values": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                        "writeOnly": True,
+                    },
+                },
+            },
+            "NotificationChannelResponse": {
+                "type": "object",
+                "required": ["channel"],
+                "properties": {"channel": _ref("NotificationChannel")},
+            },
+            "NotificationTestResponse": {
+                "type": "object",
+                "required": ["queued", "event_ids"],
+                "properties": {
+                    "queued": {"type": "integer"},
+                    "event_ids": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            "NotificationEvent": {
+                "type": "object",
+                "required": ["id", "channel_id", "trigger", "payload", "status", "attempts", "created"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "channel_id": {"type": "string"},
+                    "trigger": {"type": "string"},
+                    "payload": {"type": "object", "additionalProperties": True},
+                    "status": {"type": "string", "enum": ["pending", "retry_wait", "sent", "dead"]},
+                    "attempts": {"type": "integer"},
+                    "next_attempt_at": {"type": "string"},
+                    "last_attempt_at": {"type": "string"},
+                    "last_error": {"type": "string"},
+                    "run_id": {"type": "string"},
+                    "created": {"type": "string", "nullable": True},
+                    "dead_at": {"type": "string"},
+                },
+            },
+            "NotificationEventPage": {
+                "type": "object",
+                "required": ["events", "total", "limit", "offset", "has_more"],
+                "properties": {
+                    "events": {"type": "array", "items": _ref("NotificationEvent")},
+                    "total": {"type": "integer"},
+                    "limit": {"type": "integer"},
+                    "offset": {"type": "integer"},
+                    "has_more": {"type": "boolean"},
+                },
+            },
+            "DeleteResponse": {
+                "type": "object",
+                "required": ["removed"],
+                "properties": {"removed": {"type": "boolean"}},
+            },
             "RunStarted": {
                 "type": "object",
                 "required": ["id", "status", "stream_url", "history_url"],
@@ -1127,6 +1256,100 @@ OPENAPI_SPEC: dict = {
                 "responses": {
                     "200": _json_response("Evidence packages", _ref("PackagePage")),
                     **_common_errors(not_found="Project not found"),
+                },
+            },
+        },
+        "/notification-channels": {
+            "get": {
+                "responses": {
+                    "200": _json_response("Notification channels", _ref("NotificationChannelList")),
+                    **_common_errors(),
+                },
+            },
+            "post": {
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": _ref("NotificationChannelCreateRequest")}},
+                },
+                "responses": {
+                    "201": _json_response("Notification channel created", _ref("NotificationChannelResponse")),
+                    "400": _error_response("Invalid notification channel"),
+                    "401": _error_response("Missing, invalid, or revoked token"),
+                    "429": _error_response("Rate limit exceeded"),
+                    "503": _error_response("Vault unavailable"),
+                },
+            },
+        },
+        "/notification-channels/{channel_id}": {
+            "patch": {
+                "parameters": [NOTIFICATION_CHANNEL_ID_PARAM],
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": _ref("NotificationChannelUpdateRequest")}},
+                },
+                "responses": {
+                    "200": _json_response("Notification channel updated", _ref("NotificationChannelResponse")),
+                    "400": _error_response("Invalid notification channel"),
+                    "401": _error_response("Missing, invalid, or revoked token"),
+                    "404": _error_response("Notification channel not found"),
+                    "429": _error_response("Rate limit exceeded"),
+                    "503": _error_response("Vault unavailable"),
+                },
+            },
+            "delete": {
+                "parameters": [NOTIFICATION_CHANNEL_ID_PARAM],
+                "responses": {
+                    "200": _json_response("Notification channel deleted", _ref("DeleteResponse")),
+                    **_common_errors(not_found="Notification channel not found"),
+                },
+            },
+        },
+        "/notification-channels/{channel_id}/test": {
+            "post": {
+                "parameters": [NOTIFICATION_CHANNEL_ID_PARAM],
+                "responses": {
+                    "200": _json_response(
+                        "Test notification queued and delivered when possible",
+                        _ref("NotificationTestResponse"),
+                    ),
+                    "401": _error_response("Missing, invalid, or revoked token"),
+                    "404": _error_response("Notification channel not found"),
+                    "429": _error_response("Rate limit exceeded"),
+                    "503": _error_response("Vault unavailable"),
+                },
+            },
+        },
+        "/notification-events": {
+            "get": {
+                "parameters": [
+                    *PAGE_PARAMS,
+                    {"name": "channel_id", "in": "query", "schema": {"type": "string"}},
+                    {
+                        "name": "trigger",
+                        "in": "query",
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "run_complete",
+                                "pty_session_ended",
+                                "watcher_changed",
+                                "watcher_error",
+                                "watcher_recovered",
+                                "scheduled_run_failed",
+                                "test",
+                            ],
+                        },
+                    },
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "schema": {"type": "string", "enum": ["pending", "retry_wait", "sent", "dead"]},
+                    },
+                ],
+                "responses": {
+                    "200": _json_response("Notification delivery audit events", _ref("NotificationEventPage")),
+                    "400": _error_response("Invalid notification event filter"),
+                    **_common_errors(),
                 },
             },
         },

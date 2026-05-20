@@ -103,6 +103,12 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `GET` | `/api/v1/projects/<project_id>/runs` | Read-only project run page. |
 | `GET` | `/api/v1/projects/<project_id>/entities` | Read-only project entity page with optional `entity_type`, `run_id`, and `target_id` filters. |
 | `GET` | `/api/v1/projects/<project_id>/packages` | Read-only evidence package page. |
+| `GET` | `/api/v1/notification-channels` | List masked outbound notification channels for the token session. |
+| `POST` | `/api/v1/notification-channels` | Create one notification channel with write-only secret values. |
+| `PATCH` | `/api/v1/notification-channels/<channel_id>` | Update one notification channel's label, config, triggers, muted state, or replacement secret values. |
+| `DELETE` | `/api/v1/notification-channels/<channel_id>` | Delete one notification channel. |
+| `POST` | `/api/v1/notification-channels/<channel_id>/test` | Send the canned `test` notification payload through one channel. |
+| `GET` | `/api/v1/notification-events` | Read paged notification delivery audit rows with optional channel, trigger, and status filters. |
 | `POST` | `/api/v1/runs` | Start a non-interactive command run. |
 | `GET` | `/api/v1/runs/<run_id>` | Active or completed run status. |
 | `GET` | `/api/v1/runs/<run_id>/output` | Stored run output, with the same `format` and `range` options as the history output route. |
@@ -204,6 +210,36 @@ Entity and finding list routes use the same `limit`, `offset`, and filter contra
 
 ---
 
+## Notifications
+
+Durable `tok_` sessions can manage outbound notification channels through the API and CLI. GET responses never include raw secret values. Create and update calls accept `secret_values`, store those values in the server vault, and return only `secret_fields` metadata that says which required fields are configured.
+
+```bash
+darklab notify create webhook \
+  --label "Ops Hook" \
+  --trigger run_complete \
+  --secret-file ./webhook-secrets.json
+darklab notify test ntc_123
+darklab notify events --channel ntc_123 --status sent
+```
+
+The secret file is a JSON object keyed by the channel's secret fields, such as `{"url":"https://hooks.example.test/darklab"}` for webhook, Slack, and Discord channels. If `--secret-file` is omitted, the CLI prompts for the required secret fields without putting them in shell history. Non-secret channel settings use repeated `--config KEY=VALUE` flags.
+
+Test sends use the fixed trigger `test` with a canned payload shaped like:
+
+```json
+{
+  "trigger": "test",
+  "message": "darklab test notification",
+  "channel_id": "ntc_123",
+  "occurred_at": "2026-05-19T00:00:00+00:00"
+}
+```
+
+Delivery audit rows are paged with the normal API envelope and can be filtered by `channel_id`, `trigger`, or `status` (`pending`, `retry_wait`, `sent`, or `dead`).
+
+---
+
 ## Streaming
 
 SSE is the default stream format:
@@ -251,6 +287,7 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab project-runs <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List runs linked to a project. |
 | `darklab project-entities <project_id> [--entity-type TYPE] [--limit N] [--offset N] [--format text\|json\|ndjson]` | List Atlas entities linked to a project. |
 | `darklab project-packages <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List evidence packages. |
+| `darklab notify list\|create\|delete\|test\|events ...` | Manage outbound notification channels and read delivery audit rows. Channel secrets come from prompts or `--secret-file`, never command-line secret flags. |
 | `darklab download <run_id> --artifact ARTIFACT_ID --out DIR` | Download one artifact. |
 
 `darklab download` requires `--artifact`; without it, use `darklab artifacts <run_id>` first. Downloads use the server's attachment filename only after reducing it to a safe local basename, and the CLI refuses to overwrite an existing file. Workspace ZIP download is not exposed in API v1.

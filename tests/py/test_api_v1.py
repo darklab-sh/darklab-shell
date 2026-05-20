@@ -752,6 +752,198 @@ def test_api_v1_openapi_route_matches_checked_in_contract():
     assert live == checked_in
 
 
+def test_api_v1_notification_channels_crud_masks_secrets_and_lists_events(monkeypatch):
+    from services.notifications.models import ChannelResult
+    from services.secrets import vault as secrets_vault
+    import services.notifications.channels.webhook as webhook_channel
+
+    client = get_client()
+    token = _token(client)
+    sent_payloads = []
+    monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+    secrets_vault.reset_master_key_cache_for_tests()
+
+    def fake_post_json(_url, payload, _config, *, label):
+        sent_payloads.append((label, payload))
+        return ChannelResult.success()
+
+    monkeypatch.setattr(webhook_channel, "post_json", fake_post_json)
+
+    create = client.post(
+        "/api/v1/notification-channels",
+        headers=_headers(token),
+        json={
+            "kind": "webhook",
+            "label": "Ops Hook",
+            "triggers": ["run_complete"],
+            "secret_values": {"url": "https://hooks.example.test/darklab"},
+            "config": {"timeout_seconds": "5"},
+        },
+    )
+    created = json.loads(create.data)["channel"]
+
+    assert create.status_code == 201
+    assert created["kind"] == "webhook"
+    assert created["secret_fields"] == [{"name": "url", "configured": True}]
+    assert "hooks.example" not in json.dumps(created)
+
+    listed = json.loads(client.get("/api/v1/notification-channels", headers=_headers(token)).data)
+    assert [channel["id"] for channel in listed["channels"]] == [created["id"]]
+    assert "hooks.example" not in json.dumps(listed)
+
+    tested = client.post(f"/api/v1/notification-channels/{created['id']}/test", headers=_headers(token))
+    test_payload = json.loads(tested.data)
+
+    assert tested.status_code == 200
+    assert test_payload["queued"] == 1
+    assert sent_payloads[0][0] == "webhook"
+    assert sent_payloads[0][1]["trigger"] == "test"
+    assert sent_payloads[0][1]["message"] == "darklab test notification"
+    assert sent_payloads[0][1]["channel_id"] == created["id"]
+
+    events = json.loads(
+        client.get(
+            f"/api/v1/notification-events?channel_id={created['id']}&trigger=test&status=sent",
+            headers=_headers(token),
+        ).data
+    )
+    assert events["total"] == 1
+    assert events["events"][0]["id"] == test_payload["event_ids"][0]
+    assert events["events"][0]["payload"]["message"] == "darklab test notification"
+
+    updated = json.loads(
+        client.patch(
+            f"/api/v1/notification-channels/{created['id']}",
+            headers=_headers(token),
+            json={"label": "Muted Hook", "muted": True},
+        ).data
+    )["channel"]
+    assert updated["label"] == "Muted Hook"
+    assert updated["muted"] is True
+
+    deleted = json.loads(client.delete(f"/api/v1/notification-channels/{created['id']}", headers=_headers(token)).data)
+    assert deleted == {"removed": True}
+
+
+def test_api_v1_notification_channels_are_token_scoped(monkeypatch):
+    from services.secrets import vault as secrets_vault
+
+    client = get_client()
+    token = _token(client)
+    other_token = _token(client)
+    monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+    secrets_vault.reset_master_key_cache_for_tests()
+    create = client.post(
+        "/api/v1/notification-channels",
+        headers=_headers(token),
+        json={"kind": "webhook", "secret_values": {"url": "https://hooks.example.test/scoped"}},
+    )
+    channel_id = json.loads(create.data)["channel"]["id"]
+
+    other_list = json.loads(client.get("/api/v1/notification-channels", headers=_headers(other_token)).data)
+    other_delete = client.delete(f"/api/v1/notification-channels/{channel_id}", headers=_headers(other_token))
+
+    assert other_list == {"channels": []}
+    assert other_delete.status_code == 404
+    assert json.loads(other_delete.data)["error"]["code"] == "not_found"
+
+
+def test_darklab_cli_notify_commands_use_secret_file_and_event_reader(monkeypatch, capsys, tmp_path):
+    cli_main = import_module("darklab_cli.__main__")
+    secret_file = tmp_path / "webhook.json"
+    secret_file.write_text('{"url": "https://hooks.example.test/cli"}', encoding="utf-8")
+    calls = []
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def request(self, method, path, *, params=None, body=None, **_kwargs):
+            calls.append((method, path, params, body))
+            if path == "/notification-channels" and method == "POST":
+                assert body == {
+                    "kind": "webhook",
+                    "label": "CLI Hook",
+                    "triggers": ["run_complete"],
+                    "config": {"timeout_seconds": "5"},
+                    "secret_values": {"url": "https://hooks.example.test/cli"},
+                }
+                return {"channel": {"id": "ntc_cli", "kind": "webhook", "muted": False, "label": "CLI Hook"}}
+            if path == "/notification-channels" and method == "GET":
+                return {"channels": [{"id": "ntc_cli", "kind": "webhook", "muted": False, "label": "CLI Hook"}]}
+            if path == "/notification-channels/ntc_cli/test":
+                return {"queued": 1, "event_ids": ["nte_cli"]}
+            if path == "/notification-events":
+                assert params == {
+                    "status": "sent",
+                    "channel_id": "ntc_cli",
+                    "trigger": "test",
+                    "limit": 10,
+                    "offset": 0,
+                }
+                return {
+                    "events": [
+                        {
+                            "created": "2026-05-19T00:00:00+00:00",
+                            "id": "nte_cli",
+                            "status": "sent",
+                            "trigger": "test",
+                            "channel_id": "ntc_cli",
+                            "run_id": "",
+                        }
+                    ]
+                }
+            if path == "/notification-channels/ntc_cli":
+                return {"removed": True}
+            raise cli_main.DarklabCliError("not_found: missing")
+
+    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
+
+    assert "--secret " not in cli_main._parser()._subparsers._group_actions[0].choices["notify"].format_help()
+    assert cli_main.main([
+        "notify",
+        "create",
+        "webhook",
+        "--label",
+        "CLI Hook",
+        "--trigger",
+        "run_complete",
+        "--config",
+        "timeout_seconds=5",
+        "--secret-file",
+        str(secret_file),
+    ]) == 0
+    assert "ntc_cli" in capsys.readouterr().out
+    assert cli_main.main(["notify", "list"]) == 0
+    assert "CLI Hook" in capsys.readouterr().out
+    assert cli_main.main(["notify", "test", "ntc_cli"]) == 0
+    assert "nte_cli" in capsys.readouterr().out
+    assert cli_main.main([
+        "notify",
+        "events",
+        "--channel",
+        "ntc_cli",
+        "--trigger",
+        "test",
+        "--status",
+        "sent",
+        "--limit",
+        "10",
+    ]) == 0
+    assert "nte_cli" in capsys.readouterr().out
+    assert cli_main.main(["notify", "delete", "ntc_cli"]) == 0
+    assert json.loads(capsys.readouterr().out)["removed"] is True
+
+    assert [call[1] for call in calls] == [
+        "/notification-channels",
+        "/notification-channels",
+        "/notification-channels/ntc_cli/test",
+        "/notification-events",
+        "/notification-channels/ntc_cli",
+    ]
+
+
 def test_api_v1_openapi_generator_snapshot_is_current():
     from services.api_v1.openapi import openapi_spec
 
@@ -783,6 +975,15 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "HistorySearchMatch",
         "HistorySearchPage",
         "NdjsonStream",
+        "NotificationChannel",
+        "NotificationChannelCreateRequest",
+        "NotificationChannelList",
+        "NotificationChannelResponse",
+        "NotificationChannelUpdateRequest",
+        "NotificationEvent",
+        "NotificationEventPage",
+        "NotificationSecretField",
+        "NotificationTestResponse",
         "Project",
         "ProjectCounts",
         "ProjectEntity",
@@ -852,6 +1053,22 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "application/json"
     ]["schema"]
     assert project_link_schema == {"$ref": "#/components/schemas/ProjectRunLinkResponse"}
+    assert spec["paths"]["/notification-channels"]["post"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/NotificationChannelCreateRequest"
+    }
+    notification_patch_schema = spec["paths"]["/notification-channels/{channel_id}"]["patch"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"]
+    assert notification_patch_schema == {"$ref": "#/components/schemas/NotificationChannelUpdateRequest"}
+    assert schemas["NotificationChannelCreateRequest"]["required"] == ["kind"]
+    assert "required" not in schemas["NotificationChannelUpdateRequest"]
+    assert schemas["NotificationChannelCreateRequest"]["properties"]["secret_values"]["writeOnly"] is True
+    assert schemas["NotificationChannelList"]["properties"]["channels"]["items"] == {
+        "$ref": "#/components/schemas/NotificationChannel"
+    }
+    assert schemas["NotificationEventPage"]["properties"]["events"]["items"] == {"$ref": "#/components/schemas/NotificationEvent"}
+    notification_event_params = {param["name"] for param in spec["paths"]["/notification-events"]["get"]["parameters"]}
+    assert {"channel_id", "trigger", "status", "limit", "offset"}.issubset(notification_event_params)
     assert set(spec["paths"]["/runs"]["post"]["responses"]) == {"202", "400", "401", "409", "429", "503"}
     for path, operations in spec["paths"].items():
         for operation in operations.values():
