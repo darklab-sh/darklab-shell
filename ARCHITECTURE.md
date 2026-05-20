@@ -1493,6 +1493,16 @@ The current event inventory is:
 | INFO | `NOTIFICATION_DISPATCHED` | notification dispatcher | event_id, channel_id, trigger, session |
 | INFO | `NOTIFICATION_DEFERRED` | notification dispatcher | event_id, channel_id, trigger, session, reason |
 | INFO | `NOTIFICATION_EVENTS_PRUNED` | notification dispatcher | count, retention_days |
+| INFO | `SCHEDULE_CREATED` | browser schedule routes | ip, session, schedule_id |
+| INFO | `SCHEDULE_UPDATED` | browser schedule routes | ip, session, schedule_id |
+| INFO | `SCHEDULE_DELETED` | browser schedule routes | ip, session, schedule_id |
+| INFO | `SCHEDULE_RUN_NOW` | browser schedule routes | ip, session, schedule_id, status |
+| INFO | `SCHEDULE_FIRED` | scheduler dispatch | schedule_id, owner_kind, run_id |
+| INFO | `SCHEDULE_FIRE_SKIPPED_OVERLAP` | scheduler dispatch | schedule_id, run_id |
+| INFO | `SCHEDULER_WORKER_STARTED` | scheduler worker | worker boot |
+| INFO | `SCHEDULER_WORKER_LOCK_HELD` | scheduler worker | another scheduler already owns the deployment lock |
+| INFO | `SCHEDULER_WORKER_STOPPED` | scheduler worker | worker shutdown |
+| INFO | `SCHEDULER_RECOVERY_APPLIED` | scheduler recovery | fired, skipped |
 | WARN | `FTS_SEARCH_FALLBACK` | `get_history` | session, q, error |
 | INFO | `HISTORY_DELETED` | `delete_run` | ip, run_id, session |
 | INFO | `HISTORY_CLEARED` | `clear_history` | ip, session, count |
@@ -1511,6 +1521,7 @@ The current event inventory is:
 | WARN | `NOTIFICATION_RETRIED` | notification dispatcher | event_id, channel_id, trigger, session, attempts |
 | WARN | `NOTIFICATION_DELIVERY_FAILED` | notification dispatcher | event_id, channel_id, trigger, session, attempts |
 | WARN | `API_NOTIFICATION_CHANNEL_REJECTED` | API notification routes | ip, session, code, status, route, method |
+| WARN | `SCHEDULE_DISABLED_REVOKED` | scheduler dispatch | schedule_id, session |
 | WARN | `PROJECT_QUOTA_HIT` | project quota helper | reason |
 | WARN | `PROJECT_ROUTE_FAILED` | project download routes | ip, session, project_id, package_id, route, error |
 | WARN | `SESSION_ROUTE_FAILED` | session routes | ip, session, route, error |
@@ -1534,6 +1545,7 @@ The current event inventory is:
 | ERROR | `PACKAGE_BUILD_FAILED` | evidence package builders | ip, session, project_id, package_id, job_id, stage, error (+ traceback) |
 | ERROR | `PACKAGE_JOB_FAILED` | evidence package job worker | session, project_id, package_id, job_id, stage, error (+ traceback) |
 | ERROR | `NOTIFICATION_RUN_COMPLETE_ENQUEUE_ERROR` | run finalization notification hook | run_id, session (+ traceback) |
+| ERROR | `SCHEDULE_FIRE_FAILED` | scheduler dispatch | schedule_id, owner_kind (+ traceback) |
 | ERROR | `MIGRATION_FAILED` | Postgres migration runner | version, migration_name, error (+ traceback) |
 | ERROR | `HEALTH_DB_FAIL` | `health()` | (+ traceback) |
 | ERROR | `HEALTH_REDIS_FAIL` | `health()` | (+ traceback) |
@@ -1639,10 +1651,10 @@ Current totals:
 
 - behavior tests: 3,054
 - docs/inventory meta-tests: 32
-- `pytest`: 1648 (1616 behavior + 32 meta)
+- `pytest`: 1649 (1617 behavior + 32 meta)
 - `vitest`: 1187
 - `playwright`: 252
-- total: 3,087
+- total: 3,088
 
 ### Testing Architecture
 
@@ -1686,6 +1698,7 @@ Keep the detailed suite appendix, focused run commands, and maintenance notes in
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
 - [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

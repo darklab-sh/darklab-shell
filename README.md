@@ -387,6 +387,7 @@ To prevent commands from writing to either path directly, the app blocks any com
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - External command registry, rewrite, environment, Files, and smoke-test contracts
 - [docs/notifications.md](docs/notifications.md) - Outbound notification channels, payloads, retries, and setup guide
 - [docs/postgres-migration.md](docs/postgres-migration.md) - Offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/schedules.md](docs/schedules.md) - Scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [tests/README.md](tests/README.md) - Detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory
@@ -851,6 +852,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── release-drafts/
 │   │   ├── v2.0-merge-request.md # Draft merge-request notes for the next major release
 │   │   └── v2.0-release-notes.md # Draft user-facing release notes for the next major release
+│   ├── schedules.md           # Scheduled-command cadence, timezone, worker, and audit behavior
 │   └── storage-scaling.md      # SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 ├── entrypoint.sh               # Container startup script — fixes /data ownership, drops to appuser
 ├── examples/

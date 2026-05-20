@@ -1,0 +1,136 @@
+# Scheduled Runs
+
+Scheduled runs let a durable session token keep running one saved command on a cadence, even when no browser tab is open. Use them for routine checks such as a daily `nmap`, an hourly health probe, or a recurring passive recon command that should land in normal History.
+
+Schedules are owned by `tok_` session tokens. Anonymous browser sessions cannot create them because the worker needs a durable owner it can check after the browser closes, and token revocation must stop future fires.
+
+## Creating Schedules
+
+You can manage schedules from three places:
+
+- the browser **Schedules** modal, opened from the desktop rail or mobile menu
+- the terminal `schedule` command
+- `/api/v1/schedules` or the bundled `darklab schedule` CLI
+
+Each schedule stores:
+
+- one command
+- an optional label
+- an enabled or paused state
+- a timezone
+- either a preset cadence (`hourly`, `daily`, `weekly`) or a custom cron expression
+
+The browser editor includes **Next Runs**, which asks the server for the next three fire times and displays them in the selected schedule timezone. That preview uses the same cron and timezone code as the scheduler worker, so what you see in the modal is what the worker will use.
+
+## Cron And Timezones
+
+Cron support is intentionally strict:
+
+- five-field POSIX cron only
+- presets normalize to canonical cron strings before storage
+- custom cron expressions cannot run more often than every five minutes
+- each schedule stores an IANA timezone, such as `UTC` or `America/Chicago`
+
+For example:
+
+| Expression | Result |
+| --- | --- |
+| `0 * * * *` | valid, hourly |
+| `*/5 * * * *` | valid, every five minutes |
+| `*/4 * * * *` | rejected, faster than the minimum interval |
+| `* * * * *` | rejected, every minute |
+
+The default timezone comes from `scheduler.default_timezone`, which defaults to `UTC`. In the browser, choose the timezone from the dropdown before saving or previewing the schedule.
+
+## Firing And History Links
+
+Due schedules are fired by the scheduler worker, not by Flask request handlers. The worker launches user-owned schedules through the same brokered run path as browser and API starts, including command policy, command registry rewrites, workspace output handling, history persistence, Atlas capture, active-project capture, and outbound `run_complete` notifications.
+
+Each fire writes a `schedule_fires` audit row. Successful fires store the run id on the audit row and on the schedule. History rows and Run Details use that link to show a `scheduled` badge, and clicking the badge reopens the originating schedule.
+
+Manual **Run now** actions use the same fire-audit path. They run directly from the request that the operator initiated, so they do not depend on the background scheduler process being healthy.
+
+## Missed Fires
+
+When the scheduler worker starts, it checks for schedules that became due while the worker was offline.
+
+- Recent missed fires inside `scheduler.max_catchup_window_seconds` are coalesced into one catch-up fire.
+- Older missed windows are skipped and recorded in the fire audit.
+- `scheduler.missed_fire_policy` is `coalesce`.
+
+This keeps a short restart from losing one run, while avoiding a burst of old commands after a long outage.
+
+## Overlap Policy
+
+The current overlap policy is `skip`. If the previous scheduled run is still active when the next fire is due, the worker records a `skipped_overlap` audit row and advances to the next fire window instead of queueing another copy of the command.
+
+The overlap policy is stored on the schedule row for forward compatibility, but v1 always writes and enforces `skip`.
+
+## Revoked Tokens
+
+Schedules belong to the session token that created them. If that token is revoked, the worker records `skipped_revoked`, disables the schedule, and leaves the row visible to the owner session data instead of deleting it. The browser shows the schedule as paused with the revocation reason.
+
+## Notifications
+
+Scheduled runs reuse the outbound notification system:
+
+- successful external scheduled runs use the normal `run_complete` fan-out after the run finalizes
+- scheduler fire failures can enqueue `scheduled_run_failed`
+- notification channel delivery still follows channel triggers, muted state, do-not-disturb, rate limits, retries, and dead-letter behavior
+
+See [docs/notifications.md](notifications.md) for channel setup and delivery behavior.
+
+## Limits
+
+- `scheduler.max_per_session` defaults to `32` normal schedules per durable session token.
+- Watcher-owned schedules use the same physical table but are hidden from normal schedule lists and cannot be edited as ordinary command schedules.
+- Interactive PTY commands cannot be scheduled.
+- Workflow scheduling, blackout calendars, holiday handling, cross-session schedules, and per-target schedules are not part of scheduled runs.
+
+## Configuration
+
+Scheduler settings live under `scheduler` in `config.yaml`:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `scheduler.lock_path` | `APP_DATA_DIR/scheduler.lock` | SQLite scheduler worker lock path. Postgres uses an advisory lock. |
+| `scheduler.tick_seconds` | `5` | How often the worker checks for due schedules when nothing is ready now. |
+| `scheduler.max_per_session` | `32` | Maximum normal schedules per durable session token. |
+| `scheduler.missed_fire_policy` | `coalesce` | Missed-fire behavior on worker startup. |
+| `scheduler.max_catchup_window_seconds` | `3600` | How far back the worker will coalesce a missed fire. |
+| `scheduler.default_timezone` | `UTC` | Default timezone for new schedules. |
+
+The container entrypoint starts and supervises the scheduler worker when `SCHEDULER_ENABLED` is unset or set to `1`. Set `SCHEDULER_ENABLED=0` if you only want the web process.
+
+## Operator Checks
+
+Useful places to inspect scheduler behavior:
+
+- **Schedules modal** — current schedules, next fires, paused state, and fire audit rows
+- **History** — `scheduled` badges on runs created by a schedule
+- **Run Details** — the originating schedule link for scheduled runs
+- `/api/v1/schedules/<id>/fires` or `darklab schedule fires <id>` — paged audit rows
+- logs — `SCHEDULE_FIRED`, `SCHEDULE_FIRE_SKIPPED_OVERLAP`, `SCHEDULE_FIRE_FAILED`, `SCHEDULE_DISABLED_REVOKED`, `SCHEDULER_WORKER_STARTED`, `SCHEDULER_WORKER_LOCK_HELD`, `SCHEDULER_WORKER_STOPPED`, and `SCHEDULER_RECOVERY_APPLIED`
+
+## Related Docs
+
+- [Default.md](../.gitlab/merge_request_templates/Default.md) - default GitLab merge request template
+- [ARCHITECTURE.md](../ARCHITECTURE.md) - runtime layers, scheduler process details, advisory locks, and persistence notes
+- [CHANGELOG.md](../CHANGELOG.md) - release-by-release changes
+- [CONFIGURATION.md](../CONFIGURATION.md) - operator config reference for scheduler settings
+- [CONTRIBUTING.md](../CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
+- [CONTRIBUTORS.md](../CONTRIBUTORS.md) - contributor and acknowledgement notes
+- [DECISIONS.md](../DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
+- [DOCS_STANDARDS.md](../DOCS_STANDARDS.md) - documentation structure, templates, and review rules
+- [FEATURES.md](../FEATURES.md) - user-facing scheduled-runs feature reference
+- [README.md](../README.md) - project overview, quick start, documentation map, and installed tools
+- [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring
+- [TODO.md](../TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [ARCHITECTURE.md -> Atlas Export Schema](../ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [docs/api.md](api.md) - API and `darklab schedule` CLI usage
+- [docs/external-command-integrations.md](external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
+- [docs/notifications.md](notifications.md) - outbound notification channels, triggers, and retry behavior
+- [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/storage-scaling.md](storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
+- [tests/README.md](../tests/README.md) - test coverage appendix and focused test commands
+- [tests/ui-capture-scenes.md](../tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

@@ -208,6 +208,42 @@ class TestSchedulesRoutes:
         assert fires_payload["fires"][0]["schedule_id"] == schedule_id
         assert fires_payload["fires"][0]["status"] == "fired"
 
+    def test_schedule_fire_links_completed_run_in_history(self, monkeypatch, tmp_path):
+        from services.scheduler import dispatch
+
+        client, _db_path = _schedule_client(monkeypatch, tmp_path)
+        token = "tok_schedule_history_link"
+        run_id = "run_schedule_history_link"
+        _register_token(token)
+        monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda _schedule: run_id)
+        created = _create_schedule(client, token)
+        schedule_id = created.get_json()["schedule"]["id"]
+
+        fired = client.post(f"/schedules/{schedule_id}/run-now", headers={"X-Session-ID": token})
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs "
+                "(id, session_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+                "VALUES (?, ?, 'external', ?, ?, ?, 0, '[]', 0)",
+                (
+                    run_id,
+                    token,
+                    "ping -c 1 darklab.sh",
+                    "2026-05-20T00:00:00+00:00",
+                    "2026-05-20T00:00:01+00:00",
+                ),
+            )
+            conn.commit()
+
+        history = client.get("/history?include_total=1", headers={"X-Session-ID": token})
+        payload = history.get_json()
+
+        assert fired.status_code == 200
+        assert history.status_code == 200
+        assert payload["items"][0]["id"] == run_id
+        assert payload["items"][0]["scheduled"] is True
+        assert payload["items"][0]["schedule_id"] == schedule_id
+
     def test_schedule_create_enforces_session_cap(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
         token = "tok_schedule_cap"

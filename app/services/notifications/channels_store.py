@@ -244,7 +244,7 @@ def _test_event_statuses(conn, event_ids: list[str]) -> list[dict[str, Any]]:
     rows = conn.execute(
         "SELECT id, session_token, channel_id, trigger, payload_json, status, attempts, "
         "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at "
-        f"FROM notification_events WHERE id IN ({placeholders})",  # nosec B608
+        f"FROM notification_events WHERE id IN ({placeholders})",  # nosec
         event_ids,
     ).fetchall()
     events_by_id = {str(row["id"]): NotificationEvent.from_row(row) for row in rows}

@@ -240,7 +240,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `notifications.retry.max_age_hours` | `24` | Server-side only. Maximum retry window before a notification event moves to dead-letter state |
 | `notifications.retry.base_delay_seconds` | `30` | Server-side only. Base delay for exponential notification retry backoff |
 | `notifications.events.retention_days` | `30` | Server-side only. Number of days to keep sent notification delivery audit rows; set to `0` to disable pruning |
-| `scheduler` | see nested defaults | Server-side only. Cadence and recovery settings for scheduled runs and watcher-owned schedules |
+| `scheduler` | see nested defaults | Server-side only. Cadence and recovery settings for scheduled runs and watcher-owned schedules. See [docs/schedules.md](docs/schedules.md) for behavior details |
 | `scheduler.lock_path` | `APP_DATA_DIR/scheduler.lock` | SQLite scheduler worker lock path. Leave empty to use the app data directory default. Postgres deployments use an advisory lock instead |
 | `scheduler.tick_seconds` | `5` | How often the scheduler worker checks for due schedules when no immediate fire is found |
 | `scheduler.max_per_session` | `32` | Maximum normal schedules a durable session token can own |
@@ -967,6 +967,7 @@ Use the production Compose overlay and `DOCKER_GELF_ADDRESS` if Docker should al
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
 - [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

@@ -560,9 +560,9 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Limits:** schedules require a durable session token. Anonymous sessions cannot create schedules because there is no durable owner for the worker to enforce after the browser closes. Cron support is strict five-field POSIX cron, and custom cron expressions cannot run more often than every five minutes. Workflow scheduling, blackout calendars, and per-target schedules are out of scope.
 
-**Configuration:** scheduler settings live under `scheduler` in `config.yaml`, including `max_per_session`, `default_timezone`, `tick_seconds`, `max_catchup_window_seconds`, `missed_fire_policy`, and the SQLite `lock_path`. See [CONFIGURATION.md](CONFIGURATION.md).
+**Configuration:** scheduler settings live under `scheduler` in `config.yaml`, including `max_per_session`, `default_timezone`, `tick_seconds`, `max_catchup_window_seconds`, `missed_fire_policy`, and the SQLite `lock_path`. See [CONFIGURATION.md](CONFIGURATION.md) and [docs/schedules.md](docs/schedules.md).
 
-**Related files:** `app/blueprints/schedules.py` (browser schedule routes), `app/services/scheduler/` (cron, storage, dispatch, and worker helpers), `app/static/js/features/schedules/schedules_modal.js` (Schedules modal), and `app/static/css/features/schedules.css` (modal layout).
+**Related files:** `app/blueprints/schedules.py` (browser schedule routes), `app/services/scheduler/` (cron, storage, dispatch, and worker helpers), `app/static/js/features/schedules/schedules_modal.js` (Schedules modal), `app/static/css/features/schedules.css` (modal layout), and `docs/schedules.md` (operator guide).
 
 ---
 
@@ -1339,6 +1339,7 @@ The repo also includes a starter Grafana dashboard at `examples/grafana/darklab-
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
 - [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
+- [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

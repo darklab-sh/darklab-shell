@@ -36,19 +36,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-- **Scheduled and recurring runs**
-  - Goal
-    - Add time-driven runs to the app. Operators save a command with a cron expression or cadence preset, and the run fires on that cadence without keeping a browser tab open. Fired runs land in normal history tagged `scheduled` with a link back to the originating schedule.
-    - Reuse the existing `/runs` broker, command preparation path (allowlist, deny-prefix, registry rewrite, variable expansion), and history persistence so a scheduled run is indistinguishable from a manually-launched run except for the source tag.
-    - Reuse the shipped outbound notification queue for scheduled-run-failed and run-complete fan-out.
-    - Non-goals for v1: workflow scheduling (commands only), cross-session schedules, per-target scheduling, calendar-based holidays/blackout windows.
-  - Phase 3 — hardening, docs, release
-    - Docs: new `docs/schedules.md` covering cron support, timezone handling, missed-fire behavior, overlap policy, fan-out to notifications, and the per-session schedule cap.
-    - `CONFIGURATION.md` updates for `scheduler.{lock_path, tick_seconds, max_per_session, missed_fire_policy, max_catchup_window_seconds, default_timezone}`. `scheduler.max_per_session` defaults to 32.
-    - `ARCHITECTURE.md` gains a "Scheduler process" subsection under Runtime Topology and lists the reserved advisory-lock namespaces used by migrations, scheduler, notification worker, and notification sweep.
-    - Log events: `SCHEDULE_FIRED`, `SCHEDULE_SKIPPED_OVERLAP`, `SCHEDULE_FIRE_FAILED`, `SCHEDULER_PROCESS_BOOTED`, `SCHEDULER_MISSED_FIRES_RECOVERED`, `SCHEDULE_DISABLED_REVOKED`.
-    - Smoke tests cover a full create → fire → history-link cycle against a fast tick-rate test config.
-
 - **Watchers (change-detection monitors)**
   - Goal
     - First-class change-detection. Each watcher is "rerun command X on cadence Y, diff against baseline Z, deliver a notification only when the diff is non-empty." Builds on the scheduler service for cadence and the notifications service for delivery; reuses `app/services/runs/comparison.py` for diff computation.

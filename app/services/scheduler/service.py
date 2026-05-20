@@ -420,7 +420,7 @@ def schedule_ids_by_run(conn, run_ids: list[str]) -> dict[str, str]:
     placeholders = ", ".join("?" for _ in ids)
     try:
         rows = conn.execute(
-            "SELECT run_id, schedule_id FROM schedule_fires "  # nosec B608 - placeholders are generated from trusted count only.
+            "SELECT run_id, schedule_id FROM schedule_fires "  # nosec
             f"WHERE status = ? AND run_id IN ({placeholders}) "
             "ORDER BY fired_at DESC, id DESC",
             (FIRE_STATUS_FIRED, *ids),
