@@ -779,6 +779,18 @@ This boundary view answers a different question than the dependency graph above:
 - Scanner subprocesses remain an out-of-process boundary rather than an in-worker extension of the Flask app.
 - Config and theme YAML files are filesystem-backed dependencies that shape both backend behavior and frontend presentation but do not become a general runtime datastore.
 
+### Notifications Architecture
+
+Outbound notifications use the same durable session-token ownership model as the headless API and encrypted secrets. Durable `tok_` sessions can create session-owned channels from the Options **Notifications** tab, `/api/v1/notification-channels`, or the bundled CLI. Anonymous browser sessions cannot create channels because delivery needs an owner that survives browser restarts and can be revoked.
+
+The route layer only validates, masks, and queues. `app/blueprints/notifications.py` and the `/api/v1/notification-channels` routes both call `services.notifications.channels_store`, which owns channel CRUD, trigger/config validation, secret-field masking, and write-only secret replacement. Channel rows store metadata, trigger subscriptions, muted state, and references to vault entries; plaintext webhook URLs, bot tokens, and Pushover keys are not stored in channel payloads. SMTP email is intentionally split: recipients and reply-to live on each channel row, while relay host, user, password environment variable name, from address, and TLS mode come from operator config.
+
+Delivery is asynchronous. App event sources build stable payloads in `services.notifications.payloads` and enqueue one row per subscribed channel in `notification_events` through `services.notifications.dispatcher.enqueue()`. External non-PTY run finalization emits one `run_complete` payload with `app_name`, command root, exit code, token hint, and summary counts; built-in commands and PTY sessions do not participate in default `run_complete` fan-out. Test sends use the same queue with a fixed `test` payload so the UI, API, and CLI exercise the real delivery path.
+
+`services.notifications.base.Channel` is the registerable delivery contract. Built-in channel implementations cover generic JSON webhooks, Slack, Discord, Telegram, Pushover, and SMTP email. Formatting helpers keep chat/push/email titles aligned, while generic webhooks receive the raw JSON payload. Each channel returns a `ChannelResult` so the dispatcher can decide whether a failure is retryable or terminal without coupling the queue to provider-specific exceptions.
+
+The notification worker is a dedicated Gunicorn-sibling process started and supervised by `entrypoint.sh` when `NOTIFICATION_WORKER_ENABLED` is not disabled. It claims due event rows from the database, applies global do-not-disturb and per-channel delivery-rate settings, sends through the registered channel class, and then marks each event `sent`, `retry_wait`, or `dead`. Retryable failures use exponential backoff capped by `notifications.retry.max_attempts` and `notifications.retry.max_age_hours`; terminal failures and expired retry windows become dead-letter audit rows. Postgres deployments reserve separate advisory-lock namespaces for notification delivery and notification sweeps so future worker coordination cannot collide with migrations or the scheduler.
+
 ---
 
 ## Headless API Surface
@@ -898,7 +910,7 @@ The terminal command fans out by entity type. Private, loopback, and other non-p
 
 The provider table covers both app-native `intel` providers and provider CLI wrappers exposed through the command registry. App-native and CLI-backed rows feed the Options Provider Status modal, `secret show-consumers`, and the `providers` alias, and their secret metadata feeds the command catalog and Options Secrets suggestions. "No" in the API key column means the app-native provider works without a stored session secret, but the app still applies its own cache and per-session token bucket before calling the third-party service. "Optional" means the lookup or CLI can run without a key but gets richer account-backed results when the session vault has one.
 
-| Provider | Used by | API key required | Accepted secret names | Access note | Darklab use |
+| Provider | Used by | API key required | Accepted secret names | Access note | darklab_shell use |
 | --------- | --------- | --------- | --------- | --------- | --------- |
 | Shodan | `ip`, `shodan` CLI | Yes | `SHODAN_API_KEY` | Free signup; paid tiers | Host ports, banners, CVEs, tags, organization, and ISP context |
 | Censys | `ip` | Yes | `CENSYS_PAT`, optional `CENSYS_ORGANIZATION_ID` | Account-backed; paid tiers | Platform host services, protocols, location, names, ASN, and ownership context, with optional org-scoped requests |
@@ -1442,6 +1454,7 @@ The current event inventory is:
 | INFO | `VAULT_KEY_LOADED` | secrets vault | source |
 | INFO | `VAULT_KEY_ROTATION_COMPLETED` | secrets vault storage | session, count |
 | INFO | `INTEL_PROVIDER_LOOKUP_COMPLETED` | Atlas intel refresh | session, entity_id, provider, status |
+| INFO | `NOTIFICATION_DISPATCHED` | notification dispatcher | event_id, channel_id |
 | WARN | `FTS_SEARCH_FALLBACK` | `get_history` | session, q, error |
 | INFO | `HISTORY_DELETED` | `delete_run` | ip, run_id, session |
 | INFO | `HISTORY_CLEARED` | `clear_history` | ip, session, count |
@@ -1456,6 +1469,8 @@ The current event inventory is:
 | WARN | `RUN_FULL_OUTPUT_INDEX_FALLBACK` | run finalization | run_id, session, rel_path, error |
 | WARN | `BROKER_PUBLISH_FAILED` | broker event publish | run_id, event_type, reason, error |
 | WARN | `PTY_INPUT_DROPPED` | interactive PTY control handling | run_id, session, reason, bytes |
+| WARN | `NOTIFICATION_RETRIED` | notification dispatcher | event_id, channel_id, attempts |
+| WARN | `NOTIFICATION_DELIVERY_FAILED` | notification dispatcher | event_id, channel_id, attempts |
 | WARN | `PROJECT_QUOTA_HIT` | project quota helper | reason |
 | WARN | `PROJECT_ROUTE_FAILED` | project download routes | ip, session, project_id, package_id, route, error |
 | WARN | `SESSION_ROUTE_FAILED` | session routes | ip, session, route, error |
@@ -1478,6 +1493,7 @@ The current event inventory is:
 | ERROR | `RUN_SAVED_ERROR` | `generate()` | run_id, session, cmd (+ traceback) |
 | ERROR | `PACKAGE_BUILD_FAILED` | evidence package builders | ip, session, project_id, package_id, job_id, stage, error (+ traceback) |
 | ERROR | `PACKAGE_JOB_FAILED` | evidence package job worker | session, project_id, package_id, job_id, stage, error (+ traceback) |
+| ERROR | `NOTIFICATION_RUN_COMPLETE_ENQUEUE_ERROR` | run finalization notification hook | run_id, session (+ traceback) |
 | ERROR | `MIGRATION_FAILED` | Postgres migration runner | version, migration_name, error (+ traceback) |
 | ERROR | `HEALTH_DB_FAIL` | `health()` | (+ traceback) |
 | ERROR | `HEALTH_REDIS_FAIL` | `health()` | (+ traceback) |
@@ -1581,12 +1597,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,999
+- behavior tests: 3,000
 - docs/inventory meta-tests: 32
-- `pytest`: 1599 (1567 behavior + 32 meta)
+- `pytest`: 1600 (1568 behavior + 32 meta)
 - `vitest`: 1180
 - `playwright`: 252
-- total: 3,031
+- total: 3,032
 
 ### Testing Architecture
 
@@ -1628,6 +1644,7 @@ Keep the detailed suite appendix, focused run commands, and maintenance notes in
 - [Atlas and Entity Model →  → Export Schema](#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
+- [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
 - [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands

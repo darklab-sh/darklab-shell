@@ -97,7 +97,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `app_name` | `darklab_shell` | Name shown in the browser tab, header, and permalink pages |
+| `app_name` | `darklab_shell` | Name shown in the browser tab, header, permalink pages, and outbound notification titles/messages |
 | `prompt_username` | `anon` | Default username shown in the shell prompt and welcome samples. Users can override this in Options for their own session |
 | `prompt_domain` | `darklab.sh` | Domain shown after the prompt username. The UI renders `<username>@<domain>:~ $` when workspaces are disabled and `<username>@<domain>:<workspace path> $` when workspaces are enabled |
 | `motd` | _(empty)_ | Optional operator message shown at the top of the welcome sequence as a centered “Message From The Operator” notice. Supports `**bold**`, `` `code` ``, `[link](url)`, and newlines. Leave empty to disable |
@@ -224,7 +224,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `evidence_package_max_artifacts` | `100` | Maximum workspace artifacts included in one evidence package archive. The package wizard also uses this value when presenting archive constraints |
 | `evidence_package_download_rate_limit_per_minute` | `10` | Server-side only. Per-session evidence package download limit per minute |
 | `evidence_package_download_rate_limit_per_second` | `2` | Server-side only. Per-session evidence package download burst limit per second |
-| `notifications` | see nested defaults | Server-side only. Outbound notification delivery guardrails for do-not-disturb, per-channel send rate, and retry behavior |
+| `notifications` | see nested defaults | Server-side only. Outbound notification delivery guardrails for do-not-disturb, per-channel send rate, and retry behavior. See [docs/notifications.md](docs/notifications.md) for channel setup |
 | `notifications.do_not_disturb` | `false` | Server-side only. Stops outbound notification delivery before channel sends while keeping queued event storage available |
 | `notifications.delivery_rate_per_minute` | `10` | Server-side only. Per-channel outbound notification send cap used by the worker claim path |
 | `notifications.http_timeout_seconds` | `8` | Server-side only. HTTP timeout for outbound webhook-style notification channel sends |
@@ -954,6 +954,7 @@ Use the production Compose overlay and `DOCKER_GELF_ADDRESS` if Docker should al
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
+- [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
 - [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands

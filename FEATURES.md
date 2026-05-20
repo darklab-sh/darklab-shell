@@ -27,6 +27,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [Mobile Shell](#mobile-shell)
 - [Built-In Commands](#built-in-commands)
 - [Headless API and CLI](#headless-api-and-cli)
+- [Outbound Notifications](#outbound-notifications)
 - [Session Command Variables](#session-command-variables)
 - [Session Files](#session-files)
 - [Project Workspaces](#project-workspaces)
@@ -664,6 +665,30 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 ---
 
+## Outbound Notifications
+
+**Purpose:** send queued app events to destinations outside the browser so long-running work can report back even when the tab is not in front of you.
+
+**Behavior:**
+
+- Durable `tok_` sessions can manage outbound channels from the Options **Notifications** tab, `/api/v1/notification-channels`, or `darklab notify`.
+- Supported destinations are generic JSON webhooks, Slack incoming webhooks, Discord incoming webhooks, Telegram Bot API chats, Pushover, and SMTP email.
+- Channel secrets are write-only. Webhook URLs, bot tokens, Pushover tokens, and related secret values are stored through the encrypted vault; list responses only say whether each required secret is configured.
+- SMTP email uses operator-owned transport settings from `notifications.smtp.*`, while each email channel chooses its recipients and optional reply-to address.
+- External non-PTY run finalization queues a `run_complete` notification with the configured `app_name`, run id, command root, exit code, token hint, and summary counts. Built-in commands and PTY sessions do not send `run_complete` by default.
+- The trigger list also includes `pty_session_ended`, `scheduled_run_failed`, `watcher_changed`, `watcher_error`, `watcher_recovered`, and `test`; a channel sends only when a matching app source queues that trigger.
+- Test sends use the same queue and delivery path as real notifications, so a successful test verifies both channel config and delivery plumbing.
+- Delivery events are queued, claimed by the notification worker, retried with backoff when failures are retryable, and moved to dead-letter state when attempts or retry age are exhausted.
+- Delivery audit rows are available through `/api/v1/notification-events` and `darklab notify events`.
+
+**Limits:** anonymous browser sessions cannot create outbound channels. Email channels require SMTP settings before they can be saved or tested. Channel payloads are intentionally compact and should still be sent only to destinations you trust.
+
+**Configuration:** `notifications.*` controls do-not-disturb, per-channel delivery rate, HTTP timeout, SMTP transport, and retry behavior. `app_name` controls outbound titles/messages. See [CONFIGURATION.md](CONFIGURATION.md) and [docs/notifications.md](docs/notifications.md).
+
+**Related files:** `app/services/notifications/` (channel registry, payload builders, queue dispatcher, worker, and secret helpers), `app/blueprints/notifications.py` (browser channel routes), `app/blueprints/api_v1.py` (API channel and audit routes), `app/static/js/features/preferences/notification_channels.js` (Options **Notifications** tab), `docs/notifications.md` (setup and payload guide).
+
+---
+
 ## Session Command Variables
 
 **Purpose:** reuse common target values across commands without mutating the subprocess environment.
@@ -1060,7 +1085,7 @@ wget -q -O /dev/null --server-response https://example.com
 - The share-snapshot redaction setting selects the default redaction choice (prompt / redacted / raw) so the share prompt is skipped once a preference is saved.
 - The project capture settings control whether completed external command runs are added to the active project and whether generated Atlas entities are added with those auto-linked runs.
 - Run notifications fire a browser desktop notification each time a run exits or is killed; the title shows only the command root (`$ curl`) and the body shows exit code and elapsed time. Enabling triggers the native permission prompt; if notifications are blocked, the toggle reverts with a toast. This toggle is intentionally hidden from the mobile Options sheet because the feature is treated as desktop-oriented chrome behavior.
-- The **Notifications** tab lists outbound channels for durable session tokens. You can add, edit, mute, delete, and send a test notification for webhook, Slack, Discord, Telegram, Pushover, or SMTP email destinations. Webhook URLs and app tokens are write-only values stored through the encrypted vault, so channel rows show only whether each required secret is configured.
+- The **Notifications** tab lists outbound channels for durable session tokens. You can add, edit, mute, delete, and send a test notification for supported destinations without exposing write-only secret values after save.
 - Preferences are stored server-side per session and mirrored into browser cookies/local storage for reload continuity, so a named session token restores the same option set across browsers and devices.
 - The **Secrets** tab includes Provider Status, Add secret, Refresh, and the stored secret list so a long list of saved keys does not push the preference controls out of view.
 
@@ -1286,6 +1311,7 @@ The repo also includes a starter Grafana dashboard at `examples/grafana/darklab-
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
+- [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
 - [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands

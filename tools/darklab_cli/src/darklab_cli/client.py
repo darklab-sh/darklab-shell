@@ -1,4 +1,4 @@
-"""Small urllib-based API client for darklab CLI."""
+"""Small urllib-based API client for the darklab CLI."""
 
 from __future__ import annotations
 

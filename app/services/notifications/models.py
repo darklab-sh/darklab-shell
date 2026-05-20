@@ -52,6 +52,19 @@ EVENT_STATUSES = frozenset({
     STATUS_DEAD,
 })
 
+DEFAULT_NOTIFICATION_APP_NAME = "darklab_shell"
+
+
+def notification_app_name() -> str:
+    try:
+        from config import CFG
+
+        configured = CFG.get("app_name")
+    except Exception:  # pragma: no cover - defensive fallback for import-time edge cases
+        configured = ""
+    name = str(configured or "").strip()
+    return name or DEFAULT_NOTIFICATION_APP_NAME
+
 
 def is_durable_session_token(session_token: str) -> bool:
     return str(session_token or "").startswith("tok_")

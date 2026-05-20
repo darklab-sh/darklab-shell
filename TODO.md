@@ -36,24 +36,11 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-- **Outbound notifications (webhooks, Slack, Discord, Telegram, Pushover, SMTP email)**
-  - Goal
-    - Ship a pluggable `Channel`-based delivery layer so app events (run finalization with finding summaries, opt-in PTY session endings, watcher fires, scheduled-run failures, and test sends) can be sent to external destinations per session token.
-    - Existing notifications are browser-foreground only. This closes the loop for solo operators running long scans away from the tab and is the delivery surface the scheduler and watchers features will depend on.
-    - Land this **before** scheduler/watchers so the automation features can hook into a real delivery surface rather than building one inline.
-    - Non-goals for v1: web-push (covered by the PWA Idea), per-project channels (sessions only), per-channel templating, real-time delivery dashboards.
-  - Phase 7 — hardening, docs, release
-    - Docs: new `docs/notifications.md` covering payload shape, trigger inventory (`run_complete`, `pty_session_ended`, watcher triggers, `scheduled_run_failed`, `test`), channel-kind matrix, retry/dead-letter policy, redaction guarantees, Telegram/Pushover setup, SMTP relay guidance, and a webhook curl quickstart.
-    - `CONFIGURATION.md` updates for the `notifications.*` config tree, including SMTP transport, retry max attempts, `notifications.retry.max_age_hours` defaulting to 24, do-not-disturb, and the fixed per-channel rate settings.
-    - `ARCHITECTURE.md` gains a short "Notifications surface" subsection under Backend Architecture and log-event entries for `NOTIFICATION_DISPATCHED` / `NOTIFICATION_DELIVERY_FAILED` / `NOTIFICATION_RETRIED`.
-    - `CHANGELOG.md`, v2.0 merge-request, and release-notes updates.
-    - Contract test: assert every `register_channel(name, cls)` channel implements both `validate_config` and `send`.
-
 - **Scheduled and recurring runs**
   - Goal
     - Add time-driven runs to the app. Operators save a command with a cron expression or cadence preset, and the run fires on that cadence without keeping a browser tab open. Fired runs land in normal history tagged `scheduled` with a link back to the originating schedule.
     - Reuse the existing `/runs` broker, command preparation path (allowlist, deny-prefix, registry rewrite, variable expansion), and history persistence so a scheduled run is indistinguishable from a manually-launched run except for the source tag.
-    - Land Outbound Notifications (above) **before** this so scheduled-run-failed / run-complete fan-out is a real surface, not a stub.
+    - Reuse the shipped outbound notification queue for scheduled-run-failed and run-complete fan-out.
     - Non-goals for v1: workflow scheduling (commands only), cross-session schedules, per-target scheduling, calendar-based holidays/blackout windows.
   - Phase 0 — schema, scheduler process, and tick infrastructure
     - Add `app/core/migrations/v0010_schedules.py` (plus SQLite equivalent in `core/database.py`):

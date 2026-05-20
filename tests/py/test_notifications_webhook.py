@@ -9,6 +9,7 @@ from urllib.error import HTTPError
 
 import pytest
 
+import config
 from services.notifications.channels.webhook import WebhookChannel
 from services.notifications.models import ChannelResult, NotificationChannel
 from services.notifications.payloads import build_run_complete_payload
@@ -157,7 +158,8 @@ def test_webhook_channel_retries_timeout(monkeypatch):
     assert "timed out" in result.error
 
 
-def test_run_complete_payload_exposes_command_root_without_full_command():
+def test_run_complete_payload_exposes_command_root_without_full_command(monkeypatch):
+    monkeypatch.setitem(config.CFG, "app_name", "Ops Shell")
     payload = build_run_complete_payload(
         {
             "id": "run-1",
@@ -170,6 +172,7 @@ def test_run_complete_payload_exposes_command_root_without_full_command():
 
     assert payload == {
         "trigger": "run_complete",
+        "app_name": "Ops Shell",
         "occurred_at": payload["occurred_at"],
         "session_token_hint": "cdef",
         "run_id": "run-1",

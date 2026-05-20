@@ -12,7 +12,7 @@ from jinja2 import Environment, select_autoescape
 from core import database
 from services.notifications.base import Channel, register_channel
 from services.notifications.channels._format import format_plain_text, format_summary_fields
-from services.notifications.models import CHANNEL_KIND_EMAIL, ChannelResult
+from services.notifications.models import CHANNEL_KIND_EMAIL, ChannelResult, notification_app_name
 
 DEFAULT_SMTP_TIMEOUT_SECONDS = 15.0
 EMAIL_HTML_ENV = Environment(autoescape=select_autoescape(default=True))
@@ -111,8 +111,9 @@ def _smtp_config_errors(config: dict[str, Any]) -> list[str]:
 def _message_subject(payload: dict[str, Any]) -> str:
     trigger = str(payload.get("trigger") or "notification").strip() or "notification"
     command_root = str(payload.get("command_root") or "").strip()
+    app_name = str(payload.get("app_name") or "").strip() or notification_app_name()
     suffix = f": {command_root}" if command_root else ""
-    return f"[darklab] {trigger}{suffix}"[:180]
+    return f"[{app_name}] {trigger}{suffix}"[:180]
 
 
 def _html_body(payload: dict[str, Any]) -> str:

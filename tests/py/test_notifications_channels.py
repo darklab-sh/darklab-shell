@@ -8,7 +8,7 @@ import socket
 from urllib.error import HTTPError
 from urllib.parse import parse_qs
 
-from services.notifications.base import registered_channels
+from services.notifications.base import Channel, registered_channels
 from services.notifications.channels import register_builtin_channels
 from services.notifications.channels.discord import DiscordChannel
 from services.notifications.channels.pushover import PushoverChannel
@@ -56,6 +56,7 @@ def _channel(kind: str, *, secrets=None, config=None) -> NotificationChannel:
 def _payload() -> dict[str, object]:
     return {
         "trigger": "run_complete",
+        "app_name": "Test Shell",
         "occurred_at": "2026-05-20T00:00:00+00:00",
         "run_id": "run-123",
         "command_root": "nmap",
@@ -89,6 +90,15 @@ def test_phase2_channels_are_registered():
     assert registered[CHANNEL_KIND_PUSHOVER] is PushoverChannel
 
 
+def test_registered_channels_implement_delivery_contract():
+    register_builtin_channels()
+
+    for kind, channel_cls in registered_channels().items():
+        assert issubclass(channel_cls, Channel), kind
+        assert channel_cls.validate_config is not Channel.validate_config, kind
+        assert channel_cls.send is not Channel.send, kind
+
+
 def test_slack_channel_formats_blocks(monkeypatch):
     captured = {}
     monkeypatch.setattr("services.notifications.channels.webhook.get_channel_secret", lambda *_: "https://example.invalid/slack")
@@ -104,10 +114,10 @@ def test_slack_channel_formats_blocks(monkeypatch):
 
     assert result == ChannelResult.success()
     assert captured["timeout"] == 3.0
-    assert captured["body"]["text"] == "darklab run complete: nmap"
+    assert captured["body"]["text"] == "Test Shell run complete: nmap"
     assert captured["body"]["blocks"][0] == {
         "type": "header",
-        "text": {"type": "plain_text", "text": "darklab run complete: nmap"},
+        "text": {"type": "plain_text", "text": "Test Shell run complete: nmap"},
     }
     assert {"type": "mrkdwn", "text": "*Command*\nnmap"} in captured["body"]["blocks"][1]["fields"]
 
@@ -125,7 +135,7 @@ def test_discord_channel_formats_embed(monkeypatch):
     result = DiscordChannel(_channel(CHANNEL_KIND_DISCORD)).send(_payload())
 
     assert result == ChannelResult.success()
-    assert captured["body"]["embeds"][0]["title"] == "darklab run complete: nmap"
+    assert captured["body"]["embeds"][0]["title"] == "Test Shell run complete: nmap"
     assert {"name": "Command", "value": "nmap", "inline": True} in captured["body"]["embeds"][0]["fields"]
     assert captured["body"]["embeds"][0]["footer"] == {"text": "2026-05-20T00:00:00+00:00"}
 
@@ -183,7 +193,7 @@ def test_telegram_channel_posts_plain_text_without_token_in_body(monkeypatch):
     assert captured["url"] == "https://api.telegram.org/bot123456:secret-token/sendMessage"
     assert captured["body"]["chat_id"] == "-100123"
     assert captured["body"]["disable_web_page_preview"] is True
-    assert "darklab run complete: nmap" in captured["body"]["text"]
+    assert "Test Shell run complete: nmap" in captured["body"]["text"]
     assert "123456:secret-token" not in captured["body"]["text"]
 
 
@@ -238,7 +248,7 @@ def test_pushover_channel_posts_form_payload(monkeypatch):
     assert captured["url"] == "https://api.pushover.net/1/messages.json"
     assert captured["body"]["token"] == ["app-secret"]
     assert captured["body"]["user"] == ["user-secret"]
-    assert captured["body"]["title"] == ["darklab run complete: nmap"]
+    assert captured["body"]["title"] == ["Test Shell run complete: nmap"]
     assert captured["body"]["priority"] == ["1"]
     assert captured["body"]["sound"] == ["magic"]
     assert "device" not in captured["body"]

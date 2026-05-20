@@ -230,7 +230,7 @@ Test sends use the fixed trigger `test` with a canned payload shaped like:
 ```json
 {
   "trigger": "test",
-  "message": "darklab test notification",
+  "message": "darklab_shell test notification",
   "channel_id": "ntc_123",
   "occurred_at": "2026-05-19T00:00:00+00:00"
 }
@@ -331,6 +331,7 @@ timeout = 30
 - [TODO.md](../TODO.md) - open follow-ups, research notes, known issues, and future ideas
 - [ARCHITECTURE.md -> Atlas Export Schema](../ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/external-command-integrations.md](external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
+- [docs/notifications.md](notifications.md) - outbound notification channels, payloads, retries, and setup guide
 - [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
 - [docs/storage-scaling.md](storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [tests/README.md](../tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands

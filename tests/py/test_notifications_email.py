@@ -61,6 +61,7 @@ def _channel(*, config=None) -> NotificationChannel:
 def _payload() -> dict[str, object]:
     return {
         "trigger": "run_complete",
+        "app_name": "Test Shell",
         "occurred_at": "2026-05-20T00:00:00+00:00",
         "run_id": "run-123",
         "command_root": "nmap",
@@ -125,7 +126,7 @@ def test_email_channel_sends_starttls_message(monkeypatch):
     assert smtp.started_tls is True
     assert smtp.login_args == ("mailer", "smtp-secret")
     message = smtp.messages[0]
-    assert message["Subject"] == "[darklab] run_complete: nmap"
+    assert message["Subject"] == "[Test Shell] run_complete: nmap"
     assert message["From"] == "darklab@example.invalid"
     assert message["To"] == "ops@example.invalid, sec@example.invalid"
     assert message["Reply-To"] == "reply@example.invalid"

@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import app as shell_app
+import config
 from core.database import DB_PATH
 
 
@@ -760,6 +761,7 @@ def test_api_v1_notification_channels_crud_masks_secrets_and_lists_events(monkey
     client = get_client()
     token = _token(client)
     sent_payloads = []
+    monkeypatch.setitem(config.CFG, "app_name", "darklab_shell")
     monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
     secrets_vault.reset_master_key_cache_for_tests()
 
@@ -798,7 +800,8 @@ def test_api_v1_notification_channels_crud_masks_secrets_and_lists_events(monkey
     assert test_payload["queued"] == 1
     assert sent_payloads[0][0] == "webhook"
     assert sent_payloads[0][1]["trigger"] == "test"
-    assert sent_payloads[0][1]["message"] == "darklab test notification"
+    assert sent_payloads[0][1]["app_name"] == "darklab_shell"
+    assert sent_payloads[0][1]["message"] == "darklab_shell test notification"
     assert sent_payloads[0][1]["channel_id"] == created["id"]
 
     events = json.loads(
@@ -809,7 +812,7 @@ def test_api_v1_notification_channels_crud_masks_secrets_and_lists_events(monkey
     )
     assert events["total"] == 1
     assert events["events"][0]["id"] == test_payload["event_ids"][0]
-    assert events["events"][0]["payload"]["message"] == "darklab test notification"
+    assert events["events"][0]["payload"]["message"] == "darklab_shell test notification"
 
     updated = json.loads(
         client.patch(

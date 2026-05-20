@@ -1,4 +1,4 @@
-"""Command line entry point for the darklab API client."""
+"""Command line entry point for the darklab_shell API client."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""darklab API v1 CLI client."""
+"""darklab_shell API v1 CLI client."""
 
 __all__ = ["__version__"]
 

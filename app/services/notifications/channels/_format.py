@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.notifications.models import notification_app_name
+
 MAX_FIELD_VALUE_LENGTH = 320
 MAX_MESSAGE_LENGTH = 1800
 
@@ -21,10 +23,11 @@ def humanize_key(value: str) -> str:
 
 def notification_title(payload: dict[str, Any]) -> str:
     trigger = str(payload.get("trigger") or "notification").replace("_", " ")
+    app_name = str(payload.get("app_name") or "").strip() or notification_app_name()
     root = str(payload.get("command_root") or "").strip()
     if root:
-        return truncate_text(f"darklab {trigger}: {root}", 120)
-    return truncate_text(f"darklab {trigger}", 120)
+        return truncate_text(f"{app_name} {trigger}: {root}", 120)
+    return truncate_text(f"{app_name} {trigger}", 120)
 
 
 def format_summary_fields(payload: dict[str, Any]) -> list[tuple[str, str]]:

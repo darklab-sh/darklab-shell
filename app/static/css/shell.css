@@ -1472,6 +1472,55 @@ body.mobile-terminal-mode .output-follow-btn {
   gap: 6px;
 }
 
+#options-notification-refresh-btn {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1;
+}
+
+#options-notification-refresh-btn:hover,
+#options-notification-refresh-btn:focus-visible {
+  border-color: transparent;
+  background: var(--theme-button-ghost-hover-bg);
+  color: var(--green);
+}
+
+#options-panel-notifications .options-secret-row {
+  align-items: center;
+}
+
+#options-panel-notifications .options-secret-row-body {
+  flex: 1 1 auto;
+}
+
+#options-panel-notifications .options-secret-actions {
+  flex: 0 0 176px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(76px, 1fr));
+  gap: 8px;
+}
+
+#options-panel-notifications .options-secret-actions .btn {
+  width: 100%;
+}
+
+@media (max-width: 760px) {
+  #options-panel-notifications .options-secret-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  #options-panel-notifications .options-secret-actions {
+    flex: 0 0 auto;
+    width: min(100%, 176px);
+  }
+}
+
 .provider-status-subtitle,
 .provider-status-intro {
   color: var(--muted);

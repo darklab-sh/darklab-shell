@@ -397,6 +397,7 @@ class TestNotificationChannelRoutes:
 
         delivered = []
         client, patchers = self._notification_client(monkeypatch, tmp_path)
+        monkeypatch.setitem(config.CFG, "app_name", "darklab_shell")
         monkeypatch.setattr(
             "services.notifications.channels.webhook.post_json",
             lambda url, payload, config, label: delivered.append((url, payload, label)) or ChannelResult.success(),
@@ -415,7 +416,8 @@ class TestNotificationChannelRoutes:
             assert resp.get_json()["queued"] == 1
             assert delivered[0][0] == "https://example.invalid/hook"
             assert delivered[0][1]["trigger"] == "test"
-            assert delivered[0][1]["message"] == "darklab test notification"
+            assert delivered[0][1]["app_name"] == "darklab_shell"
+            assert delivered[0][1]["message"] == "darklab_shell test notification"
             with db_connect() as conn:
                 row = conn.execute(
                     "SELECT status, attempts FROM notification_events WHERE channel_id = ?",

@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,999
+- behavior tests: 3,000
 - docs/inventory meta-tests: 32
-- `pytest`: 1599 (1567 behavior + 32 meta)
+- `pytest`: 1600 (1568 behavior + 32 meta)
 - `vitest`: 1180
 - `playwright`: 252
-- total: 3,031
+- total: 3,032
 
 This document is organized in two parts:
 
@@ -1027,6 +1027,7 @@ Slack, Discord, Telegram, and Pushover notification channel coverage.
 | Test | Description |
 | --- | --- |
 | `test_phase2_channels_are_registered` | Verifies Slack, Discord, Telegram, and Pushover channel classes register with the shared notification channel registry. |
+| `test_registered_channels_implement_delivery_contract` | Verifies every registered notification channel implements the shared validation and send contract. |
 | `test_slack_channel_formats_blocks` | Verifies Slack notifications use incoming-webhook blocks with a header and summary fields. |
 | `test_discord_channel_formats_embed` | Verifies Discord notifications use embeds with a title, fields, and timestamp footer. |
 | `test_chat_webhook_channels_share_retry_and_terminal_outcomes` | Verifies chat-webhook channels share retryable 5xx and terminal 4xx handling. |
@@ -3604,6 +3605,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 - [ARCHITECTURE.md → Atlas Export Schema](../ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
 - [docs/api.md](../docs/api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](../docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
+- [docs/notifications.md](../docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide
 - [docs/postgres-migration.md](../docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
 - [docs/storage-scaling.md](../docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 - [tests/ui-capture-scenes.md](ui-capture-scenes.md) - UI screenshot capture scene inventory
