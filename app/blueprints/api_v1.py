@@ -81,6 +81,7 @@ from services.scheduler.service import (
     get_schedule,
     list_for_session as list_schedules_for_session,
     list_schedule_fires,
+    schedule_ids_by_run,
     update_schedule,
 )
 from services.secrets.vault import MasterKeyError, SecretDecryptError
@@ -492,11 +493,14 @@ def _history_rows(session_id: str, limit: int, offset: int, filters: dict[str, s
         artifacts = _run_file_artifacts_by_run(conn, run_ids)
         metadata = _run_metadata_counts_by_run(conn, run_ids)
         atlas = _run_atlas_counts_by_run(conn, session_id, run_ids)
+        scheduled = schedule_ids_by_run(conn, run_ids)
     for run in runs:
         run_id = str(run["id"])
         run["artifact_count"] = len(artifacts.get(run_id, []))
         run.update(metadata.get(run_id, {}))
         run.update(atlas.get(run_id, {}))
+        run["schedule_id"] = scheduled.get(run_id, "")
+        run["scheduled"] = bool(run["schedule_id"])
     return runs, total
 
 
@@ -516,6 +520,9 @@ def _load_run_detail(session_id: str, run_id: str) -> dict[str, Any] | None:
         run["artifact_count"] = len(artifacts)
         run.update(_run_metadata_counts_by_run(conn, [run_id]).get(run_id, {}))
         run.update(_run_atlas_counts_by_run(conn, session_id, [run_id]).get(run_id, {}))
+        schedule_id = schedule_ids_by_run(conn, [run_id]).get(run_id, "")
+        run["schedule_id"] = schedule_id
+        run["scheduled"] = bool(schedule_id)
     return run
 
 

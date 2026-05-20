@@ -134,9 +134,12 @@ class TestSchedulesRoutes:
         assert "Command not allowed" in resp.get_json()["message"]
 
     def test_schedule_run_now_records_fire_without_scheduler_process(self, monkeypatch, tmp_path):
+        from services.scheduler import dispatch
+
         client, db_path = _schedule_client(monkeypatch, tmp_path)
         token = "tok_schedule_run_now"
         _register_token(token)
+        monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda _schedule: "run_schedule_now")
         created = _create_schedule(client, token)
         schedule_id = created.get_json()["schedule"]["id"]
 
@@ -156,7 +159,7 @@ class TestSchedulesRoutes:
         assert dict(row) == {
             "schedule_id": schedule_id,
             "status": "fired",
-            "reason": "dispatch pending run integration",
+            "reason": "started scheduled run",
         }
 
     def test_schedule_create_enforces_session_cap(self, monkeypatch, tmp_path):
@@ -234,8 +237,12 @@ class TestScheduleBuiltin:
         assert count["count"] == 0
 
     def test_schedule_builtin_run_records_fire(self, monkeypatch, tmp_path):
+        from services.scheduler import dispatch
+
         _client, db_path = _schedule_client(monkeypatch, tmp_path)
         token = "tok_schedule_builtin_run"
+        _register_token(token)
+        monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda _schedule: "run_builtin_schedule")
         execute_builtin_command("schedule create --cron \"0 * * * *\" -- ping -c 1 darklab.sh", token)
         with db_connect() as conn:
             schedule_id = conn.execute("SELECT id FROM schedules WHERE session_token = ?", (token,)).fetchone()["id"]
@@ -254,7 +261,7 @@ class TestScheduleBuiltin:
         assert dict(row) == {
             "schedule_id": schedule_id,
             "status": "fired",
-            "reason": "dispatch pending run integration",
+            "reason": "started scheduled run",
         }
 
     def test_schedule_builtin_requires_durable_session_token(self, monkeypatch, tmp_path):

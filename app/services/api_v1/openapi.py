@@ -138,6 +138,8 @@ OPENAPI_SPEC: dict = {
                     "note_count",
                     "atlas_entity_count",
                     "atlas_finding_count",
+                    "scheduled",
+                    "schedule_id",
                 ],
                 "properties": {
                     "id": {"type": "string"},
@@ -157,6 +159,8 @@ OPENAPI_SPEC: dict = {
                     "note_count": {"type": "integer"},
                     "atlas_entity_count": {"type": "integer"},
                     "atlas_finding_count": {"type": "integer"},
+                    "scheduled": {"type": "boolean"},
+                    "schedule_id": {"type": "string"},
                 },
             },
             "RunPage": {

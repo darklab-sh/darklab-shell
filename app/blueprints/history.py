@@ -49,6 +49,7 @@ from services.projects.contracts import (
 from core.redaction import omit_raw_only_line_entries, redact_line_entries
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, builtin_command_roots_for_storage
 from services.runs.output_store import load_full_output_entries
+from services.scheduler.service import schedule_ids_by_run
 from services.storage.body_store import inline_threshold_bytes, load_text_body, maybe_store_text_body, stored_body_pointer
 from services import metrics as app_metrics
 
@@ -1147,6 +1148,7 @@ def get_history():
         project_links_by_run = _project_links_by_run(conn, session_id, [item["id"] for item in paged_runs])
         metadata_counts_by_run = _run_metadata_counts_by_run(conn, [item["id"] for item in paged_runs])
         atlas_counts = _run_atlas_counts_by_run(conn, session_id, [item["id"] for item in paged_runs])
+        scheduled_by_run = schedule_ids_by_run(conn, [item["id"] for item in paged_runs])
         labels_by_run = _entity_labels_by_entity_ids(conn, "run", [item["id"] for item in paged_runs])
         notes_by_run = _entity_notes_by_entity_ids(conn, "run", [item["id"] for item in paged_runs])
         labels_by_snapshot = _entity_labels_by_entity_ids(conn, "snapshot", [item["id"] for item in paged_snapshots])
@@ -1167,6 +1169,9 @@ def get_history():
                 "atlas_entity_count": 0,
                 "atlas_finding_count": 0,
             }))
+            schedule_id = scheduled_by_run.get(str(item["id"]), "")
+            item["schedule_id"] = schedule_id
+            item["scheduled"] = bool(schedule_id)
         for item in paged_snapshots:
             item["labels"] = labels_by_snapshot.get(str(item["id"]), [])
             item["note"] = (notes_by_snapshot.get(str(item["id"]), []) or [None])[0]
@@ -1627,6 +1632,7 @@ def get_run(run_id):
         findings_by_run = _run_findings_by_run(conn, [run_id]) if include_private_metadata else {}
         labels_by_run = _run_labels_by_run(conn, [run_id]) if include_private_metadata else {}
         notes_by_run = _run_notes_by_run(conn, [run_id]) if include_private_metadata else {}
+        scheduled_by_run = schedule_ids_by_run(conn, [run_id]) if include_private_metadata else {}
     if not include_private_metadata:
         run["output_entries"] = omit_raw_only_line_entries(run["output_entries"])
         run["output"] = [
@@ -1649,6 +1655,9 @@ def get_run(run_id):
         "atlas_entity_count": 0,
         "atlas_finding_count": 0,
     }))
+    schedule_id = scheduled_by_run.get(str(run_id), "")
+    run["schedule_id"] = schedule_id
+    run["scheduled"] = bool(schedule_id)
     run["preview_notice"] = _preview_notice(run) if not is_full_view else None
     log.info("RUN_VIEWED", extra={
         "ip": get_client_ip(), "run_id": run_id,

@@ -1903,6 +1903,12 @@
           "run_kind": {
             "type": "string"
           },
+          "schedule_id": {
+            "type": "string"
+          },
+          "scheduled": {
+            "type": "boolean"
+          },
           "started": {
             "nullable": true,
             "type": "string"
@@ -1928,7 +1934,9 @@
           "label_count",
           "note_count",
           "atlas_entity_count",
-          "atlas_finding_count"
+          "atlas_finding_count",
+          "scheduled",
+          "schedule_id"
         ],
         "type": "object"
       },

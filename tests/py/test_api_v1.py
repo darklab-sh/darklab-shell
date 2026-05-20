@@ -754,11 +754,13 @@ def test_api_v1_explicit_project_link_uses_finalized_run_path(monkeypatch):
 
 def test_api_v1_schedules_crud_run_now_and_fire_audit_are_token_scoped(monkeypatch):
     import blueprints.api_v1 as api_blueprint
+    from services.scheduler import dispatch
 
     client = get_client()
     token = _token(client)
     other_token = _token(client)
     monkeypatch.setattr(api_blueprint, "validate_schedule_command", lambda command, *_args, **_kwargs: command.strip())
+    monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda _schedule: "run_api_schedule")
 
     create = client.post(
         "/api/v1/schedules",

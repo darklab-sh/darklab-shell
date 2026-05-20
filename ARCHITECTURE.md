@@ -818,6 +818,8 @@ Scheduled runs are stored in the shared `schedules` table. The same table also h
 
 The scheduler worker is a dedicated Gunicorn-sibling process started and supervised by `entrypoint.sh` when `SCHEDULER_ENABLED` is not disabled. It is not hosted inside Flask workers. On startup it takes one deployment-wide lock: Postgres uses the reserved `darklab_shell_scheduler` advisory-lock namespace, and SQLite uses a filesystem lock at `scheduler.lock` in the app data directory unless `scheduler.lock_path` overrides it. If another scheduler owns the lock, the extra process exits cleanly and the supervisor can retry later.
 
+Due user-owned schedules launch through the same brokered run preparation path as browser and API runs, including command policy checks, registry rewrites, variable expansion, runtime checks, workspace output rewrites, history persistence, and run-complete notification fan-out. Each fire writes a `schedule_fires` audit row; successful fires store the resulting run id on both the audit row and the schedule. History and Run Details read those audit rows to show a scheduled-run badge. If the owning token has been revoked, the scheduler records `skipped_revoked` and disables the schedule. If the previous scheduled run is still active, the scheduler records `skipped_overlap` and advances to the next fire window instead of queueing another copy.
+
 Cron support is intentionally strict: five-field POSIX cron only, with `hourly`, `daily`, and `weekly` cadence presets normalized to canonical cron strings before storage. Each schedule stores an IANA timezone, defaulting to `scheduler.default_timezone` (`UTC`). On startup, recovery coalesces recent missed fire windows into one catch-up fire within `scheduler.max_catchup_window_seconds`; older missed windows are skipped with an audit row in `schedule_fires`. The v1 overlap policy is always stored and enforced as `skip`, leaving the column in place for future policies without changing the current behavior.
 
 ---
@@ -1630,12 +1632,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,045
+- behavior tests: 3,052
 - docs/inventory meta-tests: 32
-- `pytest`: 1644 (1612 behavior + 32 meta)
+- `pytest`: 1646 (1614 behavior + 32 meta)
 - `vitest`: 1186
 - `playwright`: 252
-- total: 3,082
+- total: 3,084
 
 ### Testing Architecture
 

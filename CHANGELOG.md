@@ -26,6 +26,10 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Why:** scripts and CI jobs need the same recurring-command controls that the browser routes and terminal built-in expose.
   - **What:** added `/api/v1/schedules` list/create/detail/update/delete routes, manual `run-now`, paged fire-audit reads, OpenAPI schemas, and `darklab schedule list/create/info/pause/resume/delete/run/fires`.
   - **Tests:** added API coverage for schedule CRUD, fire audit rows, cross-session isolation, invalid body handling, command-policy rejection, OpenAPI contract drift, and CLI schedule command wiring.
+- **Scheduled run firing** — due schedules now start real brokered runs instead of only writing placeholder fire rows.
+  - **Why:** the scheduler worker needs to produce the same saved history and run-complete notifications operators get from manual runs.
+  - **What:** wired user-owned schedules into the brokered run preparation path, stored resulting run ids on schedule fire audit rows, surfaced scheduled-run badges in History and Run Details, disabled revoked-token schedules with `skipped_revoked`, skipped overlapping prior runs with `skipped_overlap`, and queued `scheduled_run_failed` notifications for normal schedule fire failures.
+  - **Tests:** added scheduler dispatch coverage for real fire handoff, revoked-token disablement, and overlap skips, plus updated route/API/built-in fire tests to assert the real handoff audit reason.
 - **Outbound notifications** — the app now has durable storage, browser channel management, a supervised worker, and webhook, chat, push, and email senders for webhook, Slack, Discord, Telegram, Pushover, and SMTP email notification channels.
   - **Why:** scheduled runs and watchers need a real delivery queue instead of building their own one-off notification paths later.
   - **What:**

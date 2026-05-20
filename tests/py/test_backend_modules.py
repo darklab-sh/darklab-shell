@@ -996,11 +996,16 @@ class TestSchedulerFoundation:
         assert {schedule.id for schedule in all_rows} == {user_schedule.id, watcher_schedule.id}
 
     def test_scheduler_recovery_coalesces_recent_missed_fire(self, monkeypatch, tmp_path):
-        from services.scheduler import recovery, service
+        from services.scheduler import dispatch, recovery, service
 
         now = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc)
         missed_at = (now - timedelta(minutes=50)).isoformat()
+        monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda _schedule: "run_scheduled")
         with self._scheduler_db(monkeypatch, tmp_path) as conn:
+            conn.execute(
+                "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+                ("tok_scheduler", now.isoformat(), ""),
+            )
             schedule = service.create_schedule(
                 "tok_scheduler",
                 command_text="ping -c 1 darklab.sh",
@@ -1017,9 +1022,66 @@ class TestSchedulerFoundation:
 
         assert recovery_result == {"fired": 1, "skipped": 0}
         assert [(row["schedule_id"], row["status"]) for row in fire_rows] == [(schedule.id, "fired")]
-        assert fire_rows[0]["reason"] == "dispatch pending run integration"
+        assert fire_rows[0]["reason"] == "started scheduled run"
         assert refreshed is not None
         assert refreshed.next_run_at > now.isoformat()
+
+    def test_scheduler_fire_disables_revoked_token_schedule(self, monkeypatch, tmp_path):
+        from services.scheduler import dispatch, service
+
+        fired_at = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc).isoformat()
+        with self._scheduler_db(monkeypatch, tmp_path) as conn:
+            schedule = service.create_schedule(
+                "tok_revoked_schedule",
+                command_text="ping -c 1 darklab.sh",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            status = dispatch.fire_schedule(conn, schedule, fired_at=fired_at)
+            fire_row = conn.execute(
+                "SELECT status, reason FROM schedule_fires WHERE schedule_id = ?",
+                (schedule.id,),
+            ).fetchone()
+            refreshed = service.get_schedule(schedule.id, conn=conn)
+
+        assert status == "skipped_revoked"
+        assert dict(fire_row) == {"status": "skipped_revoked", "reason": "session token revoked"}
+        assert refreshed is not None
+        assert refreshed.enabled is False
+        assert refreshed.paused_reason == "session token revoked"
+
+    def test_scheduler_fire_skips_when_previous_run_active(self, monkeypatch, tmp_path):
+        from services.scheduler import dispatch, service
+
+        fired_at = datetime(2026, 5, 20, 12, 0, tzinfo=timezone.utc).isoformat()
+        monkeypatch.setattr(dispatch, "active_runs_for_session", lambda _session: [{"run_id": "run_active"}])
+        with self._scheduler_db(monkeypatch, tmp_path) as conn:
+            conn.execute(
+                "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+                ("tok_overlap_schedule", fired_at, ""),
+            )
+            schedule = service.create_schedule(
+                "tok_overlap_schedule",
+                command_text="ping -c 1 darklab.sh",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            conn.execute("UPDATE schedules SET last_run_id = ? WHERE id = ?", ("run_active", schedule.id))
+            schedule = service.get_schedule(schedule.id, conn=conn)
+            assert schedule is not None
+
+            status = dispatch.fire_schedule(conn, schedule, fired_at=fired_at)
+            fire_row = conn.execute(
+                "SELECT status, reason, run_id FROM schedule_fires WHERE schedule_id = ?",
+                (schedule.id,),
+            ).fetchone()
+
+        assert status == "skipped_overlap"
+        assert dict(fire_row) == {
+            "status": "skipped_overlap",
+            "reason": "previous scheduled run is still active",
+            "run_id": "",
+        }
 
     def test_scheduler_postgres_lock_exits_when_already_held(self, monkeypatch):
         from services.scheduler import worker

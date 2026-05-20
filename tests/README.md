@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,045
+- behavior tests: 3,052
 - docs/inventory meta-tests: 32
-- `pytest`: 1644 (1612 behavior + 32 meta)
+- `pytest`: 1646 (1614 behavior + 32 meta)
 - `vitest`: 1186
 - `playwright`: 252
-- total: 3,082
+- total: 3,084
 
 This document is organized in two parts:
 
@@ -463,6 +463,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSchedulerFoundation.test_scheduler_cron_presets_and_strict_cron_validation` | Verifies scheduler cadence presets normalize to canonical cron strings, strict POSIX cron validation rejects unsupported forms, and timezone names must be valid IANA zones. |
 | `TestSchedulerFoundation.test_scheduler_service_requires_tokens_and_hides_watcher_owned_rows` | Verifies schedule creation requires a durable session token and normal schedule listings hide watcher-owned schedule rows. |
 | `TestSchedulerFoundation.test_scheduler_recovery_coalesces_recent_missed_fire` | Verifies scheduler recovery coalesces a recent missed fire into one audit row and advances the next fire from the recovered fire time. |
+| `TestSchedulerFoundation.test_scheduler_fire_disables_revoked_token_schedule` | Verifies due schedules whose durable session token was revoked are audited, disabled, and marked with the revoked-token pause reason. |
+| `TestSchedulerFoundation.test_scheduler_fire_skips_when_previous_run_active` | Verifies overlap policy skips a due schedule while its previous run is still active. |
 | `TestSchedulerFoundation.test_scheduler_postgres_lock_exits_when_already_held` | Verifies the Postgres scheduler lock path exits cleanly when another scheduler already holds the advisory lock. |
 | `TestNotificationsPhase0.test_dispatcher_sync_delivery_fans_out_once_per_channel` | Verifies the notification dispatcher can synchronously fan out a run-complete trigger to two subscribed channels exactly once each. |
 | `TestNotificationsPhase0.test_dispatcher_event_claims_are_single_use` | Verifies notification event claims are leased so two workers cannot claim the same due event at the same time. |

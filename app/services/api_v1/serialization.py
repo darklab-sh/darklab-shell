@@ -40,6 +40,8 @@ def run_summary(row: dict[str, Any]) -> dict[str, Any]:
         "note_count": _int(row.get("note_count")),
         "atlas_entity_count": _int(row.get("atlas_entity_count")),
         "atlas_finding_count": _int(row.get("atlas_finding_count")),
+        "scheduled": _bool(row.get("scheduled")),
+        "schedule_id": str(row.get("schedule_id") or ""),
     }
 
 

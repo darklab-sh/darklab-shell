@@ -188,6 +188,11 @@ function _createHistoryEntry(run, isStarred, options = {}) {
   const meta = document.createElement('div');
   meta.className = 'history-entry-meta';
   meta.appendChild(_historyMetaKindBadge('run'));
+  if (run.scheduled || run.schedule_id) {
+    const scheduledBadge = _historyMetaKindBadge('schedule', 'scheduled');
+    scheduledBadge.title = run.schedule_id ? `Schedule ${run.schedule_id}` : 'Scheduled run';
+    meta.appendChild(scheduledBadge);
+  }
   _appendHistoryMetadataBadges(meta, run);
   const timeEl = document.createElement('span');
   timeEl.textContent = time;

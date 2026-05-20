@@ -12,6 +12,7 @@ from services.notifications.models import require_durable_session_token
 from services.scheduler.cron import default_timezone, next_fire, normalize_cron, validate_timezone
 from services.scheduler.models import (
     FIRE_STATUSES,
+    FIRE_STATUS_FIRED,
     OWNER_KIND_USER,
     OWNER_KINDS,
     OVERLAP_POLICY_SKIP,
@@ -410,6 +411,42 @@ def list_schedule_fires(schedule_id: str, *, limit: int = 50, offset: int = 0, c
     finally:
         if ctx is not None:
             ctx.__exit__(None, None, None)
+
+
+def schedule_ids_by_run(conn, run_ids: list[str]) -> dict[str, str]:
+    ids = [str(run_id or "") for run_id in run_ids if str(run_id or "").strip()]
+    if not ids:
+        return {}
+    placeholders = ", ".join("?" for _ in ids)
+    try:
+        rows = conn.execute(
+            "SELECT run_id, schedule_id FROM schedule_fires "  # nosec B608 - placeholders are generated from trusted count only.
+            f"WHERE status = ? AND run_id IN ({placeholders}) "
+            "ORDER BY fired_at DESC, id DESC",
+            (FIRE_STATUS_FIRED, *ids),
+        ).fetchall()
+    except Exception as exc:
+        if _is_missing_schedule_fires_table(exc):
+            return {}
+        raise
+    schedule_by_run: dict[str, str] = {}
+    for row in rows:
+        run_id = str(_value(row, "run_id") or "")
+        if run_id and run_id not in schedule_by_run:
+            schedule_by_run[run_id] = str(_value(row, "schedule_id") or "")
+    return schedule_by_run
+
+
+def _is_missing_schedule_fires_table(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return (
+        "schedule_fires" in text
+        and (
+            "no such table" in text
+            or "undefinedtable" in text
+            or "does not exist" in text
+        )
+    )
 
 
 def due_schedules(conn, *, now: str | None = None, limit: int = 50) -> list[Schedule]:

@@ -223,7 +223,7 @@ Entity and finding list routes use the same `limit`, `offset`, and filter contra
 
 ## Schedules
 
-Durable `tok_` sessions can manage normal scheduled commands through `/api/v1/schedules` and `darklab schedule`. Schedule create and update calls use the same command-policy checks as browser schedules, so saved commands are validated before they can fire later.
+Durable `tok_` sessions can manage normal scheduled commands through `/api/v1/schedules` and `darklab schedule`. Schedule create and update calls use the same command-policy checks as browser schedules, so saved commands are validated before they can fire later. Due schedules launch through the same brokered run path as manual runs; history summaries mark those runs with `scheduled: true` and the originating `schedule_id`.
 
 ```bash
 darklab schedule create --every hourly -- nmap -p 80 darklab.sh

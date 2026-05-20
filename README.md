@@ -626,7 +626,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── __init__.py     # Scheduled-run service package marker and config helper
 │   │   │   ├── commands.py     # Shared scheduled-command validation helpers
 │   │   │   ├── cron.py         # Strict cron, cadence preset, timezone, and next-fire helpers
-│   │   │   ├── dispatch.py     # Schedule fire audit boundary for normal and watcher-owned schedules
+│   │   │   ├── dispatch.py     # Schedule fire dispatch, broker launch, skip handling, and fire audit rows
 │   │   │   ├── models.py       # Schedule and schedule-fire dataclasses, constants, and allowed values
 │   │   │   ├── recovery.py     # Scheduler startup recovery for missed fire windows
 │   │   │   ├── service.py      # Backend-agnostic schedule CRUD, due-row, and fire-audit helpers

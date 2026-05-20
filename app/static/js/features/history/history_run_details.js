@@ -395,7 +395,7 @@ function _renderHistoryRunSummary(body, run) {
   const occurrenceLabel = Number.isFinite(occurrenceCount) ? occurrenceCount.toLocaleString() : '0';
   const summary = document.createElement('div');
   summary.className = 'history-run-summary-grid';
-  summary.append(
+  const summaryRows = [
     _historyRunMetaRow('Status', _historyExitLabel(run.exit_code)),
     _historyRunMetaRow('Started', run.started ? new Date(run.started).toLocaleString() : ''),
     _historyRunMetaRow('Finished', run.finished ? new Date(run.finished).toLocaleString() : ''),
@@ -407,7 +407,11 @@ function _renderHistoryRunSummary(body, run) {
       'Artifacts',
       Number(run.artifact_count || (Array.isArray(run.artifacts) ? run.artifacts.length : 0) || 0).toLocaleString(),
     ),
-  );
+  ];
+  if (run.schedule_id) {
+    summaryRows.splice(1, 0, _historyRunMetaRow('Schedule', `scheduled · ${run.schedule_id}`));
+  }
+  summary.append(...summaryRows);
   body.appendChild(summary);
 
   const context = document.createElement('div');
