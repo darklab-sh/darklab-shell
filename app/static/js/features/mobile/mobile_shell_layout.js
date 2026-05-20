@@ -21,6 +21,8 @@ const _permalinkToastHomeParent = typeof permalinkToast !== 'undefined' && perma
 const _confirmHostEl = document.getElementById('confirm-host');
 const _confirmHostHomeParent = _confirmHostEl ? _confirmHostEl.parentElement : null;
 const _workflowsOverlayHomeParent = typeof workflowsOverlay !== 'undefined' && workflowsOverlay ? workflowsOverlay.parentElement : null;
+const _schedulesOverlayEl = document.getElementById('schedules-overlay');
+const _schedulesOverlayHomeParent = _schedulesOverlayEl ? _schedulesOverlayEl.parentElement : null;
 const _workspaceOverlayHomeParent = typeof workspaceOverlay !== 'undefined' && workspaceOverlay ? workspaceOverlay.parentElement : null;
 const _faqOverlayHomeParent = typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay.parentElement : null;
 const _commandRegistryOverlayHomeParent = typeof commandRegistryOverlay !== 'undefined' && commandRegistryOverlay ? commandRegistryOverlay.parentElement : null;
@@ -91,6 +93,7 @@ const _uiOverlayRefs = {
   mobileMenu: mobileMenu || null,
   hamburgerBtn: hamburgerBtn || null,
   workflowsOverlay: typeof workflowsOverlay !== 'undefined' && workflowsOverlay ? workflowsOverlay : null,
+  schedulesOverlay: _schedulesOverlayEl,
   workspaceOverlay: _workspaceOverlayEl,
   workspaceViewerOverlay: typeof workspaceViewerOverlay !== 'undefined' && workspaceViewerOverlay ? workspaceViewerOverlay : null,
   workspaceEditorOverlay: typeof workspaceEditorOverlay !== 'undefined' && workspaceEditorOverlay ? workspaceEditorOverlay : null,
@@ -123,7 +126,8 @@ const _mobileShellOverlayNodes = [
   { node: themeOverlay, homeParent: _themeOverlayHomeParent, desktopAnchor: optionsOverlay || null },
   { node: optionsOverlay, homeParent: _optionsOverlayHomeParent, desktopAnchor: _workspaceOverlayEl || workflowsOverlay || null },
   { node: _workspaceOverlayEl, homeParent: _workspaceOverlayHomeParent, desktopAnchor: workflowsOverlay || null },
-  { node: workflowsOverlay, homeParent: _workflowsOverlayHomeParent, desktopAnchor: null },
+  { node: workflowsOverlay, homeParent: _workflowsOverlayHomeParent, desktopAnchor: _schedulesOverlayEl || null },
+  { node: _schedulesOverlayEl, homeParent: _schedulesOverlayHomeParent, desktopAnchor: null },
 ];
 
 function syncMobileShellChromeLayout(useMobile, mobileShellChromeMount) {

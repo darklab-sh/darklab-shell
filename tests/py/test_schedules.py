@@ -72,6 +72,10 @@ class TestSchedulesRoutes:
         assert listed.status_code == 200
         assert [item["id"] for item in listed.get_json()["schedules"]] == [schedule["id"]]
 
+        detail = client.get(f"/schedules/{schedule['id']}", headers={"X-Session-ID": token})
+        assert detail.status_code == 200
+        assert detail.get_json()["schedule"]["id"] == schedule["id"]
+
         updated = client.patch(
             f"/schedules/{schedule['id']}",
             headers={"X-Session-ID": token},
@@ -102,8 +106,43 @@ class TestSchedulesRoutes:
 
         assert other_list.status_code == 200
         assert other_list.get_json()["schedules"] == []
+        assert client.get(f"/schedules/{schedule_id}", headers={"X-Session-ID": other}).status_code == 404
+        assert client.get(f"/schedules/{schedule_id}/fires", headers={"X-Session-ID": other}).status_code == 404
         assert other_patch.status_code == 404
         assert other_delete.status_code == 404
+
+    def test_schedule_preview_returns_next_three_fires(self, monkeypatch, tmp_path):
+        client, _db_path = _schedule_client(monkeypatch, tmp_path)
+        token = "tok_schedule_preview"
+        _register_token(token)
+
+        resp = client.get("/schedules/preview?cadence_preset=hourly&tz=UTC", headers={"X-Session-ID": token})
+
+        assert resp.status_code == 200
+        payload = resp.get_json()
+        assert payload["cron_expr"] == "0 * * * *"
+        assert payload["cadence_preset"] == "hourly"
+        assert payload["timezone"] == "UTC"
+        assert len(payload["next_fires"]) == 3
+
+        valid_custom = client.get(
+            "/schedules/preview?cron=*/5%20*%20*%20*%20*&tz=America/Chicago",
+            headers={"X-Session-ID": token},
+        )
+        invalid_custom = client.get("/schedules/preview?cron=*/4%20*%20*%20*%20*&tz=UTC", headers={"X-Session-ID": token})
+
+        assert valid_custom.status_code == 200
+        assert valid_custom.get_json()["timezone"] == "America/Chicago"
+        assert invalid_custom.status_code == 400
+        assert "every 5 minutes" in invalid_custom.get_json()["message"]
+
+    def test_schedule_preview_requires_durable_session_token(self, monkeypatch, tmp_path):
+        client, _db_path = _schedule_client(monkeypatch, tmp_path)
+
+        resp = client.get("/schedules/preview?cadence_preset=hourly&tz=UTC", headers={"X-Session-ID": "anon"})
+
+        assert resp.status_code == 401
+        assert resp.get_json()["error"] == "session_token_required"
 
     def test_schedule_create_rejects_disallowed_command(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
@@ -161,6 +200,13 @@ class TestSchedulesRoutes:
             "status": "fired",
             "reason": "started scheduled run",
         }
+
+        fires = client.get(f"/schedules/{schedule_id}/fires", headers={"X-Session-ID": token})
+        assert fires.status_code == 200
+        fires_payload = fires.get_json()
+        assert fires_payload["total"] == 1
+        assert fires_payload["fires"][0]["schedule_id"] == schedule_id
+        assert fires_payload["fires"][0]["status"] == "fired"
 
     def test_schedule_create_enforces_session_cap(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)

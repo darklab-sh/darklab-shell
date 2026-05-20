@@ -13,7 +13,7 @@ from config import CFG
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from extensions import limiter
 from services.scheduler.commands import ScheduleCommandValidationError, validate_schedule_command
-from services.scheduler.cron import ScheduleCronError
+from services.scheduler.cron import ScheduleCronError, default_timezone, next_fire, normalize_cron, validate_timezone
 from services.scheduler.dispatch import fire_schedule
 from services.scheduler.models import OWNER_KIND_USER
 from services.scheduler.service import (
@@ -21,9 +21,11 @@ from services.scheduler.service import (
     create_schedule,
     delete_schedule,
     get_schedule,
+    list_schedule_fires,
     list_for_session,
     update_schedule,
 )
+from services.projects.utils import normalize_page_limit, normalize_page_offset, page_payload
 from services.session.variables import SessionVariableError
 
 log = logging.getLogger("shell")
@@ -66,6 +68,10 @@ def _schedule_payload(schedule):
     return payload
 
 
+def _schedule_fire_payload(fire):
+    return asdict(fire)
+
+
 def _schedule_error_response(exc):
     if isinstance(exc, ScheduleNotFound):
         return jsonify({"error": "schedule_not_found"}), 404
@@ -92,6 +98,32 @@ def _schedule_for_session_or_404(schedule_id: str, session_id: str):
     return schedule
 
 
+@schedules_bp.route("/schedules/preview")
+def schedules_preview():
+    session_id, error_response = _required_token_session()
+    if error_response:
+        return error_response
+    try:
+        cron_expr, cadence_preset = normalize_cron(
+            request.args.get("cron") or request.args.get("cron_expr"),
+            cadence_preset=request.args.get("cadence_preset") or request.args.get("preset"),
+        )
+        timezone_name = validate_timezone(request.args.get("tz") or request.args.get("timezone") or default_timezone())
+        cursor = datetime.now(timezone.utc)
+        next_fires = []
+        for _ in range(3):
+            cursor = next_fire(cron_expr, cursor, timezone_name)
+            next_fires.append(cursor.isoformat())
+    except (ScheduleCronError, ValueError) as exc:
+        return _schedule_error_response(exc)
+    return jsonify({
+        "cron_expr": cron_expr,
+        "cadence_preset": cadence_preset,
+        "timezone": timezone_name,
+        "next_fires": next_fires,
+    })
+
+
 @schedules_bp.route("/schedules")
 def schedules_list():
     session_id, error_response = _required_token_session()
@@ -102,6 +134,33 @@ def schedules_list():
     except (ScheduleError, ScheduleCronError, ValueError) as exc:
         return _schedule_error_response(exc)
     return jsonify({"schedules": schedules})
+
+
+@schedules_bp.route("/schedules/<schedule_id>")
+def schedules_detail(schedule_id):
+    session_id, error_response = _required_token_session()
+    if error_response:
+        return error_response
+    try:
+        schedule = _schedule_for_session_or_404(schedule_id, session_id)
+    except ScheduleNotFound as exc:
+        return _schedule_error_response(exc)
+    return jsonify({"schedule": _schedule_payload(schedule)})
+
+
+@schedules_bp.route("/schedules/<schedule_id>/fires")
+def schedules_fires(schedule_id):
+    session_id, error_response = _required_token_session()
+    if error_response:
+        return error_response
+    try:
+        schedule = _schedule_for_session_or_404(schedule_id, session_id)
+        limit = normalize_page_limit(request.args.get("limit"), default=20, maximum=100)
+        offset = normalize_page_offset(request.args.get("offset"))
+        fires, total = list_schedule_fires(schedule.id, limit=limit, offset=offset)
+    except (ScheduleNotFound, ScheduleError, ValueError) as exc:
+        return _schedule_error_response(exc)
+    return jsonify(page_payload("fires", [_schedule_fire_payload(fire) for fire in fires], total, limit, offset))
 
 
 @schedules_bp.route("/schedules", methods=["POST"])

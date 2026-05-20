@@ -952,11 +952,21 @@ class TestSchedulerFoundation:
 
         next_hour = cron.next_fire("0 * * * *", datetime(2026, 5, 20, 12, 15, tzinfo=timezone.utc), "UTC")
         assert next_hour == datetime(2026, 5, 20, 13, 0, tzinfo=timezone.utc)
+        assert cron.validate_cron("*/5 * * * *") == "*/5 * * * *"
+        assert cron.validate_cron("0,15,30,45 * * * *") == "0,15,30,45 * * * *"
 
         with pytest.raises(cron.ScheduleCronError):
             cron.normalize_cron("@hourly")
         with pytest.raises(cron.ScheduleCronError):
             cron.normalize_cron("* * * * * *")
+        with pytest.raises(cron.ScheduleCronError, match="every 5 minutes"):
+            cron.normalize_cron("* * * * *")
+        with pytest.raises(cron.ScheduleCronError, match="every 5 minutes"):
+            cron.normalize_cron("*/4 * * * *")
+        with pytest.raises(cron.ScheduleCronError, match="every 5 minutes"):
+            cron.normalize_cron("1/4 * * * *")
+        with pytest.raises(cron.ScheduleCronError, match="every 5 minutes"):
+            cron.normalize_cron("0,3,10 * * * *")
         with pytest.raises(cron.ScheduleCronError):
             cron.validate_timezone("Not/A_Timezone")
 

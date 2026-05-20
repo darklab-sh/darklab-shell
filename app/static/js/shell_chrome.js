@@ -387,6 +387,10 @@
       global.openCommandRegistry();
       return;
     }
+    if (action === 'schedules' && typeof global.openSchedulesModal === 'function') {
+      void global.openSchedulesModal();
+      return;
+    }
     if (action === 'projects' && typeof global.openProjectWorkspace === 'function') {
       void global.openProjectWorkspace();
       return;

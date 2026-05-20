@@ -1435,6 +1435,18 @@ function _historyRenderPanelData(data) {
         },
       });
 
+      bindPressable(entry.querySelector('[data-action="open-schedule"]'), {
+        refocusComposer: false,
+        onActivate: (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const scheduleId = event.currentTarget?.dataset?.scheduleId || run.schedule_id || '';
+          if (scheduleId && typeof openSchedulesModal === 'function') {
+            void openSchedulesModal({ scheduleId });
+          }
+        },
+      });
+
       bindPressable(entry.querySelector('[data-action="copy-command"]'), {
         onActivate: () => {
           _closeHistoryActionMenus();

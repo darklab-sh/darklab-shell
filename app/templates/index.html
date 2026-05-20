@@ -218,6 +218,11 @@
             <span class="menu-item-hint" id="mobile-menu-workflows-count"></span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="schedules">
+            <span class="menu-item-icon" aria-hidden="true">↻</span>
+            <span class="menu-item-label">schedules</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
           {% if workspace_enabled %}
           <button type="button" class="menu-item nav-item" data-menu-action="workspace">
             <span class="menu-item-icon" aria-hidden="true">▣</span>
@@ -301,6 +306,7 @@
       <button class="rail-nav-item nav-item" data-action="atlas" type="button" title="Session Entity Atlas (Alt+A)"><span class="rail-nav-glyph">◎</span><span class="rail-nav-label">atlas</span></button>
       <button class="rail-nav-item nav-item" data-action="status-monitor" type="button" title="Status Monitor (Alt+M)"><span class="rail-nav-glyph">◉</span><span class="rail-nav-label">status</span></button>
       <button class="rail-nav-item nav-item" data-action="command-registry" type="button" title="Command Registry"><span class="rail-nav-glyph">⌘</span><span class="rail-nav-label">commands</span></button>
+      <button class="rail-nav-item nav-item" data-action="schedules" type="button" title="Scheduled commands"><span class="rail-nav-glyph">↻</span><span class="rail-nav-label">schedules</span></button>
       {% if workspace_enabled %}
       <button class="rail-nav-item nav-item" data-action="workspace" type="button" title="Session files (Alt+Shift+F)"><span class="rail-nav-glyph">▣</span><span class="rail-nav-label">files</span></button>
       {% endif %}
@@ -738,6 +744,29 @@
       <button type="submit" class="btn btn-primary btn-compact" id="workflow-editor-save-btn">Save workflow</button>
     </div>
   </form>
+</div>
+
+<!-- Schedules Modal -->
+<div id="schedules-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
+  <section id="schedules-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="schedules-title">
+    <div class="faq-header">
+      <span class="faq-title" id="schedules-title">SCHEDULES</span>
+      <div class="schedules-header-actions">
+        <button type="button" class="btn btn-secondary btn-compact" id="schedules-new-btn">New schedule</button>
+        <button type="button" class="close-btn schedules-close" aria-label="Close schedules">✕</button>
+      </div>
+    </div>
+    <div class="schedules-layout">
+      <aside class="schedules-sidebar">
+        <div class="schedules-sidebar-toolbar">
+          <button type="button" class="btn btn-secondary btn-compact" id="schedules-refresh-btn">Refresh</button>
+          <span class="schedules-count" id="schedules-count">0</span>
+        </div>
+        <div class="schedules-list nice-scroll" id="schedules-list" aria-live="polite"></div>
+      </aside>
+      <div class="schedules-detail nice-scroll" id="schedules-detail"></div>
+    </div>
+  </section>
 </div>
 
 <!-- FAQ Modal -->
@@ -1254,6 +1283,7 @@
 <script src="/static/js/features/terminal/mobile_composer_keyboard.js"></script>
 <script src="/static/js/features/autocomplete/runtime_context.js"></script>
 <script src="/static/js/features/tour/tour_cli.js"></script>
+<script src="/static/js/features/schedules/schedules_modal.js"></script>
 <script src="/static/js/features/workflows/workflows.js"></script>
 <script src="/static/js/features/mobile/mobile_menu_actions.js"></script>
 <script src="/static/js/features/shortcuts/global_shortcuts.js"></script>

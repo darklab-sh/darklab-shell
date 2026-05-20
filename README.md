@@ -48,6 +48,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Safer sharing** — a built-in basic redaction baseline can mask common secrets or infrastructure details on snapshot permalinks, with optional operator regex rules appended on top. Permalink creation can choose raw vs redacted sharing per snapshot without changing the stored run history; app-native intel response bodies are omitted from share/styled export surfaces, while local text exports remain raw
 - **Run notifications** — optional browser desktop notifications fire on run completion, using command-root-only titles and exit/elapsed summaries without sending anything outside the browser
 - **Outbound notifications** — durable `tok_` sessions can send queued external-run completion notifications and manual test sends to webhook, Slack, Discord, Telegram, Pushover, or email channels, with vault-backed secrets, masked list responses, retries, and delivery audit rows
+- **Scheduled runs** — durable `tok_` sessions can save recurring commands with hourly, daily, weekly, or custom cron cadence, choose a schedule timezone, preview the next fire times in that timezone, manually fire or pause schedules, and open scheduled history runs back to their originating schedule
 - **Themes and presentation** — named theme variants, a terminal-native `theme` command, theme-aware permalink/export rendering, mobile/desktop theme parity, browser-aligned permalink/saved-HTML export styling with best-effort PDF parity, MOTD support, a customizable welcome animation (ASCII art, sampled commands, rotating hints), a guided onboarding tour in the terminal and desktop carousel, a section-grouped operator-configurable FAQ modal, and user options for welcome-intro behavior plus default share-snapshot redaction that now follow the active session token instead of staying browser-local
 - **Built-in commands** — native shell commands like `help`, `commands`, `history`, `last`, `limits`, `status`, `runs`, `stats`, `project`, `workflow`, `file`, `ls`, `cat`, `mv`, `rm`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available. `project` manages project selection, links, and targets from the terminal; `commands info <tool>` and the desktop/mobile Command Registry expose supported external-tool descriptions, examples, flags, and subcommands from `commands.yaml`; `runs` / `jobs` show active app-run metadata with CPU and RSS memory, `runs --json` prints an automation-friendly snapshot, and `stats` summarizes session activity by command root
 - **Headless API and CLI** — `/api/v1` and the bundled `darklab` CLI let scripts and CI jobs authenticate with a session token, start non-interactive runs, wait for final status, list or tail active jobs as SSE or NDJSON, cancel active runs, read history/ranged output/artifacts, grep saved output with line context, inspect Atlas and project data, manage scheduled commands and outbound notification channels, read notification delivery audits, and link or unlink completed runs from active projects without driving the browser
@@ -663,6 +664,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   │   ├── history.css # History drawer, history rows, Run Details modal, and history actions
 │   │   │   │   ├── projects.css # Projects modal, mobile project workspace, entity editors, compare picker, and package wizard
 │   │   │   │   ├── run-comparison.css # Run Comparison modal, split-view, controls, transcript diff, and mobile compare layout
+│   │   │   │   ├── schedules.css # Schedules modal, recurring-run editor, and schedule-fire audit rows
 │   │   │   │   ├── status-monitor.css # Status Monitor modal, visual cards, active-run rows, and mobile sheet layout
 │   │   │   │   ├── workflows.css # Workflows modal, workflow cards, editor, and rendered step controls
 │   │   │   │   └── workspace.css # Files modal, file viewer/editor, workspace rows, and workspace metadata chips
@@ -766,6 +768,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   ├── runner_active_restore.js # Detached active-run restore markers shared by tabs, PTY, and runner reload recovery
 │   │       │   │   ├── runner_persistence.js # Client-side saved-run persistence for local runner commands
 │   │       │   │   └── runner_workspace.js # Workspace-terminal command parsing and path helpers
+│   │       │   ├── schedules/
+│   │       │   │   └── schedules_modal.js # Schedules modal state, cadence preview, schedule actions, and run handoffs
 │   │       │   ├── shortcuts/
 │   │       │   │   ├── global_shortcuts.js # Global tab/action/chrome shortcut matching and dispatch
 │   │       │   │   └── shortcuts_key_handler.js # Global ? keyboard shortcut for the shortcuts overlay

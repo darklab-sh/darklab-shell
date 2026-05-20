@@ -345,10 +345,13 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | Method | Endpoint | Description |
 | -------- | ---------- | ------------- |
 | `GET` | `/schedules` | Lists normal scheduled runs for the current durable session token. |
+| `GET` | `/schedules/preview` | Returns the next three fire times for a cron expression or cadence preset without writing a schedule row. |
+| `GET` | `/schedules/<schedule_id>` | Returns one current-session normal schedule. |
 | `POST` | `/schedules` | Creates a normal scheduled run after validating the command, cadence, timezone, and per-session schedule cap. |
 | `PATCH` | `/schedules/<schedule_id>` | Updates one current-session schedule and re-validates changed command or cadence fields. |
 | `DELETE` | `/schedules/<schedule_id>` | Deletes one current-session normal schedule. |
 | `POST` | `/schedules/<schedule_id>/run-now` | Fires one current-session schedule immediately from the web worker and records a schedule fire audit row. |
+| `GET` | `/schedules/<schedule_id>/fires` | Returns paged fire audit rows for one current-session normal schedule. |
 
 ### Session Routes
 
@@ -820,7 +823,9 @@ The scheduler worker is a dedicated Gunicorn-sibling process started and supervi
 
 Due user-owned schedules launch through the same brokered run preparation path as browser and API runs, including command policy checks, registry rewrites, variable expansion, runtime checks, workspace output rewrites, history persistence, and run-complete notification fan-out. Each fire writes a `schedule_fires` audit row; successful fires store the resulting run id on both the audit row and the schedule. History and Run Details read those audit rows to show a scheduled-run badge. If the owning token has been revoked, the scheduler records `skipped_revoked` and disables the schedule. If the previous scheduled run is still active, the scheduler records `skipped_overlap` and advances to the next fire window instead of queueing another copy.
 
-Cron support is intentionally strict: five-field POSIX cron only, with `hourly`, `daily`, and `weekly` cadence presets normalized to canonical cron strings before storage. Each schedule stores an IANA timezone, defaulting to `scheduler.default_timezone` (`UTC`). On startup, recovery coalesces recent missed fire windows into one catch-up fire within `scheduler.max_catchup_window_seconds`; older missed windows are skipped with an audit row in `schedule_fires`. The v1 overlap policy is always stored and enforced as `skip`, leaving the column in place for future policies without changing the current behavior.
+The browser Schedules modal uses the same route contract as the terminal and CLI management paths. Its cadence preview calls `/schedules/preview`, which is token-authenticated, takes only query parameters, and performs no database write. The modal formats preview times in the selected schedule timezone from the timezone dropdown so the visible "next runs" match the cadence the worker will use. History and Run Details scheduled badges reopen the originating schedule, while Run Details can also prefill a new schedule from the completed command.
+
+Cron support is intentionally strict: five-field POSIX cron only, with `hourly`, `daily`, and `weekly` cadence presets normalized to canonical cron strings before storage. Custom cron expressions cannot run more often than every five minutes, so `*/5 * * * *` is valid but every-minute or two-minute schedules are rejected. Each schedule stores an IANA timezone, defaulting to `scheduler.default_timezone` (`UTC`). On startup, recovery coalesces recent missed fire windows into one catch-up fire within `scheduler.max_catchup_window_seconds`; older missed windows are skipped with an audit row in `schedule_fires`. The v1 overlap policy is always stored and enforced as `skip`, leaving the column in place for future policies without changing the current behavior.
 
 ---
 
@@ -1084,7 +1089,7 @@ That split is what allows the app to keep the interactive shell fast while still
 
 ### Database
 
-SQLite is the default database backend and stores data in `<data_dir>/history.db` with WAL mode, twenty-four persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable. Postgres is the supported production-scaling backend for deployments that need a server database. The server has a `database_backend` selector and a database backend/dialect helper for connection setup, JSON column types and parameters, boolean storage and parameters, timestamps, placeholders, `IN` clauses, limit/offset clauses, upsert clauses, text search expressions, concatenation, SQLite diagnostics, Postgres identifier quoting, advisory-lock IDs, lazy psycopg pool setup, `pg_trgm` availability checks, and storage rows. History search has a backend-aware SQL helper: SQLite keeps its FTS5-first path with `LIKE` fallback for short terms, while Postgres uses substring `ILIKE` clauses backed by trigram indexes. Atlas entity and finding searches use the same backend-aware substring shape so Postgres can use trigram indexes for entity values and finding text. The History list, command recents, stats routes, terminal `stats` built-in, completed-run inserts, full-output artifact metadata writes, snapshot share routes, session preferences, recent values, starred commands, user workflows, secret session migration path, Projects workspace create/link/target paths, Files metadata paths, Atlas list/detail/finding paths, notification event storage, `/diag`, and `/metrics` use the normal backend-aware app query path on both SQLite and Postgres. Postgres startup runs app-owned migrations from `app/core/migrations/` behind a transaction-scoped advisory lock; the first migration is a baseline schema for the current app tables, indexes, JSONB columns, booleans, bytea secret payloads, notification channel/event rows, and triggers, then later migrations add run-history search indexes, Atlas search/detail indexes, Project Findings paging indexes, API token last-seen tracking, and notification storage. The reserved Postgres advisory-lock namespaces are `darklab_shell_migrations`, `darklab_shell_scheduler`, `darklab_shell_notification_worker`, and `darklab_shell_notification_sweep`. When `database_backend` is `postgres`, normal app `db_connect()` calls go through the Postgres pool with an app-compatibility wrapper for the existing `?` placeholder style, PostgreSQL JIT disabled by default for lower-latency interactive requests, and a narrow read-only transient-error retry.
+SQLite is the default database backend and stores data in `<data_dir>/history.db` with WAL mode, twenty-four persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable. Postgres is the supported production-scaling backend for deployments that need a server database. The server has a `database_backend` selector and a database backend/dialect helper for connection setup, JSON column types and parameters, boolean storage and parameters, timestamps, placeholders, `IN` clauses, limit/offset clauses, upsert clauses, text search expressions, concatenation, SQLite diagnostics, Postgres identifier quoting, advisory-lock IDs, lazy psycopg pool setup, `pg_trgm` availability checks, and storage rows. History search has a backend-aware SQL helper: SQLite keeps its FTS5-first path with `LIKE` fallback for short terms, while Postgres uses substring `ILIKE` clauses backed by trigram indexes. Atlas entity and finding searches use the same backend-aware substring shape so Postgres can use trigram indexes for entity values and finding text. The History list, command recents, stats routes, terminal `stats` built-in, completed-run inserts, full-output artifact metadata writes, snapshot share routes, session preferences, recent values, starred commands, user workflows, secret session migration path, Projects workspace create/link/target paths, Files metadata paths, Atlas list/detail/finding paths, notification event storage, schedule storage and fire audits, `/diag`, and `/metrics` use the normal backend-aware app query path on both SQLite and Postgres. Postgres startup runs app-owned migrations from `app/core/migrations/` behind a transaction-scoped advisory lock; the first migration is a baseline schema for the current app tables, indexes, JSONB columns, booleans, bytea secret payloads, notification channel/event rows, and triggers, then later migrations add run-history search indexes, Atlas search/detail indexes, Project Findings paging indexes, API token last-seen tracking, and notification storage. The reserved Postgres advisory-lock namespaces are `darklab_shell_migrations`, `darklab_shell_scheduler`, `darklab_shell_notification_worker`, and `darklab_shell_notification_sweep`. When `database_backend` is `postgres`, normal app `db_connect()` calls go through the Postgres pool with an app-compatibility wrapper for the existing `?` placeholder style, PostgreSQL JIT disabled by default for lower-latency interactive requests, and a narrow read-only transient-error retry.
 
 Logical relationships are owned by the app rather than SQLite foreign-key constraints. Anonymous browser sessions can appear as `session_id` values without a matching `session_tokens` row.
 
@@ -1632,12 +1637,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,052
+- behavior tests: 3,054
 - docs/inventory meta-tests: 32
-- `pytest`: 1646 (1614 behavior + 32 meta)
-- `vitest`: 1186
+- `pytest`: 1648 (1616 behavior + 32 meta)
+- `vitest`: 1187
 - `playwright`: 252
-- total: 3,084
+- total: 3,087
 
 ### Testing Architecture
 

@@ -216,9 +216,22 @@ function _historyRunMetaRow(label, value) {
   const key = document.createElement('span');
   key.textContent = label;
   const val = document.createElement('strong');
-  val.textContent = value == null || value === '' ? '—' : String(value);
+  if (value && typeof value === 'object' && value.nodeType) {
+    val.appendChild(value);
+  } else {
+    val.textContent = value == null || value === '' ? '—' : String(value);
+  }
   row.append(key, val);
   return row;
+}
+
+function _historyRunScheduleLink(run) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn btn-secondary btn-compact history-run-schedule-link';
+  btn.dataset.historyRunAction = 'open-schedule';
+  btn.textContent = `scheduled · ${run.schedule_id}`;
+  return btn;
 }
 
 function _historyRunActionButton(label, action, { disabled = false, tone = 'secondary' } = {}) {
@@ -325,6 +338,7 @@ function _historyRunActionMenu() {
   menu.setAttribute('role', 'menu');
   const items = [
     ['copy-command', 'Copy command'],
+    ['schedule-command', 'Schedule this command'],
     ['edit-metadata', 'Edit metadata'],
   ];
   if (_historyRunCanOpenAtlas()) items.push(['open-atlas', 'Open in Atlas']);
@@ -409,7 +423,7 @@ function _renderHistoryRunSummary(body, run) {
     ),
   ];
   if (run.schedule_id) {
-    summaryRows.splice(1, 0, _historyRunMetaRow('Schedule', `scheduled · ${run.schedule_id}`));
+    summaryRows.splice(1, 0, _historyRunMetaRow('Schedule', _historyRunScheduleLink(run)));
   }
   summary.append(...summaryRows);
   body.appendChild(summary);
@@ -1089,6 +1103,16 @@ async function _handleHistoryRunModalAction(action) {
     copyTextToClipboard(run.command || '')
       .then(() => showToast('Command copied'))
       .catch(() => showToast('Failed to copy command', 'error'));
+  } else if (action === 'schedule-command') {
+    closeHistoryRunOverlay();
+    if (typeof openSchedulesModal === 'function') {
+      void openSchedulesModal({ command: run.command || '' });
+    }
+  } else if (action === 'open-schedule') {
+    closeHistoryRunOverlay();
+    if (run.schedule_id && typeof openSchedulesModal === 'function') {
+      void openSchedulesModal({ scheduleId: run.schedule_id });
+    }
   } else if (action === 'permalink') {
     copyHistoryRunPermalink(run).catch(() => showToast('Failed to copy link', 'error'));
   } else if (action === 'compare') {

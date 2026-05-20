@@ -15,6 +15,9 @@ class ScheduleCronError(ValueError):
     """Raised when a schedule cadence or timezone is invalid."""
 
 
+MIN_CRON_INTERVAL_MINUTES = 5
+
+
 def default_timezone() -> str:
     value = str(scheduler_cfg().get("default_timezone") or "UTC").strip() or "UTC"
     validate_timezone(value)
@@ -59,7 +62,70 @@ def validate_cron(cron_expr: str) -> str:
         raise ScheduleCronError("cron expression must use five POSIX fields")
     if not croniter.is_valid(normalized):
         raise ScheduleCronError("cron expression is invalid")
+    _validate_minute_spacing(parts[0])
     return normalized
+
+
+def _validate_minute_spacing(minute_field: str) -> None:
+    minutes = _expand_minute_field(minute_field)
+    if len(minutes) <= 1:
+        return
+    ordered = sorted(minutes)
+    gaps = [next_minute - minute for minute, next_minute in zip(ordered, ordered[1:])]
+    gaps.append((ordered[0] + 60) - ordered[-1])
+    if min(gaps) < MIN_CRON_INTERVAL_MINUTES:
+        raise ScheduleCronError("cron minute field cannot run more often than every 5 minutes")
+
+
+def _expand_minute_field(minute_field: str) -> set[int]:
+    values: set[int] = set()
+    for segment in minute_field.split(","):
+        segment = segment.strip()
+        if not segment:
+            raise ScheduleCronError("cron expression is invalid")
+        base, step = _split_minute_step(segment)
+        start, end = _minute_range(base, has_step="/" in segment)
+        values.update(range(start, end + 1, step))
+    return values
+
+
+def _split_minute_step(segment: str) -> tuple[str, int]:
+    if "/" not in segment:
+        return segment, 1
+    base, step_text = segment.split("/", 1)
+    try:
+        step = int(step_text)
+    except ValueError as exc:
+        raise ScheduleCronError("cron expression is invalid") from exc
+    if step <= 0:
+        raise ScheduleCronError("cron expression is invalid")
+    return base or "*", step
+
+
+def _minute_range(base: str, *, has_step: bool = False) -> tuple[int, int]:
+    if base == "*":
+        return 0, 59
+    if "-" in base:
+        start_text, end_text = base.split("-", 1)
+        start = _minute_number(start_text)
+        end = _minute_number(end_text)
+        if start > end:
+            raise ScheduleCronError("cron expression is invalid")
+        return start, end
+    minute = _minute_number(base)
+    if has_step:
+        return minute, 59
+    return minute, minute
+
+
+def _minute_number(value: str) -> int:
+    try:
+        minute = int(value)
+    except ValueError as exc:
+        raise ScheduleCronError("cron expression is invalid") from exc
+    if minute < 0 or minute > 59:
+        raise ScheduleCronError("cron expression is invalid")
+    return minute
 
 
 def _aware_after(after: datetime, tz_name: str) -> datetime:

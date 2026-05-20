@@ -42,14 +42,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
     - Reuse the existing `/runs` broker, command preparation path (allowlist, deny-prefix, registry rewrite, variable expansion), and history persistence so a scheduled run is indistinguishable from a manually-launched run except for the source tag.
     - Reuse the shipped outbound notification queue for scheduled-run-failed and run-complete fan-out.
     - Non-goals for v1: workflow scheduling (commands only), cross-session schedules, per-target scheduling, calendar-based holidays/blackout windows.
-  - Phase 2 — Browser Schedules modal
-    - New `app/static/js/features/schedules/`. Modal lives beside Workflows. Two-column layout: list on left, detail/edit on right.
-    - Cadence editor: preset chips (Every hour / day / week / custom cron) plus a live "next 3 fires" preview computed via a token-authenticated, no-body, no-write server endpoint (`GET /schedules/preview?cron=...&tz=...`) so the browser does not bundle a croniter clone.
-    - History rows for a schedule's past fires link to their run detail.
-    - Scheduled-run badges in History rows and Run Details open the Schedules modal focused on the originating schedule.
-    - Run Details gets a "Schedule this command" action that opens the Schedules modal pre-filled from that run's command, giving operators a visible path from a completed run to a recurring schedule.
-    - Revoked-token state appears as a clear paused badge: "this schedule is paused because its session token was revoked." The schedule is disabled, not deleted, so the operator can re-enable after re-issuing the token.
-    - Pressables and confirms follow the design-system primitives.
   - Phase 3 — hardening, docs, release
     - Docs: new `docs/schedules.md` covering cron support, timezone handling, missed-fire behavior, overlap policy, fan-out to notifications, and the per-session schedule cap.
     - `CONFIGURATION.md` updates for `scheduler.{lock_path, tick_seconds, max_per_session, missed_fire_policy, max_catchup_window_seconds, default_timezone}`. `scheduler.max_per_session` defaults to 32.
@@ -124,6 +116,94 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
     - Log events: `WATCHER_FIRED`, `WATCHER_CHANGED`, `WATCHER_RECOVERED`, `WATCHER_ERROR`, `WATCHER_BASELINE_ACCEPTED`, `WATCHER_DIFF_FAILED`, `WATCHER_DISABLED_AFTER_ERRORS`.
     - Smoke tests cover a full create → fire (no change) → fire (changed) → notify → accept-baseline cycle.
 
+- **Status Monitor Command Constellation full-sky polish**
+  - Goal
+    - The Status Monitor's Command Constellation maps run history onto a 24-hour clock-time X axis and a log-elapsed Y axis. Most operators run commands during a 6–16 hour daily window, so the canvas always contains a large dead zone (typically 22:00–09:00) that reads as visual void instead of constellation.
+    - Keep the existing time-of-day X axis semantics intact for operators who want strict clock-time reading, but make the **default** rendering visually balanced — the canvas should look like a continuous sky regardless of which hours the operator actually uses.
+    - Three additive changes combined into one feature: auto-fit X axis to the operator's active window (with a Full-day toggle), diurnal-weighted ambient star density so empty patches still have texture, and a daylight-gradient backdrop that paints the 24h cycle as an atmospheric tone.
+    - Non-goals: redesigning the axis contract (Y stays log-elapsed, X stays time-of-day), radial / clock-face alternate view, multi-day stacked strips. Those are bigger swings; this TODO is polish on the current chart.
+  - Phase 0 — measurement scaffolding and toggle plumbing
+    - Add helpers in `app/static/js/status_monitor.js` near the existing `_renderConstellationPanel`:
+      - `_constellationHourDensity(stars)` — returns a length-24 array of bin counts, normalized to `[0, 1]` against the busiest hour. Reused by Phase 1 and Phase 2.
+      - `_constellationActiveWindow(stars, { paddingMinutes = 60 } = {})` — returns `{startMin, endMin}` computed from the 5th and 95th percentile of `started.getHours() * 60 + getMinutes()` across the plotted stars, padded ±`paddingMinutes`, clamped to `[0, 1440]`. Returns the full `{0, 1440}` window when there are fewer than 6 stars (avoid pathological narrow windows on a brand-new session).
+      - `_constellationMinuteToX(window)` — closure returning `minute → x` mapped onto `CONSTELLATION_PLOT_LEFT … CONSTELLATION_PLOT_RIGHT`. Replaces the inline `(minutes / 1440) * CONSTELLATION_PLOT_WIDTH` math at the existing star-placement site (`status_monitor.js:1869`) so all downstream renderers (stars, ambient, streak-paths, time guides, popovers) use one mapping.
+    - Add a `constellation.full_day` boolean to the existing Options/preferences shape (default `false`). The toggle lives in the constellation legend, not in Options modal — it's a per-view setting, not a session-wide one. Persist via the existing session-preferences flow so a reload remembers it.
+    - Acceptance criteria
+      - Hover/click position math still hits the right star after the X mapping moves through `_constellationMinuteToX` (existing tests in `tests/js/unit/status_monitor.test.js` or similar — verify and extend if needed).
+      - Toggle round-trips through reload.
+      - `_constellationActiveWindow` returns `{0, 1440}` for fewer than 6 stars; returns a padded window otherwise.
+  - Phase 1 — auto-fit X axis with Full-day toggle (the "Option 1" piece)
+    - When `constellation.full_day` is `false` (default), compute the active window and use it for X-mapping. Re-derive on every render so the window adapts as new runs land.
+    - When `true`, fall back to the existing `{0, 1440}` mapping.
+    - Update `_appendConstellationTimeGuides(svg)` to pick guide positions from the current window:
+      - Major guides at evenly-spaced ticks **inside** the window (4 ticks for narrow windows ≤ 6 hours, 5 for medium 6–12 hours, 6 for wide windows > 12 hours, hour-aligned).
+      - Minor guides at half-intervals between majors.
+      - Labels keep `HH` clock format. Suppress the rightmost-edge label if it would overlap the visual boundary.
+    - Legend gains a small toggle pressable using the `.toggle-btn` primitive (per `ARCHITECTURE.md` Design System): `Active hours / Full day`. Pressing it flips the preference and re-renders the panel only (not the whole Status Monitor).
+    - Meta line shows the window — `06:32–22:14 · 142 plotted` in active-hours mode, `last 30 days · 142 plotted` in full-day mode.
+    - Acceptance criteria
+      - Empty session: defaults to full-day layout (no narrow degenerate window).
+      - 30 days of 09:00–18:00 runs: active window resolves to roughly `08:00–19:00` with one-hour padding either side.
+      - Toggle is keyboard-activatable, routes through `bindPressable`, and is announced via `aria-pressed`.
+  - Phase 2 — diurnal-weighted ambient stars (the "Option 4" piece)
+    - Modify `_ambientConstellationStars()` to accept an optional `density` array (length 24, from Phase 0's `_constellationHourDensity`) plus the current window. Ambient star X positions sample from a probability distribution that is **inverse** to real-star density inside the window, and uniform outside the window (so the chrome at idle edges still feels lived-in).
+    - Distinguish ambient from real stars visually so hover/keyboard behaviour stays unambiguous:
+      - Ambient stars are smaller (`radius ≤ 1.8px`), zero CSS glow, lower max opacity (`≤ 0.45`), no `.status-monitor-star-node` class, no `data-star-id`, no pointer events.
+      - Use a separate hue token (e.g., a desaturated tone of `--muted`) so ambient never collides with the real category tone palette. The current `--ambient-hue/saturation/lightness` style vars already exist — just lock them to a desaturated palette rather than the wide ranges the helper produces today.
+    - Cap total ambient star count between 80 and 160 (current implementation is similar; verify the bounds work for the new density-aware distribution). Re-randomize the ambient layout on every constellation render so it doesn't read as "fixed" decoration.
+    - Acceptance criteria
+      - A session with all runs at 14:00 produces ambient stars clustered at non-14:00 hours, not in the middle of the data band.
+      - Ambient stars never raise the popover, never gain keyboard focus.
+      - Color-blind smoke check: in a high-contrast theme, ambient stars don't look like dim real stars.
+  - Phase 3 — daylight gradient backdrop (the "Option 7" piece)
+    - Add a single `<linearGradient id="constellation-sky">` definition inside the constellation `<svg>`, then a `<rect>` filling `CONSTELLATION_PLOT_LEFT … CONSTELLATION_PLOT_RIGHT` and the plot height at the **bottom** of the SVG render order (paints first, ambient + real stars on top).
+    - Gradient stops are fixed by hour-of-day, not by data, so the backdrop reads the same regardless of operator activity:
+      - `00:00–05:00` — deep navy (`--theme-panel-bg` shifted toward `--theme-panel-shadow`).
+      - `05:00–07:00` — pre-dawn lift (very subtle warm gradient).
+      - `07:00–17:00` — daytime wash (slightly lighter than baseline).
+      - `17:00–20:00` — dusk gradient (slight warm tone).
+      - `20:00–24:00` — fade back to deep navy.
+    - When the X axis is auto-fit (Phase 1 default), the gradient stops compress with the axis: `00:00` always sits at the left edge of the gradient's coordinate space, `24:00` at the right edge, both mapped through `_constellationMinuteToX` so the gradient lines up with the visible window.
+    - Honor themes: define the gradient stops as `color-mix(in srgb, var(--theme-panel-bg) X%, var(--theme-panel-shadow) Y%)` patterns (or equivalent) so light / dark / high-contrast themes all produce a coherent backdrop. No hard-coded hex colors.
+    - Acceptance criteria
+      - The backdrop is visible in every shipped theme without breaking text contrast on guide labels.
+      - In auto-fit mode the gradient covers the window edge-to-edge with no visible seam between gradient and plot frame.
+      - In full-day mode the gradient covers `0–24` with the standard atmospheric progression.
+  - Phase 4 — tests, docs, and release
+    - Browser unit tests
+      - `_constellationHourDensity` returns a 24-length normalized array for given star fixtures.
+      - `_constellationActiveWindow` returns full-day for sparse fixtures, a padded window for clustered fixtures, and clamps to `[0, 1440]`.
+      - Auto-fit mapping math: a star at minute 800 inside a `{startMin: 600, endMin: 1080}` window maps to the canvas position `(800-600)/(1080-600) * CONSTELLATION_PLOT_WIDTH + CONSTELLATION_PLOT_LEFT`.
+      - Toggle round-trips through preferences and re-renders the panel.
+      - Ambient stars do not carry `data-star-id` and do not appear in `starsByNodeId`.
+    - Visual smoke
+      - Capture screenshots in `tests/ui-capture-scenes.md` for active-hours mode (typical operator), full-day mode (toggle on), and sparse session (no data → ambient + gradient backdrop only).
+    - Docs
+      - `FEATURES.md` "Status HUD" or the Status Monitor section gets one paragraph: "The Command Constellation defaults to your active hours so the canvas stays full — toggle to Full day if you want strict 24-hour reading."
+      - `CHANGELOG.md`, v2.0 merge-request, and release-notes updates.
+      - `ARCHITECTURE.md` Frontend Design System section does **not** need a new primitive; this feature reuses `.toggle-btn` and existing constellation classes.
+  - Open Decisions
+    - **Default mode** — auto-fit on, or full-day on, or operator-must-toggle from a neutral first impression?
+      - *Recommended:* auto-fit on. The dead-zone problem is the reason for this work; default to the fix. Operators who want the original layout flip one toggle. Full-day-by-default just relitigates the current state.
+    - **Window detection algorithm** — min/max active hour, percentile (p5/p95), Tukey fence, or operator-configurable?
+      - *Recommended:* p5/p95 with ±60 minutes padding. Min/max gets dragged by a single overnight midnight-clock run. Percentile is robust to outliers. Tukey is overkill at this sample size. Operator-configurable adds a setting nobody will tune.
+    - **Window padding** — fixed ±60 minutes, dynamic (proportional to window width), or none?
+      - *Recommended:* fixed ±60 minutes. Dynamic padding makes the same-hour run appear in different X positions across days; fixed padding produces stable visual behavior. None makes the leftmost and rightmost stars hug the edge.
+    - **Minimum data for auto-fit** — fewer than 6 stars / fewer than 3 days / never auto-fit on first-day sessions?
+      - *Recommended:* fewer than 6 stars → fall back to full-day. Avoids pathological narrow windows on brand-new sessions and during the first few hours of use. 6 is enough for the percentile math to mean something.
+    - **Recompute cadence** — on every poll tick, only on render, or pinned for the session?
+      - *Recommended:* on every render. The current panel rebuilds on each Status Monitor refresh anyway; pinning produces a stale window that drifts away from current activity. Per-render recomputation is cheap (one percentile pass over ≤ 350 numbers).
+    - **Ambient density target** — match the dead-zone area, or always paint a fixed ambient count?
+      - *Recommended:* fixed total count (80–160) with diurnal weighting, not area-matched. Area-matched means a tiny dead zone gets dense ambient and a huge dead zone gets sparse ambient — backwards. Fixed total with inverse-density placement produces the consistent "sky always full" feel regardless of window size.
+    - **Ambient star refresh policy** — re-randomize on every render, persist across renders, or seed from session id?
+      - *Recommended:* re-randomize. The current ambient implementation already re-renders; preserving exact positions would require deterministic seeding without payoff. Re-randomizing also avoids the eye learning a fixed pattern and treating ambient as data.
+    - **Backdrop coordinate space in auto-fit mode** — compress the gradient with the axis (so "noon" appears at the visual midpoint when the window is 09:00–19:00) or pin the gradient to true 24h coordinates (so "noon" appears wherever 12:00 lands in the mapping)?
+      - *Recommended:* pin to true coordinates via `_constellationMinuteToX`. The gradient is *about* clock time; misaligning it would be confusing. In an `09:00–19:00` window the gradient renders only the daytime wash because the navy bands are off-canvas — which is the correct semantic.
+    - **Theme handling for the backdrop** — single gradient definition, per-theme override, or a `color-mix()` pattern off existing theme tokens?
+      - *Recommended:* `color-mix()` off `--theme-panel-bg` and `--theme-panel-shadow`. Survives every shipped theme + custom themes without per-theme overrides. Document the formula in `THEME.md § Semantic Color Contract` adjacent.
+    - **Toggle placement and label** — legend chip, header-row pressable, popover under the meta line, or inline with the run-count meta?
+      - *Recommended:* legend chip using `.toggle-btn`. The legend already groups display-policy controls (size/Output, Failed); the active-hours toggle is the same shape. Two labels: `Active hours` / `Full day`. Pressable, not a checkbox.
+
 ## Known Issues
 
 No known issues are currently tracked.
@@ -135,6 +215,35 @@ No known issues are currently tracked.
 - **Promote shared run/history API helpers out of browser blueprints.**
   - `app/blueprints/api_v1.py` intentionally reuses private helpers from `blueprints.run` and `blueprints.history` to keep v1 behavior aligned with the browser path.
   - Once the API surface settles, move the shared run-start, stream, history-output, and history-count pieces into service modules so browser routes and `/api/v1` routes both depend on stable service boundaries instead of private route helpers.
+
+- **Migrate inline modal action-result text to `showToast` for consistency.**
+  - The Atlas overlay, Workflows modal, Run Comparison, tab exports, permalink, and the Session Token copy/apply/clear/rotate paths already toast every action result via `showToast(message, tone)`. The Options → Notifications panel was migrated in a recent fix using a local `_toast()` helper that routes through `showToast` and falls back to the inline message bar only when the global is missing — that's the model the surfaces below should adopt.
+  - Pattern A — `field-save-status` inline "saved" badges. Small `<span role="status" aria-live="polite">saved</span>` flashed next to an input. Replace with a one-shot toast on save.
+    - Options → Prompt name: `#options-prompt-username-saved` (`app/templates/index.html:1041`); driven by `showPromptUsernameSavedIndicator` / `hidePromptUsernameSavedIndicator` in `app/static/js/features/preferences/preferences.js:483, 491, 493, 497`.
+    - Run Details → Project notes editor: `#project-notes-save-status` (`app/templates/index.html:834`).
+    - Run Details → Project labels editor: `#project-labels-save-status` (`app/templates/index.html:839`).
+  - Pattern B — persistent in-modal message bars. One shared element holds the latest action result until overwritten or dismissed. Migrate success paths to `showToast`; keep the bar only for long-running progress (e.g., package archive build polling).
+    - Options → Secrets panel (`app/static/js/features/preferences/secrets_panel.js`).
+      - Element: `#options-secrets-msg`; helper: `_optionsSecretsShowMsg(message, isError)` at line 36-39.
+      - Success strings to migrate: `` `${normalizedName} saved.` ``, `` `${normalizedName} replaced.` ``, `` `${normalizedName} deleted.` `` (lines 655-657, 715), `'Secret entry canceled.'` (line 683).
+      - Error strings to migrate: `'Unable to open secret editor'`, `'Unable to edit secret'`, `'Unable to delete secret'`, `'Save failed — …'`, `'Failed to load secrets — …'`, `'Failed to load provider status — …'` (lines 214, 366, 437, 448, 472, 661).
+    - Options → Session Token controls (`app/static/js/features/preferences/session_token_controls.js`).
+      - Element: `#options-session-token-msg`; helper at lines 31-33. Copy/apply/clear/rotate already toast (lines 112, 363, 406, 407, 417); the gap is the validation/error paths (`'Invalid token — expected tok_… or a UUID'` line 268, rotate-verify error line 295) plus the masked-token display at line 8.
+      - The token-display field at line 8 is current-state, not an action result — leave it inline.
+    - Projects modal — the biggest offender (~60 call sites). Element rendered by `app/static/js/features/projects/project_workspace_shell.js:38-60` (`project-workspace-message` + `project-workspace-message-text` plus a `[data-project-message-dismiss]` close button so the bar persists until clicked); helper `setProjectWorkspaceMessage(text, {error, toast})` called across `app/static/js/features/projects/*.js`. Note: `project_workspace_shell.js:29-31` already imports `showToast`, so the surface is wired up.
+      - Success strings to migrate: `'Target added to selected project.'` / `'Target updated.'` (`project_targets.js:164`), `` `${n} entities added to project.` `` (`project_entities.js:931`), `'Package created.'` (`project_packages.js:1183`), `'Project deleted.'` (`project_workspace_events.js:752`), `'Findings deleted.'` (`project_workspace_events.js:886`), `'Target removed.'` (`project_workspace_events.js:933`), `'Run removed from project.'` (`project_workspace_events.js:994`), `'Package deleted.'` (`project_workspace_events.js:1066`), `` `${kind} metadata saved.` `` (`project_entity_editor.js:80`), `` `${removedCount} unavailable ${noun} removed; …` `` (`project_packages.js:1168`).
+      - Error strings to migrate: `'Could not save target.'` (`project_targets.js:166`), `'Could not load project runs.'` (`project_runs.js:59`), `'Package action failed.'` (`project_packages.js:1548`), plus the rest under the existing `error: true` paths.
+      - Keep inline only: long-running status that updates while polling, e.g., `` `Preparing package archive: ${packageJobMessage(current)}` `` (`project_packages.js:1238`). Toast would flash repeatedly.
+    - Workspace / Files modal (`app/static/js/workspace.js`).
+      - Element: `workspaceMessage`; helper `setWorkspaceMessage(message, tone)` at lines 65-70. There is already a `_showWorkspaceToast` fallback (lines 72-77) that prefers `showToast` when available — but the success paths bypass it and call `setWorkspaceMessage` directly.
+      - Success strings to migrate to `showToast`: `` `Saved ${savedPath}` `` (line 1065), `` `Created folder ${path}` `` (line 1081), `` `Deleted ${kind} ${path}` `` (line 1243), `` `Moved ${source} to ${destination}` `` (line 1257).
+      - Error strings: route through `_showWorkspaceToast` (already toast-aware) instead of `setWorkspaceMessage(..., 'error')` at lines 1037, 1089, 1167, 1291, 1475.
+  - Out of scope (leave inline). Editor-local validation that fails in place inside the editor card body — `editor.error.textContent = …` in `notification_channels.js:364`, custom-secret editor `err.textContent = …` at `secrets_panel.js:619, 627, 637`, session-token apply/rotate error nodes at `session_token_controls.js:268, 295`. These are field-contextual errors, not transient action results.
+  - Acceptance criteria when the migration lands:
+    - Every success path in Patterns A and B routes through `showToast` (or a local `_toast()` helper that wraps it).
+    - Pattern A's three `field-save-status` spans can be removed from the templates (no consumers left).
+    - The Projects modal's `setProjectWorkspaceMessage` becomes either deleted (if no caller needs it after migration) or restricted to the long-running polling case in `project_packages.js:1238`.
+    - The Workspace modal's `setWorkspaceMessage` is reduced to load-error/empty-state messaging; success paths use `showToast`.
 
 ---
 

@@ -198,6 +198,9 @@ function _closeMajorOverlays() {
     if (typeof closeWorkflows === 'function') closeWorkflows();
     else hideWorkflowsOverlay();
   }
+  if (typeof isSchedulesOverlayOpen === 'function' && isSchedulesOverlayOpen()) {
+    if (typeof closeSchedulesModal === 'function') closeSchedulesModal({ refocus: false });
+  }
   if (typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen()) {
     if (typeof closeWorkspace === 'function') closeWorkspace();
     else hideWorkspaceOverlay();

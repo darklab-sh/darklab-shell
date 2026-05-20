@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,052
+- behavior tests: 3,054
 - docs/inventory meta-tests: 32
-- `pytest`: 1646 (1614 behavior + 32 meta)
-- `vitest`: 1186
+- `pytest`: 1648 (1616 behavior + 32 meta)
+- `vitest`: 1187
 - `playwright`: 252
-- total: 3,084
+- total: 3,087
 
 This document is organized in two parts:
 
@@ -460,7 +460,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPostgresMigrations.test_postgres_search_migration_adds_trigram_indexes` | Verifies the Postgres run-search migration creates `pg_trgm` and trigram indexes for command and output search. |
 | `TestPostgresMigrations.test_migration_runner_serializes_with_advisory_lock_and_records_versions` | Verifies the Postgres migration runner takes a transaction-scoped advisory lock and records applied migration versions. |
 | `TestPostgresMigrations.test_database_init_runs_postgres_migrations_without_sqlite_bootstrap` | Verifies Postgres startup runs migrations without entering the SQLite bootstrap path. |
-| `TestSchedulerFoundation.test_scheduler_cron_presets_and_strict_cron_validation` | Verifies scheduler cadence presets normalize to canonical cron strings, strict POSIX cron validation rejects unsupported forms, and timezone names must be valid IANA zones. |
+| `TestSchedulerFoundation.test_scheduler_cron_presets_and_strict_cron_validation` | Verifies scheduler cadence presets normalize to canonical cron strings, strict POSIX cron validation rejects unsupported forms and sub-five-minute cadences, and timezone names must be valid IANA zones. |
 | `TestSchedulerFoundation.test_scheduler_service_requires_tokens_and_hides_watcher_owned_rows` | Verifies schedule creation requires a durable session token and normal schedule listings hide watcher-owned schedule rows. |
 | `TestSchedulerFoundation.test_scheduler_recovery_coalesces_recent_missed_fire` | Verifies scheduler recovery coalesces a recent missed fire into one audit row and advances the next fire from the recovered fire time. |
 | `TestSchedulerFoundation.test_scheduler_fire_disables_revoked_token_schedule` | Verifies due schedules whose durable session token was revoked are audited, disabled, and marked with the revoked-token pause reason. |
@@ -1696,11 +1696,13 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 
 | Test | Description |
 | --- | --- |
-| `TestSchedulesRoutes.test_schedule_crud_for_current_session` | Verifies current-session schedule create, list, update, delete, cadence normalization, and enabled-state shaping through the browser routes. |
-| `TestSchedulesRoutes.test_schedule_routes_hide_cross_session_rows` | Verifies schedules are session-isolated and cross-session patch/delete attempts return 404. |
+| `TestSchedulesRoutes.test_schedule_crud_for_current_session` | Verifies current-session schedule create, list, detail, update, delete, cadence normalization, and enabled-state shaping through the browser routes. |
+| `TestSchedulesRoutes.test_schedule_routes_hide_cross_session_rows` | Verifies schedules are session-isolated and cross-session detail, fire-list, patch, and delete attempts return 404. |
+| `TestSchedulesRoutes.test_schedule_preview_returns_next_three_fires` | Verifies the browser preview route returns three next-fire timestamps for a cadence preset and timezone, and rejects custom cron cadences faster than every five minutes. |
+| `TestSchedulesRoutes.test_schedule_preview_requires_durable_session_token` | Verifies the preview route requires a durable session token just like schedule writes. |
 | `TestSchedulesRoutes.test_schedule_create_rejects_disallowed_command` | Verifies schedule creation rejects commands that fail the shared command policy. |
 | `TestSchedulesRoutes.test_schedule_patch_revalidates_changed_command` | Verifies schedule updates re-run command validation when the command changes. |
-| `TestSchedulesRoutes.test_schedule_run_now_records_fire_without_scheduler_process` | Verifies manual run-now records a schedule fire and advances schedule metadata without depending on the scheduler worker. |
+| `TestSchedulesRoutes.test_schedule_run_now_records_fire_without_scheduler_process` | Verifies manual run-now records a schedule fire, exposes the fire audit route, and advances schedule metadata without depending on the scheduler worker. |
 | `TestSchedulesRoutes.test_schedule_create_enforces_session_cap` | Verifies normal schedules respect the configured per-session schedule cap. |
 | `TestScheduleBuiltin.test_schedule_builtin_create_list_info_and_state_changes` | Verifies the terminal schedule command creates, lists, inspects, pauses, resumes, and deletes current-session schedules. |
 | `TestScheduleBuiltin.test_schedule_builtin_rejects_disallowed_command` | Verifies the terminal schedule command rejects commands that fail command policy before persistence. |
@@ -1949,6 +1951,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `keeps macOS double-space substitution out of the command composer` | Verifies that macOS double-space period substitution is normalized back to literal spaces before the composer state updates. |
 | `settles welcome immediately when Enter is pressed during welcome playback` | Verifies that settles welcome immediately when Enter is pressed during welcome playback. |
 | `does not run command when Enter is pressed in cmd input during welcome playback` | Verifies that does not run command when Enter is pressed in cmd input during welcome playback. |
+| `does not let welcome playback steal Space from schedules form fields` | Verifies that the global welcome keyboard handler leaves Schedules modal form input alone while the modal is open. |
 | `renders the shell prompt line from composer state instead of the stale hidden input` | Verifies that renders the shell prompt line from composer state instead of the stale hidden input. |
 | `persists only non-running tabs for session restore` | Verifies that the browser session snapshot excludes active runs and only saves non-running tabs for reload restore. |
 | `persists output signal metadata for session restore` | Verifies that findings, warning, error, and summary metadata survives browser refresh state snapshots. |

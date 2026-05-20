@@ -50,6 +50,7 @@ function dispatchMobileMenuAction(action, btn = null) {
   if (action === 'command-registry' && typeof openCommandRegistry === 'function') openCommandRegistry();
   if (action === 'theme') openThemeSelector();
   if (action === 'workflows') openWorkflows();
+  if (action === 'schedules' && typeof openSchedulesModal === 'function') void openSchedulesModal();
   if (action === 'workspace' && typeof openWorkspace === 'function') openWorkspace();
   if (action === 'faq') openFaq();
   if (action === 'diag') window.location.href = '/diag';

@@ -22,6 +22,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [Tabs & Run History](#tabs--run-history)
 - [Run Comparison](#run-comparison)
 - [Guided Workflows](#guided-workflows)
+- [Scheduled Runs](#scheduled-runs)
 - [Permalinks](#permalinks)
 - [Share Redaction](#share-redaction)
 - [Mobile Shell](#mobile-shell)
@@ -539,6 +540,29 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - `feature_required` — optional feature gate such as `workspace`; hides the workflow when the required app feature is disabled.
 
 **Related files:** `app/conf/workflows.yaml` (operator workflow definitions), `app/services/workflows/user_workflows.py` (session workflow storage), `app/static/js/app.js` (workflow editor and CLI), `app/static/js/shell_chrome.js` (Workflows panel rendering), `app/blueprints/content.py` and `app/blueprints/session.py` (workflow API endpoints).
+
+---
+
+## Scheduled Runs
+
+**Purpose:** recurring commands that keep running on a cadence after the browser tab is closed.
+
+**Behavior:**
+
+- The **Schedules** modal opens from the desktop rail or mobile menu and lists schedules owned by the active durable `tok_` session.
+- Each schedule stores one command, an optional label, an enabled/paused state, an IANA timezone chosen from a dropdown, and either an hourly/daily/weekly preset or a five-field cron expression.
+- The editor previews the next three fire times before saving. Preview timing is computed by the server and displayed in the selected schedule timezone, so the browser uses the same cron rules as the worker.
+- Saved schedules can be edited, paused, resumed, deleted, refreshed, or fired immediately from the modal. Manual fires use the same audit path as worker-fired runs.
+- Fired runs appear in normal History with a `scheduled` badge. Clicking that badge, or the Schedule row in Run Details, reopens the schedule that created the run.
+- Run Details includes **Schedule this command**, which opens the Schedules modal with the completed run's command already filled in.
+- The schedule detail view shows recent fire audit rows, and fired rows can open the resulting Run Details modal.
+- If the owning session token is revoked, the worker disables the schedule and the browser shows it as paused instead of deleting it.
+
+**Limits:** schedules require a durable session token. Anonymous sessions cannot create schedules because there is no durable owner for the worker to enforce after the browser closes. Cron support is strict five-field POSIX cron, and custom cron expressions cannot run more often than every five minutes. Workflow scheduling, blackout calendars, and per-target schedules are out of scope.
+
+**Configuration:** scheduler settings live under `scheduler` in `config.yaml`, including `max_per_session`, `default_timezone`, `tick_seconds`, `max_catchup_window_seconds`, `missed_fire_policy`, and the SQLite `lock_path`. See [CONFIGURATION.md](CONFIGURATION.md).
+
+**Related files:** `app/blueprints/schedules.py` (browser schedule routes), `app/services/scheduler/` (cron, storage, dispatch, and worker helpers), `app/static/js/features/schedules/schedules_modal.js` (Schedules modal), and `app/static/css/features/schedules.css` (modal layout).
 
 ---
 

@@ -1930,6 +1930,26 @@ describe('app helpers', () => {
     expect(runCommand).not.toHaveBeenCalled()
   })
 
+  it('does not let welcome playback steal Space from schedules form fields', async () => {
+    const requestWelcomeSettle = vi.fn()
+    const welcomeOwnsTab = vi.fn(() => true)
+    await loadAppFns({
+      requestWelcomeSettle,
+      welcomeActive: true,
+      welcomeOwnsTab,
+      isSchedulesOverlayOpen: () => true,
+    })
+    const labelInput = document.createElement('input')
+    labelInput.id = 'schedules-label-input'
+    document.body.appendChild(labelInput)
+    labelInput.focus()
+
+    const event = new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true })
+    labelInput.dispatchEvent(event)
+
+    expect(requestWelcomeSettle).not.toHaveBeenCalled()
+  })
+
   it('renders the shell prompt line from composer state instead of the stale hidden input', async () => {
     const { cmdInput, setComposerState, syncShellPrompt } = await loadAppFns()
     const shellPromptText = document.getElementById('shell-prompt-text')

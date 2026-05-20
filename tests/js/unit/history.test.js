@@ -850,7 +850,7 @@ describe('history panel actions', () => {
       'Permalink',
       'Compare',
       'Atlas',
-      'ActionsCopy commandEdit metadataOpen in AtlasAdd to active projectAdd to projectCopy run ID',
+      'ActionsCopy commandSchedule this commandEdit metadataOpen in AtlasAdd to active projectAdd to projectCopy run ID',
     ])
     document.querySelector('.history-run-action-menu-trigger').click()
     expect(document.querySelector('.history-run-action-menu-wrap').classList.contains('open')).toBe(true)
@@ -1079,6 +1079,7 @@ describe('history panel actions', () => {
     expect([...document.querySelectorAll('.history-run-action-menu [data-history-run-action]')].map(el => el.dataset.historyRunAction))
       .toEqual([
         'copy-command',
+        'schedule-command',
         'edit-metadata',
         'open-atlas',
         'remove-project',
@@ -1199,6 +1200,7 @@ describe('history panel actions', () => {
     expect([...document.querySelectorAll('.history-run-action-menu [data-history-run-action]')].map(el => el.dataset.historyRunAction))
       .toEqual([
         'copy-command',
+        'schedule-command',
         'edit-metadata',
         'open-atlas',
         'remove-project',
