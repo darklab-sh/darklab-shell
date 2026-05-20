@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,980
+- behavior tests: 2,987
 - docs/inventory meta-tests: 32
-- `pytest`: 1580 (1548 behavior + 32 meta)
+- `pytest`: 1587 (1555 behavior + 32 meta)
 - `vitest`: 1180
 - `playwright`: 252
-- total: 3,012
+- total: 3,019
 
 This document is organized in two parts:
 
@@ -1032,6 +1032,20 @@ Slack, Discord, Telegram, and Pushover notification channel coverage.
 | `test_telegram_channel_timeout_is_retryable_without_token_leak` | Verifies Telegram timeout errors are retryable and do not echo the bot token. |
 | `test_pushover_channel_posts_form_payload` | Verifies Pushover sends form payloads with optional non-secret priority and sound options. |
 | `test_pushover_channel_requires_secret_refs` | Verifies Pushover channels require vault-backed app-token and user-key references. |
+
+#### `test_notifications_email.py`
+
+SMTP email notification channel coverage.
+
+| Test | Description |
+| --- | --- |
+| `test_email_channel_is_registered` | Verifies the email channel registers with the shared notification channel registry. |
+| `test_email_channel_rejects_missing_smtp_transport` | Verifies email channels reject missing operator SMTP transport config. |
+| `test_email_channel_requires_recipients` | Verifies email channels require at least one channel-owned recipient. |
+| `test_email_channel_sends_starttls_message` | Verifies email delivery uses STARTTLS, operator SMTP credentials, text body, and escaped HTML alternative. |
+| `test_email_channel_uses_smtp_ssl_without_starttls` | Verifies `tls: ssl` uses SMTP-over-SSL without issuing STARTTLS. |
+| `test_email_channel_reports_missing_password_secret_without_leak` | Verifies missing SMTP password environment variables fail terminally without echoing the variable name. |
+| `test_email_channel_retries_smtp_exceptions` | Verifies SMTP send exceptions are retryable and do not leak the password. |
 
 #### `test_notifications_webhook.py`
 

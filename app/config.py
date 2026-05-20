@@ -237,6 +237,14 @@ def load_config(conf_dir=None):
             "do_not_disturb": False,
             "delivery_rate_per_minute": 10,
             "http_timeout_seconds": 8,
+            "smtp": {
+                "host": "",
+                "port": 587,
+                "user": "",
+                "password_secret_id": "",
+                "from_address": "",
+                "tls": "starttls",
+            },
             "retry": {
                 "max_attempts": 6,
                 "max_age_hours": 24,

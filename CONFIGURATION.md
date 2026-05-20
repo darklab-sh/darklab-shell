@@ -228,6 +228,12 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `notifications.do_not_disturb` | `false` | Server-side only. Stops outbound notification delivery before channel sends while keeping queued event storage available |
 | `notifications.delivery_rate_per_minute` | `10` | Server-side only. Per-channel outbound notification send cap used by the worker claim path |
 | `notifications.http_timeout_seconds` | `8` | Server-side only. HTTP timeout for outbound webhook-style notification channel sends |
+| `notifications.smtp.host` | _(empty)_ | Server-side only. SMTP relay host required before email notification channels can send |
+| `notifications.smtp.port` | `587` | Server-side only. SMTP relay port for email notification channels |
+| `notifications.smtp.user` | _(empty)_ | Server-side only. SMTP username for the operator-managed relay |
+| `notifications.smtp.password_secret_id` | _(empty)_ | Server-side only. Environment variable name that contains the SMTP password; email channels never store this value |
+| `notifications.smtp.from_address` | _(empty)_ | Server-side only. From address used for email notification messages |
+| `notifications.smtp.tls` | `starttls` | Server-side only. SMTP TLS mode: `starttls`, `ssl`, or `none` |
 | `notifications.retry.max_attempts` | `6` | Server-side only. Maximum delivery attempts before a notification event moves to dead-letter state |
 | `notifications.retry.max_age_hours` | `24` | Server-side only. Maximum retry window before a notification event moves to dead-letter state |
 | `notifications.retry.base_delay_seconds` | `30` | Server-side only. Base delay for exponential notification retry backoff |

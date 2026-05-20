@@ -226,6 +226,13 @@
 #   do_not_disturb: false
 #   delivery_rate_per_minute: 10
 #   http_timeout_seconds: 8
+#   smtp:
+#     host: ""
+#     port: 587
+#     user: ""
+#     password_secret_id: ""  # Environment variable name holding the SMTP password.
+#     from_address: ""
+#     tls: starttls  # starttls, ssl, or none
 #   retry:
 #     max_attempts: 6
 #     max_age_hours: 24
