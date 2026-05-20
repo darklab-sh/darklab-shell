@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,987
+- behavior tests: 2,992
 - docs/inventory meta-tests: 32
-- `pytest`: 1587 (1555 behavior + 32 meta)
+- `pytest`: 1592 (1560 behavior + 32 meta)
 - `vitest`: 1180
 - `playwright`: 252
-- total: 3,019
+- total: 3,024
 
 This document is organized in two parts:
 
@@ -1046,6 +1046,18 @@ SMTP email notification channel coverage.
 | `test_email_channel_uses_smtp_ssl_without_starttls` | Verifies `tls: ssl` uses SMTP-over-SSL without issuing STARTTLS. |
 | `test_email_channel_reports_missing_password_secret_without_leak` | Verifies missing SMTP password environment variables fail terminally without echoing the variable name. |
 | `test_email_channel_retries_smtp_exceptions` | Verifies SMTP send exceptions are retryable and do not leak the password. |
+
+#### `test_notifications_hooks.py`
+
+Notification hook fan-out, skip-rule, and redaction coverage.
+
+| Test | Description |
+| --- | --- |
+| `test_run_complete_hook_enqueues_external_run_summary` | Verifies external run finalization queues one run-complete payload with run counts and command root. |
+| `test_run_complete_hook_skips_builtin_runs` | Verifies built-in runs do not participate in default run-complete notification fan-out. |
+| `test_run_complete_hook_redacts_string_summary_fields` | Verifies string summary fields are redacted before notification events are queued. |
+| `test_run_complete_hook_swallow_enqueue_errors` | Verifies notification enqueue failures are logged without breaking run finalization. |
+| `test_run_complete_summary_defaults_missing_counts_to_zero` | Verifies missing finalization counts default to zero in run-complete notification summaries. |
 
 #### `test_notifications_webhook.py`
 

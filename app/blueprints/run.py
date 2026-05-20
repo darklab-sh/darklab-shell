@@ -95,6 +95,7 @@ from services.projects.targets import (
     record_project_target_discoveries,
 )
 from services import metrics as app_metrics
+from services.notifications.hooks import enqueue_run_complete
 from services.session.variables import SessionVariableError, expand_session_variables
 from services.workspace.files import WorkspaceDisabled, session_workspace_dir
 from services.pty.service import (
@@ -707,6 +708,15 @@ def _finalize_completed_run(
         exit_code,
         elapsed,
         capture,
+    )
+    enqueue_run_complete(
+        run_id=run_id,
+        session_id=session_id,
+        command=original_command,
+        exit_code=exit_code,
+        run_kind=run_kind_for_cmd_type(cmd_type),
+        finalize_summary=finalize_summary,
+        cfg=CFG,
     )
     return {"elapsed": elapsed, "active_project_link": active_project_link}
 

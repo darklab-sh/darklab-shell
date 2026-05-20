@@ -575,6 +575,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   │   ├── telegram.py # Telegram Bot API notification channel
 │   │   │   │   └── webhook.py  # Generic JSON webhook notification channel
 │   │   │   ├── dispatcher.py   # Notification event enqueue, claim, retry, and synchronous delivery helpers
+│   │   │   ├── hooks.py        # Application event hooks that enqueue notification payloads
 │   │   │   ├── models.py       # Notification channel/event dataclasses and constants
 │   │   │   ├── payloads.py     # Stable payload builders for notification triggers
 │   │   │   ├── secrets.py      # Notification-channel secret references backed by the existing vault
@@ -955,6 +956,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   ├── test_metrics_endpoint.py # Prometheus /metrics gate, label, bucket, and runtime-gauge coverage
     │   ├── test_notifications_channels.py # Slack, Discord, Telegram, and Pushover notification channel coverage
     │   ├── test_notifications_email.py # SMTP email notification channel coverage
+    │   ├── test_notifications_hooks.py # Notification hook fan-out, skip-rule, and redaction coverage
     │   ├── test_notifications_webhook.py # Generic webhook notification channel delivery and payload-shape coverage
     │   ├── test_output_search.py # SQLite FTS history-search coverage and fallback behavior
     │   ├── test_postgres_backend.py # Postgres backend smoke and migration-helper integration coverage
