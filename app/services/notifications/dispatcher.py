@@ -11,7 +11,7 @@ from typing import Any, Iterable
 
 from core import database
 from core.database_backend import dialect_for_backend
-import services.notifications.channels  # noqa: F401 - registers built-in channel implementations
+from services.notifications.channels import register_builtin_channels
 from services.notifications.base import channel_class_for_kind
 from services.notifications.models import (
     STATUS_DEAD,
@@ -285,6 +285,9 @@ def _dispatch_event(conn, row: Any, *, now: str) -> bool:
         _mark_failed(conn, event, ChannelResult.retry("notification channel rate limit reached"), now)
         return False
     channel_cls = channel_class_for_kind(channel.kind)
+    if channel_cls is None:
+        register_builtin_channels()
+        channel_cls = channel_class_for_kind(channel.kind)
     if channel_cls is None:
         _mark_failed(conn, event, ChannelResult.terminal(f"notification channel {channel.kind!r} is not registered"), now)
         return False

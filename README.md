@@ -566,6 +566,12 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── base.py         # Registerable notification channel base class and registry
 │   │   │   ├── channels/
 │   │   │   │   ├── __init__.py # Built-in outbound notification channel registrations
+│   │   │   │   ├── _format.py  # Shared chat and push notification payload formatters
+│   │   │   │   ├── _http.py    # Shared HTTP POST helper for outbound notification channels
+│   │   │   │   ├── discord.py  # Discord incoming-webhook notification channel
+│   │   │   │   ├── pushover.py # Pushover message notification channel
+│   │   │   │   ├── slack.py    # Slack incoming-webhook notification channel
+│   │   │   │   ├── telegram.py # Telegram Bot API notification channel
 │   │   │   │   └── webhook.py  # Generic JSON webhook notification channel
 │   │   │   ├── dispatcher.py   # Notification event enqueue, claim, retry, and synchronous delivery helpers
 │   │   │   ├── models.py       # Notification channel/event dataclasses and constants
@@ -946,6 +952,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   ├── test_docs.py        # Doc-drift meta-tests — appendix counts, documented totals, and README project-structure coverage
     │   ├── test_logging.py     # Structured logging: formatters, configure_logging, and event coverage
     │   ├── test_metrics_endpoint.py # Prometheus /metrics gate, label, bucket, and runtime-gauge coverage
+    │   ├── test_notifications_channels.py # Slack, Discord, Telegram, and Pushover notification channel coverage
     │   ├── test_notifications_webhook.py # Generic webhook notification channel delivery and payload-shape coverage
     │   ├── test_output_search.py # SQLite FTS history-search coverage and fallback behavior
     │   ├── test_postgres_backend.py # Postgres backend smoke and migration-helper integration coverage

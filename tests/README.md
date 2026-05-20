@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,971
+- behavior tests: 2,980
 - docs/inventory meta-tests: 32
-- `pytest`: 1571 (1539 behavior + 32 meta)
+- `pytest`: 1580 (1548 behavior + 32 meta)
 - `vitest`: 1180
 - `playwright`: 252
-- total: 3,003
+- total: 3,012
 
 This document is organized in two parts:
 
@@ -1016,6 +1016,22 @@ Prometheus `/metrics` route, runtime collector, label, and histogram-bucket cove
 | `TestMetricsDefinitionDrift.test_histograms_have_explicit_buckets` | Verifies that every histogram declares explicit buckets. |
 | `TestMetricsDefinitionDrift.test_labeled_metrics_have_cardinality_policies` | Verifies that every labeled metric has an explicit cardinality policy and fails on unreviewed labels. |
 | `TestMetricsDefinitionDrift.test_route_label_normalizer_does_not_use_raw_paths` | Verifies that route labels do not preserve raw path or query-string characters. |
+
+#### `test_notifications_channels.py`
+
+Slack, Discord, Telegram, and Pushover notification channel coverage.
+
+| Test | Description |
+| --- | --- |
+| `test_phase2_channels_are_registered` | Verifies Slack, Discord, Telegram, and Pushover channel classes register with the shared notification channel registry. |
+| `test_slack_channel_formats_blocks` | Verifies Slack notifications use incoming-webhook blocks with a header and summary fields. |
+| `test_discord_channel_formats_embed` | Verifies Discord notifications use embeds with a title, fields, and timestamp footer. |
+| `test_chat_webhook_channels_share_retry_and_terminal_outcomes` | Verifies chat-webhook channels share retryable 5xx and terminal 4xx handling. |
+| `test_telegram_channel_requires_chat_id` | Verifies Telegram channels require a non-secret chat id in channel config. |
+| `test_telegram_channel_posts_plain_text_without_token_in_body` | Verifies Telegram sends plain-text messages through Bot API without placing the bot token in message text. |
+| `test_telegram_channel_timeout_is_retryable_without_token_leak` | Verifies Telegram timeout errors are retryable and do not echo the bot token. |
+| `test_pushover_channel_posts_form_payload` | Verifies Pushover sends form payloads with optional non-secret priority and sound options. |
+| `test_pushover_channel_requires_secret_refs` | Verifies Pushover channels require vault-backed app-token and user-key references. |
 
 #### `test_notifications_webhook.py`
 

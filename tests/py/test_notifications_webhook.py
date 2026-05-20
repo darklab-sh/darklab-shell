@@ -74,7 +74,7 @@ def test_webhook_channel_posts_json_payload(monkeypatch):
         return FakeResponse(204)
 
     monkeypatch.setattr("services.notifications.channels.webhook.get_channel_secret", fake_get_secret)
-    monkeypatch.setattr("services.notifications.channels.webhook.urlopen", fake_urlopen)
+    monkeypatch.setattr("services.notifications.channels._http.urlopen", fake_urlopen)
 
     result = WebhookChannel(_channel(config={"timeout_seconds": 4})).send({"trigger": "test", "ok": True})
 
@@ -97,7 +97,7 @@ def test_webhook_channel_retries_5xx_then_succeeds(monkeypatch):
         return FakeResponse(200)
 
     monkeypatch.setattr("services.notifications.channels.webhook.get_channel_secret", lambda *_: "https://example.invalid")
-    monkeypatch.setattr("services.notifications.channels.webhook.urlopen", fake_urlopen)
+    monkeypatch.setattr("services.notifications.channels._http.urlopen", fake_urlopen)
 
     channel = WebhookChannel(_channel())
     first = channel.send({"trigger": "test"})
@@ -112,7 +112,7 @@ def test_webhook_channel_retries_5xx_then_succeeds(monkeypatch):
 def test_webhook_channel_treats_4xx_as_terminal(monkeypatch):
     monkeypatch.setattr("services.notifications.channels.webhook.get_channel_secret", lambda *_: "https://example.invalid")
     monkeypatch.setattr(
-        "services.notifications.channels.webhook.urlopen",
+        "services.notifications.channels._http.urlopen",
         lambda *_args, **_kwargs: _raise(_http_error(400)),
     )
 
@@ -133,7 +133,7 @@ def test_webhook_channel_rejects_malformed_urls(monkeypatch, bad_url):
         return FakeResponse(200)
 
     monkeypatch.setattr("services.notifications.channels.webhook.get_channel_secret", lambda *_: bad_url)
-    monkeypatch.setattr("services.notifications.channels.webhook.urlopen", fake_urlopen)
+    monkeypatch.setattr("services.notifications.channels._http.urlopen", fake_urlopen)
 
     result = WebhookChannel(_channel()).send({"trigger": "test"})
 
@@ -146,7 +146,7 @@ def test_webhook_channel_rejects_malformed_urls(monkeypatch, bad_url):
 def test_webhook_channel_retries_timeout(monkeypatch):
     monkeypatch.setattr("services.notifications.channels.webhook.get_channel_secret", lambda *_: "https://example.invalid")
     monkeypatch.setattr(
-        "services.notifications.channels.webhook.urlopen",
+        "services.notifications.channels._http.urlopen",
         lambda *_args, **_kwargs: _raise(socket.timeout("timed out")),
     )
 

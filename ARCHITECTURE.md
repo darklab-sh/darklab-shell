@@ -1078,7 +1078,7 @@ erDiagram
 
 `ENTITY_LABELS` and `ENTITY_NOTES` are polymorphic on `(entity_type, entity_id)` and attach to several record types — projects, runs, snapshots, workspace files, run file artifacts, Atlas entities, findings, and packages — without separate FKs per type, which is why they sit under `LOGICAL_SESSION` rather than chaining off one specific parent.
 
-`NOTIFICATION_CHANNELS` stores session-owned delivery destinations without plaintext secrets. `NOTIFICATION_EVENTS` is the queue and audit trail used by the dedicated notification worker, with the session token copied onto each event so delivery history does not depend on joining a still-existing channel row.
+`NOTIFICATION_CHANNELS` stores session-owned delivery destinations without plaintext secrets. Registered channel kinds cover generic JSON webhooks, Slack, Discord, Telegram, and Pushover, with channel-specific secret references resolved through the existing vault. `NOTIFICATION_EVENTS` is the queue and audit trail used by the dedicated notification worker, with the session token copied onto each event so delivery history does not depend on joining a still-existing channel row.
 
 #### Atlas entity model
 
@@ -1570,12 +1570,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,971
+- behavior tests: 2,980
 - docs/inventory meta-tests: 32
-- `pytest`: 1571 (1539 behavior + 32 meta)
+- `pytest`: 1580 (1548 behavior + 32 meta)
 - `vitest`: 1180
 - `playwright`: 252
-- total: 3,003
+- total: 3,012
 
 ### Testing Architecture
 
