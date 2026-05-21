@@ -47,7 +47,7 @@ def _format_clock(value: str | None) -> str:
     return dt.astimezone().strftime("%H:%M:%S")
 
 
-def _workspace_command_error(exc: Exception) -> list[dict[str, str]]:
+def _workspace_command_error(exc: Exception) -> list[dict[str, object]]:
     if isinstance(exc, WorkspaceDisabled):
         return [output_line("file: session file storage is disabled on this instance")]
     if isinstance(exc, WorkspaceFileNotFound):
@@ -225,7 +225,7 @@ def _underline_text(text: str) -> str:
     return ansi_underline(text)
 
 
-def run_builtin_workspace(command: str, session_id: str) -> list[dict[str, str]]:
+def run_builtin_workspace(command: str, session_id: str) -> list[dict[str, object]]:
     parts = split_command_argv(command)
     subcommand = parts[1].lower() if len(parts) > 1 else "help"
 
@@ -387,7 +387,7 @@ def run_builtin_workspace(command: str, session_id: str) -> list[dict[str, str]]
     ]
 
 
-def run_builtin_workspace_alias(command: str, session_id: str) -> list[dict[str, str]]:
+def run_builtin_workspace_alias(command: str, session_id: str) -> list[dict[str, object]]:
     parts = split_command_argv(command)
     root = parts[0].lower() if parts else ""
     if root == "ls":

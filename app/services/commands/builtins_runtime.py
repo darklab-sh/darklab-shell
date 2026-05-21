@@ -146,7 +146,7 @@ def _format_clock(value: str | None) -> str:
     return dt.astimezone().strftime("%H:%M:%S")
 
 
-def run_builtin_history(session_id: str) -> list[dict[str, str]]:
+def run_builtin_history(session_id: str) -> list[dict[str, object]]:
     rows = _session_history_runs(session_id)
     if not rows:
         return [{"type": "output", "text": "No history for this session yet."}]
@@ -260,7 +260,7 @@ def _active_run_json_rows(runs: list[dict]) -> list[dict[str, object]]:
     return rows
 
 
-def _active_status_monitor_hint() -> dict[str, str]:
+def _active_status_monitor_hint() -> dict[str, object]:
     return _output_line("Tip: click STATUS in the HUD for real-time CPU/MEM monitoring.", "builtin-note")
 
 
@@ -269,7 +269,7 @@ def run_builtin_runs(
     session_id: str,
     split_command: Callable[[str], list[str]],
     active_runs: Callable[[str], list[dict]] = active_runs_for_session,
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     parts = split_command(command)
     flags = set(parts[1:])
     valid_flags = {"-v", "--verbose", "--json"}
@@ -405,7 +405,7 @@ def run_builtin_runs(
     return lines
 
 
-def run_builtin_last(session_id: str) -> list[dict[str, str]]:
+def run_builtin_last(session_id: str) -> list[dict[str, object]]:
     rows = _recent_runs(session_id)
     if not rows:
         return [{"type": "output", "text": "No completed runs for this session yet."}]
@@ -415,16 +415,16 @@ def run_builtin_last(session_id: str) -> list[dict[str, str]]:
         started = _parse_dt(row["started"]).astimezone().strftime("%Y-%m-%d %H:%M:%S")
         exit_code = row["exit_code"]
         exit_label = _ansi_exit_code(exit_code)
-        cls = "builtin-last-row"
+        row_style = "builtin-last-row"
         if exit_code == 0:
-            cls += " builtin-last-ok"
+            row_style += " builtin-last-ok"
         elif exit_code is not None:
-            cls += " builtin-last-fail"
-        lines.append(_output_line(f"{started}  [{exit_label}]  {str(row['command']).strip()}", cls))
+            row_style += " builtin-last-fail"
+        lines.append(_output_line(f"{started}  [{exit_label}]  {str(row['command']).strip()}", row_style))
     return lines
 
 
-def run_builtin_limits() -> list[dict[str, str]]:
+def run_builtin_limits() -> list[dict[str, object]]:
     width = 20
     workspace_enabled = bool(CFG.get("workspace_enabled", False))
     return [
@@ -504,7 +504,7 @@ def run_builtin_limits() -> list[dict[str, str]]:
     ]
 
 
-def run_builtin_retention() -> list[dict[str, str]]:
+def run_builtin_retention() -> list[dict[str, object]]:
     width = 22
     return [
         _output_line("Retention policy:", "builtin-section"),
@@ -539,7 +539,7 @@ def run_builtin_ps(
     session_id: str,
     command: str,
     active_runs: Callable[[str], list[dict]] = active_runs_for_session,
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     active = active_runs(session_id)
     current = command.strip() or "ps"
     lines = [
@@ -570,7 +570,7 @@ def run_builtin_status(
     session_id: str,
     active_runs: Callable[[str], list[dict]] = active_runs_for_session,
     redis_client_value=redis_client,
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     width = 18
     session_label = _mask_session_token(session_id) if session_id else "anonymous"
     lines = [
@@ -653,7 +653,7 @@ def run_builtin_stats(
     command_root: Callable[[str], str | None],
     active_builtin_command_roots: Callable[[], set[str]],
     active_runs: Callable[[str], list[dict]] = active_runs_for_session,
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     elapsed_sql = _stats_elapsed_sql()
     with db_connect() as conn:
         raw_rows = conn.execute(

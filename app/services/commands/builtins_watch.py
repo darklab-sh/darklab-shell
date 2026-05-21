@@ -35,7 +35,7 @@ class BuiltinWatchError(ValueError):
     """Raised when watch built-in input is invalid."""
 
 
-def _watch_usage() -> list[dict[str, str]]:
+def _watch_usage() -> list[dict[str, object]]:
     return [
         output_line("Watcher commands:", "builtin-section"),
         output_line("  watch list", "builtin-help-row"),
@@ -99,7 +99,7 @@ def _watcher_cadence(schedule: Schedule | None) -> str:
     return schedule.cadence_preset or schedule.cron_expr
 
 
-def _watch_lines(session_id: str) -> list[dict[str, str]]:
+def _watch_lines(session_id: str) -> list[dict[str, object]]:
     watchers = list_for_session(session_id)
     if not watchers:
         return [output_line("watch: no watchers yet. Run `watch create <baseline_run_id> --every hourly`.", "builtin-note")]
@@ -119,7 +119,7 @@ def _watch_lines(session_id: str) -> list[dict[str, str]]:
     return lines
 
 
-def _info_lines(watcher: Watcher) -> list[dict[str, str]]:
+def _info_lines(watcher: Watcher) -> list[dict[str, object]]:
     schedule = _watcher_schedule(watcher)
     width = 16
     return [
@@ -186,7 +186,7 @@ def _baseline_for_session(baseline_run_id: str, session_id: str) -> dict[str, An
     return dict(row)
 
 
-def _create_watch(parts: list[str], session_id: str) -> list[dict[str, str]]:
+def _create_watch(parts: list[str], session_id: str) -> list[dict[str, object]]:
     payload = _parse_create(parts)
     baseline = _baseline_for_session(str(payload["baseline_run_id"]), session_id)
     command = validate_schedule_command(str(baseline.get("command") or ""), session_id)
@@ -218,7 +218,7 @@ def _create_watch(parts: list[str], session_id: str) -> list[dict[str, str]]:
     ]
 
 
-def _run_watcher_now(watcher: Watcher) -> list[dict[str, str]]:
+def _run_watcher_now(watcher: Watcher) -> list[dict[str, object]]:
     schedule = _watcher_schedule(watcher)
     fired_at = datetime.now(timezone.utc).isoformat()
     with database.db_connect() as conn:
@@ -244,7 +244,7 @@ def _run_watcher_now(watcher: Watcher) -> list[dict[str, str]]:
     return lines
 
 
-def run_builtin_watch(command: str, session_id: str) -> list[dict[str, str]]:
+def run_builtin_watch(command: str, session_id: str) -> list[dict[str, object]]:
     parts = split_command_argv(command)
     subcommand = parts[1].lower() if len(parts) > 1 else "list"
     if subcommand in {"help", "-h", "--help"}:
@@ -295,8 +295,9 @@ def run_builtin_watch(command: str, session_id: str) -> list[dict[str, str]]:
                 "schedule_id": watcher.schedule_id,
                 "removed": removed,
             })
-            cls = "builtin-success" if removed else "builtin-note"
-            return [output_line(f"watch: deleted {watcher.id}" if removed else f"watch: not found {watcher.id}", cls)]
+            status_style = "builtin-success" if removed else "builtin-note"
+            message = f"watch: deleted {watcher.id}" if removed else f"watch: not found {watcher.id}"
+            return [output_line(message, status_style)]
         if subcommand in {"accept", "accept-baseline"}:
             watcher = _watcher_for_session(_watcher_ref(parts, "Usage: watch accept <id>"), session_id)
             updated = accept_baseline(watcher.id)

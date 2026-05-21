@@ -10,10 +10,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
-- **Structured output model foundation** — run output now has a typed Python and browser contract ready for the producer migration.
+- **Structured output model foundation and producer migration** — run output now has a typed Python and browser contract, and Python producers write through it while keeping legacy transcript output stable.
   - **Why:** command transcripts currently overload `cls` with severity and visual-role hints, which makes comparison, redaction, search, exports, and future structured summaries harder to keep consistent.
-  - **What:** added frozen `LineEvent`, `LineKind`, `LineRole`, `LineSignal`, and `LineEntity` contracts, legacy `cls` decoding, v1/legacy serializers, a JS classic-script twin, a legacy-class fixture, unknown-value fallback reporting, and Python/JS enum parity checks. Production emitters are still untouched in this phase.
-  - **Tests:** added line-output model, legacy-class mapping, entity normalization, signal enum coverage, Python↔JS parity, and browser helper contract coverage. Current suite total: 1703 pytest + 1217 Vitest + 252 Playwright = **3,172 tests**.
+  - **What:** added frozen `LineEvent`, `LineKind`, `LineRole`, `LineSignal`, and `LineEntity` contracts, legacy `cls` decoding, v1/legacy serializers, a JS classic-script twin, a legacy-class fixture, unknown-value fallback reporting, Python/JS enum parity checks, typed `RunOutputCapture.add_event`, and producer-side helpers for run streaming, PTY snapshots, built-ins, redaction placeholders, exports, and permalink output.
+  - **Tests:** added line-output model, legacy-class mapping, entity normalization, signal enum coverage, Python↔JS parity, browser helper contract coverage, and typed-vs-legacy capture equivalence checks. Current suite total: 1706 pytest + 1218 Vitest + 252 Playwright = **3,176 tests**.
 - **Watchers browser modal** — durable session tokens can now manage change-detection watchers from the browser.
   - **Why:** operators need a visual path for creating a watcher from a completed baseline run, checking recent fire history, and accepting expected changes without dropping into terminal commands.
   - **What:** added a top-level Watchers modal beside Schedules, desktop rail and mobile menu entry points, Run Details and History drawer **Create watcher from this baseline** handoffs, a Baseline run helper card, watcher create/edit/pause/resume/run-now/delete controls, accept-baseline confirmation, selected-timezone cadence previews, comparison-style last-diff summaries, and fire-audit rows that keep empty-diff fires visible as `diff_kind='none'`.

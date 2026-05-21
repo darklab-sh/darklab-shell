@@ -24,10 +24,10 @@ Current totals:
 
 - behavior tests: 3,135
 - docs/inventory meta-tests: 32
-- `pytest`: 1703 (1671 behavior + 32 meta)
-- `vitest`: 1217
+- `pytest`: 1706 (1674 behavior + 32 meta)
+- `vitest`: 1218
 - `playwright`: 252
-- total: 3,172
+- total: 3,176
 
 This document is organized in two parts:
 
@@ -755,6 +755,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunOutputCapture.test_preview_byte_cap_truncates_single_huge_line` | Checks that one huge output line is truncated inside the SQLite preview while preserving the run line count. |
 | `TestRunOutputCapture.test_full_output_artifact_round_trips_lines` | Checks that full output artifact round trips lines. |
 | `TestRunOutputCapture.test_full_output_artifact_round_trips_signal_metadata` | Verifies that persisted full-output artifacts preserve backend signal metadata with each line. |
+| `TestRunOutputCapture.test_add_event_preserves_legacy_output_shape` | Verifies typed run-output events still write the legacy preview and artifact shape. |
+| `TestRunOutputCapture.test_legacy_add_line_matches_typed_add_event_bytes` | Verifies legacy `add_line` output and typed `add_event` output stay byte-identical. |
 | `TestRunOutputCapture.test_full_output_artifact_respects_byte_cap` | Checks that full output artifact respects byte cap. |
 | `TestRunOutputCapture.test_full_output_artifact_loads_legacy_plain_text_rows` | Checks that full output artifact loads legacy plain text rows. |
 | `TestRunOutputCapture.test_missing_hints_file_returns_empty_list` | Checks that missing hints file returns empty list. |
@@ -1731,6 +1733,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | --- | --- |
 | `test_v1_payload_round_trips_losslessly` | Verifies that fully versioned line-event payloads survive a decode/encode round trip. |
 | `test_legacy_payload_decodes_and_upgrades_predictably` | Verifies legacy `cls` payloads decode into separate kind and role values and upgrade with v1 fields. |
+| `test_unknown_legacy_cls_survives_compatibility_round_trip` | Verifies unknown legacy class strings survive compatibility decode and encode. |
 | `test_legacy_writer_preserves_current_key_order` | Verifies the legacy line-event serializer keeps the current output-entry key order. |
 | `test_legacy_cls_fixture_maps_to_one_kind_role_pair` | Verifies every documented legacy `cls` value maps to one intended kind/role pair. |
 | `test_kind_and_role_legacy_shims_are_independent` | Verifies semantic legacy classes and structural legacy classes decode on separate axes. |
@@ -2641,6 +2644,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | --- | --- |
 | `round trips v1 payloads losslessly` | Verifies browser line-event payloads survive a decode/encode round trip. |
 | `decodes legacy class strings into separate kind and role values` | Verifies browser legacy `cls` decoding upgrades into explicit kind and role fields. |
+| `preserves unknown legacy class strings through compatibility writes` | Verifies browser compatibility writes keep unknown legacy classes intact. |
 | `preserves legacy wire key order` | Verifies the browser legacy serializer keeps the current output-entry key order. |
 | `reports unknown values and falls back safely` | Verifies browser decoding reports unknown kind, role, and signal values while rendering through safe fallbacks. |
 | `keeps role cls compatibility when both axes are non-default` | Verifies browser compatibility `cls` uses the role string when kind and role are both non-default. |

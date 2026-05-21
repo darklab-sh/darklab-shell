@@ -48,6 +48,7 @@ from services.projects.contracts import (
 )
 from core.redaction import omit_raw_only_line_entries, redact_line_entries
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, builtin_command_roots_for_storage
+from services.runs.output_model import LineKind, line_event_from_legacy, to_legacy_entry
 from services.runs.output_store import load_full_output_entries
 from services.scheduler.service import schedule_ids_by_run
 from services.storage.body_store import inline_threshold_bytes, load_text_body, maybe_store_text_body, stored_body_pointer
@@ -1615,12 +1616,10 @@ def get_run(run_id):
             run["output"].append(
                 f"[full output truncated after {truncated_mb} MB]"
             )
-            run["output_entries"].append({
-                "text": f"[full output truncated after {truncated_mb} MB]",
-                "cls": "notice",
-                "tsC": "",
-                "tsE": "",
-            })
+            run["output_entries"].append(to_legacy_entry(line_event_from_legacy(
+                f"[full output truncated after {truncated_mb} MB]",
+                kind=LineKind.notice,
+            )))
     else:
         run["output_entries"] = _preview_output_entries_from_run(run)
         run["output"] = _preview_output_from_run(run)
@@ -1672,7 +1671,7 @@ def get_run(run_id):
     content_lines = list(run["output_entries"])
     preview_notice = run["preview_notice"]
     if preview_notice:
-        content_lines.append({"text": preview_notice, "cls": "notice", "tsC": "", "tsE": ""})
+        content_lines.append(to_legacy_entry(line_event_from_legacy(preview_notice, kind=LineKind.notice)))
 
     line_count = len(content_lines)
     if is_full_view:

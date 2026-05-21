@@ -12,7 +12,7 @@ from services.intel.lookup import IntelLookupResult, ProviderLookup, lookup_enti
 from services.intel.registry import provider_label
 
 
-def run_builtin_intel(command: str, session_id: str) -> tuple[list[dict[str, str]], int]:
+def run_builtin_intel(command: str, session_id: str) -> tuple[list[dict[str, object]], int]:
     parts = split_command_argv(command)
     if len(parts) <= 1 or parts[1].lower() in {"help", "-h", "--help"}:
         return _intel_usage(), 0
@@ -43,7 +43,7 @@ def run_builtin_intel(command: str, session_id: str) -> tuple[list[dict[str, str
     return lines, exit_code
 
 
-def _intel_usage() -> list[dict[str, str]]:
+def _intel_usage() -> list[dict[str, object]]:
     return [
         output_line("Intel commands:", "builtin-section"),
         output_line("  intel ip <ip> [--include-private]", "builtin-help-row"),
@@ -70,7 +70,7 @@ def _private_ip_error(value: str, *, include_private: bool) -> str:
     )
 
 
-def _format_lookup_result(result: IntelLookupResult) -> list[dict[str, str]]:
+def _format_lookup_result(result: IntelLookupResult) -> list[dict[str, object]]:
     lines = [
         output_line(
             f"Intel lookup: {result.entity_type} {result.canonical_value}",
@@ -87,7 +87,7 @@ def _format_lookup_result(result: IntelLookupResult) -> list[dict[str, str]]:
     return lines
 
 
-def _format_provider_lookup(provider: ProviderLookup, entity_type: str) -> list[dict[str, str]]:
+def _format_provider_lookup(provider: ProviderLookup, entity_type: str) -> list[dict[str, object]]:
     label = _provider_label(provider.provider)
     if provider.status == "missing_secret":
         return [output_line(f"{label}: not configured - {provider.message}", "builtin-note")]
@@ -175,7 +175,7 @@ def _provider_cache_label(provider: ProviderLookup) -> str:
     return "retrieved and cached:"
 
 
-def _format_shodan(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _format_shodan(payload: dict[str, Any]) -> list[dict[str, object]]:
     lines = [
         output_line(format_native_record("ports", _join_values(payload.get("ports")) or "none", 14), "builtin-kv"),
         output_line(format_native_record("cves", _join_values(payload.get("cves")) or "none", 14), "builtin-kv"),
@@ -198,7 +198,7 @@ def _format_shodan(payload: dict[str, Any]) -> list[dict[str, str]]:
     return lines
 
 
-def _format_greynoise(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _format_greynoise(payload: dict[str, Any]) -> list[dict[str, object]]:
     lines = []
     message = str(payload.get("message") or "").strip()
     if message:
@@ -218,7 +218,7 @@ def _format_greynoise(payload: dict[str, Any]) -> list[dict[str, str]]:
     return lines
 
 
-def _format_censys(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _format_censys(payload: dict[str, Any]) -> list[dict[str, object]]:
     autonomous_system = payload.get("autonomous_system")
     asn = autonomous_system if isinstance(autonomous_system, dict) else {}
     location = payload.get("location")
@@ -249,7 +249,7 @@ def _format_censys(payload: dict[str, Any]) -> list[dict[str, str]]:
     return lines
 
 
-def _format_teamcymru(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _format_teamcymru(payload: dict[str, Any]) -> list[dict[str, object]]:
     return [
         output_line(format_native_record("asn", str(payload.get("asn") or "-"), 14), "builtin-kv"),
         output_line(format_native_record("prefix", str(payload.get("prefix") or "-"), 14), "builtin-kv"),
@@ -258,7 +258,7 @@ def _format_teamcymru(payload: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
-def _format_otx(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _format_otx(payload: dict[str, Any]) -> list[dict[str, object]]:
     lines = [
         output_line(format_native_record("pulses", str(payload.get("pulse_count") or 0), 14), "builtin-kv"),
         output_line(format_native_record("reputation", str(payload.get("reputation")), 14), "builtin-kv"),
@@ -277,7 +277,7 @@ def _format_otx(payload: dict[str, Any]) -> list[dict[str, str]]:
     return lines
 
 
-def _format_abuseipdb(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _format_abuseipdb(payload: dict[str, Any]) -> list[dict[str, object]]:
     score = payload.get("abuse_confidence_score")
     return [
         output_line(format_native_record("confidence", str(score) if score is not None else "-", 14), "builtin-kv"),
@@ -290,7 +290,7 @@ def _format_abuseipdb(payload: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
-def _format_ipinfo(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _format_ipinfo(payload: dict[str, Any]) -> list[dict[str, object]]:
     country = str(payload.get("country") or payload.get("country_code") or "-")
     place_parts = [
         str(payload.get("city") or "").strip(),
@@ -308,7 +308,7 @@ def _format_ipinfo(payload: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
-def _format_virustotal_domain(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _format_virustotal_domain(payload: dict[str, Any]) -> list[dict[str, object]]:
     lines = [
         output_line(format_native_record("reputation", str(payload.get("reputation")), 14), "builtin-kv"),
         output_line(format_native_record("analysis", _stats_summary(payload.get("last_analysis_stats")), 14), "builtin-kv"),
@@ -324,7 +324,7 @@ def _format_virustotal_domain(payload: dict[str, Any]) -> list[dict[str, str]]:
     return lines
 
 
-def _format_crtsh(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _format_crtsh(payload: dict[str, Any]) -> list[dict[str, object]]:
     lines = [
         output_line(format_native_record("certificates", str(payload.get("certificate_count") or 0), 14), "builtin-kv"),
         output_line(format_native_record("first seen", str(payload.get("first_seen") or "-"), 14), "builtin-kv"),
@@ -341,7 +341,7 @@ def _format_crtsh(payload: dict[str, Any]) -> list[dict[str, str]]:
     return lines
 
 
-def _format_virustotal_hash(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _format_virustotal_hash(payload: dict[str, Any]) -> list[dict[str, object]]:
     return [
         output_line(format_native_record("verdict", str(payload.get("verdict") or "unknown"), 14), "builtin-kv"),
         output_line(format_native_record("analysis", _stats_summary(payload.get("last_analysis_stats")), 14), "builtin-kv"),
@@ -351,7 +351,7 @@ def _format_virustotal_hash(payload: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
-def _format_hibp(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _format_hibp(payload: dict[str, Any]) -> list[dict[str, object]]:
     count = int(payload.get("count") or 0)
     return [
         output_line(format_native_record("pwned", "yes" if count else "no", 14), "builtin-kv"),
@@ -360,7 +360,7 @@ def _format_hibp(payload: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
-def _format_nvd(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _format_nvd(payload: dict[str, Any]) -> list[dict[str, object]]:
     lines = [
         output_line(format_native_record("severity", str(payload.get("severity") or "unknown"), 14), "builtin-kv"),
         output_line(format_native_record("score", str(payload.get("score") or "-"), 14), "builtin-kv"),
@@ -378,7 +378,7 @@ def _format_nvd(payload: dict[str, Any]) -> list[dict[str, str]]:
     return lines
 
 
-def _format_vulners(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _format_vulners(payload: dict[str, Any]) -> list[dict[str, object]]:
     lines = [
         output_line(format_native_record("severity", str(payload.get("severity") or "unknown"), 14), "builtin-kv"),
         output_line(format_native_record("score", str(payload.get("score") or "-"), 14), "builtin-kv"),
@@ -406,7 +406,7 @@ def _format_vulners(payload: dict[str, Any]) -> list[dict[str, str]]:
     return lines
 
 
-def _format_urlhaus_host(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _format_urlhaus_host(payload: dict[str, Any]) -> list[dict[str, object]]:
     lines = [
         output_line(format_native_record("status", str(payload.get("query_status") or "-"), 14), "builtin-kv"),
         output_line(format_native_record("urls", str(payload.get("url_count") or 0), 14), "builtin-kv"),
@@ -425,7 +425,7 @@ def _format_urlhaus_host(payload: dict[str, Any]) -> list[dict[str, str]]:
     return lines
 
 
-def _format_urlhaus_hash(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _format_urlhaus_hash(payload: dict[str, Any]) -> list[dict[str, object]]:
     lines = [
         output_line(format_native_record("status", str(payload.get("query_status") or "-"), 14), "builtin-kv"),
         output_line(format_native_record("signature", str(payload.get("signature") or "-"), 14), "builtin-kv"),
@@ -445,7 +445,7 @@ def _format_urlhaus_hash(payload: dict[str, Any]) -> list[dict[str, str]]:
     return lines
 
 
-def _format_urlhaus_url(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _format_urlhaus_url(payload: dict[str, Any]) -> list[dict[str, object]]:
     lines = [
         output_line(
             format_native_record("status", str(payload.get("status") or payload.get("query_status") or "-"), 14),
@@ -468,7 +468,7 @@ def _format_urlhaus_url(payload: dict[str, Any]) -> list[dict[str, str]]:
     return lines
 
 
-def _format_threatfox(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _format_threatfox(payload: dict[str, Any]) -> list[dict[str, object]]:
     lines = [
         output_line(format_native_record("status", str(payload.get("query_status") or "-"), 14), "builtin-kv"),
         output_line(format_native_record("iocs", str(payload.get("ioc_count") or 0), 14), "builtin-kv"),
@@ -489,7 +489,7 @@ def _format_threatfox(payload: dict[str, Any]) -> list[dict[str, str]]:
     return lines
 
 
-def _format_urlscan(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _format_urlscan(payload: dict[str, Any]) -> list[dict[str, object]]:
     lines = [
         output_line(format_native_record("results", str(payload.get("result_count") or 0), 14), "builtin-kv"),
         output_line(format_native_record("has more", "yes" if payload.get("has_more") else "no", 14), "builtin-kv"),
@@ -507,7 +507,7 @@ def _format_urlscan(payload: dict[str, Any]) -> list[dict[str, str]]:
     return lines
 
 
-def _format_securitytrails(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _format_securitytrails(payload: dict[str, Any]) -> list[dict[str, object]]:
     whois = payload.get("whois")
     dns = payload.get("dns")
     whois_obj = whois if isinstance(whois, dict) else {}
@@ -528,7 +528,7 @@ def _format_securitytrails(payload: dict[str, Any]) -> list[dict[str, str]]:
     return lines
 
 
-def _format_routeviews(payload: dict[str, Any]) -> list[dict[str, str]]:
+def _format_routeviews(payload: dict[str, Any]) -> list[dict[str, object]]:
     lines = [
         output_line(format_native_record("prefix", str(payload.get("prefix") or "-"), 14), "builtin-kv"),
         output_line(format_native_record("rpki", str(payload.get("rpki") or "-"), 14), "builtin-kv"),

@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import re
 
+from services.runs.output_model import LineKind, line_event_from_legacy, to_legacy_entry
+
 
 _ALLOWED_FLAGS = {"i", "m"}
 
@@ -98,12 +100,14 @@ def _is_intel_output_entry(item) -> bool:
 
 def _raw_only_placeholder_entry(source: dict | None = None) -> dict[str, object]:
     source = source or {}
-    entry: dict[str, object] = {
-        "text": RAW_ONLY_INTEL_PLACEHOLDER,
-        "cls": "notice",
+    entry = to_legacy_entry(
+        line_event_from_legacy(RAW_ONLY_INTEL_PLACEHOLDER, kind=LineKind.notice),
+        include_timestamps=False,
+    )
+    entry.update({
         "raw_only": True,
         "command_root": "intel",
-    }
+    })
     if isinstance(source.get("tsC"), str):
         entry["tsC"] = source["tsC"]
     if isinstance(source.get("tsE"), str):

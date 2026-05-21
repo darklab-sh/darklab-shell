@@ -12,6 +12,7 @@ from core.output_signals import (
     extract_target,
     strip_ansi_codes,
 )
+from services.runs.output_model import line_event_from_legacy, to_legacy_entry
 from services.runs.output_store import load_full_output_entries
 
 MAX_COMPARE_ITEMS_PER_SIDE = 5000
@@ -266,16 +267,23 @@ def preview_output_entries_from_run(run):
         raw = run.get("output")
     loaded = json.loads(raw) if raw else []
     if loaded and isinstance(loaded[0], str):
-        return [{"text": line, "cls": "", "tsC": "", "tsE": ""} for line in loaded]
+        return [to_legacy_entry(line_event_from_legacy(line)) for line in loaded]
     entries = []
     for item in loaded:
         if isinstance(item, dict) and isinstance(item.get("text"), str):
-            entry = {
-                "text": item["text"],
-                "cls": str(item.get("cls", "")),
-                "tsC": str(item.get("tsC", "")),
-                "tsE": str(item.get("tsE", "")),
-            }
+            entry = to_legacy_entry(
+                line_event_from_legacy(
+                    item["text"],
+                    item.get("cls", ""),
+                    ts_clock=item.get("tsC", ""),
+                    ts_elapsed=item.get("tsE", ""),
+                    signals=item.get("signals") if isinstance(item.get("signals"), list) else None,
+                    line_index=item.get("line_index"),
+                    command_root=item.get("command_root", ""),
+                    target=item.get("target", ""),
+                    entities=item.get("entities") if isinstance(item.get("entities"), list) else None,
+                )
+            )
             if isinstance(item.get("signals"), list):
                 entry["signals"] = [str(signal) for signal in item["signals"] if str(signal)]
             if isinstance(item.get("line_index"), int):
@@ -286,7 +294,7 @@ def preview_output_entries_from_run(run):
                 entry["target"] = item["target"]
             entries.append(entry)
         elif isinstance(item, str):
-            entries.append({"text": item, "cls": "", "tsC": "", "tsE": ""})
+            entries.append(to_legacy_entry(line_event_from_legacy(item)))
     return entries
 
 

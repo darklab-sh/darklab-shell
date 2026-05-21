@@ -16,6 +16,7 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from config import CFG
 from core.process import redis_client
+from services.runs.output_model import LineKind, line_event_from_legacy, to_legacy_entry
 
 log = logging.getLogger("shell")
 
@@ -64,7 +65,10 @@ def _line_bounded_replay_event_count(events: list["BrokerEvent"]) -> int:
 def _make_trim_notice_event() -> "BrokerEvent":
     return BrokerEvent(
         f"{int(time.time() * 1000)}-trim",
-        _event_payload("notice", {"text": REPLAY_TRIM_NOTICE, "cls": "notice"}),
+        _event_payload(
+            "notice",
+            to_legacy_entry(line_event_from_legacy(REPLAY_TRIM_NOTICE, kind=LineKind.notice), include_timestamps=False),
+        ),
     )
 
 

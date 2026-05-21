@@ -68,6 +68,26 @@ def test_legacy_payload_decodes_and_upgrades_predictably():
     }
 
 
+def test_unknown_legacy_cls_survives_compatibility_round_trip():
+    payload = {
+        "text": "sample row",
+        "cls": "builtin-help-row builtin-tour-sample",
+        "tsC": "",
+        "tsE": "",
+    }
+
+    event = from_wire(payload)
+
+    assert event.kind is LineKind.info
+    assert event.role is LineRole.help_row
+    assert to_wire(event) == {
+        **payload,
+        "v": LINE_EVENT_SCHEMA_VERSION,
+        "kind": "info",
+        "role": "help-row",
+    }
+
+
 def test_legacy_writer_preserves_current_key_order():
     event = LineEvent(
         text="line",

@@ -20,6 +20,7 @@ from services.projects.packages import (
     redact_package_value as _redact_package_value,
 )
 from services.projects.utils import cfg_int as _cfg_int
+from services.runs.output_model import LineKind, line_event_from_legacy, to_legacy_entry
 from services.runs.output_store import load_full_output_entries
 
 
@@ -281,22 +282,20 @@ def _package_markdown_link(label, href):
 
 def _package_output_entry(item) -> dict[str, object]:
     if isinstance(item, dict) and isinstance(item.get("text"), str):
-        entry = {
-            "text": item["text"],
-            "cls": str(item.get("cls", "")),
-            "tsC": str(item.get("tsC", "")),
-            "tsE": str(item.get("tsE", "")),
-        }
-        if isinstance(item.get("signals"), list):
-            entry["signals"] = [str(signal) for signal in item["signals"] if str(signal)]
-        if isinstance(item.get("line_index"), int):
-            entry["line_index"] = item["line_index"]
-        if isinstance(item.get("command_root"), str):
-            entry["command_root"] = item["command_root"]
-        if isinstance(item.get("target"), str):
-            entry["target"] = item["target"]
-        return entry
-    return {"text": str(item or ""), "cls": "", "tsC": "", "tsE": ""}
+        return to_legacy_entry(
+            line_event_from_legacy(
+                item["text"],
+                item.get("cls", ""),
+                ts_clock=item.get("tsC", ""),
+                ts_elapsed=item.get("tsE", ""),
+                signals=item.get("signals") if isinstance(item.get("signals"), list) else None,
+                line_index=item.get("line_index"),
+                command_root=item.get("command_root", ""),
+                target=item.get("target", ""),
+                entities=item.get("entities") if isinstance(item.get("entities"), list) else None,
+            )
+        )
+    return to_legacy_entry(line_event_from_legacy(str(item or "")))
 
 
 def _package_preview_output_entries(run) -> list[dict[str, object]]:
@@ -308,9 +307,9 @@ def _package_preview_output_entries(run) -> list[dict[str, object]]:
     try:
         loaded = json.loads(raw)
     except (TypeError, ValueError):
-        return [{"text": line, "cls": "", "tsC": "", "tsE": ""} for line in str(raw).splitlines()]
+        return [to_legacy_entry(line_event_from_legacy(line)) for line in str(raw).splitlines()]
     if not isinstance(loaded, list):
-        return [{"text": str(loaded), "cls": "", "tsC": "", "tsE": ""}]
+        return [to_legacy_entry(line_event_from_legacy(str(loaded)))]
     return [_package_output_entry(item) for item in loaded]
 
 
@@ -336,33 +335,27 @@ def _package_run_output_entries(run, *, cfg=None, include_companion=False):
         except (OSError, gzip.BadGzipFile, EOFError, ValueError):
             entries = _package_preview_output_entries(run)
         if run.get("full_output_truncated"):
-            entries.append({
-                "text": "[full output truncated by the server-side capture limit]",
-                "cls": "warn",
-                "tsC": "",
-                "tsE": "",
-            })
+            entries.append(to_legacy_entry(line_event_from_legacy(
+                "[full output truncated by the server-side capture limit]",
+                kind=LineKind.warn,
+            )))
     else:
         entries = _package_preview_output_entries(run)
         if run.get("preview_truncated"):
-            entries.append({
-                "text": "[preview truncated; full output was not available for this package export]",
-                "cls": "warn",
-                "tsC": "",
-                "tsE": "",
-            })
+            entries.append(to_legacy_entry(line_event_from_legacy(
+                "[preview truncated; full output was not available for this package export]",
+                kind=LineKind.warn,
+            )))
 
     max_lines = _cfg_int("max_output_lines", 5000, cfg=cfg) or 5000
     if len(entries) > max_lines:
         hidden = len(entries) - max_lines
         companion_entries = list(entries)
         capped_entries: list[dict[str, object]] = list(entries[:max_lines])
-        cap_notice: dict[str, object] = {
-            "text": f"[package transcript capped at {max_lines} lines; {hidden} additional lines omitted]",
-            "cls": "warn",
-            "tsC": "",
-            "tsE": "",
-        }
+        cap_notice = to_legacy_entry(line_event_from_legacy(
+            f"[package transcript capped at {max_lines} lines; {hidden} additional lines omitted]",
+            kind=LineKind.warn,
+        ))
         capped_entries.append(cap_notice)
         if include_companion:
             return capped_entries, companion_entries, cap_notice

@@ -70,6 +70,7 @@ from services.history.permalinks import (
 )
 from core.output_signals import OutputSignalClassifier, classify_line, command_root, extract_entities, extract_target
 from core.redaction import RAW_ONLY_INTEL_PLACEHOLDER, omit_raw_only_line_entries
+from services.runs.output_model import LineEvent, LineKind, LineSignal
 from services.runs.output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_entries, load_full_output_lines
 from services.atlas.materializer import materialize_run_entities
 from services.workspace.files import (
@@ -8659,6 +8660,64 @@ class TestRunOutputCapture:
         assert capture.artifact_rel_path is not None
         assert load_full_output_entries(capture.artifact_rel_path) == expected
 
+    def test_add_event_preserves_legacy_output_shape(self):
+        capture = RunOutputCapture("test-run-output-event", preview_limit=5, persist_full_output=True, full_output_max_bytes=0)
+        capture.add_event(LineEvent(
+            text="typed notice",
+            kind=LineKind.notice,
+            ts_clock="12:00:00",
+            ts_elapsed="+0.1s",
+            signals=(LineSignal.warnings,),
+            line_index=4,
+        ))
+        capture.finalize()
+
+        expected = [{
+            "text": "typed notice",
+            "cls": "notice",
+            "tsC": "12:00:00",
+            "tsE": "+0.1s",
+            "signals": ["warnings"],
+            "line_index": 4,
+        }]
+        assert list(capture.preview_lines) == expected
+        assert capture.artifact_rel_path is not None
+        assert load_full_output_entries(capture.artifact_rel_path) == expected
+
+    def test_legacy_add_line_matches_typed_add_event_bytes(self):
+        legacy_capture = RunOutputCapture(
+            "test-run-output-legacy-equivalence",
+            preview_limit=5,
+            persist_full_output=True,
+            full_output_max_bytes=0,
+        )
+        typed_capture = RunOutputCapture(
+            "test-run-output-typed-equivalence",
+            preview_limit=5,
+            persist_full_output=True,
+            full_output_max_bytes=0,
+        )
+
+        legacy_capture.add_line("section", cls="builtin-section", ts_clock="12:00:00", ts_elapsed="+0.1s")
+        typed_capture.add_event(LineEvent(
+            text="section",
+            kind=LineKind.info,
+            legacy_cls="builtin-section",
+            ts_clock="12:00:00",
+            ts_elapsed="+0.1s",
+        ))
+        legacy_capture.finalize()
+        typed_capture.finalize()
+
+        assert list(legacy_capture.preview_lines) == list(typed_capture.preview_lines)
+        assert legacy_capture.artifact_rel_path is not None
+        assert typed_capture.artifact_rel_path is not None
+        with gzip.open(os.path.join(RUN_OUTPUT_DIR, legacy_capture.artifact_rel_path), "rb") as legacy_file:
+            legacy_bytes = legacy_file.read()
+        with gzip.open(os.path.join(RUN_OUTPUT_DIR, typed_capture.artifact_rel_path), "rb") as typed_file:
+            typed_bytes = typed_file.read()
+        assert legacy_bytes == typed_bytes
+
     def test_full_output_artifact_respects_byte_cap(self):
         capture = RunOutputCapture("test-run-output-cap", preview_limit=10, persist_full_output=True, full_output_max_bytes=60)
         capture.add_line("1234")
@@ -10162,7 +10221,7 @@ class TestBuiltinStatus:
                     with mock.patch("services.commands.builtins.redis_client", None):
                         lines = builtin_commands._run_builtin_status("tok_statusdemo")
 
-        text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", line["text"]) for line in lines)
+        text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", str(line["text"])) for line in lines)
         assert re.search(r"session\s+tok_stat••••", text)
         assert "tok_statusdemo" not in text
         assert re.search(r"session type\s+session token", text)
@@ -10269,7 +10328,7 @@ class TestBuiltinStats:
                 with mock.patch("services.commands.builtins.active_runs_for_session", return_value=[{"id": "job-1"}]):
                     lines = builtin_commands._run_builtin_stats("tok_statsdemo")
 
-        text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", line["text"]) for line in lines)
+        text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", str(line["text"])) for line in lines)
         assert re.search(r"session\s+tok_stat••••", text)
         assert "tok_statsdemo" not in text
         assert re.search(r"runs\s+7", text)
@@ -10313,7 +10372,7 @@ class TestBuiltinStats:
             with mock.patch("core.database.DB_PATH", db_path):
                 lines = builtin_commands._run_builtin_stats("tok_builtinonly")
 
-        text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", line["text"]) for line in lines)
+        text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", str(line["text"])) for line in lines)
         assert re.search(r"runs\s+1", text)
         assert re.search(r"success rate\s+100% \(1 ok / 0 failed\)", text)
         assert "No external tool runs for this session yet." in text

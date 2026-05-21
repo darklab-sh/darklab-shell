@@ -38,6 +38,7 @@ from services.pty.capture import (
     PtyTerminalCapture as _BasePtyTerminalCapture,
     _terminal_history_line_limit,
 )
+from services.runs.output_model import LineKind, line_event_from_legacy, to_legacy_entry
 from services import metrics as app_metrics
 
 log = logging.getLogger("shell")
@@ -188,7 +189,7 @@ class PtyRun:
     brokered: bool
     terminal_capture: PtyTerminalCapture
     owner_tab_id: str = ""
-    completion_callback: Callable[["PtyRun", str, int, Sequence[dict[str, str]]], dict[str, object]] | None = None
+    completion_callback: Callable[["PtyRun", str, int, Sequence[dict[str, object]]], dict[str, object]] | None = None
     events: deque[PtyEvent] = field(default_factory=lambda: deque(maxlen=_pty_buffer_limit()))
     seq: int = 0
     closed: bool = False
@@ -484,16 +485,22 @@ def _load_active_pty_meta_for_session(run_id: str, session_id: str) -> tuple[dic
     return meta, ""
 
 
-def _limited_snapshot_entries(entries: Sequence[dict[str, str]], ansi_snapshot: str) -> list[dict[str, str]]:
+def _limited_snapshot_entries(entries: Sequence[dict[str, object]], ansi_snapshot: str) -> list[dict[str, object]]:
     if ansi_snapshot:
         return []
     fallback_entry_limit = _pty_snapshot_fallback_entry_limit()
     if len(entries) <= fallback_entry_limit:
         return [dict(entry) for entry in entries]
-    return [{
-        "text": "[earlier PTY snapshot entries omitted; terminal snapshot resumes visually]",
-        "cls": "notice",
-    }, *[dict(entry) for entry in entries[-fallback_entry_limit:]]]
+    return [
+        to_legacy_entry(
+            line_event_from_legacy(
+                "[earlier PTY snapshot entries omitted; terminal snapshot resumes visually]",
+                kind=LineKind.notice,
+            ),
+            include_timestamps=False,
+        ),
+        *[dict(entry) for entry in entries[-fallback_entry_limit:]],
+    ]
 
 
 def _pty_snapshot_payload_from_run(run: PtyRun, *, distributed: bool = False) -> dict[str, Any]:
@@ -872,7 +879,7 @@ def start_pty_run(
     owner_tab_id: str = "",
     allow_input: bool = True,
     max_runtime_seconds: int = 900,
-    completion_callback: Callable[[PtyRun, str, int, Sequence[dict[str, str]]], dict[str, object]] | None = None,
+    completion_callback: Callable[[PtyRun, str, int, Sequence[dict[str, object]]], dict[str, object]] | None = None,
 ) -> PtyRun:
     if pyte is None:
         raise PtyDependencyError(

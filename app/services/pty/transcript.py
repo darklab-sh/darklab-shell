@@ -4,19 +4,21 @@ from __future__ import annotations
 
 import re
 
+from services.runs.output_model import LineRole, line_event_from_legacy, to_legacy_entry
+
 _PTY_TRANSIENT_LINE_PATTERNS = (
     re.compile(r"^rate:\s+.*\bdone\b.*\bfound=\d+\b", re.IGNORECASE),
     re.compile(r"^::\s*Progress:\s*\[", re.IGNORECASE),
 )
 
 
-def normalize_pty_entry(entry) -> dict[str, str]:
+def normalize_pty_entry(entry) -> dict[str, object]:
     if isinstance(entry, dict):
-        return {
-            "text": str(entry.get("text", "")),
-            "cls": str(entry.get("cls", "")),
-        }
-    return {"text": str(entry), "cls": ""}
+        return to_legacy_entry(
+            line_event_from_legacy(str(entry.get("text", "")), entry.get("cls", "")),
+            include_timestamps=False,
+        )
+    return to_legacy_entry(line_event_from_legacy(str(entry)), include_timestamps=False)
 
 
 def is_transient_pty_line(text: str) -> bool:
@@ -26,9 +28,9 @@ def is_transient_pty_line(text: str) -> bool:
     return any(pattern.search(value) for pattern in _PTY_TRANSIENT_LINE_PATTERNS)
 
 
-def split_pty_entries(entries: list[dict[str, str]]) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+def split_pty_entries(entries: list[dict[str, object]]) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     marker_index = next(
-        (index for index, entry in enumerate(entries) if entry.get("cls") == "pty-marker"),
+        (index for index, entry in enumerate(entries) if entry.get("cls") == LineRole.pty_marker.value),
         -1,
     )
     if marker_index < 0:
@@ -36,14 +38,14 @@ def split_pty_entries(entries: list[dict[str, str]]) -> tuple[list[dict[str, str
     return entries[:marker_index], entries[marker_index + 1:]
 
 
-def filter_transient_pty_entries(entries: list[dict[str, str]]) -> list[dict[str, str]]:
+def filter_transient_pty_entries(entries: list[dict[str, object]]) -> list[dict[str, object]]:
     return [
         entry for entry in entries
-        if entry.get("cls") != "pty-marker" and not is_transient_pty_line(entry.get("text", ""))
+        if entry.get("cls") != LineRole.pty_marker.value and not is_transient_pty_line(str(entry.get("text", "")))
     ]
 
 
-def shape_completed_pty_entries(synthesized_lines, transcript_mode: object) -> list[dict[str, str]]:
+def shape_completed_pty_entries(synthesized_lines, transcript_mode: object) -> list[dict[str, object]]:
     mode = str(transcript_mode or "final_frame").strip().lower()
     entries = [normalize_pty_entry(item) for item in synthesized_lines]
     scrollback, final_frame = split_pty_entries(entries)

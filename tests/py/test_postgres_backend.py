@@ -649,7 +649,7 @@ def test_builtin_stats_command_reads_elapsed_time_from_postgres(monkeypatch, pos
         active_builtin_command_roots=lambda: {"status", "stats"},
         active_runs=lambda _session_id: [],
     )
-    text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", line["text"]) for line in lines)
+    text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", str(line["text"])) for line in lines)
 
     assert re.search(r"runs\s+3", text)
     assert re.search(r"snapshots\s+1", text)

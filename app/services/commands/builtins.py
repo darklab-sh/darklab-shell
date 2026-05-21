@@ -116,8 +116,8 @@ def _tour_feature_enabled() -> bool:
     return bool(CFG.get("tour_enabled", True))
 
 
-def _active_documented_builtin_commands() -> list[dict[str, str]]:
-    commands = _DOCUMENTED_BUILTIN_COMMANDS
+def _active_documented_builtin_commands() -> list[dict[str, object]]:
+    commands: list[dict[str, object]] = [dict(entry) for entry in _DOCUMENTED_BUILTIN_COMMANDS]
     if not _workspace_feature_enabled():
         commands = [
             entry for entry in commands
@@ -224,19 +224,19 @@ def get_current_shortcuts(is_mac: bool | None = None) -> dict:
     return _get_current_shortcuts(is_mac=is_mac)
 
 
-def _run_builtin_runs(command: str, session_id: str) -> list[dict[str, str]]:
+def _run_builtin_runs(command: str, session_id: str) -> list[dict[str, object]]:
     return _run_builtin_runs_impl(command, session_id, _split_command, active_runs_for_session)
 
 
-def _run_builtin_ps(session_id: str, command: str) -> list[dict[str, str]]:
+def _run_builtin_ps(session_id: str, command: str) -> list[dict[str, object]]:
     return _run_builtin_ps_impl(session_id, command, active_runs_for_session)
 
 
-def _run_builtin_status(session_id: str) -> list[dict[str, str]]:
+def _run_builtin_status(session_id: str) -> list[dict[str, object]]:
     return _run_builtin_status_impl(session_id, active_runs_for_session, redis_client)
 
 
-def _run_builtin_stats(session_id: str) -> list[dict[str, str]]:
+def _run_builtin_stats(session_id: str) -> list[dict[str, object]]:
     return _run_builtin_stats_impl(
         session_id,
         command_root,
@@ -249,11 +249,11 @@ def _documented_builtin_rows() -> list[tuple[str, str]]:
     return builtins_discovery.documented_builtin_rows(_active_documented_builtin_commands)
 
 
-def _run_builtin_help() -> list[dict[str, str]]:
+def _run_builtin_help() -> list[dict[str, object]]:
     return builtins_discovery.run_builtin_help()
 
 
-def _run_builtin_commands(command: str) -> list[dict[str, str]]:
+def _run_builtin_commands(command: str) -> list[dict[str, object]]:
     return builtins_discovery.run_builtin_commands(
         command,
         _split_command,
@@ -262,15 +262,15 @@ def _run_builtin_commands(command: str) -> list[dict[str, str]]:
     )
 
 
-def _run_builtin_client_side_command(name: str) -> list[dict[str, str]]:
+def _run_builtin_client_side_command(name: str) -> list[dict[str, object]]:
     return builtins_discovery.run_builtin_client_side_command(name)
 
 
-def _run_builtin_faq() -> list[dict[str, str]]:
+def _run_builtin_faq() -> list[dict[str, object]]:
     return builtins_discovery.run_builtin_faq()
 
 
-def _run_builtin_man(command: str) -> list[dict[str, str]]:
+def _run_builtin_man(command: str) -> list[dict[str, object]]:
     return builtins_discovery.run_builtin_man(
         command,
         _split_command,
@@ -279,11 +279,11 @@ def _run_builtin_man(command: str) -> list[dict[str, str]]:
     )
 
 
-def _run_builtin_type(command: str) -> list[dict[str, str]]:
+def _run_builtin_type(command: str) -> list[dict[str, object]]:
     return builtins_discovery.run_builtin_type(command, _split_command, _active_builtin_command_roots)
 
 
-def _run_builtin_which(command: str) -> list[dict[str, str]]:
+def _run_builtin_which(command: str) -> list[dict[str, object]]:
     return builtins_discovery.run_builtin_which(command, _split_command, _active_builtin_command_roots)
 
 
@@ -363,7 +363,7 @@ _BUILTIN_COMMAND_DISPATCH = {
 }
 
 
-def execute_builtin_command(command: str, session_id: str, *, tab_id: str = "") -> tuple[list[dict[str, str]], int]:
+def execute_builtin_command(command: str, session_id: str, *, tab_id: str = "") -> tuple[list[dict[str, object]], int]:
     # Built-in commands still return the same [{text, class}, ...], exit_code shape
     # as real runs so the frontend path is identical.
     _sync_builtin_module_hooks()

@@ -17,18 +17,18 @@ from services.commands.builtins_format import text_lines as _text_lines
 from services.commands.registry import load_ascii_art, split_command_argv
 
 
-def run_builtin_banner(load_ascii_art_func=load_ascii_art) -> list[dict[str, str]]:
+def run_builtin_banner(load_ascii_art_func=load_ascii_art) -> list[dict[str, object]]:
     art = load_ascii_art_func()
     if not art:
         return [{"type": "output", "text": CFG["app_name"]}]
     return _text_lines(art.splitlines())
 
 
-def run_builtin_clear() -> list[dict[str, str]]:
+def run_builtin_clear() -> list[dict[str, object]]:
     return [{"type": "clear"}]
 
 
-def run_builtin_fortune() -> list[dict[str, str]]:
+def run_builtin_fortune() -> list[dict[str, object]]:
     fortunes = [
         "Trust the output, not the hunch.",
         "A green terminal does not make the command a good idea.",
@@ -61,23 +61,23 @@ def run_builtin_fortune() -> list[dict[str, str]]:
     return [{"type": "output", "text": random.choice(fortunes)}]
 
 
-def run_builtin_groups() -> list[dict[str, str]]:
+def run_builtin_groups() -> list[dict[str, object]]:
     return [{"type": "output", "text": f"{CFG['app_name']} operators"}]
 
 
-def run_builtin_poweroff() -> list[dict[str, str]]:
+def run_builtin_poweroff() -> list[dict[str, object]]:
     return [{"type": "output", "text": random.choice(_SNARKY_POWEROFF_RESPONSES)}]
 
 
-def run_builtin_reboot() -> list[dict[str, str]]:
+def run_builtin_reboot() -> list[dict[str, object]]:
     return [{"type": "output", "text": random.choice(_SNARKY_REBOOT_RESPONSES)}]
 
 
-def run_builtin_rm_root() -> list[dict[str, str]]:
+def run_builtin_rm_root() -> list[dict[str, object]]:
     return [{"type": "output", "text": random.choice(_SNARKY_RM_ROOT_RESPONSES)}]
 
 
-def run_builtin_sudo(command: str) -> list[dict[str, str]]:
+def run_builtin_sudo(command: str) -> list[dict[str, object]]:
     parts = split_command_argv(command)
     if len(parts) == 1:
         return [{"type": "output", "text": random.choice(_SNARKY_SUDO_RESPONSES)}]
@@ -86,17 +86,17 @@ def run_builtin_sudo(command: str) -> list[dict[str, str]]:
     return [{"type": "output", "text": template.format(target=target)}]
 
 
-def run_builtin_su(command: str) -> list[dict[str, str]]:
+def run_builtin_su(command: str) -> list[dict[str, object]]:
     prefix = "sudo" if command.strip().lower().startswith("sudo") else "su"
     text = random.choice(_SNARKY_SU_RESPONSES).replace("su:", f"{prefix}:")
     return [{"type": "output", "text": text}]
 
 
-def run_builtin_xyzzy() -> list[dict[str, str]]:
+def run_builtin_xyzzy() -> list[dict[str, object]]:
     return [{"type": "output", "text": "Nothing happens."}]
 
 
-def run_builtin_coffee() -> list[dict[str, str]]:
+def run_builtin_coffee() -> list[dict[str, object]]:
     return _text_lines([
         "HTTP/1.1 418 I'm a teapot",
         "Content-Type: text/plain",
@@ -105,7 +105,7 @@ def run_builtin_coffee() -> list[dict[str, str]]:
     ])
 
 
-def run_builtin_fork_bomb() -> list[dict[str, str]]:
+def run_builtin_fork_bomb() -> list[dict[str, object]]:
     return _text_lines([
         "bash: fork bomb politely declined",
         "system remains operational",

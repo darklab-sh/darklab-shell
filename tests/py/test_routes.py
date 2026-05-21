@@ -40,6 +40,14 @@ from services.atlas.materializer import materialize_run_entities
 from services.workspace.files import resolve_workspace_path
 
 
+def _builtin_line_text(line: dict[str, object]) -> str:
+    return str(line.get("text", ""))
+
+
+def _builtin_lines_text(lines: list[dict[str, object]]) -> str:
+    return "\n".join(_builtin_line_text(line) for line in lines)
+
+
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 def get_client(*, use_forwarded_for=True):
@@ -1194,26 +1202,26 @@ class TestProjectRoutes:
         cli_session = self._session_id("project-cli")
         create_lines, create_code = execute_builtin_command("project create CLI Case", cli_session)
         assert create_code == 0
-        assert "created CLI Case" in "\n".join(line["text"] for line in create_lines)
+        assert "created CLI Case" in _builtin_lines_text(create_lines)
 
         current_lines, _ = execute_builtin_command("project current", cli_session)
-        current_text = "\n".join(line["text"] for line in current_lines)
+        current_text = _builtin_lines_text(current_lines)
         assert "Active project:" in current_text
         assert "CLI Case" in current_text
 
         list_lines, _ = execute_builtin_command("project list", cli_session)
-        assert "cli-case" in "\n".join(line["text"] for line in list_lines)
+        assert "cli-case" in _builtin_lines_text(list_lines)
 
         clear_lines, _ = execute_builtin_command("project clear", cli_session)
-        assert clear_lines[0]["text"] == "project: active project cleared"
+        assert _builtin_line_text(clear_lines[0]) == "project: active project cleared"
 
         use_lines, _ = execute_builtin_command("project use cli-case", cli_session)
-        assert "active project is CLI Case" in use_lines[0]["text"]
+        assert "active project is CLI Case" in _builtin_line_text(use_lines[0])
 
         rename_lines, _ = execute_builtin_command("project rename cli-case CLI Case Renamed", cli_session)
-        assert "renamed CLI Case Renamed" in rename_lines[0]["text"]
+        assert "renamed CLI Case Renamed" in _builtin_line_text(rename_lines[0])
         renamed_current, _ = execute_builtin_command("project current", cli_session)
-        assert "CLI Case Renamed" in "\n".join(line["text"] for line in renamed_current)
+        assert "CLI Case Renamed" in _builtin_lines_text(renamed_current)
 
         tab_one_run = self._seed_run(
             cli_session,
@@ -1230,37 +1238,37 @@ class TestProjectRoutes:
             started="'2026-05-15T00:01:00+00:00'",
         )
         link_last_lines, _ = execute_builtin_command("project link run last", cli_session, tab_id="tab-1")
-        assert f"linked run {tab_one_run}" in link_last_lines[0]["text"]
+        assert f"linked run {tab_one_run}" in _builtin_line_text(link_last_lines[0])
         link_session_last_lines, _ = execute_builtin_command("project link last", cli_session)
-        assert f"linked run {tab_two_run}" in link_session_last_lines[0]["text"]
+        assert f"linked run {tab_two_run}" in _builtin_line_text(link_session_last_lines[0])
 
         target_lines, _ = execute_builtin_command("project target add domain darklab.sh", cli_session)
-        assert target_lines[0]["text"] == "project: target added domain darklab.sh"
+        assert _builtin_line_text(target_lines[0]) == "project: target added domain darklab.sh"
         quick_target_lines, _ = execute_builtin_command("project target quick-add https://ip.darklab.sh/admin", cli_session)
-        assert quick_target_lines[0]["text"] == "project: target added url https://ip.darklab.sh/admin"
+        assert _builtin_line_text(quick_target_lines[0]) == "project: target added url https://ip.darklab.sh/admin"
         target_list_lines, _ = execute_builtin_command("project target list", cli_session)
-        target_list_text = "\n".join(line["text"] for line in target_list_lines)
+        target_list_text = _builtin_lines_text(target_list_lines)
         assert "darklab.sh" in target_list_text
         assert "https://ip.darklab.sh/admin" in target_list_text
         remove_target_lines, _ = execute_builtin_command("project target remove darklab.sh", cli_session)
-        assert remove_target_lines[0]["text"] == "project: target removed darklab.sh"
+        assert _builtin_line_text(remove_target_lines[0]) == "project: target removed darklab.sh"
 
         archive_lines, _ = execute_builtin_command("project archive cli-case-renamed", cli_session)
-        assert "archived CLI Case Renamed" in archive_lines[0]["text"]
+        assert "archived CLI Case Renamed" in _builtin_line_text(archive_lines[0])
 
         archived_current, _ = execute_builtin_command("project current", cli_session)
-        assert archived_current[0]["text"].startswith("No active project.")
+        assert _builtin_line_text(archived_current[0]).startswith("No active project.")
 
         unarchive_lines, _ = execute_builtin_command("project unarchive cli-case-renamed", cli_session)
-        assert "unarchived CLI Case Renamed" in unarchive_lines[0]["text"]
+        assert "unarchived CLI Case Renamed" in _builtin_line_text(unarchive_lines[0])
 
         unarchived_current, _ = execute_builtin_command("project current", cli_session)
-        assert unarchived_current[0]["text"].startswith("No active project.")
+        assert _builtin_line_text(unarchived_current[0]).startswith("No active project.")
 
         delete_lines, _ = execute_builtin_command("project delete cli-case-renamed", cli_session)
-        assert "deleted CLI Case Renamed" in delete_lines[0]["text"]
+        assert "deleted CLI Case Renamed" in _builtin_line_text(delete_lines[0])
         deleted_list_lines, _ = execute_builtin_command("project list --all", cli_session)
-        assert "cli-case-renamed" not in "\n".join(line["text"] for line in deleted_list_lines)
+        assert "cli-case-renamed" not in _builtin_lines_text(deleted_list_lines)
 
     def test_active_project_rejects_cross_session_and_clears_stale_projects(self):
         client = get_client()
@@ -2351,9 +2359,9 @@ class TestProjectRoutes:
 
         execute_builtin_command(f"project use {project['slug']}", session_id)
         link_last_lines, _ = execute_builtin_command("project link last", session_id)
-        assert f"linked run {run_id}" in link_last_lines[0]["text"]
+        assert f"linked run {run_id}" in _builtin_line_text(link_last_lines[0])
         unsupported_file_link_lines, _ = execute_builtin_command("project link file reports/notes.txt", session_id)
-        assert unsupported_file_link_lines[0]["text"] == "project: project links support run"
+        assert _builtin_line_text(unsupported_file_link_lines[0]) == "project: project links support run"
 
         with mock.patch.dict(shell_app.CFG, {"workspace_enabled": True}, clear=False):
             missing_label = client.post(

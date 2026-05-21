@@ -33,7 +33,7 @@ class BuiltinScheduleError(ValueError):
     """Raised when schedule built-in input is invalid."""
 
 
-def _schedule_usage() -> list[dict[str, str]]:
+def _schedule_usage() -> list[dict[str, object]]:
     return [
         output_line("Schedule commands:", "builtin-section"),
         output_line("  schedule list", "builtin-help-row"),
@@ -86,7 +86,7 @@ def _schedule_cadence(schedule: Schedule) -> str:
     return schedule.cadence_preset or schedule.cron_expr
 
 
-def _schedule_lines(session_id: str) -> list[dict[str, str]]:
+def _schedule_lines(session_id: str) -> list[dict[str, object]]:
     schedules = list_for_session(session_id)
     if not schedules:
         return [output_line("schedule: no schedules yet. Run `schedule create --every hourly -- <cmd>`.", "builtin-note")]
@@ -103,7 +103,7 @@ def _schedule_lines(session_id: str) -> list[dict[str, str]]:
     return lines
 
 
-def _info_lines(schedule: Schedule) -> list[dict[str, str]]:
+def _info_lines(schedule: Schedule) -> list[dict[str, object]]:
     width = 14
     return [
         output_line("Schedule:", "builtin-section"),
@@ -160,7 +160,7 @@ def _parse_create(parts: list[str]) -> dict[str, Any]:
     return parsed
 
 
-def _create_schedule(parts: list[str], session_id: str) -> list[dict[str, str]]:
+def _create_schedule(parts: list[str], session_id: str) -> list[dict[str, object]]:
     payload = _parse_create(parts)
     command = validate_schedule_command(payload["command"], session_id)
     schedule = create_schedule(
@@ -187,7 +187,7 @@ def _create_schedule(parts: list[str], session_id: str) -> list[dict[str, str]]:
     ]
 
 
-def _run_schedule_now(schedule: Schedule) -> list[dict[str, str]]:
+def _run_schedule_now(schedule: Schedule) -> list[dict[str, object]]:
     fired_at = datetime.now(timezone.utc).isoformat()
     with database.db_connect() as conn:
         status = fire_schedule(conn, schedule, fired_at=fired_at)
@@ -210,7 +210,7 @@ def _run_schedule_now(schedule: Schedule) -> list[dict[str, str]]:
     return lines
 
 
-def run_builtin_schedule(command: str, session_id: str) -> list[dict[str, str]]:
+def run_builtin_schedule(command: str, session_id: str) -> list[dict[str, object]]:
     parts = split_command_argv(command)
     subcommand = parts[1].lower() if len(parts) > 1 else "list"
     if subcommand in {"help", "-h", "--help"}:
@@ -261,8 +261,9 @@ def run_builtin_schedule(command: str, session_id: str) -> list[dict[str, str]]:
                 "schedule_id": schedule.id,
                 "removed": removed,
             })
-            cls = "builtin-success" if removed else "builtin-note"
-            return [output_line(f"schedule: deleted {schedule.id}" if removed else f"schedule: not found {schedule.id}", cls)]
+            status_style = "builtin-success" if removed else "builtin-note"
+            message = f"schedule: deleted {schedule.id}" if removed else f"schedule: not found {schedule.id}"
+            return [output_line(message, status_style)]
         if subcommand in {"run", "run-now"}:
             schedule = _schedule_for_session(_schedule_ref(parts, "Usage: schedule run <id>"), session_id)
             return _run_schedule_now(schedule)

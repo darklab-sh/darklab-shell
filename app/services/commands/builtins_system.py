@@ -18,12 +18,12 @@ from services.commands.builtins_format import (
 _STARTED_AT = datetime.now(timezone.utc)
 
 
-def run_builtin_date() -> list[dict[str, str]]:
+def run_builtin_date() -> list[dict[str, object]]:
     now = datetime.now().astimezone()
     return [{"type": "output", "text": now.strftime("%a %b %d %H:%M:%S %Z %Y")}]
 
 
-def run_builtin_env(session_id: str) -> list[dict[str, str]]:
+def run_builtin_env(session_id: str) -> list[dict[str, object]]:
     lines = [
         _output_line("Environment:", "builtin-section"),
         _output_line(f"APP_NAME={CFG['app_name']}", "builtin-plain"),
@@ -34,7 +34,7 @@ def run_builtin_env(session_id: str) -> list[dict[str, str]]:
     return lines
 
 
-def run_builtin_whoami() -> list[dict[str, str]]:
+def run_builtin_whoami() -> list[dict[str, object]]:
     return [
         _output_line("Shell identity:", "builtin-section"),
         _output_line(CFG["app_name"], "builtin-identity"),
@@ -44,16 +44,16 @@ def run_builtin_whoami() -> list[dict[str, str]]:
     ]
 
 
-def run_builtin_hostname() -> list[dict[str, str]]:
+def run_builtin_hostname() -> list[dict[str, object]]:
     return [{"type": "output", "text": CFG["app_name"]}]
 
 
-def run_builtin_id() -> list[dict[str, str]]:
+def run_builtin_id() -> list[dict[str, object]]:
     text = f"uid=1000({CFG['app_name']}) gid=1000({CFG['app_name']}) groups=1000({CFG['app_name']})"
     return [{"type": "output", "text": text}]
 
 
-def run_builtin_ip_addr() -> list[dict[str, str]]:
+def run_builtin_ip_addr() -> list[dict[str, object]]:
     return _text_lines([
         "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000",
         "    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00",
@@ -64,13 +64,13 @@ def run_builtin_ip_addr() -> list[dict[str, str]]:
     ])
 
 
-def run_builtin_pwd() -> list[dict[str, str]]:
+def run_builtin_pwd() -> list[dict[str, object]]:
     if CFG.get("workspace_enabled"):
         return [{"type": "output", "text": "/"}]
     return [{"type": "output", "text": f"/app/{CFG['app_name']}/bin"}]
 
 
-def run_builtin_route() -> list[dict[str, str]]:
+def run_builtin_route() -> list[dict[str, object]]:
     return _text_lines([
         "Kernel IP routing table",
         (
@@ -88,23 +88,23 @@ def run_builtin_route() -> list[dict[str, str]]:
     ])
 
 
-def run_builtin_tty() -> list[dict[str, str]]:
+def run_builtin_tty() -> list[dict[str, object]]:
     return [{"type": "output", "text": "/dev/pts/web"}]
 
 
-def run_builtin_uname(command: str, split_command) -> list[dict[str, str]]:
+def run_builtin_uname(command: str, split_command) -> list[dict[str, object]]:
     parts = split_command(command)
     if "-a" in parts[1:]:
         return [{"type": "output", "text": f"{CFG['app_name']} Linux web-terminal x86_64 app-runtime"}]
     return [{"type": "output", "text": "Linux"}]
 
 
-def run_builtin_uptime() -> list[dict[str, str]]:
+def run_builtin_uptime() -> list[dict[str, object]]:
     elapsed = int((datetime.now(timezone.utc) - _STARTED_AT).total_seconds())
     return [{"type": "output", "text": f"up {_format_duration(elapsed)}"}]
 
 
-def run_builtin_df(command: str) -> list[dict[str, str]]:
+def run_builtin_df(command: str) -> list[dict[str, object]]:
     return _text_lines([
         (
             f"{_ansi_underline('Filesystem')}      "
@@ -120,7 +120,7 @@ def run_builtin_df(command: str) -> list[dict[str, str]]:
     ])
 
 
-def run_builtin_free(command: str) -> list[dict[str, str]]:
+def run_builtin_free(command: str) -> list[dict[str, object]]:
     return _text_lines([
         (
             "               "
@@ -136,7 +136,7 @@ def run_builtin_free(command: str) -> list[dict[str, str]]:
     ])
 
 
-def run_builtin_version() -> list[dict[str, str]]:
+def run_builtin_version() -> list[dict[str, object]]:
     try:
         flask_version = package_version("flask")
     except PackageNotFoundError:
@@ -151,5 +151,5 @@ def run_builtin_version() -> list[dict[str, str]]:
     return lines
 
 
-def run_builtin_who(session_id: str) -> list[dict[str, str]]:
+def run_builtin_who(session_id: str) -> list[dict[str, object]]:
     return [{"type": "output", "text": f"{CFG['app_name']}  pts/web  {session_id or 'anonymous'}"}]

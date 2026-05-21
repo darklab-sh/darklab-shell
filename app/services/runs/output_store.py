@@ -10,11 +10,13 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 import gzip
 import json
 import os
 
 from config import resolve_data_dir
+from services.runs.output_model import LineEvent, line_event_from_legacy, to_legacy_wire
 
 DATA_DIR = resolve_data_dir()
 RUN_OUTPUT_DIR = os.path.join(DATA_DIR, "run-output")
@@ -132,7 +134,7 @@ class RunOutputCapture:
 
     def add_line(
         self,
-        text: str,
+        text: str = "",
         cls: str = "",
         ts_clock: str = "",
         ts_elapsed: str = "",
@@ -141,26 +143,26 @@ class RunOutputCapture:
         command_root: str = "",
         target: str = "",
         entities: Sequence[Mapping[str, object]] | None = None,
+        *,
+        event: LineEvent | None = None,
     ):
-        line = str(text).rstrip("\n")
-        entry: dict[str, object] = {
-            "text": line,
-            "cls": str(cls or ""),
-            "tsC": str(ts_clock or ""),
-            "tsE": str(ts_elapsed or ""),
-        }
-        signal_values = [str(signal) for signal in (signals or []) if str(signal)]
-        if signal_values:
-            entry["signals"] = signal_values
-        if line_index is not None:
-            entry["line_index"] = int(line_index)
-        if command_root:
-            entry["command_root"] = str(command_root)
-        if target:
-            entry["target"] = str(target)
-        entity_values = self._normalize_entities(entities)
-        if entity_values:
-            entry["entities"] = entity_values
+        if event is None:
+            event = line_event_from_legacy(
+                text,
+                cls,
+                ts_clock=ts_clock,
+                ts_elapsed=ts_elapsed,
+                signals=signals,
+                line_index=line_index,
+                command_root=command_root,
+                target=target,
+                entities=self._normalize_entities(entities),
+            )
+        self.add_event(event)
+
+    def add_event(self, event: LineEvent):
+        storage_event = replace(event, text=event.text.rstrip("\n"))
+        entry = to_legacy_wire(storage_event)
         self.output_line_count += 1
 
         self._append_preview_entry(entry)

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Callable
 
+from services.runs.output_model import LineKind, LineRole, line_event_from_legacy, to_legacy_output_event
+
 
 def format_duration(total_seconds: int) -> str:
     total_seconds = max(0, int(total_seconds))
@@ -137,12 +139,18 @@ def ansi_exit_code(value: object) -> str:
     return ansi_green(code) if code == 0 else ansi_red(code)
 
 
-def text_lines(lines: list[str]) -> list[dict[str, str]]:
+def text_lines(lines: list[str]) -> list[dict[str, object]]:
     return [{"type": "output", "text": line} for line in lines]
 
 
-def output_line(text: str, cls: str = "") -> dict[str, str]:
-    return {"type": "output", "text": text, "cls": cls}
+def output_line(
+    text: str,
+    cls: str = "",
+    *,
+    kind: LineKind | str | None = None,
+    role: LineRole | str | None = None,
+) -> dict[str, object]:
+    return to_legacy_output_event(line_event_from_legacy(text, cls, kind=kind, role=role))
 
 
 def format_native_record(label: str, value: str, width: int) -> str:

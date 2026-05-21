@@ -11,7 +11,7 @@ from services.secrets.storage import InvalidSecretName, delete_secret, list_secr
 from services.secrets.vault import MasterKeyError, SecretDecryptError
 
 
-def _secret_usage() -> list[dict[str, str]]:
+def _secret_usage() -> list[dict[str, object]]:
     return [
         output_line("Secret commands:", "builtin-section"),
         output_line("  secret set NAME", "builtin-help-row"),
@@ -97,7 +97,7 @@ def _format_provider_status_row(provider: dict[str, Any], status_label: str) -> 
     return format_native_record(label, detail, 22)
 
 
-def _run_secret_show_consumers(session_id: str) -> list[dict[str, str]]:
+def _run_secret_show_consumers(session_id: str) -> list[dict[str, object]]:
     try:
         stored_secret_names = _provider_secret_name_set(session_id)
     except (MasterKeyError, SecretDecryptError) as exc:
@@ -147,7 +147,7 @@ def _run_secret_show_consumers(session_id: str) -> list[dict[str, str]]:
     return lines
 
 
-def run_builtin_secret(command: str, session_id: str) -> list[dict[str, str]]:
+def run_builtin_secret(command: str, session_id: str) -> list[dict[str, object]]:
     parts = split_command_argv(command)
     subcommand = parts[1].lower() if len(parts) > 1 else "help"
 

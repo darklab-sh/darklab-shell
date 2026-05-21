@@ -865,7 +865,7 @@ class TestBuiltinCommandResolution:
         with mock.patch("services.commands.builtins.load_commands_registry", return_value=registry) as loader:
             lines = _run_builtin_commands("commands --external")
 
-        text = "\n".join(line.get("text", "") for line in lines)
+        text = "\n".join(str(line.get("text", "")) for line in lines)
         assert loader.call_count == 1
         assert "Allowed external commands:" in text
         assert "[Registry Group]" in text
@@ -904,7 +904,7 @@ class TestBuiltinCommandResolution:
         with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
             lines = _run_builtin_commands("commands info sentinel-scan")
 
-        text = "\n".join(line.get("text", "") for line in lines)
+        text = "\n".join(str(line.get("text", "")) for line in lines)
         assert "sentinel-scan" in text
         assert "Probe a target safely." in text
         assert "sentinel-scan example.test" in text

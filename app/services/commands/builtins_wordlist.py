@@ -7,7 +7,7 @@ from services.commands.registry import split_command_argv
 from services.commands.wordlists import filter_wordlists, find_wordlist, load_wordlist_catalog
 
 
-def _wordlist_usage() -> list[dict[str, str]]:
+def _wordlist_usage() -> list[dict[str, object]]:
     return [
         output_line("Usage: wordlist [list [category] | search <term> | path <name-or-path> | --all]", "builtin-note"),
         output_line("  wordlist", "builtin-help-row"),
@@ -17,7 +17,7 @@ def _wordlist_usage() -> list[dict[str, str]]:
     ]
 
 
-def _wordlist_rows(items: list[dict], *, heading: str) -> list[dict[str, str]]:
+def _wordlist_rows(items: list[dict], *, heading: str) -> list[dict[str, object]]:
     if not items:
         return [output_line("No matching wordlists found.", "builtin-note")]
     widths = {
@@ -39,7 +39,7 @@ def _wordlist_rows(items: list[dict], *, heading: str) -> list[dict[str, str]]:
     return lines
 
 
-def run_builtin_wordlist(command: str) -> list[dict[str, str]]:
+def run_builtin_wordlist(command: str) -> list[dict[str, object]]:
     parts = split_command_argv(command)
     args = parts[1:]
     catalog = load_wordlist_catalog(include_all="--all" in args)

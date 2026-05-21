@@ -15,7 +15,7 @@ import subprocess
 import threading
 import uuid
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import TypedDict
 
@@ -65,6 +65,14 @@ from services.runs.broker import (
 )
 from services.runs.output_store import RunOutputCapture, load_full_output_entries
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, run_kind_for_cmd_type
+from services.runs.output_model import (
+    LineEvent,
+    LineKind,
+    legacy_cls_for_event,
+    line_event_from_legacy,
+    to_legacy_entry,
+    to_legacy_output_event,
+)
 from services.storage.body_store import inline_threshold_bytes, maybe_store_text_body
 from services.atlas.materializer import materialize_run_entities
 from services.secrets.audit import emit_secret_event
@@ -322,26 +330,42 @@ def _run_output_capture(run_id):
     )
 
 
-def _capture_add_line_with_signals(capture, classifier, text, *, cls="", ts_clock="", ts_elapsed=""):
-    metadata = classifier.classify_line(text, cls=cls) if classifier else {}
-    capture.add_line(
-        text,
-        cls=cls,
-        ts_clock=ts_clock,
-        ts_elapsed=ts_elapsed,
+def _capture_add_line_with_signals(
+    capture,
+    classifier,
+    text: str = "",
+    *,
+    cls: str = "",
+    ts_clock: str = "",
+    ts_elapsed: str = "",
+    event: LineEvent | None = None,
+):
+    base_event = event or line_event_from_legacy(text, cls, ts_clock=ts_clock, ts_elapsed=ts_elapsed)
+    metadata = classifier.classify_line(base_event.text, cls=legacy_cls_for_event(base_event)) if classifier else {}
+    metadata_event = line_event_from_legacy(
+        base_event.text,
+        legacy_cls_for_event(base_event),
         signals=metadata.get("signals") if isinstance(metadata.get("signals"), list) else None,
+        entities=metadata.get("entities") if isinstance(metadata.get("entities"), list) else None,
+    )
+    captured_event = replace(
+        base_event,
+        signals=metadata_event.signals,
         line_index=metadata.get("line_index") if isinstance(metadata.get("line_index"), int) else None,
         command_root=str(metadata.get("command_root", "")),
         target=str(metadata.get("target", "")),
-        entities=metadata.get("entities") if isinstance(metadata.get("entities"), list) else None,
+        entities=metadata_event.entities,
     )
-    return metadata
+    capture.add_event(captured_event)
+    return metadata, captured_event
 
 
-def _broker_output_payload(event_type, text, *, cls="", metadata=None):
-    payload = {"text": text}
-    if cls:
-        payload["cls"] = cls
+def _broker_output_payload(event_type, text: str = "", *, cls: str = "", metadata=None, event: LineEvent | None = None):
+    payload_event = event or line_event_from_legacy(text, cls)
+    payload = {"text": payload_event.text}
+    payload_cls = legacy_cls_for_event(payload_event)
+    if payload_cls:
+        payload["cls"] = payload_cls
     if isinstance(metadata, dict):
         if isinstance(metadata.get("signals"), list):
             payload["signals"] = metadata["signals"]
@@ -790,11 +814,11 @@ def _normalize_client_side_run_lines(lines):
     for item in source_lines:
         if isinstance(item, dict):
             text = str(item.get("text", ""))
-            cls = str(item.get("cls", ""))
+            legacy_class = str(item.get("cls", ""))
         else:
             text = str(item)
-            cls = ""
-        normalized.append({"text": text, "cls": cls, "tsC": "", "tsE": ""})
+            legacy_class = ""
+        normalized.append(to_legacy_entry(line_event_from_legacy(text, legacy_class)))
     return normalized
 
 
@@ -1237,7 +1261,7 @@ def _prepare_command_input(
 
 def _filter_builtin_command_events(events, variable_notice: str, postfilter: _SyntheticPostFilterProcessor):
     if variable_notice:
-        events = [{"type": "output", "text": variable_notice, "cls": "notice"}] + events
+        events = [to_legacy_output_event(line_event_from_legacy(variable_notice, kind=LineKind.notice))] + events
     filtered_events = []
     for event in events:
         if event.get("type") != "output":
@@ -1487,21 +1511,27 @@ def _publish_broker_captured_line(
     text: str,
     *,
     cls: str = "",
+    kind: LineKind | str | None = None,
+    event: LineEvent | None = None,
     run_started_dt,
 ):
     line_dt = datetime.now(timezone.utc)
-    metadata = _capture_add_line_with_signals(
-        capture,
-        signal_classifier,
+    base_event = event or line_event_from_legacy(
         text,
-        cls=cls,
+        cls,
+        kind=kind,
         ts_clock=line_dt.strftime("%H:%M:%S"),
         ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
+    )
+    metadata, captured_event = _capture_add_line_with_signals(
+        capture,
+        signal_classifier,
+        event=base_event,
     )
     publish_run_event(
         run_id,
         event_type,
-        _broker_output_payload(event_type, text, cls=cls, metadata=metadata),
+        _broker_output_payload(event_type, metadata=metadata, event=captured_event),
     )
 
 
@@ -1612,17 +1642,17 @@ def _brokered_real_run_worker(
         if variable_notice:
             _publish_broker_captured_line(
                 run_id, capture, signal_classifier, "notice", variable_notice,
-                cls="notice", run_started_dt=run_started_dt,
+                kind=LineKind.notice, run_started_dt=run_started_dt,
             )
         if rewrite_notice:
             _publish_broker_captured_line(
                 run_id, capture, signal_classifier, "notice", f"[notice] {rewrite_notice}",
-                cls="notice", run_started_dt=run_started_dt,
+                kind=LineKind.notice, run_started_dt=run_started_dt,
             )
         for workspace_notice in workspace_notices:
             _publish_broker_captured_line(
                 run_id, capture, signal_classifier, "notice", workspace_notice,
-                cls="notice", run_started_dt=run_started_dt,
+                kind=LineKind.notice, run_started_dt=run_started_dt,
             )
 
         if proc.stdout is None:
@@ -1644,7 +1674,7 @@ def _brokered_real_run_worker(
                     })
                     _publish_broker_captured_line(
                         run_id, capture, signal_classifier, "notice", timeout_msg,
-                        cls="notice", run_started_dt=run_started_dt,
+                        kind=LineKind.notice, run_started_dt=run_started_dt,
                     )
                     break
 

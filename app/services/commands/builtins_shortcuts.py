@@ -58,13 +58,13 @@ def get_current_shortcuts(is_mac: bool | None = None) -> dict:
     }
 
 
-def run_builtin_shortcuts() -> list[dict[str, str]]:
+def run_builtin_shortcuts() -> list[dict[str, object]]:
     payload = get_current_shortcuts()
     width = max(
         (len(item["key"]) for section in payload["sections"] for item in section["items"]),
         default=0,
     )
-    lines: list[dict[str, str]] = []
+    lines: list[dict[str, object]] = []
     for index, section in enumerate(payload["sections"]):
         if index > 0:
             lines.append(_output_line("", "builtin-spacer"))

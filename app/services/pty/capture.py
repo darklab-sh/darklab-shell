@@ -10,6 +10,8 @@ from collections import deque
 from collections.abc import Iterable, Sequence
 from typing import Any
 
+from services.runs.output_model import LineKind, LineRole, line_event_from_legacy, to_legacy_entry
+
 try:
     # importlib + Any | None lets us treat pyte as optional at runtime without
     # binding a typed module symbol; pyte ships no type stubs.
@@ -324,17 +326,22 @@ class PtyTerminalCapture:
             except Exception:
                 log.warning("PTY_CAPTURE_RESIZE_FAILED", exc_info=True)
 
-    def synthesize_entries(self) -> list[dict[str, str]]:
+    def synthesize_entries(self) -> list[dict[str, object]]:
         with self._lock:
             scrollback = self._scrollback_lines()
             final_frame = self._final_frame_lines()
-        entries = [{"text": line, "cls": ""} for line in scrollback]
+        entries = [to_legacy_entry(line_event_from_legacy(line), include_timestamps=False) for line in scrollback]
         if scrollback and final_frame:
-            entries.append({"text": "", "cls": "pty-marker"})
-        entries.extend({"text": line, "cls": ""} for line in final_frame)
+            entries.append(to_legacy_entry(line_event_from_legacy("", role=LineRole.pty_marker), include_timestamps=False))
+        entries.extend(to_legacy_entry(line_event_from_legacy(line), include_timestamps=False) for line in final_frame)
         if entries:
             return entries
-        return [{"text": "[interactive PTY exited with no output]", "cls": "notice"}]
+        return [
+            to_legacy_entry(
+                line_event_from_legacy("[interactive PTY exited with no output]", kind=LineKind.notice),
+                include_timestamps=False,
+            )
+        ]
 
     def ansi_snapshot(self) -> tuple[str, bool]:
         with self._lock:

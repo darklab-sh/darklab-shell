@@ -30,7 +30,7 @@ from services.commands.registry import (
 _BACKSPACE_RE = re.compile(r".\x08")
 
 
-def run_builtin_help() -> list[dict[str, str]]:
+def run_builtin_help() -> list[dict[str, object]]:
     lines = [
         _output_line("Help and discovery:", "builtin-section"),
         _output_line(f"README: {_format_terminal_link(PROJECT_README, PROJECT_README)}", "builtin-note"),
@@ -47,7 +47,7 @@ def run_builtin_help() -> list[dict[str, str]]:
     return lines
 
 
-def documented_builtin_rows(active_documented_builtin_commands: Callable[[], list[dict[str, str]]]) -> list[tuple[str, str]]:
+def documented_builtin_rows(active_documented_builtin_commands: Callable[[], list[dict[str, object]]]) -> list[tuple[str, str]]:
     rows = [
         (str(entry["name"]), str(entry["description"]))
         for entry in active_documented_builtin_commands()
@@ -85,7 +85,7 @@ def _allowed_external_command_groups(
     return rows or None
 
 
-def _run_builtin_commands_info(parts: list[str]) -> list[dict[str, str]]:
+def _run_builtin_commands_info(parts: list[str]) -> list[dict[str, object]]:
     if len(parts) not in {3, 4}:
         return [_output_line("Usage: commands info <command> [subcommand]")]
     root = parts[2].lower()
@@ -95,7 +95,7 @@ def _run_builtin_commands_info(parts: list[str]) -> list[dict[str, str]]:
         target = f"{root} {subcommand}" if subcommand else root
         return [_output_line(f"commands: no catalog entry for {target}")]
 
-    lines: list[dict[str, str]] = [
+    lines: list[dict[str, object]] = [
         _output_line(str(entry.get("root") or root), "builtin-section"),
     ]
     if entry.get("subcommand"):
@@ -162,9 +162,9 @@ def _run_builtin_commands_info(parts: list[str]) -> list[dict[str, str]]:
 def run_builtin_commands(
     command: str,
     split_command: Callable[[str], list[str]],
-    active_documented_builtin_commands: Callable[[], list[dict[str, str]]],
+    active_documented_builtin_commands: Callable[[], list[dict[str, object]]],
     load_registry: Callable[[], dict] = load_commands_registry,
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     parts = split_command(command)
     if len(parts) > 1 and parts[1].lower() == "info":
         return _run_builtin_commands_info(parts)
@@ -182,7 +182,7 @@ def run_builtin_commands(
     elif "--external" in filters and "--built-in" not in filters:
         show_builtins = False
 
-    lines: list[dict[str, str]] = []
+    lines: list[dict[str, object]] = []
 
     if show_builtins:
         builtins = documented_builtin_rows(active_documented_builtin_commands)
@@ -219,14 +219,14 @@ def run_builtin_commands(
     return lines
 
 
-def run_builtin_client_side_command(name: str) -> list[dict[str, str]]:
+def run_builtin_client_side_command(name: str) -> list[dict[str, object]]:
     return [_output_line(f"{name}: command runs client-side — reload the page and try again.")]
 
 
 def _run_builtin_man_for_synthetic_topic(
     topic: str,
     documented_rows: Callable[[], list[tuple[str, str]]],
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     topic_help = {
         "man": "Show the real man page for an allowed command, or built-in help for a native command.",
         "uname": "Describe the web shell environment.",
@@ -243,7 +243,7 @@ def _run_builtin_man_for_synthetic_topic(
     return run_builtin_help()
 
 
-def run_builtin_faq() -> list[dict[str, str]]:
+def run_builtin_faq() -> list[dict[str, object]]:
     entries = load_all_faq(CFG["app_name"], PROJECT_README)
     if not entries:
         return _text_lines([
@@ -282,7 +282,7 @@ def run_builtin_man(
     split_command: Callable[[str], list[str]],
     active_builtin_command_roots: Callable[[], set[str]],
     documented_rows: Callable[[], list[tuple[str, str]]],
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     parts = split_command(command)
     if len(parts) != 2:
         return [{"type": "output", "text": "Usage: man <allowed-command>"}]
@@ -352,7 +352,7 @@ def run_builtin_type(
     command: str,
     split_command: Callable[[str], list[str]],
     active_builtin_command_roots: Callable[[], set[str]],
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     parts = split_command(command)
     if len(parts) != 2:
         return [{"type": "output", "text": "Usage: type <command>"}]
@@ -372,7 +372,7 @@ def run_builtin_which(
     command: str,
     split_command: Callable[[str], list[str]],
     active_builtin_command_roots: Callable[[], set[str]],
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     parts = split_command(command)
     if len(parts) != 2:
         return [{"type": "output", "text": "Usage: which <command>"}]

@@ -16,6 +16,10 @@ def get_client():
     return shell_app.app.test_client()
 
 
+def _line_text(line: dict[str, object]) -> str:
+    return str(line.get("text", ""))
+
+
 def _schedule_client(monkeypatch, tmp_path):
     db_path = str(tmp_path / "schedules.db")
     lock_path = str(tmp_path / "schedules.lock")
@@ -535,7 +539,7 @@ class TestWatchBuiltin:
             token,
         )
         assert exit_code == 0
-        assert "watch: created wtr_" in lines[0]["text"]
+        assert "watch: created wtr_" in _line_text(lines[0])
         with db_connect() as conn:
             row = conn.execute(
                 "SELECT w.id, w.schedule_id, w.baseline_run_id, s.owner_kind, s.enabled "
@@ -549,14 +553,14 @@ class TestWatchBuiltin:
         assert row["enabled"] == 1
 
         listed, _ = execute_builtin_command("watch list", token)
-        assert any(watcher_id in line["text"] and "Nmap drift" in line["text"] for line in listed)
+        assert any(watcher_id in _line_text(line) and "Nmap drift" in _line_text(line) for line in listed)
 
         info, _ = execute_builtin_command(f"watch info {watcher_id}", token)
-        assert any("baseline run" in line["text"] and baseline_run_id in line["text"] for line in info)
-        assert any("command" in line["text"] and "nmap -sV darklab.sh" in line["text"] for line in info)
+        assert any("baseline run" in _line_text(line) and baseline_run_id in _line_text(line) for line in info)
+        assert any("command" in _line_text(line) and "nmap -sV darklab.sh" in _line_text(line) for line in info)
 
         paused, _ = execute_builtin_command(f"watch pause {watcher_id}", token)
-        assert paused[0]["text"] == f"watch: paused {watcher_id}"
+        assert _line_text(paused[0]) == f"watch: paused {watcher_id}"
         with db_connect() as conn:
             paused_row = conn.execute(
                 "SELECT w.state, s.enabled FROM watchers w JOIN schedules s ON s.id = w.schedule_id WHERE w.id = ?",
@@ -566,10 +570,10 @@ class TestWatchBuiltin:
         assert paused_row["enabled"] == 0
 
         resumed, _ = execute_builtin_command(f"watch resume {watcher_id}", token)
-        assert resumed[0]["text"] == f"watch: resumed {watcher_id}"
+        assert _line_text(resumed[0]) == f"watch: resumed {watcher_id}"
 
         deleted, _ = execute_builtin_command(f"watch delete {watcher_id}", token)
-        assert deleted[0]["text"] == f"watch: deleted {watcher_id}"
+        assert _line_text(deleted[0]) == f"watch: deleted {watcher_id}"
         schedule_id = row["schedule_id"]
         with db_connect() as conn:
             watcher_count = conn.execute("SELECT COUNT(*) AS count FROM watchers WHERE id = ?", (watcher_id,)).fetchone()
@@ -587,9 +591,9 @@ class TestWatchBuiltin:
         unfinished, _ = execute_builtin_command("watch create run_watch_unfinished --every hourly", token)
         disallowed, _ = execute_builtin_command("watch create run_watch_disallowed --every hourly", token)
 
-        assert missing[0]["text"] == "watch: baseline run not found: run_missing"
-        assert unfinished[0]["text"] == "watch: baseline run must be completed"
-        assert "Command not allowed" in disallowed[0]["text"]
+        assert _line_text(missing[0]) == "watch: baseline run not found: run_missing"
+        assert _line_text(unfinished[0]) == "watch: baseline run must be completed"
+        assert "Command not allowed" in _line_text(disallowed[0])
         with db_connect() as conn:
             count = conn.execute("SELECT COUNT(*) AS count FROM watchers WHERE session_token = ?", (token,)).fetchone()
         assert count["count"] == 0
@@ -610,7 +614,7 @@ class TestWatchBuiltin:
         fired, exit_code = execute_builtin_command(f"watch run {watcher_id}", token)
 
         assert exit_code == 0
-        assert fired[0]["text"] == f"watch: fired {watcher_id}"
+        assert _line_text(fired[0]) == f"watch: fired {watcher_id}"
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         row = conn.execute(
@@ -626,7 +630,7 @@ class TestWatchBuiltin:
 
         accepted, _ = execute_builtin_command(f"watch accept {watcher_id}", token)
 
-        assert accepted[0]["text"].startswith("watch: accepted baseline run_fire_")
+        assert _line_text(accepted[0]).startswith("watch: accepted baseline run_fire_")
         with db_connect() as conn:
             baseline_row = conn.execute("SELECT baseline_run_id, state FROM watchers WHERE id = ?", (watcher_id,)).fetchone()
         assert baseline_row["baseline_run_id"].startswith("run_fire_")
@@ -638,7 +642,7 @@ class TestWatchBuiltin:
         lines, exit_code = execute_builtin_command("watch list", "anonymous-session")
 
         assert exit_code == 0
-        assert lines[0]["text"] == "watch: persistent session token required. Run `session-token generate` first."
+        assert _line_text(lines[0]) == "watch: persistent session token required. Run `session-token generate` first."
 
 
 class TestScheduleBuiltin:
@@ -651,20 +655,20 @@ class TestScheduleBuiltin:
             token,
         )
         assert exit_code == 0
-        assert "schedule: created sch_" in lines[0]["text"]
+        assert "schedule: created sch_" in _line_text(lines[0])
         with db_connect() as conn:
             row = conn.execute("SELECT id, enabled FROM schedules WHERE session_token = ?", (token,)).fetchone()
         schedule_id = row["id"]
         assert row["enabled"] == 1
 
         listed, _ = execute_builtin_command("schedule list", token)
-        assert any(schedule_id in line["text"] and "ping -c 1 darklab.sh" in line["text"] for line in listed)
+        assert any(schedule_id in _line_text(line) and "ping -c 1 darklab.sh" in _line_text(line) for line in listed)
 
         info, _ = execute_builtin_command(f"schedule info {schedule_id}", token)
-        assert any("command" in line["text"] and "ping -c 1 darklab.sh" in line["text"] for line in info)
+        assert any("command" in _line_text(line) and "ping -c 1 darklab.sh" in _line_text(line) for line in info)
 
         paused, _ = execute_builtin_command(f"schedule pause {schedule_id}", token)
-        assert paused[0]["text"] == f"schedule: paused {schedule_id}"
+        assert _line_text(paused[0]) == f"schedule: paused {schedule_id}"
         with db_connect() as conn:
             paused_row = conn.execute("SELECT enabled, paused_reason FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
             conn.execute(
@@ -676,7 +680,7 @@ class TestScheduleBuiltin:
         assert paused_row["paused_reason"] == "paused"
 
         resumed, _ = execute_builtin_command(f"schedule resume {schedule_id}", token)
-        assert resumed[0]["text"] == f"schedule: resumed {schedule_id}"
+        assert _line_text(resumed[0]) == f"schedule: resumed {schedule_id}"
         with db_connect() as conn:
             resumed_row = conn.execute(
                 "SELECT enabled, last_error, consecutive_failures FROM schedules WHERE id = ?",
@@ -687,7 +691,7 @@ class TestScheduleBuiltin:
         assert resumed_row["consecutive_failures"] == 0
 
         deleted, _ = execute_builtin_command(f"schedule delete {schedule_id}", token)
-        assert deleted[0]["text"] == f"schedule: deleted {schedule_id}"
+        assert _line_text(deleted[0]) == f"schedule: deleted {schedule_id}"
         with db_connect() as conn:
             count = conn.execute("SELECT COUNT(*) AS count FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
         assert count["count"] == 0
@@ -699,7 +703,7 @@ class TestScheduleBuiltin:
         lines, exit_code = execute_builtin_command("schedule create --every hourly -- rm -rf /", token)
 
         assert exit_code == 0
-        assert "Command not allowed" in lines[0]["text"]
+        assert "Command not allowed" in _line_text(lines[0])
         with db_connect() as conn:
             count = conn.execute("SELECT COUNT(*) AS count FROM schedules WHERE session_token = ?", (token,)).fetchone()
         assert count["count"] == 0
@@ -718,7 +722,7 @@ class TestScheduleBuiltin:
         lines, exit_code = execute_builtin_command(f"schedule run {schedule_id}", token)
 
         assert exit_code == 0
-        assert lines[0]["text"] == f"schedule: fired {schedule_id}"
+        assert _line_text(lines[0]) == f"schedule: fired {schedule_id}"
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         row = conn.execute(
@@ -738,4 +742,4 @@ class TestScheduleBuiltin:
         lines, exit_code = execute_builtin_command("schedule list", "anonymous-session")
 
         assert exit_code == 0
-        assert lines[0]["text"] == "schedule: persistent session token required. Run `session-token generate` first."
+        assert _line_text(lines[0]) == "schedule: persistent session token required. Run `session-token generate` first."

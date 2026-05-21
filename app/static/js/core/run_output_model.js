@@ -205,6 +205,7 @@ var DarklabRunOutputModel = (function (global) {
   }
 
   function legacyClsForEvent(event) {
+    if (event.legacy_cls) return String(event.legacy_cls);
     const role = event.role || LineRole.BODY;
     if (role !== LineRole.BODY) return ROLE_LEGACY_CLS[role] || '';
     return KIND_LEGACY_CLS[event.kind || LineKind.INFO] || '';
@@ -232,6 +233,7 @@ var DarklabRunOutputModel = (function (global) {
       text: String(item.text || ''),
       kind: enumValue(LINE_KIND_VALUES, item.kind, legacyClsToKind(clsValue), 'kind', unknownCollector),
       role: enumValue(LINE_ROLE_VALUES, item.role, legacyClsToRole(clsValue), 'role', unknownCollector),
+      legacy_cls: String(clsValue || ''),
       ts_clock: String(item.tsC || ''),
       ts_elapsed: String(item.tsE || ''),
       signals: signalsFromWire(item.signals, unknownCollector),

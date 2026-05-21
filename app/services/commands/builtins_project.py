@@ -20,7 +20,7 @@ from services.projects.targets import (
 )
 
 
-def _project_usage() -> list[dict[str, str]]:
+def _project_usage() -> list[dict[str, object]]:
     return [
         output_line("Project commands:", "builtin-section"),
         output_line("  project list [--all]", "builtin-help-row"),
@@ -147,7 +147,7 @@ def _resolve_project_target_ref(session_id: str, project_id: str, raw_ref: str) 
     return None
 
 
-def _project_target_lines(session_id: str, project: dict[str, object]) -> list[dict[str, str]]:
+def _project_target_lines(session_id: str, project: dict[str, object]) -> list[dict[str, object]]:
     targets = _project_target_rows(session_id, str(project["id"]))
     if not targets:
         return [output_line("project: no targets yet", "builtin-note")]
@@ -162,7 +162,7 @@ def _project_target_lines(session_id: str, project: dict[str, object]) -> list[d
     return lines
 
 
-def _run_project_target_command(parts: list[str], session_id: str) -> list[dict[str, str]]:
+def _run_project_target_command(parts: list[str], session_id: str) -> list[dict[str, object]]:
     project = get_active_project(session_id)
     if not project:
         return [output_line("project: no active project; run `project use <name-or-id>` first")]
@@ -211,7 +211,7 @@ def _run_project_target_command(parts: list[str], session_id: str) -> list[dict[
     return [output_line(f"project: unknown target action '{action}'")]
 
 
-def run_builtin_project(command: str, session_id: str, *, tab_id: str = "") -> list[dict[str, str]]:
+def run_builtin_project(command: str, session_id: str, *, tab_id: str = "") -> list[dict[str, object]]:
     parts = split_command_argv(command)
     subcommand = parts[1].lower() if len(parts) > 1 else "current"
     try:

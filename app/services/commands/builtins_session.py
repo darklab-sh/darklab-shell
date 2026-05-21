@@ -26,7 +26,7 @@ def mask_session_token(token: str) -> str:
     return token[:8] + "••••••••"
 
 
-def run_builtin_session_token(cmd: str, session_id: str) -> list[dict[str, str]]:
+def run_builtin_session_token(cmd: str, session_id: str) -> list[dict[str, object]]:
     parts = split_command_argv(cmd)
     subcommand = parts[1].lower() if len(parts) > 1 else ""
 
@@ -64,7 +64,7 @@ def run_builtin_session_token(cmd: str, session_id: str) -> list[dict[str, str]]
     ]
 
 
-def run_builtin_var(cmd: str, session_id: str) -> list[dict[str, str]]:
+def run_builtin_var(cmd: str, session_id: str) -> list[dict[str, object]]:
     parts = split_command_argv(cmd)
     subcommand = parts[1].lower() if len(parts) > 1 else "list"
     width = 12

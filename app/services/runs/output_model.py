@@ -185,6 +185,7 @@ class LineEvent:
     text: str
     kind: LineKind = LineKind.info
     role: LineRole = LineRole.body
+    legacy_cls: str = ""
     ts_clock: str = ""
     ts_elapsed: str = ""
     signals: tuple[LineSignal, ...] = ()
@@ -206,6 +207,44 @@ def to_legacy_wire(event: LineEvent) -> dict[str, object]:
     return _legacy_payload(event)
 
 
+def to_legacy_entry(event: LineEvent, *, include_timestamps: bool = True) -> dict[str, object]:
+    return _legacy_payload(event, include_timestamps=include_timestamps)
+
+
+def to_legacy_output_event(event: LineEvent, *, include_timestamps: bool = False) -> dict[str, object]:
+    return {"type": "output", **_legacy_payload(event, include_timestamps=include_timestamps)}
+
+
+def line_event_from_legacy(
+    text: object,
+    cls: object = "",
+    *,
+    kind: LineKind | str | None = None,
+    role: LineRole | str | None = None,
+    ts_clock: object = "",
+    ts_elapsed: object = "",
+    signals: Sequence[object] | None = None,
+    line_index: object = None,
+    command_root: object = "",
+    target: object = "",
+    entities: Sequence[Mapping[str, object]] | None = None,
+) -> LineEvent:
+    legacy_cls = str(cls or "")
+    return LineEvent(
+        text=str(text),
+        kind=_coerce_kind(kind, legacy_cls),
+        role=_coerce_role(role, legacy_cls),
+        legacy_cls=legacy_cls,
+        ts_clock=str(ts_clock or ""),
+        ts_elapsed=str(ts_elapsed or ""),
+        signals=_signals_from_wire(signals, None),
+        line_index=_optional_int(line_index),
+        command_root=str(command_root or ""),
+        target=str(target or ""),
+        entities=_entities_from_wire(entities),
+    )
+
+
 def from_wire(payload: Mapping[str, object], unknown_collector: UnknownCollector | None = None) -> LineEvent:
     cls_value = payload.get("cls", "")
     kind = _enum_from_wire(LineKind, payload.get("kind"), LineKind.from_legacy_cls(cls_value), "kind", unknown_collector)
@@ -214,6 +253,7 @@ def from_wire(payload: Mapping[str, object], unknown_collector: UnknownCollector
         text=str(payload.get("text", "")),
         kind=kind,
         role=role,
+        legacy_cls=str(cls_value or ""),
         ts_clock=str(payload.get("tsC", "")),
         ts_elapsed=str(payload.get("tsE", "")),
         signals=_signals_from_wire(payload.get("signals"), unknown_collector),
@@ -229,18 +269,22 @@ def event_search_text(event: LineEvent) -> str:
 
 
 def legacy_cls_for_event(event: LineEvent) -> str:
+    if event.legacy_cls:
+        return event.legacy_cls
     if event.role != LineRole.body:
         return _ROLE_LEGACY_CLS[event.role]
     return _KIND_LEGACY_CLS[event.kind]
 
 
-def _legacy_payload(event: LineEvent) -> dict[str, object]:
+def _legacy_payload(event: LineEvent, *, include_timestamps: bool = True) -> dict[str, object]:
     payload: dict[str, object] = {
         "text": event.text,
         "cls": legacy_cls_for_event(event),
-        "tsC": event.ts_clock,
-        "tsE": event.ts_elapsed,
     }
+    if include_timestamps or event.ts_clock:
+        payload["tsC"] = event.ts_clock
+    if include_timestamps or event.ts_elapsed:
+        payload["tsE"] = event.ts_elapsed
     if event.signals:
         payload["signals"] = [signal.value for signal in event.signals]
     if event.line_index is not None:
@@ -280,11 +324,36 @@ def _enum_from_wire(
         return default
 
 
+def _coerce_kind(value: LineKind | str | None, legacy_cls: str) -> LineKind:
+    if isinstance(value, LineKind):
+        return value
+    if value is None or value == "":
+        return LineKind.from_legacy_cls(legacy_cls)
+    try:
+        return LineKind(str(value))
+    except ValueError:
+        return LineKind.from_legacy_cls(legacy_cls)
+
+
+def _coerce_role(value: LineRole | str | None, legacy_cls: str) -> LineRole:
+    if isinstance(value, LineRole):
+        return value
+    if value is None or value == "":
+        return LineRole.from_legacy_cls(legacy_cls)
+    try:
+        return LineRole(str(value))
+    except ValueError:
+        return LineRole.from_legacy_cls(legacy_cls)
+
+
 def _signals_from_wire(value: object, unknown_collector: UnknownCollector | None) -> tuple[LineSignal, ...]:
     if not isinstance(value, Sequence) or isinstance(value, str):
         return ()
     signals: list[LineSignal] = []
     for item in value:
+        if isinstance(item, LineSignal):
+            signals.append(item)
+            continue
         try:
             signals.append(LineSignal(str(item)))
         except ValueError:
@@ -337,6 +406,9 @@ __all__ = [
     "event_search_text",
     "from_wire",
     "legacy_cls_for_event",
+    "line_event_from_legacy",
+    "to_legacy_entry",
+    "to_legacy_output_event",
     "to_legacy_wire",
     "to_wire",
 ]

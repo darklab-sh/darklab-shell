@@ -58,6 +58,27 @@ describe('run output model', () => {
     });
   });
 
+  it('preserves unknown legacy class strings through compatibility writes', () => {
+    const event = model.fromWireLineEvent({
+      text: 'sample row',
+      cls: 'builtin-help-row builtin-tour-sample',
+      tsC: '',
+      tsE: '',
+    });
+
+    expect(event.kind).toBe('info');
+    expect(event.role).toBe('help-row');
+    expect(model.toWireLineEvent(event)).toEqual({
+      text: 'sample row',
+      cls: 'builtin-help-row builtin-tour-sample',
+      tsC: '',
+      tsE: '',
+      v: 1,
+      kind: 'info',
+      role: 'help-row',
+    });
+  });
+
   it('preserves legacy wire key order', () => {
     const legacy = model.toLegacyWireLineEvent({
       text: 'line',

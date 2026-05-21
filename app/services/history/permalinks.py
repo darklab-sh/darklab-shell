@@ -17,6 +17,7 @@ from config import (
     theme_runtime_css_vars,
 )
 from core.helpers import FONT_FILES, current_theme_name
+from services.runs.output_model import LineRole, line_event_from_legacy, to_legacy_entry
 
 _FONT_DIR = Path(__file__).resolve().parents[2] / "static" / "fonts"
 
@@ -101,32 +102,31 @@ def _normalize_permalink_lines(content_lines, label: str):
             for entry in content_items
         )
         if not has_prompt_echo:
-            normalized_lines.append({"text": echo_text, "cls": "prompt-echo", "tsC": "", "tsE": ""})
-            normalized_lines.append({"text": "", "cls": "", "tsC": "", "tsE": ""})
+            normalized_lines.append(to_legacy_entry(line_event_from_legacy(echo_text, role=LineRole.prompt_echo)))
+            normalized_lines.append(to_legacy_entry(line_event_from_legacy("")))
         for entry in content_items:
             if isinstance(entry, str):
-                normalized_lines.append({"text": entry, "cls": "", "tsC": "", "tsE": ""})
+                normalized_lines.append(to_legacy_entry(line_event_from_legacy(entry)))
             else:
-                normalized: dict[str, object] = {
-                    "text": str(entry.get("text", "")),
-                    "cls": str(entry.get("cls", "")),
-                    "tsC": str(entry.get("tsC", "")),
-                    "tsE": str(entry.get("tsE", "")),
-                }
-                if isinstance(entry.get("signals"), list):
-                    normalized["signals"] = [str(signal) for signal in entry["signals"] if str(signal)]
-                if isinstance(entry.get("line_index"), int):
-                    normalized["line_index"] = entry["line_index"]
-                if isinstance(entry.get("command_root"), str):
-                    normalized["command_root"] = entry["command_root"]
-                if isinstance(entry.get("target"), str):
-                    normalized["target"] = entry["target"]
+                normalized = to_legacy_entry(
+                    line_event_from_legacy(
+                        entry.get("text", ""),
+                        entry.get("cls", ""),
+                        ts_clock=entry.get("tsC", ""),
+                        ts_elapsed=entry.get("tsE", ""),
+                        signals=entry.get("signals") if isinstance(entry.get("signals"), list) else None,
+                        line_index=entry.get("line_index"),
+                        command_root=entry.get("command_root", ""),
+                        target=entry.get("target", ""),
+                        entities=entry.get("entities") if isinstance(entry.get("entities"), list) else None,
+                    )
+                )
                 normalized_lines.append(normalized)
     else:
-        normalized_lines.append({"text": echo_text, "cls": "prompt-echo", "tsC": "", "tsE": ""})
-        normalized_lines.append({"text": "", "cls": "", "tsC": "", "tsE": ""})
+        normalized_lines.append(to_legacy_entry(line_event_from_legacy(echo_text, role=LineRole.prompt_echo)))
+        normalized_lines.append(to_legacy_entry(line_event_from_legacy("")))
         for entry in content_items:
-            normalized_lines.append({"text": str(entry), "cls": "", "tsC": "", "tsE": ""})
+            normalized_lines.append(to_legacy_entry(line_event_from_legacy(str(entry))))
 
     return normalized_lines
 
