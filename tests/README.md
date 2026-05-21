@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,103
+- behavior tests: 3,108
 - docs/inventory meta-tests: 32
-- `pytest`: 1684 (1652 behavior + 32 meta)
-- `vitest`: 1199
+- `pytest`: 1688 (1656 behavior + 32 meta)
+- `vitest`: 1200
 - `playwright`: 252
-- total: 3,135
+- total: 3,140
 
 This document is organized in two parts:
 
@@ -1734,6 +1734,10 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestWatchersRoutes.test_watcher_create_validates_baseline_visibility_and_completion` | Verifies watcher creation hides cross-session baseline runs and rejects unfinished current-session baselines. |
 | `TestWatchersRoutes.test_watcher_accept_baseline_promotes_latest_fire_and_resets_state` | Verifies accept-baseline promotes the latest watcher fire and clears changed-state counters. |
 | `TestWatchersRoutes.test_watcher_run_now_keeps_same_command_fire_audits_separate` | Verifies manual watcher fire creates audit rows only for the selected watcher even when another watcher has the same command. |
+| `TestWatchBuiltin.test_watch_builtin_create_list_info_and_state_changes` | Verifies the terminal watch command creates, lists, inspects, pauses, resumes, and deletes current-session watchers and owned schedules. |
+| `TestWatchBuiltin.test_watch_builtin_validates_baseline_and_command_policy` | Verifies the terminal watch command rejects missing, unfinished, and disallowed-command baselines before persistence. |
+| `TestWatchBuiltin.test_watch_builtin_run_records_fire_and_accepts_latest_baseline` | Verifies the terminal watch run subcommand records watcher fire audit rows and accept promotes the latest watcher run as baseline. |
+| `TestWatchBuiltin.test_watch_builtin_requires_durable_session_token` | Verifies the terminal watch command requires a persistent session token. |
 | `TestScheduleBuiltin.test_schedule_builtin_create_list_info_and_state_changes` | Verifies the terminal schedule command creates, lists, inspects, pauses, resumes, and deletes current-session schedules. |
 | `TestScheduleBuiltin.test_schedule_builtin_rejects_disallowed_command` | Verifies the terminal schedule command rejects commands that fail command policy before persistence. |
 | `TestScheduleBuiltin.test_schedule_builtin_run_records_fire` | Verifies the terminal schedule run subcommand records a schedule fire and advances schedule metadata. |
@@ -2201,6 +2205,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `uses subcommand-scoped value hints` | Verifies that value hints for repeated flags such as `-o` come from the active subcommand context. |
 | `walks nested subcommands before suggesting the next project argument` | Verifies that nested project subcommands continue into their next argument hints instead of restarting autocomplete at command-root suggestions. |
 | `suggests schedule ids for terminal schedule actions` | Verifies that terminal schedule action autocomplete uses the current session's loaded schedule ids. |
+| `suggests watcher ids for terminal watch actions` | Verifies that terminal watch action autocomplete uses the current session's loaded watcher ids. |
 | `tracks recent values from structured flag and positional slots, capped per kind in memory` | Verifies that recent target capture reads known typed argument slots, skips file-list inputs, preserves recency order, and enforces the autocomplete cap per kind without using browser storage. |
 | `stores complete IPv4 values from host slots without keeping partial numeric hosts` | Verifies that recent value capture preserves complete IPv4 addresses from host slots without saving partial numeric host values. |
 | `loads recent values from the session endpoint` | Verifies that recent target autocomplete loads persisted session domains, IPs, URLs, and port sets from the backend and normalizes the returned values. |

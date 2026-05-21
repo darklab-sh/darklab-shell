@@ -32,6 +32,9 @@ function updateSessionId(newId) {
   if (typeof loadScheduleAutocompleteHints === 'function') {
     loadScheduleAutocompleteHints().catch(() => {});
   }
+  if (typeof loadWatcherAutocompleteHints === 'function') {
+    loadWatcherAutocompleteHints().catch(() => {});
+  }
   if (typeof refreshWorkspaceFileCache === 'function') {
     refreshWorkspaceFileCache().catch(() => {});
   }
@@ -59,6 +62,7 @@ window.addEventListener('storage', (e) => {
     if (typeof loadSessionVariables === 'function') loadSessionVariables().catch(() => {});
     if (typeof loadRecentValues === 'function') loadRecentValues().catch(() => {});
     if (typeof loadScheduleAutocompleteHints === 'function') loadScheduleAutocompleteHints().catch(() => {});
+    if (typeof loadWatcherAutocompleteHints === 'function') loadWatcherAutocompleteHints().catch(() => {});
     if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache().catch(() => {});
     if (typeof window.refreshActiveProjectContext === 'function') window.refreshActiveProjectContext().catch(() => {});
     if (typeof _updateOptionsSessionTokenStatus === 'function') _updateOptionsSessionTokenStatus();

@@ -198,6 +198,7 @@ _DOCUMENTED_BUILTIN_COMMANDS = [
     {"name": "uniq [-c] <file>", "description": "Collapse adjacent duplicate lines in a session file.", "root": "uniq"},
     {"name": "var", "description": "Set, list, or unset session command variables.", "root": "var"},
     {"name": "version", "description": "Show shell, app, Flask, and Python version details.", "root": "version"},
+    {"name": "watch", "description": "Create, inspect, pause, resume, delete, and fire watchers.", "root": "watch"},
     {"name": "file", "description": "List, view, create, edit, download, move, or remove session files.", "root": "file"},
     {"name": "which <cmd>", "description": "Locate a built-in command or allowed runtime command.", "root": "which"},
     {"name": "who", "description": "Show the current shell user and session.", "root": "who"},

@@ -1144,6 +1144,63 @@ describe('autocomplete helpers', () => {
     expect(getAutocompleteMatches('schedule info sch_p', 19).map(item => item.value)).toEqual(['sch_paused'])
   })
 
+  it('suggests watcher ids for terminal watch actions', () => {
+    const { getAutocompleteMatches, setWatcherAutocompleteWatchers } = fromDomScripts(
+      [
+        'app/static/js/core/utils.js',
+        'app/static/js/core/autocomplete_core.js',
+        'app/static/js/features/autocomplete/suggestions.js',
+        'app/static/js/features/autocomplete/runtime_context.js',
+        'app/static/js/autocomplete.js',
+      ],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => '',
+        allowedCommandsFaqData: { commands: [] },
+        _cliThemeEntries: () => [],
+        _cliConfigEntries: () => [],
+        sessionVariables: [],
+        acSuggestions: [],
+        acContextRegistry: {
+          watch: {
+            flags: [],
+            expects_value: [],
+            arg_hints: {
+              __positional__: [
+                { value: 'list', insertValue: 'list ', description: 'List watchers' },
+                { value: 'pause', insertValue: 'pause ', description: 'Pause a watcher' },
+              ],
+            },
+            subcommands: {
+              pause: { flags: [], arg_hints: { __positional__: [{ value: '<watcher-id>', hintOnly: true }] } },
+              accept: { flags: [], arg_hints: { __positional__: [{ value: '<watcher-id>', hintOnly: true }] } },
+              info: { flags: [], arg_hints: { __positional__: [{ value: '<watcher-id>', hintOnly: true }] } },
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+      setWatcherAutocompleteWatchers,
+    }`,
+    )
+
+    setWatcherAutocompleteWatchers([
+      { id: 'wtr_nmap', label: 'Nmap drift', state: 'ok' },
+      { id: 'wtr_paused', command_text: 'katana -u darklab.sh', state: 'paused' },
+    ])
+
+    expect(getAutocompleteMatches('watch pause ', 12).map(item => item.value)).toEqual(['wtr_nmap', 'wtr_paused'])
+    expect(getAutocompleteMatches('watch accept wtr_p', 18).map(item => item.value)).toEqual(['wtr_paused'])
+  })
+
   it('tracks recent values from structured flag and positional slots, capped per kind in memory', () => {
     const { rememberRecentValuesFromCommand, _readRecentValues } = fromDomScripts(
       ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],

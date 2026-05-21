@@ -59,6 +59,7 @@ from services.commands.builtins_session import (
     run_builtin_var as _run_builtin_var,
 )
 from services.commands.builtins_secrets import run_builtin_secret as _run_builtin_secret
+from services.commands.builtins_watch import run_builtin_watch as _run_builtin_watch
 from services.commands.builtins_shortcuts import (
     get_current_shortcuts as _get_current_shortcuts,
     run_builtin_shortcuts as _run_builtin_shortcuts,
@@ -346,6 +347,7 @@ _BUILTIN_COMMAND_DISPATCH = {
     "uniq":      lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
     "var":       lambda cmd, sid: _run_builtin_var(cmd, sid),
     "version":   lambda cmd, sid: _run_builtin_version(),
+    "watch":     lambda cmd, sid: _run_builtin_watch(cmd, sid),
     "file":      lambda cmd, sid: _run_builtin_workspace(cmd, sid),
     "wc":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
     "which":     lambda cmd, sid: _run_builtin_which(cmd),

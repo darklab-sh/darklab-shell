@@ -337,23 +337,47 @@
   const AMBIENT_HUE = 218;
   const AMBIENT_SAT_MIN = 12;
   const AMBIENT_SAT_MAX = 24;
-  const AMBIENT_LIGHT_MIN = 52;
-  const AMBIENT_LIGHT_MAX = 66;
-  const AMBIENT_OPACITY_MIN = 0.18;
-  const AMBIENT_OPACITY_MAX = 0.42;
+  const AMBIENT_LIGHT_MIN = 56;
+  const AMBIENT_LIGHT_MAX = 68;
+  const AMBIENT_OPACITY_MIN = 0.26;
+  const AMBIENT_OPACITY_MAX = 0.45;
   const AMBIENT_RADIUS_MIN = 0.7;
   const AMBIENT_RADIUS_MAX = 1.7;
-  const AMBIENT_COUNT_MIN = 80;
+  const AMBIENT_COUNT_MIN = 120;
   const AMBIENT_COUNT_MAX = 160;
+  // Density thresholds for the inverse-density curve. Hours with real-star
+  // density at or below `low` get full ambient weight; hours at or above
+  // `high` get only a residual sprinkle. Between the two we smooth-step
+  // down so the dead-zone fill reads as a distinct cluster instead of
+  // melting into the mid-density hours.
+  const AMBIENT_DENSITY_LOW = 0.2;
+  const AMBIENT_DENSITY_HIGH = 0.6;
+  const AMBIENT_PEAK_FLOOR = 0.03;
+
+  function _ambientInverseWeight(density) {
+    const value = Number(density) || 0;
+    if (value <= AMBIENT_DENSITY_LOW) return 1;
+    if (value >= AMBIENT_DENSITY_HIGH) return AMBIENT_PEAK_FLOOR;
+    const t = (value - AMBIENT_DENSITY_LOW) / (AMBIENT_DENSITY_HIGH - AMBIENT_DENSITY_LOW);
+    const smooth = t * t * (3 - (2 * t));
+    return 1 - (smooth * (1 - AMBIENT_PEAK_FLOOR));
+  }
 
   function _ambientHourWeights(stars, displayWindow) {
-    // Inside the active window we want ambient to be *inverse* to real-star
-    // density so the chrome fills lulls without competing with the data
-    // band. Outside the active window we want uniform fill — those hours
-    // have no real-star density to invert, but the chrome there should
-    // still read as a lived-in sky. Hours that fall fully outside the
-    // visible display window get zero weight so we don't waste samples on
-    // off-canvas minutes when auto-fit has narrowed the X axis.
+    // Inside the active window ambient sample weight is *inverse* to
+    // real-star density so the chrome concentrates in lulls. Outside the
+    // active window we want uniform fill — those hours have no real-star
+    // density to invert, but the chrome there should still read as a
+    // lived-in sky. Hours that fall fully outside the visible display
+    // window get zero weight so we don't waste samples on off-canvas
+    // minutes when auto-fit has narrowed the X axis.
+    //
+    // The threshold-smooth curve in `_ambientInverseWeight` makes the
+    // bias sharp enough to be perceptible: with ~5 quiet hours getting
+    // weight 1 and ~10 peak hours getting weight 0.03, ambient
+    // concentrates in the dead-zone band even when the active window
+    // spans almost the entire day (e.g., users who run commands across
+    // most clock hours but sleep through a 4-hour window in the middle).
     const density = _constellationHourDensity(stars);
     const active = _constellationActiveWindow(stars);
     const activeStartH = active.startMin / 60;
@@ -364,7 +388,7 @@
     for (let h = 0; h < 24; h += 1) {
       if (h + 1 <= windowStartH || h >= windowEndH) continue;
       if (h >= activeStartH && h < activeEndH) {
-        weights[h] = Math.max(0.08, 1 - density[h]);
+        weights[h] = _ambientInverseWeight(density[h]);
       } else {
         weights[h] = 1;
       }

@@ -608,6 +608,82 @@ commands:
             - value: "<schedule-id>"
               hint_only: true
               description: "Schedule id"
+  - root: watch
+    description: "built-in: manage change-detection watchers"
+    autocomplete:
+      subcommands:
+        list:
+          description: "List current-session watchers"
+          closes: true
+        create:
+          description: "Create a watcher from a completed baseline run"
+          arguments:
+            - value: "<baseline-run-id>"
+              hint_only: true
+              description: "Completed baseline run id"
+          flags:
+            - value: --cron
+              takes_value: true
+              description: "Five-field cron expression"
+              suggest:
+                - value: "0 * * * *"
+                  description: "Every hour"
+                - value: "0 0 * * *"
+                  description: "Every day"
+                - value: "0 0 * * 0"
+                  description: "Every week"
+            - value: --every
+              takes_value: true
+              description: "Cadence preset"
+              suggest:
+                - value: hourly
+                  description: "Every hour"
+                - value: daily
+                  description: "Every day"
+                - value: weekly
+                  description: "Every week"
+            - value: --label
+              takes_value: true
+              description: "Display label"
+            - value: --timezone
+              takes_value: true
+              description: "IANA timezone"
+        pause:
+          description: "Pause a watcher"
+          arguments:
+            - value: "<watcher-id>"
+              hint_only: true
+              description: "Watcher id"
+        resume:
+          description: "Resume a watcher"
+          arguments:
+            - value: "<watcher-id>"
+              hint_only: true
+              description: "Watcher id"
+        delete:
+          description: "Delete a watcher"
+          arguments:
+            - value: "<watcher-id>"
+              hint_only: true
+              description: "Watcher id"
+        accept:
+          description: "Accept the latest watcher run as the baseline"
+          arguments:
+            - value: "<watcher-id>"
+              hint_only: true
+              description: "Watcher id"
+        run:
+          description: "Fire a watcher now"
+          arguments:
+            - value: "<watcher-id>"
+              hint_only: true
+              description: "Watcher id"
+        info:
+          description: "Show watcher details"
+          arguments:
+            - value: "<watcher-id>"
+              hint_only: true
+              description: "Watcher id"
   - root: providers
     description: "built-in: show app-native intel provider setup status"
     autocomplete:

@@ -42,9 +42,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
     - The unit of value: operators stop watching their tabs for "is anything new on this nmap?" and the app tells them.
     - Land **after** scheduler and notifications. A watcher without a scheduler is just a manual diff; a watcher without notifications is just a database row.
     - Non-goals for v1: watchers across multiple commands, watcher graphs, threshold-based alerting (e.g., "only fire if 3 new ports"), watcher history retention beyond a fixed cap.
-  - Phase 4 — Terminal `watch` built-in
-    - Add `watch` to the session built-in family with subcommands: `list`, `create <baseline_run_id> --cron "<expr>"`, `create <baseline_run_id> --every hourly|daily|weekly`, `pause <id>`, `resume <id>`, `delete <id>`, `accept <id>`, `run <id>`, `info <id>`.
-    - Symmetric with the `schedule` built-in. Autocomplete completes watcher IDs against the current session.
   - Phase 5 — Browser Watchers modal
     - New `app/static/js/features/watchers/`. Modal lives beside Schedules.
     - Watcher row state: `ok` (last fire matched baseline) / `changed` (last fire had a non-empty diff and is awaiting accept) / `firing` (fire in progress) / `paused` / `error`.

@@ -620,6 +620,35 @@ function _runtimeScheduleContext(baseSpec = {}) {
   return spec;
 }
 
+function _runtimeWatcherHints() {
+  const watchers = typeof _readAutocompleteWatchers === 'function' ? _readAutocompleteWatchers() : [];
+  return watchers
+    .map((watcher) => {
+      const value = String(watcher && watcher.id || '').trim();
+      if (!value) return null;
+      const label = String(watcher && watcher.label || value).trim();
+      const state = String(watcher && watcher.state || 'ok').trim() || 'ok';
+      return _runtimeHint(value, `${label} · ${state}`);
+    })
+    .filter(Boolean);
+}
+
+function _runtimeWatcherContext(baseSpec = {}) {
+  const spec = _cloneRuntimeSpec(baseSpec);
+  spec.subcommands = spec.subcommands && typeof spec.subcommands === 'object' ? spec.subcommands : {};
+  const watcherHints = _runtimeWatcherHints();
+  ['pause', 'resume', 'delete', 'accept', 'run', 'info'].forEach((name) => {
+    const subSpec = spec.subcommands[name] && typeof spec.subcommands[name] === 'object'
+      ? _cloneRuntimeSpec(spec.subcommands[name])
+      : {};
+    if (watcherHints.length) {
+      subSpec.arg_hints = Object.assign({}, subSpec.arg_hints || {}, { __positional__: watcherHints });
+      spec.subcommands[name] = subSpec;
+    }
+  });
+  return spec;
+}
+
 function getRuntimeAutocompleteContext(baseRegistry = {}) {
   const context = {};
   _runtimeActiveBuiltinRoots(baseRegistry).forEach((root) => {
@@ -642,6 +671,9 @@ function getRuntimeAutocompleteContext(baseRegistry = {}) {
   }
   if (baseRegistry.schedule) {
     context.schedule = _runtimeScheduleContext(baseRegistry.schedule);
+  }
+  if (baseRegistry.watch) {
+    context.watch = _runtimeWatcherContext(baseRegistry.watch);
   }
   if (isWorkspaceFeatureEnabled() && baseRegistry.file) {
     context.file = _runtimeMergeContextSpec(baseRegistry.file, _runtimeWorkspaceContext());

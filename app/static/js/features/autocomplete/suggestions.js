@@ -85,6 +85,7 @@ const acRecentValuePersistPromises = new Set();
 let acProjectTargets = [];
 let acProjects = [];
 let acSchedules = [];
+let acWatchers = [];
 
 function _readRecentValues(kind = '') {
   const normalizedKind = String(kind || '').trim().toLowerCase();
@@ -104,6 +105,10 @@ function _readAutocompleteProjects() {
 
 function _readAutocompleteSchedules() {
   return acSchedules.slice(0, 200);
+}
+
+function _readAutocompleteWatchers() {
+  return acWatchers.slice(0, 200);
 }
 
 function _setRecentValuesByKind(valuesByKind) {
@@ -207,6 +212,26 @@ function setScheduleAutocompleteSchedules(items) {
   return _readAutocompleteSchedules();
 }
 
+function setWatcherAutocompleteWatchers(items) {
+  const seen = new Set();
+  acWatchers = (Array.isArray(items) ? items : [])
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const id = String(item.id || '').trim();
+      if (!id) return null;
+      const label = String(item.label || item.command_text || id).trim();
+      const state = String(item.state || '').trim().toLowerCase() || 'ok';
+      return { id, label, state };
+    })
+    .filter((item) => {
+      if (!item || !item.id || seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    })
+    .slice(0, 200);
+  return _readAutocompleteWatchers();
+}
+
 function loadProjectAutocompleteTargets() {
   if (typeof apiFetch !== 'function') return Promise.resolve(_readProjectTargets());
   const projectListRequest = apiFetch('/projects?include_archived=1', { cache: 'no-store' })
@@ -241,6 +266,18 @@ function loadScheduleAutocompleteHints() {
       setScheduleAutocompleteSchedules([]);
       if (typeof logClientError === 'function') logClientError('failed to load schedule autocomplete hints', err);
       return _readAutocompleteSchedules();
+    });
+}
+
+function loadWatcherAutocompleteHints() {
+  if (typeof apiFetch !== 'function') return Promise.resolve(_readAutocompleteWatchers());
+  return apiFetch('/watchers', { cache: 'no-store' })
+    .then(resp => (resp && resp.ok && typeof resp.json === 'function' ? resp.json() : { watchers: [] }))
+    .then(data => setWatcherAutocompleteWatchers(data && data.watchers))
+    .catch((err) => {
+      setWatcherAutocompleteWatchers([]);
+      if (typeof logClientError === 'function') logClientError('failed to load watcher autocomplete hints', err);
+      return _readAutocompleteWatchers();
     });
 }
 

@@ -523,6 +523,124 @@ class TestWatchersRoutes:
         assert second_fires.get_json()["total"] == 0
 
 
+class TestWatchBuiltin:
+    def test_watch_builtin_create_list_info_and_state_changes(self, monkeypatch, tmp_path):
+        _client, _db_path = _schedule_client(monkeypatch, tmp_path)
+        token = "tok_watch_builtin"
+        baseline_run_id = "run_watch_builtin_baseline"
+        _insert_completed_run(token, baseline_run_id, command="nmap -sV darklab.sh")
+
+        lines, exit_code = execute_builtin_command(
+            f'watch create {baseline_run_id} --every hourly --label "Nmap drift"',
+            token,
+        )
+        assert exit_code == 0
+        assert "watch: created wtr_" in lines[0]["text"]
+        with db_connect() as conn:
+            row = conn.execute(
+                "SELECT w.id, w.schedule_id, w.baseline_run_id, s.owner_kind, s.enabled "
+                "FROM watchers w JOIN schedules s ON s.id = w.schedule_id "
+                "WHERE w.session_token = ?",
+                (token,),
+            ).fetchone()
+        watcher_id = row["id"]
+        assert row["baseline_run_id"] == baseline_run_id
+        assert row["owner_kind"] == "watcher"
+        assert row["enabled"] == 1
+
+        listed, _ = execute_builtin_command("watch list", token)
+        assert any(watcher_id in line["text"] and "Nmap drift" in line["text"] for line in listed)
+
+        info, _ = execute_builtin_command(f"watch info {watcher_id}", token)
+        assert any("baseline run" in line["text"] and baseline_run_id in line["text"] for line in info)
+        assert any("command" in line["text"] and "nmap -sV darklab.sh" in line["text"] for line in info)
+
+        paused, _ = execute_builtin_command(f"watch pause {watcher_id}", token)
+        assert paused[0]["text"] == f"watch: paused {watcher_id}"
+        with db_connect() as conn:
+            paused_row = conn.execute(
+                "SELECT w.state, s.enabled FROM watchers w JOIN schedules s ON s.id = w.schedule_id WHERE w.id = ?",
+                (watcher_id,),
+            ).fetchone()
+        assert paused_row["state"] == "paused"
+        assert paused_row["enabled"] == 0
+
+        resumed, _ = execute_builtin_command(f"watch resume {watcher_id}", token)
+        assert resumed[0]["text"] == f"watch: resumed {watcher_id}"
+
+        deleted, _ = execute_builtin_command(f"watch delete {watcher_id}", token)
+        assert deleted[0]["text"] == f"watch: deleted {watcher_id}"
+        schedule_id = row["schedule_id"]
+        with db_connect() as conn:
+            watcher_count = conn.execute("SELECT COUNT(*) AS count FROM watchers WHERE id = ?", (watcher_id,)).fetchone()
+            schedule_count = conn.execute("SELECT COUNT(*) AS count FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
+        assert watcher_count["count"] == 0
+        assert schedule_count["count"] == 0
+
+    def test_watch_builtin_validates_baseline_and_command_policy(self, monkeypatch, tmp_path):
+        _client, _db_path = _schedule_client(monkeypatch, tmp_path)
+        token = "tok_watch_builtin_validation"
+        _insert_completed_run(token, "run_watch_unfinished", finished=None)
+        _insert_completed_run(token, "run_watch_disallowed", command="rm -rf /")
+
+        missing, _ = execute_builtin_command("watch create run_missing --every hourly", token)
+        unfinished, _ = execute_builtin_command("watch create run_watch_unfinished --every hourly", token)
+        disallowed, _ = execute_builtin_command("watch create run_watch_disallowed --every hourly", token)
+
+        assert missing[0]["text"] == "watch: baseline run not found: run_missing"
+        assert unfinished[0]["text"] == "watch: baseline run must be completed"
+        assert "Command not allowed" in disallowed[0]["text"]
+        with db_connect() as conn:
+            count = conn.execute("SELECT COUNT(*) AS count FROM watchers WHERE session_token = ?", (token,)).fetchone()
+        assert count["count"] == 0
+
+    def test_watch_builtin_run_records_fire_and_accepts_latest_baseline(self, monkeypatch, tmp_path):
+        from services.scheduler import dispatch
+
+        _client, db_path = _schedule_client(monkeypatch, tmp_path)
+        token = "tok_watch_builtin_run"
+        baseline_run_id = "run_watch_fire_baseline"
+        _register_token(token)
+        _insert_completed_run(token, baseline_run_id)
+        monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda schedule: f"run_fire_{schedule.owner_id[-8:]}")
+        execute_builtin_command(f"watch create {baseline_run_id} --cron \"0 * * * *\"", token)
+        with db_connect() as conn:
+            watcher_id = conn.execute("SELECT id FROM watchers WHERE session_token = ?", (token,)).fetchone()["id"]
+
+        fired, exit_code = execute_builtin_command(f"watch run {watcher_id}", token)
+
+        assert exit_code == 0
+        assert fired[0]["text"] == f"watch: fired {watcher_id}"
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT watcher_id, baseline_run_id, state_at_fire FROM watcher_fires WHERE watcher_id = ?",
+            (watcher_id,),
+        ).fetchone()
+        conn.close()
+        assert dict(row) == {
+            "watcher_id": watcher_id,
+            "baseline_run_id": baseline_run_id,
+            "state_at_fire": "firing",
+        }
+
+        accepted, _ = execute_builtin_command(f"watch accept {watcher_id}", token)
+
+        assert accepted[0]["text"].startswith("watch: accepted baseline run_fire_")
+        with db_connect() as conn:
+            baseline_row = conn.execute("SELECT baseline_run_id, state FROM watchers WHERE id = ?", (watcher_id,)).fetchone()
+        assert baseline_row["baseline_run_id"].startswith("run_fire_")
+        assert baseline_row["state"] == "ok"
+
+    def test_watch_builtin_requires_durable_session_token(self, monkeypatch, tmp_path):
+        _client, _db_path = _schedule_client(monkeypatch, tmp_path)
+
+        lines, exit_code = execute_builtin_command("watch list", "anonymous-session")
+
+        assert exit_code == 0
+        assert lines[0]["text"] == "watch: persistent session token required. Run `session-token generate` first."
+
+
 class TestScheduleBuiltin:
     def test_schedule_builtin_create_list_info_and_state_changes(self, monkeypatch, tmp_path):
         _client, _db_path = _schedule_client(monkeypatch, tmp_path)
