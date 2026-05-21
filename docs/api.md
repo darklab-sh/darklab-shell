@@ -110,6 +110,14 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `DELETE` | `/api/v1/schedules/<schedule_id>` | Delete a scheduled command. |
 | `POST` | `/api/v1/schedules/<schedule_id>/run-now` | Fire a scheduled command immediately and return the updated schedule row. |
 | `GET` | `/api/v1/schedules/<schedule_id>/fires` | Read paged fire audit rows for a scheduled command. |
+| `GET` | `/api/v1/watchers` | Change-detection watcher page for the token session. |
+| `POST` | `/api/v1/watchers` | Create a watcher from `baseline_run_id`, cadence, and optional command override. |
+| `GET` | `/api/v1/watchers/<watcher_id>` | One change-detection watcher. |
+| `PATCH` | `/api/v1/watchers/<watcher_id>` | Update a watcher's command, cadence, timezone, label, options, or pause/resume state. |
+| `DELETE` | `/api/v1/watchers/<watcher_id>` | Delete a watcher and its owned schedule. |
+| `POST` | `/api/v1/watchers/<watcher_id>/run-now` | Fire a watcher immediately and return the updated watcher row. |
+| `POST` | `/api/v1/watchers/<watcher_id>/accept-baseline` | Promote the latest fire, or the supplied `run_id`, to the new watcher baseline. |
+| `GET` | `/api/v1/watchers/<watcher_id>/fires` | Read paged fire audit rows for a watcher. |
 | `GET` | `/api/v1/notification-channels` | List masked outbound notification channels for the token session. |
 | `POST` | `/api/v1/notification-channels` | Create one notification channel with write-only secret values. |
 | `PATCH` | `/api/v1/notification-channels/<channel_id>` | Update one notification channel's label, config, triggers, muted state, or replacement secret values. |
@@ -243,6 +251,30 @@ Schedule list and fire-audit routes use the normal `limit`, `offset`, and `has_m
 
 ---
 
+## Watchers
+
+Durable `tok_` sessions can manage change-detection watchers through `/api/v1/watchers` and `darklab watch`. A watcher starts from a completed baseline run, owns one hidden scheduler cadence row, reruns the watched command on that cadence, and compares each completed fire against the current baseline.
+
+```bash
+darklab watch create run_123 --every hourly
+darklab watch create run_123 --cron "*/15 * * * *" --label "HTTP drift"
+darklab watch create run_123 --every daily -- curl -I https://darklab.sh
+darklab watch list
+darklab watch info wtr_123
+darklab watch pause wtr_123
+darklab watch resume wtr_123
+darklab watch run wtr_123
+darklab watch fires wtr_123
+darklab watch accept wtr_123 --run-id run_456
+darklab watch delete wtr_123
+```
+
+If `watch create` does not include a command after `--`, the API inherits the command from the baseline run. `--suppress-removals` ignores removal-only diffs, and `--notify-metadata-changes` treats metadata-only changes as alert-worthy. Watcher list and fire-audit routes use the normal `limit`, `offset`, and `has_more` envelope. `darklab watch list` and `darklab watch fires` default to 50 rows and cap at 100.
+
+Watcher notifications use `watcher_changed`, `watcher_error`, and `watcher_recovered`. See [docs/watchers.md](watchers.md) for the diff model, baseline lifecycle, and scheduler interaction.
+
+---
+
 ## Notifications
 
 Durable `tok_` sessions can manage outbound notification channels through the API and CLI. GET responses never include raw secret values. Create and update calls accept `secret_values`, store those values in the server vault, and return only `secret_fields` metadata that says which required fields are configured.
@@ -329,6 +361,11 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab schedule create (--cron CRON \| --every hourly\|daily\|weekly) [--label TEXT] [--timezone TZ] -- COMMAND` | Create a scheduled command from shell-shaped arguments after `--`. |
 | `darklab schedule info\|pause\|resume\|delete\|run <schedule_id>` | Inspect, pause, resume, delete, or immediately fire one scheduled command. |
 | `darklab schedule fires <schedule_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List fire audit rows for a scheduled command. `--limit` defaults to 50 and caps at 100. |
+| `darklab watch list [--limit N] [--offset N] [--format text\|json\|ndjson]` | List change-detection watchers. `--limit` defaults to 50 and caps at 100. |
+| `darklab watch create <baseline_run_id> (--cron CRON \| --every hourly\|daily\|weekly) [--label TEXT] [--timezone TZ] [--suppress-removals] [--notify-metadata-changes] [-- COMMAND]` | Create a watcher from a completed baseline run. Omit `-- COMMAND` to inherit the baseline command. |
+| `darklab watch info\|pause\|resume\|delete\|run <watcher_id>` | Inspect, pause, resume, delete, or immediately fire one watcher. |
+| `darklab watch accept <watcher_id> [--run-id RUN_ID]` | Promote the latest watcher fire, or the supplied run, to the new baseline. |
+| `darklab watch fires <watcher_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List watcher fire audit rows. `--limit` defaults to 50 and caps at 100. |
 | `darklab notify list\|create\|update\|mute\|unmute\|delete\|test\|events ...` | Manage outbound notification channels and read delivery audit rows. `notify events --limit` defaults to 50 and caps at 100. Channel secrets come from prompts or `--secret-file`, never command-line secret flags. |
 | `darklab download <run_id> --artifact ARTIFACT_ID --out DIR` | Download one artifact. |
 
@@ -380,5 +417,6 @@ timeout = 30
 - [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
 - [docs/schedules.md](schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
+- [docs/watchers.md](watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
 - [tests/README.md](../tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](../tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

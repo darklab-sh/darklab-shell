@@ -86,6 +86,19 @@ from services.scheduler.service import (
 )
 from services.secrets.vault import MasterKeyError, SecretDecryptError
 from services.session.variables import SessionVariableError
+from services.watchers.serialization import watcher_fire_payload, watcher_payload
+from services.watchers.service import (
+    WatcherError,
+    accept_baseline,
+    create_watcher,
+    delete_watcher,
+    get_watcher,
+    list_for_session as list_watchers_for_session,
+    list_watcher_fires,
+    pause_watcher,
+    resume_watcher,
+    update_watcher,
+)
 from services.workspace.files import WorkspaceError, open_workspace_file_for_download
 
 from blueprints.history import (  # noqa: PLC0415
@@ -227,6 +240,86 @@ def _api_schedule_log_payload(schedule=None, *, session_id: str = "", **extra) -
             "timezone": schedule.timezone,
             "next_run_at": schedule.next_run_at,
             "consecutive_failures": schedule.consecutive_failures,
+        })
+    payload.update(extra)
+    return payload
+
+
+def _watcher_for_api_session(watcher_id: str, session_id: str, *, conn=None):
+    watcher = get_watcher(watcher_id, conn=conn)
+    if watcher is None or watcher.session_token != session_id:
+        raise ApiAuthError("not_found", "Watcher not found.", status_code=404)
+    return watcher
+
+
+def _baseline_run_for_api_session(run_id: str, session_id: str, *, conn=None) -> dict[str, Any]:
+    baseline_id = str(run_id or "").strip()
+    if not baseline_id:
+        raise ApiAuthError("not_found", "Baseline run not found.", status_code=404)
+    assert conn is not None
+    row = conn.execute(
+        "SELECT id, session_id, command, finished FROM runs WHERE id = ? AND session_id = ?",
+        (baseline_id, session_id),
+    ).fetchone()
+    if row is None:
+        raise ApiAuthError("not_found", "Baseline run not found.", status_code=404)
+    finished = str(row["finished"] if isinstance(row, dict) else row["finished"] or "").strip()
+    if not finished:
+        raise WatcherError("baseline run must be completed")
+    return dict(row)
+
+
+def _api_watcher_error_shape(exc: Exception) -> tuple[str, str, int]:
+    if isinstance(exc, ApiAuthError):
+        return exc.code, exc.message, exc.status_code
+    if isinstance(exc, ScheduleCronError):
+        return "invalid_watcher", str(exc), 400
+    if isinstance(exc, ScheduleCommandValidationError):
+        return "invalid_command", str(exc), 400
+    if isinstance(exc, SessionVariableError):
+        return "invalid_command", str(exc), 400
+    if isinstance(exc, WatcherError):
+        status = 409 if "quota" in str(exc).lower() else 400
+        return "invalid_watcher", str(exc), status
+    if isinstance(exc, ScheduleError):
+        status = 409 if "quota" in str(exc).lower() else 400
+        return "invalid_watcher", str(exc), status
+    if isinstance(exc, ValueError):
+        return "invalid_watcher", str(exc), 400
+    raise exc
+
+
+def _watcher_api_error(exc: Exception):
+    code, message, status = _api_watcher_error_shape(exc)
+    try:
+        session = get_log_session_id(current_api_session().token)
+    except Exception:
+        session = ""
+    log.warning("API_WATCHER_REJECTED", extra={
+        "ip": get_client_ip(),
+        "session": session,
+        "code": code,
+        "status": status,
+        "route": str(request.path or ""),
+        "method": str(request.method or ""),
+        "error": message,
+    })
+    return _api_json_error(code, message, status)
+
+
+def _api_watcher_log_payload(watcher=None, *, session_id: str = "", **extra) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id or getattr(watcher, "session_token", "")),
+        "source": "api",
+    }
+    if watcher is not None:
+        payload.update({
+            "watcher_id": watcher.id,
+            "schedule_id": watcher.schedule_id,
+            "baseline_run_id": watcher.baseline_run_id,
+            "last_run_id": watcher.last_run_id,
+            "state": watcher.state,
         })
     payload.update(extra)
     return payload
@@ -1151,6 +1244,237 @@ def api_schedule_fires(schedule_id):
         offset=offset,
     ))
     return jsonify(page_payload("fires", [schedule_fire_payload(fire) for fire in fires], total, limit, offset))
+
+
+@api_v1_bp.route("/watchers", methods=["GET"])
+@require_api_auth
+def api_watchers():
+    session_id = _require_session_id()
+    try:
+        with db_connect() as conn:
+            watchers = list_watchers_for_session(session_id, conn=conn)
+            schedules = {
+                watcher.schedule_id: get_schedule(watcher.schedule_id, conn=conn)
+                for watcher in watchers
+            }
+    except (WatcherError, ScheduleError, ValueError) as exc:
+        return _watcher_api_error(exc)
+    limit = normalize_page_limit(request.args.get("limit"), 50, 100)
+    offset = normalize_page_offset(request.args.get("offset"))
+    log.debug("API_WATCHERS_LISTED", extra=_api_watcher_log_payload(
+        None,
+        session_id=session_id,
+        count=len(watchers),
+        limit=limit,
+        offset=offset,
+    ))
+    payloads = [
+        watcher_payload(watcher, schedule=schedules.get(watcher.schedule_id))
+        for watcher in watchers
+    ]
+    return jsonify(page_payload("watchers", payloads[offset:offset + limit], len(payloads), limit, offset))
+
+
+@api_v1_bp.route("/watchers", methods=["POST"])
+@require_api_auth
+def api_watcher_create():
+    session_id = _require_session_id()
+    try:
+        data = _json_body()
+        with db_connect() as conn:
+            baseline = _baseline_run_for_api_session(str(data.get("baseline_run_id") or ""), session_id, conn=conn)
+            command_text = str(data.get("command") or data.get("command_text") or baseline.get("command") or "")
+            command = validate_schedule_command(
+                command_text,
+                session_id,
+                workspace_cwd=str(data.get("workspace_cwd") or ""),
+            )
+            watcher = create_watcher(
+                session_id,
+                command_text=command,
+                baseline_run_id=str(baseline["id"]),
+                cron_expr=data.get("cron_expr"),
+                cadence_preset=data.get("cadence_preset"),
+                timezone_name=data.get("timezone", data.get("timezone_name")),
+                label=str(data.get("label") or ""),
+                options=data.get("options"),
+                enabled=coerce_schedule_bool(data.get("enabled"), default=True),
+                conn=conn,
+            )
+            schedule = get_schedule(watcher.schedule_id, conn=conn)
+            conn.commit()
+    except (
+        ApiAuthError,
+        WatcherError,
+        ScheduleError,
+        ScheduleCronError,
+        ScheduleCommandValidationError,
+        SessionVariableError,
+        ValueError,
+    ) as exc:
+        return _watcher_api_error(exc)
+    log.info("API_WATCHER_CREATED", extra=_api_watcher_log_payload(watcher, session_id=session_id))
+    return jsonify({"watcher": watcher_payload(watcher, schedule=schedule)}), 201
+
+
+@api_v1_bp.route("/watchers/<watcher_id>", methods=["GET"])
+@require_api_auth
+def api_watcher(watcher_id):
+    session_id = _require_session_id()
+    try:
+        with db_connect() as conn:
+            watcher = _watcher_for_api_session(watcher_id, session_id, conn=conn)
+            schedule = get_schedule(watcher.schedule_id, conn=conn)
+    except (ApiAuthError, WatcherError, ScheduleError, ValueError) as exc:
+        return _watcher_api_error(exc)
+    return jsonify({"watcher": watcher_payload(watcher, schedule=schedule)})
+
+
+@api_v1_bp.route("/watchers/<watcher_id>", methods=["PATCH"])
+@require_api_auth
+def api_watcher_update(watcher_id):
+    session_id = _require_session_id()
+    try:
+        data = _json_body()
+        with db_connect() as conn:
+            watcher = _watcher_for_api_session(watcher_id, session_id, conn=conn)
+            updates = dict(data)
+            if "command" in updates or "command_text" in updates:
+                updates["command_text"] = validate_schedule_command(
+                    updates.get("command", updates.get("command_text")),
+                    session_id,
+                    workspace_cwd=str(updates.get("workspace_cwd") or ""),
+                )
+            if "timezone_name" in updates and "timezone" not in updates:
+                updates["timezone"] = updates.pop("timezone_name")
+            state = str(updates.pop("state", "") or "").strip().lower()
+            enabled_value = updates.get("enabled")
+            enabled_update = coerce_schedule_bool(enabled_value) if enabled_value is not None else None
+            pause_requested = state == "paused" or updates.pop("pause", False) is True or enabled_update is False
+            resume_requested = (
+                state in {"ok", "resume", "active"}
+                or updates.pop("resume", False) is True
+                or enabled_update is True
+            )
+            updates.pop("enabled", None)
+            updates.pop("workspace_cwd", None)
+            updates.pop("reason", None)
+            updated = update_watcher(watcher.id, updates, conn=conn) if updates else watcher
+            if updated is None:
+                raise ApiAuthError("not_found", "Watcher not found.", status_code=404)
+            if pause_requested:
+                updated = pause_watcher(updated.id, str(data.get("reason") or "operator paused"), conn=conn)
+            elif resume_requested:
+                updated = resume_watcher(updated.id, conn=conn)
+            if updated is None:
+                raise ApiAuthError("not_found", "Watcher not found.", status_code=404)
+            schedule = get_schedule(updated.schedule_id, conn=conn)
+            conn.commit()
+    except (
+        ApiAuthError,
+        WatcherError,
+        ScheduleError,
+        ScheduleCronError,
+        ScheduleCommandValidationError,
+        SessionVariableError,
+        ValueError,
+    ) as exc:
+        return _watcher_api_error(exc)
+    log.info("API_WATCHER_UPDATED", extra=_api_watcher_log_payload(
+        updated,
+        session_id=session_id,
+        changed_fields=",".join(sorted(key for key in data if key != "workspace_cwd")),
+    ))
+    return jsonify({"watcher": watcher_payload(updated, schedule=schedule)})
+
+
+@api_v1_bp.route("/watchers/<watcher_id>", methods=["DELETE"])
+@require_api_auth
+def api_watcher_delete(watcher_id):
+    session_id = _require_session_id()
+    try:
+        with db_connect() as conn:
+            watcher = _watcher_for_api_session(watcher_id, session_id, conn=conn)
+            removed = delete_watcher(watcher.id, conn=conn)
+            conn.commit()
+    except (ApiAuthError, WatcherError, ScheduleError, ValueError) as exc:
+        return _watcher_api_error(exc)
+    log.info("API_WATCHER_DELETED", extra=_api_watcher_log_payload(watcher, session_id=session_id, removed=removed))
+    return jsonify({"removed": removed})
+
+
+@api_v1_bp.route("/watchers/<watcher_id>/run-now", methods=["POST"])
+@require_api_auth
+def api_watcher_run_now(watcher_id):
+    session_id = _require_session_id()
+    fired_at = datetime.now(timezone.utc).isoformat()
+    try:
+        with db_connect() as conn:
+            watcher = _watcher_for_api_session(watcher_id, session_id, conn=conn)
+            schedule = get_schedule(watcher.schedule_id, conn=conn)
+            if schedule is None:
+                raise WatcherError("watcher schedule not found")
+            status = fire_schedule(conn, schedule, fired_at=fired_at)
+            refreshed = get_watcher(watcher.id, conn=conn) or watcher
+            refreshed_schedule = get_schedule(schedule.id, conn=conn) or schedule
+            conn.commit()
+    except (ApiAuthError, WatcherError, ScheduleError, ScheduleCronError, ValueError) as exc:
+        return _watcher_api_error(exc)
+    log.info("API_WATCHER_RUN_NOW", extra=_api_watcher_log_payload(
+        refreshed,
+        session_id=session_id,
+        status=status,
+        fired_at=fired_at,
+        run_id=refreshed.last_run_id,
+        last_error=refreshed.last_error,
+    ))
+    return jsonify({
+        "status": status,
+        "fired_at": fired_at,
+        "watcher": watcher_payload(refreshed, schedule=refreshed_schedule),
+    })
+
+
+@api_v1_bp.route("/watchers/<watcher_id>/fires", methods=["GET"])
+@require_api_auth
+def api_watcher_fires(watcher_id):
+    session_id = _require_session_id()
+    try:
+        limit = normalize_page_limit(request.args.get("limit"), 50, 100)
+        offset = normalize_page_offset(request.args.get("offset"))
+        with db_connect() as conn:
+            watcher = _watcher_for_api_session(watcher_id, session_id, conn=conn)
+            fires, total = list_watcher_fires(watcher.id, limit=limit, offset=offset, conn=conn)
+    except (ApiAuthError, WatcherError, ValueError) as exc:
+        return _watcher_api_error(exc)
+    log.debug("API_WATCHER_FIRES_LISTED", extra=_api_watcher_log_payload(
+        watcher,
+        session_id=session_id,
+        count=len(fires),
+        total=total,
+        limit=limit,
+        offset=offset,
+    ))
+    return jsonify(page_payload("fires", [watcher_fire_payload(fire) for fire in fires], total, limit, offset))
+
+
+@api_v1_bp.route("/watchers/<watcher_id>/accept-baseline", methods=["POST"])
+@require_api_auth
+def api_watcher_accept_baseline(watcher_id):
+    session_id = _require_session_id()
+    try:
+        data = _json_body()
+        with db_connect() as conn:
+            watcher = _watcher_for_api_session(watcher_id, session_id, conn=conn)
+            accepted = accept_baseline(watcher.id, run_id=data.get("run_id"), conn=conn)
+            if accepted is None:
+                raise ApiAuthError("not_found", "Watcher not found.", status_code=404)
+            schedule = get_schedule(accepted.schedule_id, conn=conn)
+            conn.commit()
+    except (ApiAuthError, WatcherError, ScheduleError, ValueError) as exc:
+        return _watcher_api_error(exc)
+    log.info("API_WATCHER_BASELINE_ACCEPTED", extra=_api_watcher_log_payload(accepted, session_id=session_id))
+    return jsonify({"watcher": watcher_payload(accepted, schedule=schedule)})
 
 
 @api_v1_bp.route("/notification-channels", methods=["GET"])

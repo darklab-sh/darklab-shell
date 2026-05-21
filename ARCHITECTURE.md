@@ -241,6 +241,14 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `DELETE` | `/api/v1/schedules/<schedule_id>` | Deletes one normal scheduled command owned by the token session. |
 | `POST` | `/api/v1/schedules/<schedule_id>/run-now` | Fires one normal scheduled command immediately and returns the updated schedule row. |
 | `GET` | `/api/v1/schedules/<schedule_id>/fires` | Returns paged fire audit rows for one normal scheduled command. |
+| `GET` | `/api/v1/watchers` | Returns a paged list of change-detection watchers owned by the token session. |
+| `POST` | `/api/v1/watchers` | Creates a watcher from a completed baseline run after command-policy validation. |
+| `GET` | `/api/v1/watchers/<watcher_id>` | Returns one change-detection watcher owned by the token session. |
+| `PATCH` | `/api/v1/watchers/<watcher_id>` | Updates one watcher's command, cadence, label, timezone, options, or pause/resume state. |
+| `DELETE` | `/api/v1/watchers/<watcher_id>` | Deletes one watcher and its owned schedule. |
+| `POST` | `/api/v1/watchers/<watcher_id>/run-now` | Fires one watcher immediately and returns the updated watcher row. |
+| `POST` | `/api/v1/watchers/<watcher_id>/accept-baseline` | Promotes the latest watcher fire, or the supplied run id, to the new baseline. |
+| `GET` | `/api/v1/watchers/<watcher_id>/fires` | Returns paged fire audit rows for one watcher. |
 | `GET` | `/api/v1/notification-channels` | Returns masked outbound notification channel metadata for the token session. |
 | `POST` | `/api/v1/notification-channels` | Creates one outbound notification channel with write-only vault-backed secret values. |
 | `PATCH` | `/api/v1/notification-channels/<channel_id>` | Updates one outbound notification channel's label, config, triggers, muted state, or replacement secret values. |
@@ -846,6 +854,8 @@ Watchers are durable change-detection monitors owned by `tok_` session tokens. E
 Watcher storage is split between `watchers` for current state and `watcher_fires` for append-only audit. `watcher_fires` has a unique `(watcher_id, run_id)` constraint so duplicate run-finalization paths cannot create duplicate diff records or notification fan-out. `options_json` currently accepts only `suppress_removals` and `notify_metadata_changes`; additions and removals count as diffs by default, while metadata-only changes stay opt-in until classifier behavior is stable. If a baseline run is deleted from history, the cleanup path pauses the owned schedule, moves the watcher to `error`, sets `state_reason='baseline_deleted'`, and logs `WATCHER_BASELINE_DELETED` so operators do not keep firing against a missing baseline.
 
 Watcher creation and deletion use one database transaction for the watcher row and its owned schedule row. A session can own up to `watchers.max_per_session` watchers, defaulting to 32. Multiple watchers can wrap the same command, but they still keep separate schedules, baselines, state, and fire audit rows. Update, pause, resume, and accept-baseline operations go through the watcher service so the watcher row and owned schedule stay in sync.
+
+Watcher management is exposed through the browser Watchers modal, the terminal `watch` built-in, `/api/v1/watchers`, and the bundled `darklab watch` CLI. All four paths use the same service layer, baseline-completion checks, command validation, schedule ownership rules, and paged fire audit rows.
 
 The scheduler does not have a separate watcher timer. When a due row has `owner_kind='watcher'`, `scheduler.dispatch` claims the fire, launches the command through the same brokered run path as a normal schedule, records a pending watcher fire, and returns without waiting for the scan to finish. When the run finalizes, `services.watchers.finalize` claims that pending fire, compares the completed run to the watcher's baseline through the shared run-comparison helpers, updates watcher state, and queues `watcher_changed`, `watcher_error`, or `watcher_recovered` notifications. A non-empty diff moves the watcher to `changed`; an empty diff after `changed` moves it back to `ok` and can send `watcher_recovered`; an empty diff after `ok` stays quiet. Failed watcher runs do not replace the baseline, and five consecutive failures disable the owned schedule with `WATCHER_DISABLED_AFTER_ERRORS`.
 
@@ -1716,10 +1726,10 @@ Current totals:
 
 - behavior tests: 3,117
 - docs/inventory meta-tests: 32
-- `pytest`: 1688 (1656 behavior + 32 meta)
+- `pytest`: 1691 (1659 behavior + 32 meta)
 - `vitest`: 1211
 - `playwright`: 252
-- total: 3,151
+- total: 3,154
 
 ### Testing Architecture
 
@@ -1765,5 +1775,6 @@ Keep the detailed suite appendix, focused run commands, and maintenance notes in
 - [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
 - [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
+- [docs/watchers.md](docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

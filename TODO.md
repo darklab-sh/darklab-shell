@@ -42,12 +42,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
     - The unit of value: operators stop watching their tabs for "is anything new on this nmap?" and the app tells them.
     - Land **after** scheduler and notifications. A watcher without a scheduler is just a manual diff; a watcher without notifications is just a database row.
     - Non-goals for v1: watchers across multiple commands, watcher graphs, threshold-based alerting (e.g., "only fire if 3 new ports"), watcher history retention beyond a fixed cap.
-  - Phase 6 — CLI and API surfaces
-    - `/api/v1/watchers` GET/POST/PATCH/DELETE plus `/api/v1/watchers/<id>/accept-baseline`, `/run-now`, and `/fires` (paginated audit).
-    - CLI: `darklab watch list / create / pause / resume / delete / accept / run / info / fires`.
   - Phase 7 — hardening, docs, release
-    - Docs: new `docs/watchers.md` covering the diff model, classifier inventory, baseline lifecycle, and how watchers interact with the scheduler and notifications.
-    - `ARCHITECTURE.md` gains a "Watchers" subsection under Backend Architecture.
     - Log events: `WATCHER_FIRED`, `WATCHER_CHANGED`, `WATCHER_RECOVERED`, `WATCHER_ERROR`, `WATCHER_BASELINE_ACCEPTED`, `WATCHER_DIFF_FAILED`, `WATCHER_DISABLED_AFTER_ERRORS`.
     - Smoke tests cover a full create → fire (no change) → fire (changed) → notify → accept-baseline cycle.
 

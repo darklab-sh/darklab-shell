@@ -6,8 +6,12 @@ from copy import deepcopy
 
 from config import APP_VERSION
 from services.scheduler.models import CADENCE_PRESETS
+from services.watchers.models import DIFF_KINDS, WATCHER_OPTION_DEFAULTS, WATCHER_STATES
 
 CADENCE_PRESET_ENUM = list(CADENCE_PRESETS)
+WATCHER_DIFF_KIND_ENUM = sorted(DIFF_KINDS)
+WATCHER_OPTION_KEYS = tuple(WATCHER_OPTION_DEFAULTS)
+WATCHER_STATE_ENUM = sorted(WATCHER_STATES)
 
 
 def _ref(name: str) -> dict:
@@ -66,6 +70,7 @@ PROJECT_ID_PARAM = _path_param("project_id", "Project id")
 ARTIFACT_ID_PARAM = _path_param("artifact_id", "Artifact id")
 NOTIFICATION_CHANNEL_ID_PARAM = _path_param("channel_id", "Notification channel id")
 SCHEDULE_ID_PARAM = _path_param("schedule_id", "Schedule id")
+WATCHER_ID_PARAM = _path_param("watcher_id", "Watcher id")
 
 
 OPENAPI_SPEC: dict = {
@@ -697,7 +702,7 @@ OPENAPI_SPEC: dict = {
                 ],
                 "properties": {
                     "id": {"type": "string"},
-                    "owner_kind": {"type": "string", "enum": ["user"]},
+                    "owner_kind": {"type": "string", "enum": ["user", "watcher"]},
                     "owner_id": {"type": "string"},
                     "kind": {"type": "string", "enum": ["command"]},
                     "command_text": {"type": "string"},
@@ -796,6 +801,165 @@ OPENAPI_SPEC: dict = {
                     "status": {"type": "string"},
                     "fired_at": {"type": "string"},
                     "schedule": _ref("Schedule"),
+                },
+            },
+            "WatcherOptions": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    key: {"type": "boolean"}
+                    for key in WATCHER_OPTION_KEYS
+                },
+            },
+            "WatcherDiffSummary": {
+                "type": "object",
+                "additionalProperties": True,
+                "description": "Bounded classifier summary for added, removed, and changed signals.",
+            },
+            "Watcher": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "id",
+                    "label",
+                    "command_text",
+                    "schedule_id",
+                    "baseline_run_id",
+                    "last_run_id",
+                    "last_diff_summary",
+                    "state",
+                    "state_reason",
+                    "last_error",
+                    "options",
+                    "consecutive_no_change",
+                    "consecutive_changed",
+                    "consecutive_failures",
+                    "created",
+                    "updated",
+                ],
+                "properties": {
+                    "id": {"type": "string"},
+                    "label": {"type": "string"},
+                    "command_text": {"type": "string"},
+                    "schedule_id": {"type": "string"},
+                    "baseline_run_id": {"type": "string"},
+                    "last_run_id": {"type": "string"},
+                    "last_diff_summary": _ref("WatcherDiffSummary"),
+                    "state": {"type": "string", "enum": WATCHER_STATE_ENUM},
+                    "state_reason": {"type": "string"},
+                    "last_error": {"type": "string"},
+                    "options": _ref("WatcherOptions"),
+                    "consecutive_no_change": {"type": "integer"},
+                    "consecutive_changed": {"type": "integer"},
+                    "consecutive_failures": {"type": "integer"},
+                    "created": {"type": "string", "nullable": True},
+                    "updated": {"type": "string", "nullable": True},
+                    "schedule": _ref("Schedule"),
+                },
+            },
+            "WatcherPage": {
+                "type": "object",
+                "required": ["watchers", "total", "limit", "offset", "has_more"],
+                "properties": {
+                    "watchers": {"type": "array", "items": _ref("Watcher")},
+                    "total": {"type": "integer"},
+                    "limit": {"type": "integer"},
+                    "offset": {"type": "integer"},
+                    "has_more": {"type": "boolean"},
+                },
+            },
+            "WatcherResponse": {
+                "type": "object",
+                "required": ["watcher"],
+                "properties": {"watcher": _ref("Watcher")},
+            },
+            "WatcherCreateRequest": {
+                "type": "object",
+                "required": ["baseline_run_id"],
+                "properties": {
+                    "baseline_run_id": {"type": "string"},
+                    "command": {"type": "string"},
+                    "command_text": {"type": "string"},
+                    "cron_expr": {"type": "string"},
+                    "cadence_preset": {"type": "string", "enum": CADENCE_PRESET_ENUM},
+                    "timezone": {"type": "string"},
+                    "timezone_name": {"type": "string"},
+                    "label": {"type": "string"},
+                    "enabled": {"type": "boolean"},
+                    "options": _ref("WatcherOptions"),
+                    "workspace_cwd": {"type": "string"},
+                },
+            },
+            "WatcherUpdateRequest": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string"},
+                    "command_text": {"type": "string"},
+                    "cron_expr": {"type": "string"},
+                    "cadence_preset": {"type": "string", "enum": CADENCE_PRESET_ENUM},
+                    "timezone": {"type": "string"},
+                    "timezone_name": {"type": "string"},
+                    "label": {"type": "string"},
+                    "enabled": {"type": "boolean"},
+                    "state": {"type": "string", "enum": ["ok", "active", "resume", "paused"]},
+                    "pause": {"type": "boolean"},
+                    "resume": {"type": "boolean"},
+                    "reason": {"type": "string"},
+                    "options": _ref("WatcherOptions"),
+                    "workspace_cwd": {"type": "string"},
+                },
+            },
+            "WatcherFire": {
+                "type": "object",
+                "required": [
+                    "id",
+                    "watcher_id",
+                    "baseline_run_id",
+                    "run_id",
+                    "diff_summary",
+                    "diff_kind",
+                    "truncated",
+                    "notification_event_ids",
+                    "state_at_fire",
+                    "created",
+                ],
+                "properties": {
+                    "id": {"type": "string"},
+                    "watcher_id": {"type": "string"},
+                    "baseline_run_id": {"type": "string"},
+                    "run_id": {"type": "string"},
+                    "diff_summary": _ref("WatcherDiffSummary"),
+                    "diff_kind": {"type": "string", "enum": WATCHER_DIFF_KIND_ENUM},
+                    "truncated": {"type": "boolean"},
+                    "notification_event_ids": {"type": "array", "items": {"type": "string"}},
+                    "state_at_fire": {"type": "string", "enum": WATCHER_STATE_ENUM},
+                    "created": {"type": "string", "nullable": True},
+                },
+            },
+            "WatcherFirePage": {
+                "type": "object",
+                "required": ["fires", "total", "limit", "offset", "has_more"],
+                "properties": {
+                    "fires": {"type": "array", "items": _ref("WatcherFire")},
+                    "total": {"type": "integer"},
+                    "limit": {"type": "integer"},
+                    "offset": {"type": "integer"},
+                    "has_more": {"type": "boolean"},
+                },
+            },
+            "WatcherRunNowResponse": {
+                "type": "object",
+                "required": ["status", "fired_at", "watcher"],
+                "properties": {
+                    "status": {"type": "string"},
+                    "fired_at": {"type": "string"},
+                    "watcher": _ref("Watcher"),
+                },
+            },
+            "WatcherAcceptBaselineRequest": {
+                "type": "object",
+                "properties": {
+                    "run_id": {"type": "string"},
                 },
             },
             "NotificationSecretField": {
@@ -1482,6 +1646,93 @@ OPENAPI_SPEC: dict = {
                 "responses": {
                     "200": _json_response("Schedule fire audit rows", _ref("ScheduleFirePage")),
                     **_common_errors(not_found="Schedule not found"),
+                },
+            },
+        },
+        "/watchers": {
+            "get": {
+                "parameters": [*PAGE_PARAMS],
+                "responses": {
+                    "200": _json_response("Change-detection watchers", _ref("WatcherPage")),
+                    **_common_errors(),
+                },
+            },
+            "post": {
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": _ref("WatcherCreateRequest")}},
+                },
+                "responses": {
+                    "201": _json_response("Watcher created", _ref("WatcherResponse")),
+                    "400": _error_response("Invalid watcher or command"),
+                    "401": _error_response("Missing, invalid, or revoked token"),
+                    "404": _error_response("Baseline run not found"),
+                    "409": _error_response("Watcher quota exceeded"),
+                    "429": _error_response("Rate limit exceeded"),
+                },
+            },
+        },
+        "/watchers/{watcher_id}": {
+            "get": {
+                "parameters": [WATCHER_ID_PARAM],
+                "responses": {
+                    "200": _json_response("Watcher detail", _ref("WatcherResponse")),
+                    **_common_errors(not_found="Watcher not found"),
+                },
+            },
+            "patch": {
+                "parameters": [WATCHER_ID_PARAM],
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": _ref("WatcherUpdateRequest")}},
+                },
+                "responses": {
+                    "200": _json_response("Watcher updated", _ref("WatcherResponse")),
+                    "400": _error_response("Invalid watcher or command"),
+                    "401": _error_response("Missing, invalid, or revoked token"),
+                    "404": _error_response("Watcher not found"),
+                    "409": _error_response("Watcher quota exceeded"),
+                    "429": _error_response("Rate limit exceeded"),
+                },
+            },
+            "delete": {
+                "parameters": [WATCHER_ID_PARAM],
+                "responses": {
+                    "200": _json_response("Watcher deleted", _ref("DeleteResponse")),
+                    **_common_errors(not_found="Watcher not found"),
+                },
+            },
+        },
+        "/watchers/{watcher_id}/run-now": {
+            "post": {
+                "parameters": [WATCHER_ID_PARAM],
+                "responses": {
+                    "200": _json_response("Watcher fired immediately", _ref("WatcherRunNowResponse")),
+                    "400": _error_response("Invalid watcher"),
+                    **_common_errors(not_found="Watcher not found"),
+                },
+            },
+        },
+        "/watchers/{watcher_id}/fires": {
+            "get": {
+                "parameters": [WATCHER_ID_PARAM, *PAGE_PARAMS],
+                "responses": {
+                    "200": _json_response("Watcher fire audit rows", _ref("WatcherFirePage")),
+                    **_common_errors(not_found="Watcher not found"),
+                },
+            },
+        },
+        "/watchers/{watcher_id}/accept-baseline": {
+            "post": {
+                "parameters": [WATCHER_ID_PARAM],
+                "requestBody": {
+                    "required": False,
+                    "content": {"application/json": {"schema": _ref("WatcherAcceptBaselineRequest")}},
+                },
+                "responses": {
+                    "200": _json_response("Watcher baseline accepted", _ref("WatcherResponse")),
+                    "400": _error_response("Invalid baseline"),
+                    **_common_errors(not_found="Watcher not found"),
                 },
             },
         },

@@ -2004,7 +2004,8 @@
           },
           "owner_kind": {
             "enum": [
-              "user"
+              "user",
+              "watcher"
             ],
             "type": "string"
           },
@@ -2243,6 +2244,372 @@
             "type": "string"
           },
           "timezone": {
+            "type": "string"
+          },
+          "workspace_cwd": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Watcher": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline_run_id": {
+            "type": "string"
+          },
+          "command_text": {
+            "type": "string"
+          },
+          "consecutive_changed": {
+            "type": "integer"
+          },
+          "consecutive_failures": {
+            "type": "integer"
+          },
+          "consecutive_no_change": {
+            "type": "integer"
+          },
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "last_diff_summary": {
+            "$ref": "#/components/schemas/WatcherDiffSummary"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "last_run_id": {
+            "type": "string"
+          },
+          "options": {
+            "$ref": "#/components/schemas/WatcherOptions"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/Schedule"
+          },
+          "schedule_id": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "changed",
+              "error",
+              "firing",
+              "ok",
+              "paused"
+            ],
+            "type": "string"
+          },
+          "state_reason": {
+            "type": "string"
+          },
+          "updated": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "command_text",
+          "schedule_id",
+          "baseline_run_id",
+          "last_run_id",
+          "last_diff_summary",
+          "state",
+          "state_reason",
+          "last_error",
+          "options",
+          "consecutive_no_change",
+          "consecutive_changed",
+          "consecutive_failures",
+          "created",
+          "updated"
+        ],
+        "type": "object"
+      },
+      "WatcherAcceptBaselineRequest": {
+        "properties": {
+          "run_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WatcherCreateRequest": {
+        "properties": {
+          "baseline_run_id": {
+            "type": "string"
+          },
+          "cadence_preset": {
+            "enum": [
+              "hourly",
+              "daily",
+              "weekly"
+            ],
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "command_text": {
+            "type": "string"
+          },
+          "cron_expr": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "options": {
+            "$ref": "#/components/schemas/WatcherOptions"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "timezone_name": {
+            "type": "string"
+          },
+          "workspace_cwd": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "baseline_run_id"
+        ],
+        "type": "object"
+      },
+      "WatcherDiffSummary": {
+        "additionalProperties": true,
+        "description": "Bounded classifier summary for added, removed, and changed signals.",
+        "type": "object"
+      },
+      "WatcherFire": {
+        "properties": {
+          "baseline_run_id": {
+            "type": "string"
+          },
+          "created": {
+            "nullable": true,
+            "type": "string"
+          },
+          "diff_kind": {
+            "enum": [
+              "none",
+              "signal",
+              "textual"
+            ],
+            "type": "string"
+          },
+          "diff_summary": {
+            "$ref": "#/components/schemas/WatcherDiffSummary"
+          },
+          "id": {
+            "type": "string"
+          },
+          "notification_event_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "state_at_fire": {
+            "enum": [
+              "changed",
+              "error",
+              "firing",
+              "ok",
+              "paused"
+            ],
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "watcher_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "watcher_id",
+          "baseline_run_id",
+          "run_id",
+          "diff_summary",
+          "diff_kind",
+          "truncated",
+          "notification_event_ids",
+          "state_at_fire",
+          "created"
+        ],
+        "type": "object"
+      },
+      "WatcherFirePage": {
+        "properties": {
+          "fires": {
+            "items": {
+              "$ref": "#/components/schemas/WatcherFire"
+            },
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fires",
+          "total",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "WatcherOptions": {
+        "additionalProperties": false,
+        "properties": {
+          "notify_metadata_changes": {
+            "type": "boolean"
+          },
+          "suppress_removals": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "WatcherPage": {
+        "properties": {
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "watchers": {
+            "items": {
+              "$ref": "#/components/schemas/Watcher"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "watchers",
+          "total",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "type": "object"
+      },
+      "WatcherResponse": {
+        "properties": {
+          "watcher": {
+            "$ref": "#/components/schemas/Watcher"
+          }
+        },
+        "required": [
+          "watcher"
+        ],
+        "type": "object"
+      },
+      "WatcherRunNowResponse": {
+        "properties": {
+          "fired_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "watcher": {
+            "$ref": "#/components/schemas/Watcher"
+          }
+        },
+        "required": [
+          "status",
+          "fired_at",
+          "watcher"
+        ],
+        "type": "object"
+      },
+      "WatcherUpdateRequest": {
+        "properties": {
+          "cadence_preset": {
+            "enum": [
+              "hourly",
+              "daily",
+              "weekly"
+            ],
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "command_text": {
+            "type": "string"
+          },
+          "cron_expr": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "options": {
+            "$ref": "#/components/schemas/WatcherOptions"
+          },
+          "pause": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "resume": {
+            "type": "boolean"
+          },
+          "state": {
+            "enum": [
+              "ok",
+              "active",
+              "resume",
+              "paused"
+            ],
+            "type": "string"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "timezone_name": {
             "type": "string"
           },
           "workspace_cwd": {
@@ -5417,6 +5784,554 @@
               }
             },
             "description": "Schedule not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/watchers": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatcherPage"
+                }
+              }
+            },
+            "description": "Change-detection watchers"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WatcherCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatcherResponse"
+                }
+              }
+            },
+            "description": "Watcher created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid watcher or command"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Baseline run not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Watcher quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/watchers/{watcher_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Watcher id",
+            "in": "path",
+            "name": "watcher_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteResponse"
+                }
+              }
+            },
+            "description": "Watcher deleted"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Watcher not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "Watcher id",
+            "in": "path",
+            "name": "watcher_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatcherResponse"
+                }
+              }
+            },
+            "description": "Watcher detail"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Watcher not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "patch": {
+        "parameters": [
+          {
+            "description": "Watcher id",
+            "in": "path",
+            "name": "watcher_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WatcherUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatcherResponse"
+                }
+              }
+            },
+            "description": "Watcher updated"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid watcher or command"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Watcher not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Watcher quota exceeded"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/watchers/{watcher_id}/accept-baseline": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Watcher id",
+            "in": "path",
+            "name": "watcher_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WatcherAcceptBaselineRequest"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatcherResponse"
+                }
+              }
+            },
+            "description": "Watcher baseline accepted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid baseline"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Watcher not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/watchers/{watcher_id}/fires": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Watcher id",
+            "in": "path",
+            "name": "watcher_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatcherFirePage"
+                }
+              }
+            },
+            "description": "Watcher fire audit rows"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Watcher not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/watchers/{watcher_id}/run-now": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Watcher id",
+            "in": "path",
+            "name": "watcher_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatcherRunNowResponse"
+                }
+              }
+            },
+            "description": "Watcher fired immediately"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid watcher"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Watcher not found"
           },
           "429": {
             "content": {

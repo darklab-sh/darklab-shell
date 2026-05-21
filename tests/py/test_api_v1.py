@@ -12,6 +12,7 @@ import app as shell_app
 import config
 from core.database import DB_PATH
 from services.scheduler.models import CADENCE_PRESETS, Schedule
+from services.watchers.models import WATCHER_OPTION_DEFAULTS, Watcher, WatcherFire
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -876,6 +877,139 @@ def test_api_v1_schedule_create_normalizes_string_false_enabled(monkeypatch):
     assert json.loads(create.data)["schedule"]["enabled"] is False
 
 
+def test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped(monkeypatch):
+    import blueprints.api_v1 as api_blueprint
+    from services.scheduler import dispatch
+
+    client = get_client()
+    token = _token(client)
+    other_token = _token(client)
+    baseline_run_id = _seed_run(token, command="nmap -sV darklab.sh", output="22/tcp open ssh")
+    monkeypatch.setattr(api_blueprint, "validate_schedule_command", lambda command, *_args, **_kwargs: command.strip())
+    monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda _schedule: "run_api_watcher")
+
+    create = client.post(
+        "/api/v1/watchers",
+        headers=_headers(token),
+        json={
+            "baseline_run_id": baseline_run_id,
+            "cadence_preset": "hourly",
+            "label": "API Watcher",
+            "timezone": "UTC",
+            "options": {"suppress_removals": True, "notify_metadata_changes": False},
+        },
+    )
+    watcher = json.loads(create.data)["watcher"]
+
+    assert create.status_code == 201
+    assert watcher["command_text"] == "nmap -sV darklab.sh"
+    assert watcher["baseline_run_id"] == baseline_run_id
+    assert watcher["state"] == "ok"
+    assert watcher["options"]["suppress_removals"] is True
+    assert watcher["schedule"]["owner_kind"] == "watcher"
+    assert "session_token" not in watcher
+
+    listed = json.loads(client.get("/api/v1/watchers?limit=10&offset=0", headers=_headers(token)).data)
+    other_listed = json.loads(client.get("/api/v1/watchers", headers=_headers(other_token)).data)
+    detail = json.loads(client.get(f"/api/v1/watchers/{watcher['id']}", headers=_headers(token)).data)["watcher"]
+    cross_detail = client.get(f"/api/v1/watchers/{watcher['id']}", headers=_headers(other_token))
+    cross_patch = client.patch(
+        f"/api/v1/watchers/{watcher['id']}",
+        headers=_headers(other_token),
+        json={"state": "paused"},
+    )
+    cross_run_now = client.post(f"/api/v1/watchers/{watcher['id']}/run-now", headers=_headers(other_token))
+    cross_fires = client.get(f"/api/v1/watchers/{watcher['id']}/fires", headers=_headers(other_token))
+    cross_accept = client.post(f"/api/v1/watchers/{watcher['id']}/accept-baseline", headers=_headers(other_token))
+    cross_delete = client.delete(f"/api/v1/watchers/{watcher['id']}", headers=_headers(other_token))
+    paused = json.loads(
+        client.patch(
+            f"/api/v1/watchers/{watcher['id']}",
+            headers=_headers(token),
+            json={"state": "paused", "reason": "operator check", "label": "Paused API Watcher"},
+        ).data
+    )["watcher"]
+    resumed = json.loads(
+        client.patch(
+            f"/api/v1/watchers/{watcher['id']}",
+            headers=_headers(token),
+            json={"state": "ok"},
+        ).data
+    )["watcher"]
+    fired = json.loads(client.post(f"/api/v1/watchers/{watcher['id']}/run-now", headers=_headers(token)).data)
+    fires = json.loads(client.get(f"/api/v1/watchers/{watcher['id']}/fires", headers=_headers(token)).data)
+    accepted = json.loads(
+        client.post(
+            f"/api/v1/watchers/{watcher['id']}/accept-baseline",
+            headers=_headers(token),
+            json={"run_id": "run_api_watcher"},
+        ).data
+    )["watcher"]
+    deleted = json.loads(client.delete(f"/api/v1/watchers/{watcher['id']}", headers=_headers(token)).data)
+    deleted_detail = client.get(f"/api/v1/watchers/{watcher['id']}", headers=_headers(token))
+
+    assert listed["total"] == 1
+    assert listed["watchers"][0]["id"] == watcher["id"]
+    assert other_listed["watchers"] == []
+    assert detail["label"] == "API Watcher"
+    assert cross_detail.status_code == 404
+    assert json.loads(cross_detail.data)["error"]["code"] == "not_found"
+    assert cross_patch.status_code == 404
+    assert cross_run_now.status_code == 404
+    assert cross_fires.status_code == 404
+    assert cross_accept.status_code == 404
+    assert cross_delete.status_code == 404
+    assert paused["state"] == "paused"
+    assert paused["label"] == "Paused API Watcher"
+    assert paused["schedule"]["enabled"] is False
+    assert resumed["state"] == "ok"
+    assert resumed["schedule"]["enabled"] is True
+    assert fired["status"] == "fired"
+    assert fired["watcher"]["last_run_id"] == "run_api_watcher"
+    assert fires["total"] == 1
+    assert fires["fires"][0]["run_id"] == "run_api_watcher"
+    assert accepted["baseline_run_id"] == "run_api_watcher"
+    assert deleted == {"removed": True}
+    assert deleted_detail.status_code == 404
+
+
+def test_api_v1_watchers_reject_invalid_body_disallowed_command_and_bad_baseline(monkeypatch):
+    import blueprints.api_v1 as api_blueprint
+
+    client = get_client()
+    token = _token(client)
+    baseline_run_id = _seed_run(token, command="nmap darklab.sh")
+
+    def reject_command(*_args, **_kwargs):
+        raise api_blueprint.ScheduleCommandValidationError("command is not allowed")
+
+    monkeypatch.setattr(api_blueprint, "validate_schedule_command", reject_command)
+
+    invalid_body = client.post(
+        "/api/v1/watchers",
+        headers=_headers(token),
+        data="[]",
+        content_type="application/json",
+    )
+    missing_baseline = client.post(
+        "/api/v1/watchers",
+        headers=_headers(token),
+        json={"baseline_run_id": "missing", "cadence_preset": "hourly"},
+    )
+    disallowed = client.post(
+        "/api/v1/watchers",
+        headers=_headers(token),
+        json={"baseline_run_id": baseline_run_id, "cadence_preset": "hourly", "command": "nmap darklab.sh"},
+    )
+
+    assert invalid_body.status_code == 400
+    assert json.loads(invalid_body.data)["error"]["code"] == "invalid_body"
+    assert missing_baseline.status_code == 404
+    assert json.loads(missing_baseline.data)["error"]["code"] == "not_found"
+    assert disallowed.status_code == 400
+    assert json.loads(disallowed.data)["error"]["code"] == "invalid_command"
+
+
 def test_api_v1_openapi_route_matches_checked_in_contract():
     client = get_client()
     live = json.loads(client.get("/api/v1/openapi.json").data)
@@ -1244,6 +1378,123 @@ def test_darklab_cli_schedule_commands_manage_api_schedules(monkeypatch, capsys)
     ]
 
 
+def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
+    cli_main = import_module("darklab_cli.__main__")
+    calls = []
+    watcher = {
+        "id": "wtr_cli",
+        "state": "ok",
+        "baseline_run_id": "run_base",
+        "last_run_id": "",
+        "label": "Hourly Watch",
+        "command_text": "nmap -sV darklab.sh",
+    }
+
+    class FakeClient:
+        def __init__(self, _config):
+            pass
+
+        def request(self, method, path, *, params=None, body=None, **_kwargs):
+            calls.append((method, path, params, body))
+            if path == "/watchers" and method == "POST":
+                assert body == {
+                    "baseline_run_id": "run_base",
+                    "cron_expr": None,
+                    "cadence_preset": "hourly",
+                    "label": "Hourly Watch",
+                    "timezone": None,
+                    "enabled": True,
+                    "options": {
+                        "suppress_removals": True,
+                        "notify_metadata_changes": False,
+                    },
+                    "command": "nmap -sV darklab.sh",
+                }
+                return {"watcher": watcher}
+            if path == "/watchers" and method == "GET":
+                assert params == {"limit": 10, "offset": 0}
+                return {"watchers": [watcher], "total": 1, "limit": 10, "offset": 0, "has_more": False}
+            if path == "/watchers/wtr_cli" and method == "GET":
+                return {"watcher": watcher}
+            if path == "/watchers/wtr_cli" and method == "PATCH":
+                assert body is not None
+                state = "paused" if body.get("state") == "paused" else "ok"
+                return {"watcher": {**watcher, "state": state}}
+            if path == "/watchers/wtr_cli/run-now":
+                return {
+                    "status": "fired",
+                    "fired_at": "2026-05-20T00:00:00+00:00",
+                    "watcher": {**watcher, "last_run_id": "run_fire"},
+                }
+            if path == "/watchers/wtr_cli/fires":
+                assert params == {"limit": 5, "offset": 0}
+                return {
+                    "fires": [{
+                        "created": "2026-05-20T00:00:00+00:00",
+                        "diff_kind": "textual",
+                        "state_at_fire": "changed",
+                        "run_id": "run_fire",
+                    }]
+                }
+            if path == "/watchers/wtr_cli/accept-baseline":
+                assert body == {"run_id": "run_fire"}
+                return {"watcher": {**watcher, "baseline_run_id": "run_fire"}}
+            if path == "/watchers/wtr_cli" and method == "DELETE":
+                return {"removed": True}
+            raise cli_main.DarklabCliError("not_found: missing")
+
+    monkeypatch.setenv("DARKLAB_TOKEN", "tok_cli")
+    monkeypatch.setattr(cli_main, "DarklabClient", FakeClient)
+
+    assert cli_main.main([
+        "watch",
+        "create",
+        "run_base",
+        "--every",
+        "hourly",
+        "--label",
+        "Hourly Watch",
+        "--suppress-removals",
+        "--",
+        "nmap",
+        "-sV",
+        "darklab.sh",
+    ]) == 0
+    assert "wtr_cli" in capsys.readouterr().out
+    assert cli_main.main(["watch", "create", "run_base", "--every", "hourly", "--"]) == 1
+    assert "needs a command after --" in capsys.readouterr().err
+    assert cli_main.main(["watch", "list", "--limit", "10"]) == 0
+    list_output = capsys.readouterr().out
+    assert "STATE" in list_output
+    assert "Hourly Watch" in list_output
+    assert cli_main.main(["watch", "info", "wtr_cli"]) == 0
+    assert "nmap -sV darklab.sh" in capsys.readouterr().out
+    assert cli_main.main(["watch", "pause", "wtr_cli"]) == 0
+    assert "paused" in capsys.readouterr().out
+    assert cli_main.main(["watch", "resume", "wtr_cli"]) == 0
+    assert "ok" in capsys.readouterr().out
+    assert cli_main.main(["watch", "run", "wtr_cli"]) == 0
+    assert "fire: fired" in capsys.readouterr().out
+    assert cli_main.main(["watch", "fires", "wtr_cli", "--limit", "5"]) == 0
+    assert "textual" in capsys.readouterr().out
+    assert cli_main.main(["watch", "accept", "wtr_cli", "--run-id", "run_fire"]) == 0
+    assert "run_fire" in capsys.readouterr().out
+    assert cli_main.main(["watch", "delete", "wtr_cli"]) == 0
+    assert json.loads(capsys.readouterr().out)["removed"] is True
+
+    assert [call[1] for call in calls] == [
+        "/watchers",
+        "/watchers",
+        "/watchers/wtr_cli",
+        "/watchers/wtr_cli",
+        "/watchers/wtr_cli",
+        "/watchers/wtr_cli/run-now",
+        "/watchers/wtr_cli/fires",
+        "/watchers/wtr_cli/accept-baseline",
+        "/watchers/wtr_cli",
+    ]
+
+
 def test_api_v1_openapi_generator_snapshot_is_current():
     from services.api_v1.openapi import openapi_spec
 
@@ -1307,6 +1558,17 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "ScheduleResponse",
         "ScheduleRunNowResponse",
         "ScheduleUpdateRequest",
+        "Watcher",
+        "WatcherAcceptBaselineRequest",
+        "WatcherCreateRequest",
+        "WatcherDiffSummary",
+        "WatcherFire",
+        "WatcherFirePage",
+        "WatcherOptions",
+        "WatcherPage",
+        "WatcherResponse",
+        "WatcherRunNowResponse",
+        "WatcherUpdateRequest",
     }.issubset(schemas)
     assert spec["paths"]["/runs"]["post"]["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/RunStartRequest"
@@ -1325,6 +1587,8 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert schemas["PackagePage"]["properties"]["packages"]["items"] == {"$ref": "#/components/schemas/EvidencePackage"}
     assert schemas["SchedulePage"]["properties"]["schedules"]["items"] == {"$ref": "#/components/schemas/Schedule"}
     assert schemas["ScheduleFirePage"]["properties"]["fires"]["items"] == {"$ref": "#/components/schemas/ScheduleFire"}
+    assert schemas["WatcherPage"]["properties"]["watchers"]["items"] == {"$ref": "#/components/schemas/Watcher"}
+    assert schemas["WatcherFirePage"]["properties"]["fires"]["items"] == {"$ref": "#/components/schemas/WatcherFire"}
     schedule_schema = schemas["Schedule"]
     schedule_payload_fields = {field.name for field in fields(Schedule)} - {"session_token"}
     assert set(schedule_schema["properties"]) == schedule_payload_fields
@@ -1339,6 +1603,22 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert schedule_patch_schema == {"$ref": "#/components/schemas/ScheduleUpdateRequest"}
     schedule_fire_params = {param["name"] for param in spec["paths"]["/schedules/{schedule_id}/fires"]["get"]["parameters"]}
     assert {"schedule_id", "limit", "offset"}.issubset(schedule_fire_params)
+    watcher_schema = schemas["Watcher"]
+    watcher_payload_fields = {field.name for field in fields(Watcher)} - {"session_token"}
+    assert set(watcher_schema["properties"]) == watcher_payload_fields | {"schedule"}
+    assert watcher_schema["additionalProperties"] is False
+    assert set(schemas["WatcherOptions"]["properties"]) == set(WATCHER_OPTION_DEFAULTS)
+    watcher_fire_schema = schemas["WatcherFire"]
+    assert set(watcher_fire_schema["properties"]) == {field.name for field in fields(WatcherFire)}
+    assert spec["paths"]["/watchers"]["post"]["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/WatcherCreateRequest"
+    }
+    watcher_patch_schema = spec["paths"]["/watchers/{watcher_id}"]["patch"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"]
+    assert watcher_patch_schema == {"$ref": "#/components/schemas/WatcherUpdateRequest"}
+    watcher_fire_params = {param["name"] for param in spec["paths"]["/watchers/{watcher_id}/fires"]["get"]["parameters"]}
+    assert {"watcher_id", "limit", "offset"}.issubset(watcher_fire_params)
     assert {"id", "run_id", "workspace_path", "display_name", "file_status"}.issubset(
         set(schemas["ArtifactSummary"]["required"])
     )

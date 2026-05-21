@@ -589,7 +589,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Limits:** watchers require a durable `tok_` session token. Anonymous sessions cannot create watchers because the scheduler needs a stable owner. Watchers monitor one baseline command at a time, use the same five-minute minimum custom cron interval as schedules, and keep bounded diff summaries rather than unlimited raw diff payloads.
 
-**Related files:** `app/blueprints/watchers.py` (browser watcher routes), `app/services/watchers/` (watcher state, diff classifiers, finalization, and fire audit helpers), `app/static/js/features/watchers/watchers_modal.js` (Watchers modal), and `app/static/css/features/watchers.css` (modal layout).
+**Related files:** `app/blueprints/watchers.py` (browser watcher routes), `app/services/watchers/` (watcher state, diff classifiers, finalization, and fire audit helpers), `app/static/js/features/watchers/watchers_modal.js` (Watchers modal), `app/static/css/features/watchers.css` (modal layout), and `docs/watchers.md` (operator guide).
 
 ---
 
@@ -1369,5 +1369,6 @@ The repo also includes a starter Grafana dashboard at `examples/grafana/darklab-
 - [docs/postgres-migration.md](docs/postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow
 - [docs/schedules.md](docs/schedules.md) - scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
+- [docs/watchers.md](docs/watchers.md) - change-detection watcher baseline, diff, scheduler, and notification behavior
 - [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

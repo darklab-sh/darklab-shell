@@ -19,7 +19,7 @@ STREAM_INTERRUPTED_EXIT_CODE = 130
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="darklab",
-        description="Headless darklab_shell client for runs, history, projects, Atlas, and notifications.",
+        description="Headless darklab_shell client for runs, history, projects, Atlas, schedules, watchers, and notifications.",
     )
     parser.add_argument("--api-url", help="darklab_shell base URL")
     parser.add_argument("--token", help="tok_ session token")
@@ -208,6 +208,60 @@ def _parser() -> argparse.ArgumentParser:
     schedule_fires.add_argument("--offset", type=int, default=0)
     schedule_fires.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
+    watch = sub.add_parser("watch", help="Manage recurring change-detection watchers.")
+    watch_sub = watch.add_subparsers(dest="watch_command", required=True)
+
+    watch_list = watch_sub.add_parser("list", help="List change-detection watchers.")
+    watch_list.add_argument("--limit", type=int, default=50, help="Rows to return; default 50, max 100.")
+    watch_list.add_argument("--offset", type=int, default=0)
+    watch_list.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
+
+    watch_create = watch_sub.add_parser(
+        "create",
+        help="Create a watcher from a completed baseline run.",
+        description="Create a watcher from a completed baseline run. Add `-- COMMAND` to override the baseline command.",
+    )
+    watch_create.add_argument("--cron")
+    watch_create.add_argument("--every", metavar="PRESET", help="Cadence preset: hourly, daily, or weekly.")
+    watch_create.add_argument("--label")
+    watch_create.add_argument("--timezone")
+    watch_create.add_argument("--disabled", action="store_true", help="Create the watcher paused.")
+    watch_create.add_argument("--suppress-removals", action="store_true", help="Ignore removal-only diffs.")
+    watch_create.add_argument("--notify-metadata-changes", action="store_true", help="Treat metadata-only changes as diffs.")
+    watch_create.add_argument("--format", choices=("text", "json"), default="text")
+    watch_create.add_argument("--command-override", default=None, help=argparse.SUPPRESS)
+    watch_create.add_argument("baseline_run_id")
+
+    watch_info = watch_sub.add_parser("info", help="Show one watcher.")
+    watch_info.add_argument("watcher_id")
+    watch_info.add_argument("--format", choices=("text", "json"), default="text")
+
+    watch_pause = watch_sub.add_parser("pause", help="Pause a watcher and its owned schedule.")
+    watch_pause.add_argument("watcher_id")
+    watch_pause.add_argument("--format", choices=("text", "json"), default="text")
+
+    watch_resume = watch_sub.add_parser("resume", help="Resume a paused watcher.")
+    watch_resume.add_argument("watcher_id")
+    watch_resume.add_argument("--format", choices=("text", "json"), default="text")
+
+    watch_delete = watch_sub.add_parser("delete", help="Delete a watcher and its owned schedule.")
+    watch_delete.add_argument("watcher_id")
+
+    watch_run = watch_sub.add_parser("run", help="Fire a watcher immediately.")
+    watch_run.add_argument("watcher_id")
+    watch_run.add_argument("--format", choices=("text", "json"), default="text")
+
+    watch_accept = watch_sub.add_parser("accept", help="Accept the latest watcher fire as the new baseline.")
+    watch_accept.add_argument("watcher_id")
+    watch_accept.add_argument("--run-id", help="Specific completed watcher run to accept instead of the latest fire.")
+    watch_accept.add_argument("--format", choices=("text", "json"), default="text")
+
+    watch_fires = watch_sub.add_parser("fires", help="List watcher fire audit rows.")
+    watch_fires.add_argument("watcher_id")
+    watch_fires.add_argument("--limit", type=int, default=50, help="Rows to return; default 50, max 100.")
+    watch_fires.add_argument("--offset", type=int, default=0)
+    watch_fires.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
+
     notify = sub.add_parser("notify", help="Manage outbound notification channels and delivery events.")
     notify_sub = notify.add_subparsers(dest="notify_command", required=True)
 
@@ -266,7 +320,7 @@ def _add_atlas_common_filters(parser: argparse.ArgumentParser, *, include_entity
 
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(_preprocess_watch_create_argv(argv))
     try:
         client = DarklabClient(load_config(args))
         return _dispatch(client, args)
@@ -275,6 +329,28 @@ def main(argv: list[str] | None = None) -> int:
         return STREAM_INTERRUPTED_EXIT_CODE
     except DarklabCliError as exc:
         return die(str(exc))
+
+
+def _preprocess_watch_create_argv(argv: list[str] | None) -> list[str] | None:
+    if argv is None:
+        return None
+    parts = list(argv)
+    watch_index = -1
+    for index in range(len(parts) - 1):
+        if parts[index] == "watch" and parts[index + 1] == "create":
+            watch_index = index
+            break
+    if watch_index < 0:
+        return parts
+    tail = parts[watch_index + 2:]
+    if "--" not in tail:
+        return parts
+    separator_index = tail.index("--")
+    command_parts = tail[separator_index + 1:]
+    rewritten = parts[:watch_index + 2]
+    rewritten.extend(tail[:separator_index])
+    rewritten.extend(["--command-override", shlex.join(command_parts) if command_parts else ""])
+    return rewritten
 
 
 def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
@@ -346,6 +422,8 @@ def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
             return _atlas(client, args)
         case "schedule":
             return _schedule(client, args)
+        case "watch":
+            return _watch(client, args)
         case "notify":
             return _notify(client, args)
         case "download":
@@ -421,6 +499,18 @@ def _schedule_command_text(argv: list[str]) -> str:
     return command
 
 
+def _optional_command_text(argv: list[str], command_name: str) -> str:
+    parts = list(argv or [])
+    if not parts:
+        return ""
+    if parts[0] != "--":
+        raise DarklabCliError(f"{command_name} needs -- before the command override.")
+    command = shlex.join(parts[1:]).strip()
+    if not command:
+        raise DarklabCliError(f"{command_name} needs a command after --.")
+    return command
+
+
 def _print_schedule(payload: dict[str, Any], output_format: str) -> int:
     if output_format == "json":
         return _print_payload(payload, "json")
@@ -436,6 +526,92 @@ def _print_schedule_fire(payload: dict[str, Any], output_format: str) -> int:
     schedule = payload.get("schedule") if isinstance(payload, dict) else {}
     if isinstance(schedule, dict):
         _print_table([schedule], ("id", "enabled", "last_run_at", "last_run_id", "command_text"))
+    status = payload.get("status") if isinstance(payload, dict) else ""
+    fired_at = payload.get("fired_at") if isinstance(payload, dict) else ""
+    if status or fired_at:
+        print(f"fire: {status} {fired_at}".rstrip())
+    return 0
+
+
+def _watch(client: DarklabClient, args: argparse.Namespace) -> int:
+    match args.watch_command:
+        case "list":
+            payload = client.request("GET", "/watchers", params=_page_window_params(args))
+            return _print_collection(
+                payload,
+                "watchers",
+                args.format,
+                fields=("id", "state", "baseline_run_id", "label", "command_text"),
+            )
+        case "create":
+            if bool(args.cron) == bool(args.every):
+                raise DarklabCliError("watch create needs exactly one of --cron or --every.")
+            body: dict[str, Any] = {
+                "baseline_run_id": args.baseline_run_id,
+                "cron_expr": args.cron,
+                "cadence_preset": args.every,
+                "label": args.label,
+                "timezone": args.timezone,
+                "enabled": not args.disabled,
+                "options": {
+                    "suppress_removals": bool(args.suppress_removals),
+                    "notify_metadata_changes": bool(args.notify_metadata_changes),
+                },
+            }
+            if args.command_override is not None:
+                command = str(args.command_override or "").strip()
+                if not command:
+                    raise DarklabCliError("watch create needs a command after --.")
+                body["command"] = command
+            return _print_watcher(client.request("POST", "/watchers", body=body), args.format)
+        case "info":
+            return _print_watcher(client.request("GET", f"/watchers/{args.watcher_id}"), args.format)
+        case "pause":
+            payload = client.request(
+                "PATCH",
+                f"/watchers/{args.watcher_id}",
+                body={"state": "paused", "reason": "operator paused"},
+            )
+            return _print_watcher(payload, args.format)
+        case "resume":
+            payload = client.request("PATCH", f"/watchers/{args.watcher_id}", body={"state": "ok"})
+            return _print_watcher(payload, args.format)
+        case "delete":
+            return _print_payload(client.request("DELETE", f"/watchers/{args.watcher_id}"), "json")
+        case "run":
+            return _print_watcher_fire(client.request("POST", f"/watchers/{args.watcher_id}/run-now"), args.format)
+        case "accept":
+            body = {"run_id": args.run_id} if args.run_id else {}
+            return _print_watcher(
+                client.request("POST", f"/watchers/{args.watcher_id}/accept-baseline", body=body),
+                args.format,
+            )
+        case "fires":
+            payload = client.request("GET", f"/watchers/{args.watcher_id}/fires", params=_page_window_params(args))
+            return _print_collection(
+                payload,
+                "fires",
+                args.format,
+                fields=("created", "diff_kind", "state_at_fire", "run_id"),
+            )
+    return die("unknown watch command")
+
+
+def _print_watcher(payload: dict[str, Any], output_format: str) -> int:
+    if output_format == "json":
+        return _print_payload(payload, "json")
+    watcher = payload.get("watcher") if isinstance(payload, dict) else {}
+    if isinstance(watcher, dict):
+        _print_table([watcher], ("id", "state", "baseline_run_id", "last_run_id", "label", "command_text"))
+    return 0
+
+
+def _print_watcher_fire(payload: dict[str, Any], output_format: str) -> int:
+    if output_format == "json":
+        return _print_payload(payload, "json")
+    watcher = payload.get("watcher") if isinstance(payload, dict) else {}
+    if isinstance(watcher, dict):
+        _print_table([watcher], ("id", "state", "baseline_run_id", "last_run_id", "command_text"))
     status = payload.get("status") if isinstance(payload, dict) else ""
     fired_at = payload.get("fired_at") if isinstance(payload, dict) else ""
     if status or fired_at:

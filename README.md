@@ -390,6 +390,7 @@ To prevent commands from writing to either path directly, the app blocks any com
 - [docs/postgres-migration.md](docs/postgres-migration.md) - Offline SQLite-to-Postgres cutover helper and validation workflow
 - [docs/schedules.md](docs/schedules.md) - Scheduled-command cadence, timezone, worker, and audit behavior
 - [docs/storage-scaling.md](docs/storage-scaling.md) - SQLite growth baseline, storage pressure points, and Postgres sizing guidance
+- [docs/watchers.md](docs/watchers.md) - Change-detection watcher baseline, diff, scheduler, and notification behavior
 - [tests/README.md](tests/README.md) - Detailed suite appendix, smoke-test coverage, and focused test commands
 - [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory
 
@@ -877,7 +878,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── v2.0-merge-request.md # Draft merge-request notes for the next major release
 │   │   └── v2.0-release-notes.md # Draft user-facing release notes for the next major release
 │   ├── schedules.md           # Scheduled-command cadence, timezone, worker, and audit behavior
-│   └── storage-scaling.md      # SQLite growth baseline, storage pressure points, and Postgres sizing guidance
+│   ├── storage-scaling.md      # SQLite growth baseline, storage pressure points, and Postgres sizing guidance
+│   └── watchers.md            # Change-detection watcher baseline, diff, scheduler, and notification behavior
 ├── entrypoint.sh               # Container startup script — fixes /data ownership, drops to appuser
 ├── examples/
 │   ├── docker-compose.prod.yml  # Optional production Docker Compose override (GELF, proxy env, external network)
