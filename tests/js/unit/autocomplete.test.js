@@ -1359,6 +1359,71 @@ describe('autocomplete helpers', () => {
     expect(_readRecentValues('port_set')).toEqual(['80,443'])
   })
 
+  it('replays recent-value captures submitted before autocomplete context loads', async () => {
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/session/recent-values' && options.method === 'POST') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            values: {
+              domain: ['alpha.example.com'],
+              ip: [],
+              url: [],
+              port_set: [],
+            },
+          }),
+        })
+      }
+      return Promise.resolve({
+        json: () => Promise.resolve({
+          values: {
+            domain: [],
+            ip: [],
+            url: [],
+            port_set: [],
+          },
+        }),
+      })
+    })
+    const { loadRecentValues, rememberRecentValuesFromCommand, _readRecentValues, _setContextRegistry } = fromDomScripts(
+      ['app/static/js/core/utils.js', 'app/static/js/core/autocomplete_core.js', 'app/static/js/features/autocomplete/suggestions.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        SESSION_ID: 'session-a',
+        apiFetch,
+        acSuggestions: [],
+        acContextRegistry: {},
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      loadRecentValues,
+      rememberRecentValuesFromCommand,
+      _readRecentValues,
+      _setContextRegistry: (value) => { acContextRegistry = value; },
+    }`,
+    )
+
+    expect(rememberRecentValuesFromCommand('dig alpha.example.com')).toEqual([])
+    _setContextRegistry({
+      dig: {
+        flags: [],
+        expects_value: [],
+        arg_hints: { __positional__: [{ value: '<domain>', hintOnly: true, value_type: 'domain' }] },
+      },
+    })
+    await loadRecentValues()
+
+    expect(_readRecentValues('domain')).toEqual(['alpha.example.com'])
+    expect(apiFetch).toHaveBeenCalledWith('/session/recent-values', expect.objectContaining({
+      method: 'POST',
+    }))
+  })
+
   it('reloads active project targets after a same-session project workspace storage signal', async () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/projects?include_archived=1') {

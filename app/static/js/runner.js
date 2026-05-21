@@ -771,6 +771,8 @@ function _previewTruncationNotice(outputLineCount, fullOutputAvailable) {
 function _streamOutputMetadata(msg) {
   if (!msg || typeof msg !== 'object') return null;
   const metadata = {};
+  if (typeof msg.kind === 'string' && msg.kind) metadata.kind = msg.kind;
+  if (typeof msg.role === 'string' && msg.role) metadata.role = msg.role;
   if (Array.isArray(msg.signals) && msg.signals.length) metadata.signals = msg.signals;
   if (Number.isInteger(msg.line_index)) metadata.line_index = msg.line_index;
   if (typeof msg.command_root === 'string' && msg.command_root) metadata.command_root = msg.command_root;

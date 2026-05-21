@@ -800,23 +800,36 @@ function _ptyHistoryLineMetadata(entry) {
 
 function _ptyEntryForTranscript(entry) {
   if (entry && typeof entry === 'object') {
-    return {
+    const line = {
       text: String(entry.text ?? ''),
       cls: String(entry.cls || ''),
       metadata: _ptyHistoryLineMetadata(entry),
     };
+    if (typeof entry.kind === 'string' && entry.kind) line.kind = entry.kind;
+    if (typeof entry.role === 'string' && entry.role) line.role = entry.role;
+    return line;
   }
   return { text: String(entry ?? ''), cls: '', metadata: null };
 }
 
+function _ptyEntryRole(entry) {
+  const model = window.DarklabRunOutputModel || null;
+  if (model && typeof model.fromWireLineEvent === 'function') {
+    return String(model.fromWireLineEvent(entry || {}).role || 'body');
+  }
+  return String(entry && entry.role || entry && entry.cls || 'body');
+}
+
+function _isPtyMarkerEntry(entry) {
+  return entry && typeof entry === 'object' && _ptyEntryRole(entry) === 'pty-marker';
+}
+
 function _ptyFinalFrameEntries(entries) {
   const source = Array.isArray(entries) ? entries : [];
-  const markerIndex = source.findLastIndex(entry => (
-    entry && typeof entry === 'object' && String(entry.cls || '') === 'pty-marker'
-  ));
+  const markerIndex = source.findLastIndex(entry => _isPtyMarkerEntry(entry));
   const frameEntries = markerIndex >= 0 ? source.slice(markerIndex + 1) : source;
   return frameEntries
-    .filter(entry => !(entry && typeof entry === 'object' && String(entry.cls || '') === 'pty-marker'))
+    .filter(entry => !_isPtyMarkerEntry(entry))
     .map(_ptyEntryForTranscript);
 }
 
@@ -830,7 +843,7 @@ async function _ptyLoadSavedTranscript(runId) {
 
 function _ptySnapshotEntries(entries) {
   return (Array.isArray(entries) ? entries : [])
-    .filter(entry => !(entry && typeof entry === 'object' && String(entry.cls || '') === 'pty-marker'))
+    .filter(entry => !_isPtyMarkerEntry(entry))
     .map(_ptyEntryForTranscript);
 }
 
@@ -848,7 +861,7 @@ async function _ptyAppendSavedTranscript(tabId, runId) {
       return;
     }
     if (typeof appendLine === 'function') {
-      entries.forEach(entry => appendLine(entry.text, entry.cls || '', tabId, entry.metadata || null));
+      entries.forEach(entry => appendLine(entry, tabId));
     }
   } catch (_) {
     if (typeof appendLine === 'function') {

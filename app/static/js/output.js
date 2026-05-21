@@ -420,6 +420,8 @@ function _normalizeOutputEntities(entities) {
 
 function _applyOutputSignalMetadata(span, rawLine, metadata) {
   if (!metadata || typeof metadata !== 'object') return;
+  if (typeof metadata.kind === 'string' && metadata.kind) rawLine.kind = metadata.kind;
+  if (typeof metadata.role === 'string' && metadata.role) rawLine.role = metadata.role;
   const signals = _normalizeOutputSignals(metadata.signals);
   if (signals.length) {
     rawLine.signals = signals;
@@ -695,15 +697,157 @@ function _formatHighVolumeCount(value) {
   return Number(value || 0).toLocaleString('en-US');
 }
 
-function _rawOutputLine(text, cls, tabId, now, runStart, metadata = null) {
+function _runOutputModel() {
+  if (typeof DarklabRunOutputModel !== 'undefined') return DarklabRunOutputModel;
+  if (typeof globalThis !== 'undefined' && globalThis.DarklabRunOutputModel) return globalThis.DarklabRunOutputModel;
+  return null;
+}
+
+function _fallbackLineEventFromWire(payload) {
+  const item = payload && typeof payload === 'object' ? payload : {};
+  const legacyCls = String(item.cls || '');
+  const kind = legacyCls === 'notice' ? 'notice' : (legacyCls === 'warn' || legacyCls === 'warning' ? 'warn' : (legacyCls === 'error' ? 'error' : 'info'));
+  const roleValues = new Set([
+    'prompt-echo',
+    'section-header',
+    'kv',
+    'help-row',
+    'pty-marker',
+    'progress',
+    'status-line',
+    'success',
+    'denied',
+    'exit-ok',
+    'exit-fail',
+  ]);
+  const role = roleValues.has(legacyCls) ? legacyCls : 'body';
+  return {
+    text: String(item.text || ''),
+    kind: String(item.kind || kind),
+    role: String(item.role || role),
+    legacy_cls: legacyCls,
+    ts_clock: String(item.tsC || item.ts_clock || ''),
+    ts_elapsed: String(item.tsE || item.ts_elapsed || ''),
+    signals: Array.isArray(item.signals) ? item.signals.map(signal => String(signal || '')).filter(Boolean) : [],
+    line_index: Number.isInteger(item.line_index) ? item.line_index : null,
+    line_number: Number.isInteger(item.line_number) ? item.line_number : undefined,
+    command_root: String(item.command_root || ''),
+    target: String(item.target || ''),
+    entities: _normalizeOutputEntities(item.entities),
+  };
+}
+
+function _lineEventFromWire(payload) {
+  const model = _runOutputModel();
+  if (model && typeof model.fromWireLineEvent === 'function') {
+    const event = model.fromWireLineEvent(payload || {});
+    if (payload && typeof payload === 'object' && Number.isInteger(payload.line_number)) {
+      event.line_number = payload.line_number;
+    }
+    return event;
+  }
+  return _fallbackLineEventFromWire(payload);
+}
+
+function _lineEventLegacyPayload(event) {
+  const model = _runOutputModel();
+  if (model && typeof model.toLegacyWireLineEvent === 'function') {
+    return model.toLegacyWireLineEvent(event || {});
+  }
+  return {
+    text: String(event && event.text || ''),
+    cls: String(event && (event.legacy_cls || event.role !== 'body' && event.role || event.kind !== 'info' && event.kind) || ''),
+    tsC: String(event && (event.ts_clock || event.tsC) || ''),
+    tsE: String(event && (event.ts_elapsed || event.tsE) || ''),
+  };
+}
+
+function _mergeLineEventMetadata(payload, metadata = null) {
+  const merged = {};
+  const sources = [
+    payload && typeof payload === 'object' ? payload.metadata : null,
+    metadata,
+    payload && typeof payload === 'object' ? payload : null,
+  ];
+  sources.forEach(source => {
+    if (!source || typeof source !== 'object') return;
+    ['kind', 'role', 'signals', 'line_index', 'line_number', 'command_root', 'target', 'entities', 'high_volume_resume', 'live_output', 'faq_command'].forEach(key => {
+      if (source[key] !== undefined && source[key] !== null && source[key] !== '') merged[key] = source[key];
+    });
+  });
+  return Object.keys(merged).length ? merged : null;
+}
+
+function _lineEventPayload(text, cls, metadata = null) {
+  if (text && typeof text === 'object') {
+    const payload = { ...text };
+    if (payload.metadata && typeof payload.metadata === 'object') {
+      ['kind', 'role', 'signals', 'line_index', 'line_number', 'command_root', 'target', 'entities'].forEach(key => {
+        if (payload[key] === undefined && payload.metadata[key] !== undefined) payload[key] = payload.metadata[key];
+      });
+    }
+    if (metadata && typeof metadata === 'object') {
+      ['kind', 'role', 'signals', 'line_index', 'line_number', 'command_root', 'target', 'entities'].forEach(key => {
+        if (metadata[key] !== undefined) payload[key] = metadata[key];
+      });
+    }
+    return payload;
+  }
+  const payload = { text: String(text ?? ''), cls: String(cls || '') };
+  if (metadata && typeof metadata === 'object') {
+    ['kind', 'role', 'signals', 'line_index', 'line_number', 'command_root', 'target', 'entities'].forEach(key => {
+      if (metadata[key] !== undefined) payload[key] = metadata[key];
+    });
+  }
+  return payload;
+}
+
+function _normalizeLineEventInput(text, cls = '', metadata = null) {
+  const payload = _lineEventPayload(text, cls, metadata);
+  return {
+    event: _lineEventFromWire(payload),
+    metadata: _mergeLineEventMetadata(payload, metadata),
+  };
+}
+
+function _normalizeAppendLineArgs(text, cls, tabId, metadata = null) {
+  if (text && typeof text === 'object') {
+    const tabIdValue = typeof tabId === 'string' && tabId ? tabId : (typeof cls === 'string' ? cls : '');
+    const metadataValue = metadata || (tabId && typeof tabId === 'object' ? tabId : null);
+    return {
+      ..._normalizeLineEventInput(text, '', metadataValue),
+      tabId: tabIdValue,
+    };
+  }
+  return {
+    ..._normalizeLineEventInput(text, cls, metadata),
+    tabId,
+  };
+}
+
+function _legacyClsForLineEvent(event) {
+  return String(_lineEventLegacyPayload(event).cls || '');
+}
+
+function _isPromptEchoLineEvent(event) {
+  return String(event && event.role || '') === 'prompt-echo';
+}
+
+function _isPlainOutputLineEvent(event) {
+  const role = String(event && event.role || 'body');
+  const kind = String(event && event.kind || 'info');
+  return ['exit-ok', 'exit-fail', 'denied'].includes(role) || kind === 'notice';
+}
+
+function _rawOutputLine(event, tabId, now, runStart, metadata = null) {
   const tsC = new Date(now).toTimeString().slice(0, 8);
   const tsE = runStart ? '+' + ((now - runStart) / 1000).toFixed(1) + 's' : '+0.0s';
-  let rawTextForStorage = text;
-  if (cls === 'prompt-echo') {
+  let rawTextForStorage = String(event && event.text || '');
+  if (_isPromptEchoLineEvent(event)) {
     const prefix = _outputPromptPrefix();
-    rawTextForStorage = `${prefix}${text ? ' ' + text : ''}`;
+    rawTextForStorage = `${prefix}${event.text ? ' ' + event.text : ''}`;
   }
-  const rawLine = { text: rawTextForStorage, cls: cls || '', tsC, tsE };
+  const rawLine = { ..._lineEventLegacyPayload({ ...event, text: rawTextForStorage, ts_clock: tsC, ts_elapsed: tsE }), tsC, tsE };
   _applyOutputSignalMetadata(null, rawLine, metadata);
   return rawLine;
 }
@@ -846,7 +990,9 @@ function _appendOutputCommandChip(content, command, label = '') {
   content.appendChild(chip);
 }
 
-function _buildOutputLine(text, cls, tabId, now, runStart, metadata = null) {
+function _buildOutputLine(event, tabId, now, runStart, metadata = null) {
+  const text = String(event && event.text || '');
+  const cls = _legacyClsForLineEvent(event);
   const span = document.createElement('span');
   span.className = 'line' + (cls ? ' ' + cls : '');
   const content = document.createElement('span');
@@ -861,7 +1007,7 @@ function _buildOutputLine(text, cls, tabId, now, runStart, metadata = null) {
   }
 
   let rawTextForStorage = text;
-  if (cls === 'prompt-echo') {
+  if (_isPromptEchoLineEvent(event)) {
     const prefix = _outputPromptPrefix();
     const prefixEl = document.createElement('span');
     prefixEl.className = 'prompt-prefix';
@@ -880,7 +1026,7 @@ function _buildOutputLine(text, cls, tabId, now, runStart, metadata = null) {
     button.title = 'Render new output lines live again';
     _bindHighVolumeOutputResumeButton(button);
     content.appendChild(button);
-  } else if (cls === 'exit-ok' || cls === 'exit-fail' || cls === 'denied' || cls === 'notice') {
+  } else if (_isPlainOutputLineEvent(event)) {
     content.textContent = text;
   } else if (metadata && typeof metadata.faq_command === 'string' && metadata.faq_command.trim()) {
     _appendOutputCommandChip(content, metadata.faq_command.trim(), String(text || '').trim());
@@ -889,7 +1035,11 @@ function _buildOutputLine(text, cls, tabId, now, runStart, metadata = null) {
   }
   span.appendChild(content);
 
-  const rawLine = { text: rawTextForStorage, cls: cls || '', tsC, tsE: span.dataset.tsE || '' };
+  const rawLine = {
+    ..._lineEventLegacyPayload({ ...event, text: rawTextForStorage, ts_clock: tsC, ts_elapsed: span.dataset.tsE || '' }),
+    tsC,
+    tsE: span.dataset.tsE || '',
+  };
   _applyOutputSignalMetadata(span, rawLine, metadata);
 
   return { span, rawLine };
@@ -997,7 +1147,8 @@ function _syncTabRawLines(tab, rawLine) {
 
 function _appendRestoredOutputSpan(out, rawLine, tabId) {
   const span = document.createElement('span');
-  const cls = rawLine && typeof rawLine.cls === 'string' ? rawLine.cls : '';
+  const event = _lineEventFromWire(rawLine || {});
+  const cls = _legacyClsForLineEvent(event);
   span.className = 'line' + (cls ? ' ' + cls : '');
   span.dataset.tsC = String(rawLine && rawLine.tsC || '');
   if (rawLine && rawLine.tsE) span.dataset.tsE = String(rawLine.tsE);
@@ -1006,9 +1157,9 @@ function _appendRestoredOutputSpan(out, rawLine, tabId) {
 
   const content = document.createElement('span');
   content.className = 'line-content';
-  const text = String(rawLine && rawLine.text || '');
+  const text = String(event && event.text || '');
 
-  if (cls === 'prompt-echo') {
+  if (_isPromptEchoLineEvent(event)) {
     const prefix = _outputPromptPrefix();
     const prefixEl = document.createElement('span');
     prefixEl.className = 'prompt-prefix';
@@ -1017,7 +1168,7 @@ function _appendRestoredOutputSpan(out, rawLine, tabId) {
 
     const bodyText = stripPromptLabelFromEchoText(text);
     if (bodyText) content.appendChild(document.createTextNode(bodyText));
-  } else if (cls === 'notice' || cls === 'denied' || cls === 'exit-ok' || cls === 'exit-fail') {
+  } else if (_isPlainOutputLineEvent(event)) {
     content.textContent = text;
   } else {
     _renderAnsiWithEntityTokens(content, text, _normalizeOutputEntities(rawLine && rawLine.entities), tabId);
@@ -1033,6 +1184,8 @@ function renderRestoredTabOutput(tabId, rawLines) {
   const lines = Array.isArray(rawLines) ? rawLines.map(line => ({
     text: String(line && line.text || ''),
     cls: String(line && line.cls || ''),
+    kind: String(line && line.kind || ''),
+    role: String(line && line.role || ''),
     tsC: String(line && line.tsC || ''),
     tsE: String(line && line.tsE || ''),
     signals: _normalizeOutputSignals(line && line.signals),
@@ -1178,17 +1331,19 @@ _setLnMode('off');
 // before rendering. Each line also receives data-ts-e (elapsed) and data-ts-c
 // (clock) attributes used by the CSS ::before timestamp display.
 function appendLine(text, cls, tabId, metadata = null) {
-  const id = tabId || activeTabId;
+  const normalized = _normalizeAppendLineArgs(text, cls, tabId, metadata);
+  const { event } = normalized;
+  const id = normalized.tabId || activeTabId;
   const out = getOutput(id);
   if (!out) return;
 
   const tab = getTab(id);
   const now = Date.now();
   const runStart = tab?.runStart || 0;
-  if (_shouldSkipLiveOutputRender(tab, metadata)) {
+  if (_shouldSkipLiveOutputRender(tab, normalized.metadata)) {
     _flushPendingOutputBeforeHighVolumeSkip(id);
     const state = _ensureHighVolumeOutputState(tab);
-    const rawLine = _rawOutputLine(text, cls, id, now, runStart, metadata);
+    const rawLine = _rawOutputLine(event, id, now, runStart, normalized.metadata);
     _assignRawOutputLineNumber(out, tab, rawLine);
     _syncTabRawLines(tab, rawLine);
     if (state) {
@@ -1199,7 +1354,7 @@ function appendLine(text, cls, tabId, metadata = null) {
   }
   const state = _getPendingOutputBatch(id);
   const shouldBatch = state.scheduled || state.items.length > 0 || state.burstCount >= _OUTPUT_SYNC_BURST_LIMIT;
-  const { span, rawLine } = _buildOutputLine(text, cls, id, now, runStart, metadata);
+  const { span, rawLine } = _buildOutputLine(event, id, now, runStart, normalized.metadata);
   const lineNumber = _assignOutputLineNumber(out, tab, span);
   if (lineNumber > 0) rawLine.line_number = lineNumber;
 
@@ -1228,14 +1383,8 @@ function appendLine(text, cls, tabId, metadata = null) {
 }
 
 function _normalizeAppendLinesEntry(entry) {
-  if (entry && typeof entry === 'object') {
-    return {
-      text: String(entry.text ?? ''),
-      cls: String(entry.cls || ''),
-      metadata: entry.metadata && typeof entry.metadata === 'object' ? entry.metadata : entry,
-    };
-  }
-  return { text: String(entry ?? ''), cls: '', metadata: null };
+  if (entry && typeof entry === 'object') return _normalizeLineEventInput(entry, '', entry.metadata || null);
+  return _normalizeLineEventInput(String(entry ?? ''), '', null);
 }
 
 function appendLines(lines, tabId) {
@@ -1256,7 +1405,7 @@ function appendLines(lines, tabId) {
         const entry = _normalizeAppendLinesEntry(sourceLines[index]);
         if (_shouldSkipLiveOutputRender(tab, entry.metadata)) {
           const state = _ensureHighVolumeOutputState(tab);
-          const rawLine = _rawOutputLine(entry.text, entry.cls, id, now, runStart, entry.metadata);
+          const rawLine = _rawOutputLine(entry.event, id, now, runStart, entry.metadata);
           _assignRawOutputLineNumber(out, tab, rawLine);
           _syncTabRawLines(tab, rawLine);
           if (state) {
@@ -1265,7 +1414,7 @@ function appendLines(lines, tabId) {
           }
           continue;
         }
-        const { span, rawLine } = _buildOutputLine(entry.text, entry.cls, id, now, runStart, entry.metadata);
+        const { span, rawLine } = _buildOutputLine(entry.event, id, now, runStart, entry.metadata);
         const lineNumber = _assignOutputLineNumber(out, tab, span);
         if (lineNumber > 0) rawLine.line_number = lineNumber;
         state.items.push({ span, rawLine });

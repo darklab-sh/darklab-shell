@@ -3,8 +3,10 @@ function _getExportableRawLines(tab) {
   if (!tab || !Array.isArray(tab.rawLines)) return [];
   return tab.rawLines.filter(line => {
     if (!line || typeof line.text !== 'string') return false;
-    const cls = String(line.cls || '');
-    if (cls === 'wlc-live' || cls.startsWith('welcome-')) return false;
+    const cls = window.ExportHtmlUtils && typeof ExportHtmlUtils.lineLegacyClass === 'function'
+      ? ExportHtmlUtils.lineLegacyClass(ExportHtmlUtils.lineEventFromWire(line))
+      : String(line.cls || '');
+    if (['wlc-live'].includes(cls) || cls.startsWith('welcome-')) return false;
     const plain = line.text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').trim();
     return plain.length > 0;
   });
@@ -91,13 +93,15 @@ function _normalizeTabTranscriptLine(line) {
     return { text: line, cls: '', tsC: '', tsE: '' };
   }
   if (line && typeof line.text === 'string') {
-    return {
-      text: line.text,
-      cls: String(line.cls || ''),
-      tsC: String(line.tsC || ''),
-      tsE: String(line.tsE || ''),
-      line_number: Number.isInteger(line.line_number) ? line.line_number : undefined,
-    };
+    return window.ExportHtmlUtils && typeof ExportHtmlUtils.lineEventFromWire === 'function'
+      ? ExportHtmlUtils.lineEventFromWire(line)
+      : {
+        text: line.text,
+        cls: String(line.cls || ''),
+        tsC: String(line.tsC || ''),
+        tsE: String(line.tsE || ''),
+        line_number: Number.isInteger(line.line_number) ? line.line_number : undefined,
+      };
   }
   return null;
 }
@@ -245,8 +249,10 @@ function _extractLatestFullRunShareContent(tab, fullRun) {
     : rawLines.length;
   const exitIndex = (() => {
     for (let i = rawLines.length - 1; i >= 0; i -= 1) {
-      const cls = String(rawLines[i] && rawLines[i].cls || '');
-      if (cls === 'exit-ok' || cls === 'exit-fail') return i;
+      const event = window.ExportHtmlUtils && typeof ExportHtmlUtils.lineEventFromWire === 'function'
+        ? ExportHtmlUtils.lineEventFromWire(rawLines[i])
+        : { role: String(rawLines[i] && rawLines[i].role || rawLines[i] && rawLines[i].cls || '') };
+      if (['exit-ok', 'exit-fail'].includes(String(event.role || ''))) return i;
     }
     return rawLines.length;
   })();

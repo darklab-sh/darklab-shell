@@ -81,8 +81,16 @@ var DarklabOutputCore = (function (global) {
     return cls.split(/\s+/).filter(Boolean).includes(className);
   }
 
+  function lineRole(rawLine) {
+    const model = window.DarklabRunOutputModel || null;
+    if (model && typeof model.fromWireLineEvent === 'function') {
+      return String(model.fromWireLineEvent(rawLine || {}).role || 'body');
+    }
+    return lineHasClass(rawLine, 'prompt-echo') ? 'prompt-echo' : 'body';
+  }
+
   function isSignalCountableLine(rawLine) {
-    if (!rawLine || lineHasClass(rawLine, 'prompt-echo')) return false;
+    if (!rawLine || lineRole(rawLine) === 'prompt-echo') return false;
     const classes = String(rawLine.cls || '').split(/\s+/).filter(Boolean);
     return !classes.some(cls => isSignalSummaryClassName(cls));
   }

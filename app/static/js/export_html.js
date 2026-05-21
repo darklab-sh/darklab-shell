@@ -32,7 +32,53 @@
     '--terminal-font-size',
     '--terminal-line-height',
   ];
-  const PLAIN_CLASSES = new Set(['exit-ok', 'exit-fail', 'denied', 'notice']);
+  function runOutputModel() {
+    return window.DarklabRunOutputModel || null;
+  }
+
+  function fallbackLineEvent(line) {
+    const cls = String(line && line.cls || '');
+    return {
+      text: String(line && line.text || ''),
+      cls,
+      kind: String(line && line.kind || (cls === 'notice' ? 'notice' : 'info')),
+      role: String(line && line.role || (['prompt-echo', 'denied', 'exit-ok', 'exit-fail'].includes(cls) ? cls : 'body')),
+      tsC: String(line && line.tsC || ''),
+      tsE: String(line && line.tsE || ''),
+      line_number: Number.isInteger(line && line.line_number) ? line.line_number : undefined,
+    };
+  }
+
+  function lineEventFromWire(line) {
+    const model = runOutputModel();
+    if (model && typeof model.fromWireLineEvent === 'function') {
+      const event = model.fromWireLineEvent(line || {});
+      event.cls = lineLegacyClass(event);
+      event.tsC = event.ts_clock || '';
+      event.tsE = event.ts_elapsed || '';
+      if (Number.isInteger(line && line.line_number)) event.line_number = line.line_number;
+      return event;
+    }
+    return fallbackLineEvent(line || {});
+  }
+
+  function lineLegacyClass(event) {
+    const model = runOutputModel();
+    if (model && typeof model.toLegacyWireLineEvent === 'function') {
+      return String(model.toLegacyWireLineEvent(event || {}).cls || '');
+    }
+    return String(event && (event.legacy_cls || event.cls || (event.role !== 'body' ? event.role : event.kind !== 'info' ? event.kind : '')) || '');
+  }
+
+  function isPromptEchoEvent(event) {
+    return String(event && event.role || '') === 'prompt-echo';
+  }
+
+  function isPlainEvent(event) {
+    const role = String(event && event.role || 'body');
+    const kind = String(event && event.kind || 'info');
+    return ['exit-ok', 'exit-fail', 'denied'].includes(role) || kind === 'notice';
+  }
 
   function escapeExportHtml(text) {
     return String(text ?? '')
@@ -63,16 +109,10 @@
 
   function normalizeExportTranscriptLine(line) {
     if (typeof line === 'string') {
-      return { text: line, cls: '', tsC: '', tsE: '' };
+      return lineEventFromWire({ text: line });
     }
     if (line && typeof line.text === 'string') {
-      return {
-        text: line.text,
-        cls: String(line.cls || ''),
-        tsC: String(line.tsC || ''),
-        tsE: String(line.tsE || ''),
-        line_number: Number.isInteger(line.line_number) ? line.line_number : undefined,
-      };
+      return lineEventFromWire(line);
     }
     return null;
   }
@@ -162,15 +202,18 @@
   function buildExportLinesHtml(rawLines, { getPrefix = () => '', ansiToHtml }) {
     const prefixes = rawLines.map((line, i) => getPrefix(line, i));
     const prefixWidth = Math.max(0, ...prefixes.map(p => p.length));
-    const linesHtml = rawLines.map(({ text, cls }, i) => {
+    const linesHtml = rawLines.map((rawLine, i) => {
+      const line = lineEventFromWire(rawLine);
+      const text = String(line.text || '');
+      const cls = lineLegacyClass(line);
       const prefix = prefixes[i];
       const prefixSpan = prefix
         ? `<span class="perm-prefix">${escapeExportHtml(prefix)}</span>`
         : '';
       let content;
-      if (cls === 'prompt-echo') {
+      if (isPromptEchoEvent(line)) {
         content = renderExportPromptEcho(text);
-      } else if (PLAIN_CLASSES.has(cls)) {
+      } else if (isPlainEvent(line)) {
         content = escapeExportHtml(text);
       } else {
         content = ansiToHtml(text);
@@ -351,6 +394,10 @@ ${linesHtml}
     normalizeExportTranscriptLine,
     normalizeExportTranscriptLines,
     normalizeExportRunMeta,
+    lineEventFromWire,
+    lineLegacyClass,
+    isPromptEchoEvent,
+    isPlainEvent,
     buildExportDocumentModel,
     escapeExportHtml,
     renderExportPromptEcho,

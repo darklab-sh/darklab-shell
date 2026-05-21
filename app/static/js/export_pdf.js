@@ -81,21 +81,28 @@
     return segments;
   }
 
-  function buildPdfLineSegments({ text, cls, colors, ansiToHtml }) {
-    const stripped = text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
-    if (cls === 'exit-ok') return [{ text: stripped, color: colors.green, fontStyle: 'normal' }];
-    if (cls === 'exit-fail') return [{ text: stripped, color: colors.red, fontStyle: 'normal' }];
-    if (cls === 'denied') return [{ text: stripped, color: colors.amber, fontStyle: 'normal' }];
-    if (cls === 'notice') return [{ text: stripped, color: colors.blue, fontStyle: 'normal' }];
-    if (cls === 'prompt-echo') {
-      const firstSpace = text.indexOf(' ');
-      const prompt = firstSpace === -1 ? text : text.slice(0, firstSpace);
-      const rest = firstSpace === -1 ? '' : text.slice(firstSpace);
+  function buildPdfLineSegments({ text, cls, kind, role, colors, ansiToHtml }) {
+    const exportHtmlUtils = window.ExportHtmlUtils || null;
+    const lineEvent = exportHtmlUtils && typeof exportHtmlUtils.lineEventFromWire === 'function'
+      ? exportHtmlUtils.lineEventFromWire({ text, cls, kind, role })
+      : { text: String(text || ''), kind: String(kind || (cls === 'notice' ? 'notice' : 'info')), role: String(role || (['prompt-echo', 'denied', 'exit-ok', 'exit-fail'].includes(cls) ? cls : 'body')) };
+    const lineText = String(lineEvent.text || '');
+    const lineKind = String(lineEvent.kind || 'info');
+    const lineRole = String(lineEvent.role || 'body');
+    const stripped = lineText.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+    if (lineRole === 'exit-ok') return [{ text: stripped, color: colors.green, fontStyle: 'normal' }];
+    if (lineRole === 'exit-fail') return [{ text: stripped, color: colors.red, fontStyle: 'normal' }];
+    if (lineRole === 'denied') return [{ text: stripped, color: colors.amber, fontStyle: 'normal' }];
+    if (lineKind === 'notice') return [{ text: stripped, color: colors.blue, fontStyle: 'normal' }];
+    if (lineRole === 'prompt-echo') {
+      const firstSpace = lineText.indexOf(' ');
+      const prompt = firstSpace === -1 ? lineText : lineText.slice(0, firstSpace);
+      const rest = firstSpace === -1 ? '' : lineText.slice(firstSpace);
       const segments = [{ text: prompt, color: colors.blue, fontStyle: 'bold' }];
       if (rest) segments.push({ text: rest, color: colors.text, fontStyle: 'normal' });
       return segments;
     }
-    return parseAnsiSegments(text, colors.text, ansiToHtml);
+    return parseAnsiSegments(lineText, colors.text, ansiToHtml);
   }
 
   function splitSegmentTokens(segment) {
@@ -352,7 +359,7 @@
     const checkPage = () => { if (y + leading > pageH - outputBoxPadBottom) newPage(); };
 
     for (let i = 0; i < rawLines.length; i++) {
-      const { text, cls } = rawLines[i];
+      const { text, cls, kind, role } = rawLines[i];
       checkPage();
       let x = outputBoxPadX;
 
@@ -368,7 +375,7 @@
 
       const contentW = (pageW - outputBoxPadX * 2) - (x - outputBoxPadX);
 
-      const segments = buildPdfLineSegments({ text, cls, colors, ansiToHtml });
+      const segments = buildPdfLineSegments({ text, cls, kind, role, colors, ansiToHtml });
       if (!prefixes[i] && !hasRenderableSegments(segments)) continue;
       const wrappedLines = wrapPdfSegments(doc, monoFontFamily, segments, contentW);
 

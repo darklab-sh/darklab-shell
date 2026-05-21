@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,135
+- behavior tests: 3,150
 - docs/inventory meta-tests: 32
 - `pytest`: 1706 (1674 behavior + 32 meta)
-- `vitest`: 1218
+- `vitest`: 1224
 - `playwright`: 252
-- total: 3,176
+- total: 3,182
 
 This document is organized in two parts:
 
@@ -2246,6 +2246,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `tracks recent values from structured flag and positional slots, capped per kind in memory` | Verifies that recent target capture reads known typed argument slots, skips file-list inputs, preserves recency order, and enforces the autocomplete cap per kind without using browser storage. |
 | `stores complete IPv4 values from host slots without keeping partial numeric hosts` | Verifies that recent value capture preserves complete IPv4 addresses from host slots without saving partial numeric host values. |
 | `loads recent values from the session endpoint` | Verifies that recent target autocomplete loads persisted session domains, IPs, URLs, and port sets from the backend and normalizes the returned values. |
+| `replays recent-value captures submitted before autocomplete context loads` | Verifies that a command submitted before autocomplete metadata loads still records recent target values once the metadata is available. |
 | `reloads active project targets after a same-session project workspace storage signal` | Verifies that passive browser tabs refresh project-target autocomplete after another tab changes project workspace state from the terminal. |
 | `persists captured recent values without requiring browser storage` | Verifies that captured typed values are posted to the session endpoint while the local autocomplete cache remains usable immediately. |
 | `suggests recent targets only inside compatible known value slots` | Verifies that recent target autocomplete appears only where command metadata identifies a compatible value type. |
@@ -2532,6 +2533,9 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | Test | Description |
 | --- | --- |
 | `renders notice lines with textContent (not HTML)` | Verifies that renders notice lines with textContent (not HTML). |
+| `renders typed notice events with textContent and legacy CSS class` | Verifies that typed notice events render safely while keeping the legacy notice class. |
+| `renders typed prompt roles like legacy prompt-echo lines` | Verifies that typed prompt-role events render with the same prompt prefix and raw-line compatibility as legacy prompt echoes. |
+| `round trips wire event input through fromWireLineEvent before rendering` | Verifies that wire-shaped line events are decoded through the shared browser model before rendering. |
 | `renders non-plain classes through ansi_to_html` | Verifies that renders non-plain classes through ansi_to_html. |
 | `isolates ANSI parser state between tabs` | Verifies that unterminated ANSI color or style state in one tab does not affect output rendered in another tab. |
 | `resets ANSI parser state before replaying restored output` | Verifies that restored transcript replay starts with fresh ANSI parser state for the target tab. |
@@ -2574,7 +2578,9 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `adds the cls class alongside "line"` | Verifies that adds the cls class alongside "line". |
 | `calls ansi_to_html for normal output lines` | Verifies that calls ansi_to_html for normal output lines. |
 | `uses ExportHtmlUtils.renderExportPromptEcho for prompt-echo lines` | Verifies that uses ExportHtmlUtils.renderExportPromptEcho for prompt-echo lines. |
+| `uses ExportHtmlUtils role helpers for typed prompt lines` | Verifies that typed prompt-role lines use the shared export role helpers before rendering. |
 | `uses textContent (not ansi_to_html) for plain classes` | Verifies that uses textContent (not ansi_to_html) for plain classes. |
+| `uses textContent for typed notice events` | Verifies that typed notice events render as text content on permalink pages instead of HTML. |
 | `sets #toggle-ln text to "line numbers: off" initially` | Verifies that sets #toggle-ln text to "line numbers: off" initially. |
 | `sets #toggle-ts text to "timestamps: unavailable" when no metadata` | Verifies that sets #toggle-ts text to "timestamps: unavailable" when no metadata. |
 | `sets #toggle-ts text to "timestamps: off" when metadata present` | Verifies that sets #toggle-ts text to "timestamps: off" when metadata present. |

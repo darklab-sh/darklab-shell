@@ -35,6 +35,15 @@ function makeExportHtmlUtilsMock() {
     exportTimestamp: vi.fn(() => '2025-01-15T10-30-00'),
     buildExportMetaLine: vi.fn(({ label, createdText }) => `${label} · ${createdText}`),
     normalizeExportTranscriptLines: vi.fn((lines) => lines),
+    lineEventFromWire: vi.fn((line) => ({
+      ...line,
+      text: String(line?.text || ''),
+      kind: String(line?.kind || (line?.cls === 'notice' ? 'notice' : 'info')),
+      role: String(line?.role || (['prompt-echo', 'denied', 'exit-ok', 'exit-fail'].includes(line?.cls) ? line.cls : 'body')),
+    })),
+    lineLegacyClass: vi.fn((line) => String(line?.cls || (line?.role && line.role !== 'body' ? line.role : line?.kind === 'notice' ? 'notice' : ''))),
+    isPromptEchoEvent: vi.fn((line) => line?.role === 'prompt-echo'),
+    isPlainEvent: vi.fn((line) => ['exit-ok', 'exit-fail', 'denied'].includes(line?.role) || line?.kind === 'notice'),
     normalizeExportRunMeta: vi.fn((runMeta) => {
       if (!runMeta) return null
       return {
@@ -251,6 +260,13 @@ describe('renderOutput — output element structure', () => {
     expect(mocks.ansiUpInstance.ansi_to_html).not.toHaveBeenCalled()
   })
 
+  it('uses ExportHtmlUtils role helpers for typed prompt lines', () => {
+    const lines = [{ text: '$ nmap target', kind: 'info', role: 'prompt-echo' }]
+    const { mocks } = loadPermalink({ lines })
+    expect(mocks.ExportHtmlUtils.renderExportPromptEcho).toHaveBeenCalledWith('$ nmap target')
+    expect(mocks.ansiUpInstance.ansi_to_html).not.toHaveBeenCalled()
+  })
+
   it('uses textContent (not ansi_to_html) for plain classes', () => {
     for (const cls of ['exit-ok', 'exit-fail', 'denied', 'notice']) {
       afterEach(() => {
@@ -265,6 +281,14 @@ describe('renderOutput — output element structure', () => {
       el.container.remove()
       delete window.PermData
     }
+  })
+
+  it('uses textContent for typed notice events', () => {
+    const lines = [{ text: '<b>typed notice</b>', kind: 'notice', role: 'body' }]
+    const { el, mocks } = loadPermalink({ lines })
+    const contentEl = el.output.querySelector('.perm-content')
+    expect(contentEl.textContent).toBe('<b>typed notice</b>')
+    expect(mocks.ansiUpInstance.ansi_to_html).not.toHaveBeenCalled()
   })
 
   it('sets #toggle-ln text to "line numbers: off" initially', () => {

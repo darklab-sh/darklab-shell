@@ -9,6 +9,8 @@ function _snapshotTabRawLines(rawLines) {
   return rawLines.map(line => ({
     text: String(line && line.text || ''),
     cls: String(line && line.cls || ''),
+    kind: String(line && line.kind || ''),
+    role: String(line && line.role || ''),
     tsC: String(line && line.tsC || ''),
     tsE: String(line && line.tsE || ''),
     signals: Array.isArray(line && line.signals)

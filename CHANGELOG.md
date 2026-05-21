@@ -10,10 +10,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
-- **Structured output model foundation plus Python producer/consumer migration** — run output now has a typed Python and browser contract, and Python code writes and reads through it while keeping legacy transcript output stable.
+- **Structured output model foundation plus Python and browser consumer migration** — run output now has a typed Python and browser contract, and Python plus browser consumers read through it while keeping legacy transcript output stable.
   - **Why:** command transcripts currently overload `cls` with severity and visual-role hints, which makes comparison, redaction, search, exports, and future structured summaries harder to keep consistent.
-  - **What:** added frozen `LineEvent`, `LineKind`, `LineRole`, `LineSignal`, and `LineEntity` contracts, legacy `cls` decoding, v1/legacy serializers, a JS classic-script twin, a legacy-class fixture, unknown-value fallback reporting, Python/JS enum parity checks, typed `RunOutputCapture.add_event`, typed full-output artifact loading, redaction helpers that operate on frozen events before route-boundary serialization, and producer-side helpers for run streaming, PTY snapshots, built-ins, redaction placeholders, exports, and permalink output.
-  - **Tests:** added line-output model, legacy-class mapping, entity normalization, signal enum coverage, Python↔JS parity, browser helper contract coverage, and typed-vs-legacy capture equivalence checks. Current suite total: 1706 pytest + 1218 Vitest + 252 Playwright = **3,176 tests**.
+  - **What:** added frozen `LineEvent`, `LineKind`, `LineRole`, `LineSignal`, and `LineEntity` contracts, legacy `cls` decoding, v1/legacy serializers, a JS classic-script twin, a legacy-class fixture, unknown-value fallback reporting, Python/JS enum parity checks, typed `RunOutputCapture.add_event`, typed full-output artifact loading, redaction helpers that operate on frozen events before route-boundary serialization, browser rendering/export helpers that branch on typed `kind` and `role`, and producer-side helpers for run streaming, PTY snapshots, built-ins, redaction placeholders, exports, and permalink output.
+  - **Tests:** added line-output model, legacy-class mapping, entity normalization, signal enum coverage, Python↔JS parity, browser helper contract coverage, typed notice/prompt rendering coverage, typed-vs-legacy capture equivalence checks, and recent-target autocomplete boot-race coverage. Current suite total: 1706 pytest + 1224 Vitest + 252 Playwright = **3,182 tests**.
 - **Watchers browser modal** — durable session tokens can now manage change-detection watchers from the browser.
   - **Why:** operators need a visual path for creating a watcher from a completed baseline run, checking recent fire history, and accepting expected changes without dropping into terminal commands.
   - **What:** added a top-level Watchers modal beside Schedules, desktop rail and mobile menu entry points, Run Details and History drawer **Create watcher from this baseline** handoffs, a Baseline run helper card, watcher create/edit/pause/resume/run-now/delete controls, accept-baseline confirmation, selected-timezone cadence previews, comparison-style last-diff summaries, and fire-audit rows that keep empty-diff fires visible as `diff_kind='none'`.
@@ -551,6 +551,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Recent target capture waits for autocomplete metadata when the shell boots quickly** — commands submitted before `/autocomplete` finishes loading now queue their recent-value capture and replay it once command metadata is ready.
+  - **Why:** early commands could appear in History while `/session/recent-values` stayed empty, which made token-backed autocomplete recents fail to follow the active session across browser contexts.
+  - **Tests:** added an autocomplete unit regression for the delayed metadata path and reran the focused session-token Playwright flow.
 - **Workspace output-flag validation coverage no longer depends on local config** — the nmap deny-prefix regression test now creates its own temporary enabled workspace instead of relying on the developer or CI default `workspace_enabled` setting.
   - **Why:** local runs could pass with workspace storage enabled while CI correctly used the disabled default.
   - **Tests:** reran the focused deny-prefix validation slice.

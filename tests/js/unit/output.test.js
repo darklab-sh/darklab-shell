@@ -12,7 +12,7 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {}, AnsiUpCtor = null } 
   }
 
   return fromDomScripts(
-    ['app/static/js/core/output_core.js', 'app/static/js/output.js'],
+    ['app/static/js/core/run_output_model.js', 'app/static/js/core/output_core.js', 'app/static/js/output.js'],
     {
       document,
       AnsiUp: AnsiUpCtor || FakeAnsiUp,
@@ -67,6 +67,49 @@ describe('appendLine', () => {
     expect(line).not.toBeNull()
     expect(line.innerHTML).not.toContain('<img')
     expect(line.textContent).toContain('<img src=x onerror=alert(1)>')
+  })
+
+  it('renders typed notice events with textContent and legacy CSS class', () => {
+    const { appendLine } = loadOutputFns()
+
+    appendLine({
+      text: '<strong>typed notice</strong>',
+      kind: 'notice',
+      role: 'body',
+    }, 'tab-1')
+
+    const line = document.querySelector('.line.notice')
+    expect(line).not.toBeNull()
+    expect(line.innerHTML).not.toContain('<strong>')
+    expect(line.textContent).toContain('<strong>typed notice</strong>')
+  })
+
+  it('renders typed prompt roles like legacy prompt-echo lines', () => {
+    const { appendLine, _getTabs } = loadOutputFns()
+
+    appendLine({ text: 'nmap darklab.sh', kind: 'info', role: 'prompt-echo' }, 'tab-1')
+
+    const line = document.querySelector('.line.prompt-echo')
+    expect(line).not.toBeNull()
+    expect(line.querySelector('.prompt-prefix')?.textContent).toContain('anon@darklab')
+    expect(line.textContent).toContain('nmap darklab.sh')
+    expect(_getTabs()[0].rawLines[0].cls).toBe('prompt-echo')
+    expect(_getTabs()[0].rawLines[0].text).toContain('nmap darklab.sh')
+  })
+
+  it('round trips wire event input through fromWireLineEvent before rendering', () => {
+    const { appendLine } = loadOutputFns()
+
+    appendLine({
+      text: 'still plain',
+      cls: '',
+      kind: 'notice',
+      role: 'body',
+    }, 'tab-1')
+
+    const line = document.querySelector('.line.notice')
+    expect(line).not.toBeNull()
+    expect(line.textContent).toContain('still plain')
   })
 
   it('renders non-plain classes through ansi_to_html', () => {

@@ -244,6 +244,8 @@ function _historyOutputLineMetadata(entry) {
   if (!entry || typeof entry !== 'object') return null;
   const metadata = {};
   if (Array.isArray(entry.signals) && entry.signals.length) metadata.signals = entry.signals;
+  if (typeof entry.kind === 'string' && entry.kind) metadata.kind = entry.kind;
+  if (typeof entry.role === 'string' && entry.role) metadata.role = entry.role;
   if (Number.isInteger(entry.line_index)) metadata.line_index = entry.line_index;
   if (Number.isInteger(entry.line_number)) metadata.line_number = entry.line_number;
   if (typeof entry.command_root === 'string' && entry.command_root) metadata.command_root = entry.command_root;

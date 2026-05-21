@@ -82,6 +82,7 @@ let acRecentValues = {
   port_set: [],
 };
 const acRecentValuePersistPromises = new Set();
+const acPendingRecentValueCommands = [];
 let acProjectTargets = [];
 let acProjects = [];
 let acSchedules = [];
@@ -314,7 +315,8 @@ function loadRecentValues() {
   return apiFetch('/session/recent-values')
     .then(resp => (resp && typeof resp.json === 'function' ? resp.json() : {}))
     .then((data) => {
-      if (data && data.values && typeof data.values === 'object') return _setRecentValuesByKind(data.values);
+      if (data && data.values && typeof data.values === 'object') _setRecentValuesByKind(data.values);
+      processPendingRecentValueCommands();
       return _readRecentValues();
     })
     .catch((err) => {
@@ -348,6 +350,7 @@ function _persistRecentValues(items) {
 }
 
 function flushRecentValues() {
+  processPendingRecentValueCommands();
   if (!acRecentValuePersistPromises.size) return Promise.resolve([]);
   return Promise.all(Array.from(acRecentValuePersistPromises)).catch(() => []);
 }
@@ -865,13 +868,16 @@ function _withTypedValueSlotSuggestions(ctx, baseItems, valueSlots = {}) {
   return baseItems;
 }
 
-function rememberRecentValuesFromCommand(command) {
+function rememberRecentValuesFromCommand(command, options = {}) {
   const text = String(command || '').trim();
   if (!text) return [];
   const registry = _getAutocompleteRegistry();
   const ctx = _autocompleteTokenContext(text, text.length);
   const rootSpec = ctx.commandRoot ? registry[ctx.commandRoot] : null;
-  if (!rootSpec) return [];
+  if (!rootSpec) {
+    if (!options.skipQueue && !_autocompleteRegistryHasEntries()) _queueRecentValueCommand(text);
+    return [];
+  }
   const contextSpec = _autocompleteSpecForContext(ctx, rootSpec);
   const spec = contextSpec.spec;
   if (!spec) return [];
@@ -1004,6 +1010,24 @@ function _getAutocompleteRegistry() {
     ? getRuntimeAutocompleteContext(yamlRegistry)
     : {};
   return _mergeAutocompleteRegistry(yamlRegistry, runtimeRegistry);
+}
+
+function _autocompleteRegistryHasEntries() {
+  return Object.keys(_getAutocompleteRegistry()).length > 0;
+}
+
+function _queueRecentValueCommand(command) {
+  const text = String(command || '').trim();
+  if (!text) return;
+  if (acPendingRecentValueCommands.includes(text)) return;
+  acPendingRecentValueCommands.push(text);
+  if (acPendingRecentValueCommands.length > 25) acPendingRecentValueCommands.shift();
+}
+
+function processPendingRecentValueCommands() {
+  if (!acPendingRecentValueCommands.length || !_autocompleteRegistryHasEntries()) return [];
+  const pending = acPendingRecentValueCommands.splice(0, acPendingRecentValueCommands.length);
+  return pending.flatMap(command => rememberRecentValuesFromCommand(command, { skipQueue: true }));
 }
 
 function _contextClosedByTokenArity(ctx, spec) {

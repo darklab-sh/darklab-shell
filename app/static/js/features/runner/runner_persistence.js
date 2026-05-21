@@ -28,10 +28,15 @@ window.DarklabRunnerPersistence = (() => {
     function persistClientSideRun(command, lineItems, statusValue, tabId = '') {
       const safeCommand = historySafeCommand(command);
       if (!safeCommand || typeof apiFetch !== 'function') return;
-      const lines = (Array.isArray(lineItems) ? lineItems : []).map((line) => ({
-        text: String(line && line.text !== undefined ? line.text : line || ''),
-        cls: String(line && line.cls || ''),
-      }));
+      const lines = (Array.isArray(lineItems) ? lineItems : []).map((line) => {
+        const entry = {
+          text: String(line && line.text !== undefined ? line.text : line || ''),
+          cls: String(line && line.cls || ''),
+        };
+        if (typeof line?.kind === 'string' && line.kind) entry.kind = line.kind;
+        if (typeof line?.role === 'string' && line.role) entry.role = line.role;
+        return entry;
+      });
       apiFetch('/run/client', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

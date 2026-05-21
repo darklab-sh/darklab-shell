@@ -29,7 +29,6 @@
   ansiUp.use_classes = false;
 
   var out = document.getElementById('output');
-  var PLAIN_CLASSES = new Set(['exit-ok', 'exit-fail', 'denied', 'notice']);
   var tsModes = ['off', 'elapsed', 'clock'];
 
   // ── Preference cookies ─────────────────────────────────────────────────────
@@ -71,8 +70,9 @@
     out.style.setProperty('--perm-prefix-width', prefixWidth + 'ch');
 
     lines.forEach(function (entry, index) {
+      var lineEvent = ExportHtmlUtils.lineEventFromWire(entry);
       var span = document.createElement('span');
-      var cls = entry.cls || '';
+      var cls = ExportHtmlUtils.lineLegacyClass(lineEvent);
       span.className = 'line' + (cls ? ' ' + cls : '');
 
       var prefix = prefixes[index];
@@ -85,12 +85,12 @@
 
       var contentEl = document.createElement('span');
       contentEl.className = 'perm-content';
-      if (cls === 'prompt-echo') {
-        contentEl.innerHTML = ExportHtmlUtils.renderExportPromptEcho(entry.text);
-      } else if (PLAIN_CLASSES.has(cls)) {
-        contentEl.textContent = entry.text;
+      if (ExportHtmlUtils.isPromptEchoEvent(lineEvent)) {
+        contentEl.innerHTML = ExportHtmlUtils.renderExportPromptEcho(lineEvent.text);
+      } else if (ExportHtmlUtils.isPlainEvent(lineEvent)) {
+        contentEl.textContent = lineEvent.text;
       } else {
-        contentEl.innerHTML = ansiUp.ansi_to_html(entry.text);
+        contentEl.innerHTML = ansiUp.ansi_to_html(lineEvent.text);
       }
       span.appendChild(contentEl);
       out.appendChild(span);

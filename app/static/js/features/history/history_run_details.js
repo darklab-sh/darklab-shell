@@ -199,6 +199,8 @@ function _historyRunOutputEntries(run) {
     return run.output_entries.map(entry => ({
       text: String(entry && typeof entry === 'object' ? entry.text || '' : entry || ''),
       cls: String(entry && typeof entry === 'object' ? entry.cls || '' : ''),
+      kind: String(entry && typeof entry === 'object' ? entry.kind || '' : ''),
+      role: String(entry && typeof entry === 'object' ? entry.role || '' : ''),
     }));
   }
   if (Array.isArray(run.output)) {
