@@ -626,6 +626,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── broker.py       # Brokered run event storage, replay, and SSE stream helpers
 │   │   │   ├── comparison.py   # Shared run comparison helpers for history and project compare APIs
 │   │   │   ├── kinds.py        # Saved-run kind helpers for built-in vs external command behavior
+│   │   │   ├── output_model.py # Typed run-output line-event schema plus legacy wire compatibility helpers
 │   │   │   ├── output_store.py # Preview/full-output capture and artifact persistence helpers
 │   │   │   ├── streaming.py    # Low-level subprocess stdout readiness, nonblocking read, and cleanup helpers
 │   │   │   └── workspace_artifacts.py # Run-scoped workspace artifact detection and size helpers
@@ -714,6 +715,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   ├── dom.js      # Shared DOM element references
 │   │       │   ├── history_core.js # Pure history filter/label/format helpers shared by history.js and unit harnesses
 │   │       │   ├── output_core.js # Pure output prompt/signal helpers shared by output.js and unit harnesses
+│   │       │   ├── run_output_model.js # Browser-side typed run-output line-event schema and legacy compatibility helpers
 │   │       │   ├── runner_core.js # Pure runner duration and synthetic pipe helpers shared by runner.js and unit harnesses
 │   │       │   ├── search_core.js # Pure search labels/counts/summary helpers shared by search.js and unit harnesses
 │   │       │   ├── session_core.js # Pure session identity helpers shared by session.js and unit harnesses
@@ -975,6 +977,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │       ├── output.test.js      # ANSI rendering, timestamp/line-number mode, HTML export
     │       ├── permalink.test.js   # Permalink page controller — render paths, toggles, save action delegation
     │       ├── pty.test.js         # Interactive PTY detection, xterm mount, and focus ownership
+    │       ├── run_output_model.test.js # Browser run-output line-event schema, legacy decoding, and enum parity contract coverage
     │       ├── runner.test.js      # elapsed formatting, run/kill edge cases, stall recovery
     │       ├── search.test.js      # search helper, regex/case modes, mixed-content line regression
     │       ├── session.test.js     # session ID persistence, apiFetch() header injection, and session-switch preference reloads
@@ -998,7 +1001,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   ├── fixtures/
     │   │   ├── container_smoke_test-expectations.json # Stored expected output for the Container Smoke Test corpus
     │   │   ├── container_smoke_test-interactive-expectations.json # Interactive PTY smoke fixtures
-    │   │   └── container_smoke_test-workspace-expectations.json # Workspace file-flag smoke fixtures
+    │   │   ├── container_smoke_test-workspace-expectations.json # Workspace file-flag smoke fixtures
+    │   │   └── run_output_legacy_cls.json # Documented legacy run-output cls mappings for the typed line-event model
     │   ├── test_api_v1.py     # Headless API auth/history/run/schedule/OpenAPI route coverage plus bundled CLI unit checks
     │   ├── test_backend_modules.py # DB init/migration, loader/overlay helpers, config/theme/FAQ coverage
     │   ├── test_container_smoke_test.py # Opt-in Docker build/run smoke test (see scripts/container_smoke_test.sh)
@@ -1010,10 +1014,13 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   ├── test_notifications_hooks.py # Notification hook fan-out, skip-rule, and redaction coverage
     │   ├── test_notifications_webhook.py # Generic webhook notification channel delivery and payload-shape coverage
     │   ├── test_output_search.py # SQLite FTS history-search coverage and fallback behavior
+    │   ├── test_output_signals_against_line_signal.py # Output signal scope coverage for the typed line-event signal enum
     │   ├── test_postgres_backend.py # Postgres backend smoke and migration-helper integration coverage
     │   ├── test_request_kill_and_commands.py # /kill, request parsing, loader edges, and built-in command resolution
     │   ├── test_routes.py      # Flask integration tests via test client (all HTTP routes)
     │   ├── test_run_history_share.py # Higher-value /runs, history, share, built-in command, and persistence flows
+    │   ├── test_run_output_model.py # Typed run-output line-event schema, legacy compatibility, and entity normalization coverage
+    │   ├── test_run_output_model_parity.py # Python/browser enum parity coverage for the run-output line-event schema
     │   ├── test_schedules.py   # Scheduled-run route and terminal built-in CRUD, validation, quota, isolation, and manual fire coverage
     │   ├── test_session_routes.py # session-token generation/verify/migrate/revoke/starred/preferences route coverage
     │   ├── test_validation.py  # Tests for command validation, rewrites, and runtime availability helpers

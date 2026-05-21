@@ -805,6 +805,15 @@ def _git_tracked_files() -> list[str]:
     return [line for line in result.stdout.splitlines() if line]
 
 
+def _git_untracked_files() -> list[str]:
+    """Return untracked files that are not ignored by git."""
+    result = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        capture_output=True, text=True, cwd=str(_REPO_ROOT), check=True,
+    )
+    return [line for line in result.stdout.splitlines() if line]
+
+
 def _all_ancestor_dirs(paths) -> set[str]:
     """Return every intermediate directory path implied by the file list.
 
@@ -976,10 +985,11 @@ class TestProjectStructureCoverage:
         listed = _parse_project_structure_tree(_README.read_text())
         listed_set = set(listed)
         tracked = set(_git_tracked_files())
+        untracked = set(_git_untracked_files())
         # Allow any directory that contains tracked files, including every
         # intermediate ancestor (so '.gitlab' resolves via
         # '.gitlab/merge_request_templates/Default.md').
-        valid = tracked | _all_ancestor_dirs(tracked) | {"."}
+        valid = tracked | untracked | _all_ancestor_dirs(tracked | untracked) | {"."}
         unknown = sorted(
             p for p in listed_set
             if p not in valid

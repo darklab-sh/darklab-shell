@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,118
+- behavior tests: 3,135
 - docs/inventory meta-tests: 32
-- `pytest`: 1692 (1660 behavior + 32 meta)
-- `vitest`: 1211
+- `pytest`: 1703 (1671 behavior + 32 meta)
+- `vitest`: 1217
 - `playwright`: 252
-- total: 3,155
+- total: 3,172
 
 This document is organized in two parts:
 
@@ -1150,6 +1150,12 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestOutputSearch.test_full_output_text_beyond_preview_window_is_searchable` | Verifies that `output_search_text` can index content from beyond the capped preview window — simulates a truncated run whose full artifact text contains terms absent from `output_preview`, and asserts they are found. |
 | `TestOutputSearch.test_fts_failure_falls_back_to_command_and_output_like` | Verifies graceful degradation when the `runs_fts` table does not exist: command-text and output-only queries succeed via `LIKE` fallback and return HTTP 200. |
 
+#### `test_output_signals_against_line_signal.py`
+
+| Test | Description |
+| --- | --- |
+| `test_output_signal_scopes_are_covered_by_line_signal_enum` | Verifies that backend output signal scopes are covered by the typed line-event signal enum. |
+
 #### `test_postgres_backend.py`
 
 Backend smoke, route, and migration coverage. SQLite smoke coverage always runs. CI runs the Postgres lane automatically. For local runs, Postgres integration tests run when `DARKLAB_TEST_POSTGRES_DSN` or `--postgres-dsn` points at a test Postgres database; `npm run test:postgres` can also create a disposable Docker Postgres container automatically. Postgres tests create and drop isolated schemas so they do not share tables with the app schema.
@@ -1718,6 +1724,26 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestHistoryIsolation.test_public_run_permalink_omits_intel_output_for_non_owner` | Verifies that public non-owner run permalink JSON omits app-native intel response bodies. |
 | `TestShareRoundTrip.test_share_json_roundtrip_preserves_structured_content` | Checks that share JSON roundtrip preserves structured content. |
 | `TestShareRoundTrip.test_share_omits_intel_output_even_when_raw_requested` | Verifies that raw snapshot sharing omits app-native intel response bodies from JSON and HTML. |
+
+#### `test_run_output_model.py`
+
+| Test | Description |
+| --- | --- |
+| `test_v1_payload_round_trips_losslessly` | Verifies that fully versioned line-event payloads survive a decode/encode round trip. |
+| `test_legacy_payload_decodes_and_upgrades_predictably` | Verifies legacy `cls` payloads decode into separate kind and role values and upgrade with v1 fields. |
+| `test_legacy_writer_preserves_current_key_order` | Verifies the legacy line-event serializer keeps the current output-entry key order. |
+| `test_legacy_cls_fixture_maps_to_one_kind_role_pair` | Verifies every documented legacy `cls` value maps to one intended kind/role pair. |
+| `test_kind_and_role_legacy_shims_are_independent` | Verifies semantic legacy classes and structural legacy classes decode on separate axes. |
+| `test_unknown_values_fall_back_and_report_to_collector` | Verifies unknown kind, role, and signal values fall back safely and report through the caller collector. |
+| `test_entity_normalisation_matches_capture_shape` | Verifies line entities normalize to the same shape used by run-output capture. |
+| `test_compatibility_cls_prefers_role_when_both_axes_are_non_default` | Verifies compatibility `cls` uses the role string when kind and role are both non-default. |
+| `test_event_search_text_is_event_text_for_phase_zero` | Verifies the initial search-text accessor returns the event text unchanged. |
+
+#### `test_run_output_model_parity.py`
+
+| Test | Description |
+| --- | --- |
+| `test_python_and_js_line_event_enum_values_match` | Verifies Python and browser line-event enum value lists stay in sync. |
 
 #### `test_schedules.py`
 
@@ -2608,6 +2634,17 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `appends the saved PTY final frame before the exit status line` | Verifies that modal PTY completion loads the saved final screen into the parent transcript before appending the exit status line. |
 | `marks a PTY tab detached when the stream ends without an exit event but the run is still active` | Verifies that a dropped PTY stream keeps the run marked active, preserves Kill, and starts the saved-result polling path. |
 | `marks a PTY tab failed when the stream ends and the run is not active` | Verifies that a stale PTY stream finalizes the tab as failed instead of treating an unknown exit as success. |
+
+#### `run_output_model.test.js`
+
+| Test | Description |
+| --- | --- |
+| `round trips v1 payloads losslessly` | Verifies browser line-event payloads survive a decode/encode round trip. |
+| `decodes legacy class strings into separate kind and role values` | Verifies browser legacy `cls` decoding upgrades into explicit kind and role fields. |
+| `preserves legacy wire key order` | Verifies the browser legacy serializer keeps the current output-entry key order. |
+| `reports unknown values and falls back safely` | Verifies browser decoding reports unknown kind, role, and signal values while rendering through safe fallbacks. |
+| `keeps role cls compatibility when both axes are non-default` | Verifies browser compatibility `cls` uses the role string when kind and role are both non-default. |
+| `exports enum value lists for Python parity tests` | Verifies the browser model exposes enum value lists for cross-language parity checks. |
 
 #### `runner.test.js`
 

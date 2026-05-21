@@ -1727,10 +1727,10 @@ Current totals:
 
 - behavior tests: 3,118
 - docs/inventory meta-tests: 32
-- `pytest`: 1692 (1660 behavior + 32 meta)
-- `vitest`: 1211
+- `pytest`: 1703 (1671 behavior + 32 meta)
+- `vitest`: 1217
 - `playwright`: 252
-- total: 3,155
+- total: 3,172
 
 ### Testing Architecture
 
