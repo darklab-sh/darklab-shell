@@ -649,6 +649,8 @@ class TestPostgresMigrations:
         "notification_events",
         "schedules",
         "schedule_fires",
+        "watchers",
+        "watcher_fires",
         "projects",
         "project_links",
         "entities",
@@ -719,6 +721,7 @@ class TestPostgresMigrations:
             "0008",
             "0009",
             "0010",
+            "0011",
         ]
         for table_name in (
             "runs",
@@ -735,6 +738,8 @@ class TestPostgresMigrations:
             "notification_events",
             "schedules",
             "schedule_fires",
+            "watchers",
+            "watcher_fires",
             "projects",
             "project_links",
             "entities",
@@ -1578,6 +1583,208 @@ class TestSchedulerFoundation:
 
         with worker.acquire_scheduler_lock() as acquired:
             assert acquired is False
+
+
+class TestWatchersFoundation:
+    def _watcher_db(self, monkeypatch, tmp_path, *, max_per_session=32):
+        db_path = os.path.join(tmp_path, "watchers.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+        monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.SQLITE)
+        monkeypatch.setattr(database, "CFG", {
+            "permalink_retention_days": 0,
+            "scheduler": {
+                "default_timezone": "UTC",
+                "max_catchup_window_seconds": 3600,
+                "tick_seconds": 5,
+            },
+            "watchers": {
+                "max_per_session": max_per_session,
+            },
+        })
+        database.db_init()
+        return database.db_connect()
+
+    def _register_token(self, conn, token: str = "tok_watchers"):
+        conn.execute(
+            "INSERT INTO session_tokens (token, created, last_seen_at) VALUES (?, ?, ?)",
+            (token, "2026-05-20T10:00:00+00:00", ""),
+        )
+
+    def test_watcher_create_inserts_owned_schedule_and_hides_it_from_normal_schedule_lists(self, monkeypatch, tmp_path):
+        from services.scheduler import service as schedule_service
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_baseline",
+                cadence_preset="hourly",
+                label="Nmap drift",
+                options={"suppress_removals": True},
+                conn=conn,
+            )
+            schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
+            visible_schedules = schedule_service.list_for_session("tok_watchers", conn=conn)
+            visible_watchers = watcher_service.list_for_session("tok_watchers", conn=conn)
+
+        assert watcher.baseline_run_id == "run_baseline"
+        assert watcher.command_text == "nmap -sV darklab.sh"
+        assert watcher.options == {"suppress_removals": True, "notify_metadata_changes": False}
+        assert schedule is not None
+        assert schedule.owner_kind == "watcher"
+        assert schedule.owner_id == watcher.id
+        assert schedule.command_text == watcher.command_text
+        assert visible_schedules == []
+        assert [item.id for item in visible_watchers] == [watcher.id]
+
+    def test_watcher_delete_removes_watcher_schedule_and_fire_rows_atomically(self, monkeypatch, tmp_path):
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="curl https://darklab.sh",
+                baseline_run_id="run_baseline",
+                cadence_preset="daily",
+                conn=conn,
+            )
+            watcher_service.record_watcher_fire(conn, watcher, run_id="run_current")
+
+            assert watcher_service.delete_watcher(watcher.id, conn=conn) is True
+            rows = {
+                "watchers": conn.execute("SELECT COUNT(*) AS count FROM watchers").fetchone()["count"],
+                "schedules": conn.execute("SELECT COUNT(*) AS count FROM schedules").fetchone()["count"],
+                "watcher_fires": conn.execute("SELECT COUNT(*) AS count FROM watcher_fires").fetchone()["count"],
+            }
+
+        assert rows == {"watchers": 0, "schedules": 0, "watcher_fires": 0}
+
+    def test_watcher_create_requires_durable_token_valid_options_and_quota(self, monkeypatch, tmp_path):
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path, max_per_session=1) as conn:
+            self._register_token(conn)
+
+            with pytest.raises(ValueError):
+                watcher_service.create_watcher(
+                    "anonymous-session",
+                    command_text="echo nope",
+                    baseline_run_id="run_baseline",
+                    cadence_preset="hourly",
+                    conn=conn,
+                )
+            with pytest.raises(watcher_service.WatcherError, match="unsupported watcher option"):
+                watcher_service.create_watcher(
+                    "tok_watchers",
+                    command_text="echo nope",
+                    baseline_run_id="run_baseline",
+                    cadence_preset="hourly",
+                    options={"unknown": True},
+                    conn=conn,
+                )
+            with pytest.raises(watcher_service.WatcherError, match="must be true or false"):
+                watcher_service.create_watcher(
+                    "tok_watchers",
+                    command_text="echo nope",
+                    baseline_run_id="run_baseline",
+                    cadence_preset="hourly",
+                    options={"suppress_removals": "yes"},
+                    conn=conn,
+                )
+
+            first = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="echo first",
+                baseline_run_id="run_first",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            with pytest.raises(watcher_service.WatcherError, match="watcher quota"):
+                watcher_service.create_watcher(
+                    "tok_watchers",
+                    command_text="echo second",
+                    baseline_run_id="run_second",
+                    cadence_preset="hourly",
+                    conn=conn,
+                )
+
+        assert first.id.startswith("wtr_")
+
+    def test_watchers_with_same_command_keep_separate_schedules_and_state(self, monkeypatch, tmp_path):
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            first = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="httpx -u darklab.sh",
+                baseline_run_id="run_one",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            second = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="httpx -u darklab.sh",
+                baseline_run_id="run_two",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            conn.execute(
+                "UPDATE watchers SET state = ?, consecutive_changed = ? WHERE id = ?",
+                ("changed", 2, first.id),
+            )
+            refreshed = {watcher.id: watcher for watcher in watcher_service.list_for_session("tok_watchers", conn=conn)}
+
+        assert first.schedule_id != second.schedule_id
+        assert first.baseline_run_id != second.baseline_run_id
+        assert refreshed[first.id].state == "changed"
+        assert refreshed[first.id].consecutive_changed == 2
+        assert refreshed[second.id].state == "ok"
+        assert refreshed[second.id].consecutive_changed == 0
+
+    def test_watcher_fire_insert_is_idempotent_for_same_watcher_and_run(self, monkeypatch, tmp_path):
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="katana -u https://darklab.sh",
+                baseline_run_id="run_baseline",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+
+            first = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_current",
+                diff_summary={"added": 3},
+                diff_kind="signal",
+                notification_event_ids=["nte_1"],
+                state_at_fire="changed",
+            )
+            second = watcher_service.record_watcher_fire(
+                conn,
+                watcher,
+                run_id="run_current",
+                diff_summary={"added": 99},
+                diff_kind="textual",
+                notification_event_ids=["nte_2"],
+                state_at_fire="error",
+            )
+            count = conn.execute("SELECT COUNT(*) AS count FROM watcher_fires").fetchone()["count"]
+
+        assert second == first
+        assert count == 1
+        assert first.diff_summary == {"added": 3}
+        assert first.diff_kind == "signal"
+        assert first.notification_event_ids == ["nte_1"]
+        assert first.state_at_fire == "changed"
 
 
 class TestNotificationsPhase0:

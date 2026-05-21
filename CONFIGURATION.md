@@ -247,6 +247,8 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `scheduler.missed_fire_policy` | `coalesce` | Missed-fire behavior. The worker coalesces recent missed windows into one catch-up fire |
 | `scheduler.max_catchup_window_seconds` | `3600` | Maximum age for a missed schedule to receive one catch-up fire on worker startup |
 | `scheduler.default_timezone` | `UTC` | Default IANA timezone used when a schedule does not set its own timezone |
+| `watchers` | see nested defaults | Server-side only. Change-detection monitor limits. Watchers use scheduler-owned cadence rows and notification triggers |
+| `watchers.max_per_session` | `32` | Maximum change-detection watchers a durable session token can own |
 | `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` means disabled |
 | `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
 | `run_broker_enabled` | `true` | Enables the brokered run model for command start, output replay, and live reattachment |

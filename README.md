@@ -486,7 +486,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0007_postgres_atlas_metadata_search.py # Postgres Atlas label/note search indexes
 │   │   │   ├── v0008_postgres_session_token_last_seen.py # Postgres API token last-seen column
 │   │   │   ├── v0009_notification_channels.py # Postgres outbound notification channel and event tables
-│   │   │   └── v0010_schedules.py # Postgres scheduled-run and watcher-owned schedule tables
+│   │   │   ├── v0010_schedules.py # Postgres scheduled-run and watcher-owned schedule tables
+│   │   │   └── v0011_watchers.py # Postgres watcher state and fire-audit tables
 │   │   ├── output_signals.py   # Server-side output signal and entity classifier
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and in-process fallback
 │   │   └── redaction.py        # Snapshot-share redaction helpers and built-in rule application
@@ -645,6 +646,10 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── storage/
 │   │   │   ├── __init__.py     # Shared file-backed storage package marker
 │   │   │   └── body_store.py   # Compressed large-body offload helpers for DB text columns
+│   │   ├── watchers/
+│   │   │   ├── __init__.py     # Watcher change-detection service package marker
+│   │   │   ├── models.py       # Watcher, watcher-fire, and watcher-diff dataclasses and constants
+│   │   │   └── service.py      # Watcher create/delete, option validation, quota, and fire-audit helpers
 │   │   ├── workflows/
 │   │   │   ├── __init__.py     # Workflow service package marker
 │   │   │   ├── catalog.py      # Built-in/configured workflow catalog loading and normalization helpers

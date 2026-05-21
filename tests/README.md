@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,074
+- behavior tests: 3,079
 - docs/inventory meta-tests: 32
-- `pytest`: 1663 (1631 behavior + 32 meta)
+- `pytest`: 1668 (1636 behavior + 32 meta)
 - `vitest`: 1191
 - `playwright`: 252
-- total: 3,106
+- total: 3,111
 
 This document is organized in two parts:
 
@@ -478,6 +478,11 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSchedulerFoundation.test_scheduler_recovery_skips_invalid_and_stale_missed_fires` | Verifies recovery audits invalid due timestamps and stale missed fires outside the catch-up window. |
 | `TestSchedulerFoundation.test_scheduler_worker_run_once_fires_due_schedules_and_commits` | Verifies one worker tick fires due schedules and commits the resulting fire rows. |
 | `TestSchedulerFoundation.test_scheduler_postgres_lock_exits_when_already_held` | Verifies the Postgres scheduler lock path exits cleanly when another scheduler already holds the advisory lock. |
+| `TestWatchersFoundation.test_watcher_create_inserts_owned_schedule_and_hides_it_from_normal_schedule_lists` | Verifies watcher creation inserts the watcher row and owned schedule row together while normal schedule lists hide watcher-owned cadence. |
+| `TestWatchersFoundation.test_watcher_delete_removes_watcher_schedule_and_fire_rows_atomically` | Verifies deleting a watcher removes its state, owned schedule, and fire audit rows together. |
+| `TestWatchersFoundation.test_watcher_create_requires_durable_token_valid_options_and_quota` | Verifies watcher creation requires durable tokens, strict option booleans, known option keys, and the per-session watcher cap. |
+| `TestWatchersFoundation.test_watchers_with_same_command_keep_separate_schedules_and_state` | Verifies duplicate command watchers keep separate schedules, baselines, and state counters. |
+| `TestWatchersFoundation.test_watcher_fire_insert_is_idempotent_for_same_watcher_and_run` | Verifies duplicate watcher-fire records for the same watcher and run reuse the existing audit row. |
 | `TestNotificationsPhase0.test_dispatcher_sync_delivery_fans_out_once_per_channel` | Verifies the notification dispatcher can synchronously fan out a run-complete trigger to two subscribed channels exactly once each. |
 | `TestNotificationsPhase0.test_dispatcher_event_claims_are_single_use` | Verifies notification event claims are leased so two workers cannot claim the same due event at the same time. |
 | `TestNotificationsPhase0.test_dispatcher_dnd_defers_without_consuming_attempts` | Verifies notification do-not-disturb defers delivery without burning provider retry attempts. |

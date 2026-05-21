@@ -827,6 +827,14 @@ The browser Schedules modal uses the same route contract as the terminal and CLI
 
 Cron support is intentionally strict: five-field POSIX cron only, with `hourly`, `daily`, and `weekly` cadence presets normalized to canonical cron strings before storage. Custom cron expressions cannot run more often than every five minutes, so `*/5 * * * *` is valid but every-minute or two-minute schedules are rejected. Each schedule stores an IANA timezone, defaulting to `scheduler.default_timezone` (`UTC`). On startup, recovery coalesces recent missed fire windows into one catch-up fire within `scheduler.max_catchup_window_seconds`; older missed windows are skipped with an audit row in `schedule_fires`. The v1 overlap policy is always stored and enforced as `skip`, leaving the column in place for future policies without changing the current behavior.
 
+### Watchers
+
+Watchers are durable change-detection monitors owned by `tok_` session tokens. Each watcher stores the command text, baseline run id, current state, validated diff-policy options, consecutive outcome counters, and a unique link to one scheduler-owned cadence row. The paired schedule uses `owner_kind='watcher'` and `owner_id=<watcher_id>`, so normal schedule lists and the Schedules UI keep watcher cadence separate from ordinary scheduled commands.
+
+Watcher storage is split between `watchers` for current state and `watcher_fires` for append-only audit. `watcher_fires` has a unique `(watcher_id, run_id)` constraint so duplicate run-finalization paths cannot create duplicate diff records or notification fan-out. `options_json` currently accepts only `suppress_removals` and `notify_metadata_changes`; additions and removals count as diffs by default, while metadata-only changes stay opt-in until classifier behavior is stable.
+
+Watcher creation and deletion use one database transaction for the watcher row and its owned schedule row. A session can own up to `watchers.max_per_session` watchers, defaulting to 32. Multiple watchers can wrap the same command, but they still keep separate schedules, baselines, state, and fire audit rows.
+
 ---
 
 ## Headless API Surface
@@ -1679,12 +1687,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,074
+- behavior tests: 3,079
 - docs/inventory meta-tests: 32
-- `pytest`: 1663 (1631 behavior + 32 meta)
+- `pytest`: 1668 (1636 behavior + 32 meta)
 - `vitest`: 1191
 - `playwright`: 252
-- total: 3,106
+- total: 3,111
 
 ### Testing Architecture
 

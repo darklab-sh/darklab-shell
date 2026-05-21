@@ -207,6 +207,7 @@ def _create_schema(conn):
     _create_secrets_schema(conn)
     _create_notification_schema(conn)
     _create_schedule_schema(conn)
+    _create_watcher_schema(conn)
     _create_project_workspace_schema(conn)
 
 
@@ -316,6 +317,48 @@ def _create_schedule_schema(conn):
             reason       TEXT NOT NULL DEFAULT '',
             CHECK (owner_kind IN ('user', 'watcher')),
             CHECK (status IN ('skipped_overlap', 'skipped_revoked', 'fired', 'fire_failed'))
+        )
+    """)
+
+
+def _create_watcher_schema(conn):
+    """Create watcher change-detection storage."""
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS watchers (
+            id                      TEXT PRIMARY KEY,
+            session_token           TEXT NOT NULL,
+            label                   TEXT NOT NULL DEFAULT '',
+            command_text            TEXT NOT NULL,
+            schedule_id             TEXT NOT NULL UNIQUE,
+            baseline_run_id         TEXT NOT NULL,
+            last_run_id             TEXT NOT NULL DEFAULT '',
+            last_diff_summary_json  {_json_column_sql("{}")},
+            state                   TEXT NOT NULL DEFAULT 'ok',
+            state_reason            TEXT NOT NULL DEFAULT '',
+            last_error              TEXT NOT NULL DEFAULT '',
+            options_json            {_json_column_sql("{}")},
+            consecutive_no_change   INTEGER NOT NULL DEFAULT 0,
+            consecutive_changed     INTEGER NOT NULL DEFAULT 0,
+            consecutive_failures    INTEGER NOT NULL DEFAULT 0,
+            created                 TEXT NOT NULL,
+            updated                 TEXT NOT NULL,
+            CHECK (state IN ('ok', 'changed', 'firing', 'paused', 'error'))
+        )
+    """)
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS watcher_fires (
+            id                          TEXT PRIMARY KEY,
+            watcher_id                  TEXT NOT NULL,
+            baseline_run_id             TEXT NOT NULL,
+            run_id                      TEXT NOT NULL,
+            diff_summary_json           {_json_column_sql("{}")},
+            diff_kind                   TEXT NOT NULL DEFAULT 'none',
+            truncated                   INTEGER NOT NULL DEFAULT 0,
+            notification_event_ids_json {_json_column_sql("[]")},
+            state_at_fire               TEXT NOT NULL DEFAULT '',
+            created                     TEXT NOT NULL,
+            UNIQUE (watcher_id, run_id),
+            CHECK (diff_kind IN ('signal', 'textual', 'none'))
         )
     """)
 
@@ -565,6 +608,26 @@ def _create_indexes(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_schedule_fires_schedule_fired "
         "ON schedule_fires (schedule_id, fired_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_watchers_session_updated "
+        "ON watchers (session_token, updated DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_watchers_schedule "
+        "ON watchers (schedule_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_watchers_baseline "
+        "ON watchers (baseline_run_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_watcher_fires_watcher_created "
+        "ON watcher_fires (watcher_id, created DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_watcher_fires_run "
+        "ON watcher_fires (run_id)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_projects_session_status_updated "

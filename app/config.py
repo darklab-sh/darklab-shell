@@ -264,6 +264,9 @@ def load_config(conf_dir=None):
             "max_catchup_window_seconds": 3600,
             "default_timezone": "UTC",
         },
+        "watchers": {
+            "max_per_session": 32,
+        },
         "max_tabs":                   8,
         "command_timeout_seconds":    3600,
         "heartbeat_interval_seconds": 20,

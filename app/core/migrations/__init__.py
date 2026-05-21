@@ -15,6 +15,7 @@ from . import (
     v0008_postgres_session_token_last_seen,
     v0009_notification_channels,
     v0010_schedules,
+    v0011_watchers,
 )
 from .runner import Migration
 
@@ -29,4 +30,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0008_postgres_session_token_last_seen.MIGRATION,
     v0009_notification_channels.MIGRATION,
     v0010_schedules.MIGRATION,
+    v0011_watchers.MIGRATION,
 )

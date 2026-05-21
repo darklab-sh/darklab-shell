@@ -256,6 +256,14 @@
 #   max_catchup_window_seconds: 3600
 #   default_timezone: UTC
 
+# ── Watchers ────────────────────────────────────────────────────────────────
+#
+# Server-side limits for change-detection monitors. Each watcher owns one
+# scheduler row, so this cap bounds both watcher state and recurring checks.
+# Server default if unset:
+# watchers:
+#   max_per_session: 32
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 # Log verbosity level . Options: ERROR, WARN, INFO, DEBUG

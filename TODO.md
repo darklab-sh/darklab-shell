@@ -42,23 +42,9 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
     - The unit of value: operators stop watching their tabs for "is anything new on this nmap?" and the app tells them.
     - Land **after** scheduler and notifications. A watcher without a scheduler is just a manual diff; a watcher without notifications is just a database row.
     - Non-goals for v1: watchers across multiple commands, watcher graphs, threshold-based alerting (e.g., "only fire if 3 new ports"), watcher history retention beyond a fixed cap.
-  - Phase 0 — schema and data model
-    - Add `app/core/migrations/v0011_watchers.py` (plus SQLite equivalent):
-      - `watchers` — `id, session_token, label, command_text, schedule_id, baseline_run_id, last_run_id, last_diff_summary_json, state ('ok'|'changed'|'firing'|'paused'|'error'), state_reason, last_error, options_json, consecutive_no_change, consecutive_changed, consecutive_failures, created, updated`. `options_json` stores strictly validated watcher policy flags such as `suppress_removals` and `notify_metadata_changes`; additions and removals count as diffs by default, while metadata/severity-only changes stay opt-in until classifiers stabilize. Promote these flags to typed columns if the validated option set grows beyond three fields.
-      - `watcher_fires` — `id, watcher_id, baseline_run_id, run_id, diff_summary_json, diff_kind ('signal'|'textual'|'none'), truncated, notification_event_ids_json, state_at_fire, created`. Append-only audit with a unique constraint on `(watcher_id, run_id)` so duplicate run-finalization paths cannot create duplicate watcher fires.
-    - The watcher row owns its schedule. The paired schedule uses `owner_kind='watcher'` and `owner_id=<watcher_id>` in the shared `schedules` table, and `watchers.schedule_id` is unique so a schedule cannot be shared between a watcher and a regular scheduled run.
-    - Watchers are capped at 32 per session by default (`watchers.max_per_session`), mirroring the schedule cap because each watcher owns one schedule.
-    - Watcher creation requires a durable `tok_` session owner. Anonymous UUID sessions cannot create watchers because watcher cadence, baseline state, and notifications must survive browser restarts.
-    - Acceptance criteria
-      - A new watcher inserts both a `watchers` row and a `schedules` row in one transaction.
-      - Deleting a watcher removes both rows atomically.
-      - A normal schedule cannot claim a watcher-owned schedule row, and the Schedules UI/API does not expose watcher-owned rows as ordinary schedules.
-      - Two watchers wrapping the same command still fire separate runs; watcher state and baseline acceptance are never shared across watchers.
-      - Duplicate finalize calls for the same `(watcher_id, run_id)` are idempotent and never emit duplicate notifications.
   - Phase 1 — Service composition
-    - Add `app/services/watchers/`:
-      - `models.py` — `Watcher`, `WatcherFire`, `WatcherDiff` dataclasses.
-      - `service.py` — `create / update / delete / pause / resume / accept_baseline / list_for_session` library functions.
+    - Extend `app/services/watchers/`:
+      - `service.py` — add update, pause, resume, and accept-baseline library functions on top of the existing create/delete/list foundation.
       - `runner.py` — the watcher fire hook called by the scheduler worker when it fires a watcher-owned schedule. Responsibilities: kick the run through the broker, record the pending watcher fire, and return quickly so the scheduler is not blocked by a long scan.
       - `finalize.py` — run-finalization hook that claims the pending watcher fire for the completed run, computes the diff against `baseline_run_id`, updates watcher state, and enqueues `watcher_changed`, `watcher_error`, or `watcher_recovered` notifications as appropriate. The state machine is explicit: non-empty diff after `ok` or `recovered` emits `watcher_changed`; empty diff after `changed` emits optional `watcher_recovered`; empty diff after `ok` stays quiet; failed watcher runs set `state='error'`, do not promote the failed run to baseline, and emit `watcher_error`. After five consecutive failures, disable the watcher and log `WATCHER_DISABLED_AFTER_ERRORS`.
       - `diff.py` — thin wrapper over `services/runs/comparison.py` that returns a normalized `WatcherDiff` regardless of which comparator fired (signal-based, textual added/removed).
