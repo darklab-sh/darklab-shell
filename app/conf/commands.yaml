@@ -1680,22 +1680,22 @@ commands:
           hint_only: true
           value_type: domain
           description: Usually provided through -d
-  - root: pd-httpx
+  - root: httpx
     description: Probes HTTP(S) services and reports web metadata such as status, title, and technology signals.
     category: Network Reconnaissance
     policy:
       allow:
-        - pd-httpx
+        - httpx
       deny:
-        - pd-httpx -l
-        - pd-httpx -list
-        - pd-httpx -o
-        - pd-httpx --output
-        - pd-httpx -rr
-        - pd-httpx -request
-        - pd-httpx -srd
-        - pd-httpx -store-response-dir
-        - pd-httpx -config
+        - httpx -l
+        - httpx -list
+        - httpx -o
+        - httpx --output
+        - httpx -rr
+        - httpx -request
+        - httpx -srd
+        - httpx -store-response-dir
+        - httpx -config
     workspace_flags:
       - flag: -l
         mode: read
@@ -1742,27 +1742,27 @@ commands:
           requires_workspace: true
     autocomplete:
       examples:
-        - value: pd-httpx -h
+        - value: httpx -h
           description: Show help and usage
-        - value: pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect
+        - value: httpx -u https://ip.darklab.sh -title -status-code -tech-detect
           description: "Full recon \u2014 title, status code, and tech fingerprint"
-        - value: pd-httpx -u https://ip.darklab.sh -status-code
+        - value: httpx -u https://ip.darklab.sh -status-code
           description: Check HTTP status code
-        - value: pd-httpx -u https://ip.darklab.sh -follow-redirects
+        - value: httpx -u https://ip.darklab.sh -follow-redirects
           description: Follow and report redirects
-        - value: pd-httpx -l urls.txt -status-code -title -o httpx-results.txt
+        - value: httpx -l urls.txt -status-code -title -o httpx-results.txt
           description: Probe URLs from a session file and save results
           feature_required: workspace
-        - value: pd-httpx -l subdomains.txt -silent -o live-urls.txt
+        - value: httpx -l subdomains.txt -silent -o live-urls.txt
           description: Probe subdomains from a session file and save live URLs
           feature_required: workspace
-        - value: pd-httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt
+        - value: httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt
           description: Summarize live URLs from a session file
           feature_required: workspace
-        - value: pd-httpx -l urls.txt -status-code -sr -srd httpx-responses
+        - value: httpx -l urls.txt -status-code -sr -srd httpx-responses
           description: Store HTTP responses in a session directory
           feature_required: workspace
-        - value: pd-httpx -l urls.txt -screenshot -srd httpx-screenshots
+        - value: httpx -l urls.txt -screenshot -srd httpx-screenshots
           description: Save screenshots in a session directory
           feature_required: workspace
       flags:

@@ -10,7 +10,7 @@ ARG OPENSSL_SHA256=aaf51a1fe064384f811daeaeb4ec4dce7340ec8bd893027eee676af31e83a
 ARG SSLSCAN_VERSION=2.2.2
 ARG NUCLEI_VERSION=v3.8.0
 ARG SUBFINDER_VERSION=v2.14.0
-ARG PD_HTTPX_VERSION=v1.9.0
+ARG HTTPX_VERSION=v1.9.0
 ARG DNSX_VERSION=v1.2.3
 ARG NAABU_VERSION=v2.6.1
 ARG KATANA_VERSION=v1.6.1
@@ -36,7 +36,8 @@ RUN rm -f /etc/dpkg/dpkg.cfg.d/docker
 RUN apt-get update
 RUN apt-get upgrade -y
 
-RUN apt-get install -y  man-db procps net-tools curl wget iputils-ping nmap dnsutils traceroute netcat-traditional \
+RUN apt-get install -y --no-install-recommends \
+                        man-db procps net-tools curl wget iputils-ping nmap dnsutils traceroute netcat-traditional \
                         mtr whois tcptraceroute dnsrecon git libnet-ssleay-perl rubygems \
                         libxml-writer-perl libjson-perl ruby-dev build-essential fping python3-requests fierce \
                         dnsenum libcap2-bin sudo gosu groff-base bsdextrautils iptables masscan libpcap-dev \
@@ -96,10 +97,8 @@ RUN git clone --depth 1 --branch "${SSLSCAN_VERSION}" https://github.com/rbsec/s
 RUN go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@${NUCLEI_VERSION}
 
 # Install the ProjectDiscovery suite via Go.
-# Rename httpx to pd-httpx to avoid colliding with the Python httpx package.
 RUN go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@${SUBFINDER_VERSION}
-RUN go install -v github.com/projectdiscovery/httpx/cmd/httpx@${PD_HTTPX_VERSION} && \
-    mv /usr/local/bin/httpx /usr/local/bin/pd-httpx
+RUN go install -v github.com/projectdiscovery/httpx/cmd/httpx@${HTTPX_VERSION}
 RUN go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@${DNSX_VERSION}
 RUN go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@${NAABU_VERSION}
 RUN go install -v github.com/projectdiscovery/katana/cmd/katana@${KATANA_VERSION}

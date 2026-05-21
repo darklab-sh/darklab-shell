@@ -107,9 +107,62 @@ _APP_SIGNAL_EXCLUDES = [
     re.compile(r"^\[workspace\]\s+(?:reading|writing)\s+\S", re.I),
 ]
 
+_HELP_FLAGS_BY_ROOT = {
+    "amass": {"-h", "-help", "--help"},
+    "assetfinder": {"-h", "--help"},
+    "chaos": {"-h", "--help"},
+    "curl": {"-h", "--help"},
+    "dig": {"-h"},
+    "dnsenum": {"-h", "--help"},
+    "dnsrecon": {"-h", "--help"},
+    "dnsx": {"-h", "--help"},
+    "feroxbuster": {"-h", "--help"},
+    "ffuf": {"-h", "--help"},
+    "fierce": {"-h", "--help"},
+    "fping": {"-h", "--help"},
+    "gobuster": {"-h", "--help"},
+    "greynoise": {"--help"},
+    "ipinfo": {"--help"},
+    "katana": {"-h", "-help", "--help"},
+    "masscan": {"--help"},
+    "mtr": {"-h", "--help"},
+    "naabu": {"-h", "-help", "--help"},
+    "nc": {"-h", "--help"},
+    "nikto": {"-help", "--help"},
+    "nmap": {"-h", "--help"},
+    "nuclei": {"-h", "--help"},
+    "openssl": {"-help"},
+    "httpx": {"-h", "--help"},
+    "ping": {"-h", "--help"},
+    "rustscan": {"--help"},
+    "shodan": {"--help"},
+    "sslscan": {"-h", "--help"},
+    "sslyze": {"--help"},
+    "subfinder": {"-h", "--help"},
+    "tcptraceroute": {"-h", "--help"},
+    "testssl": {"--help"},
+    "traceroute": {"--help"},
+    "urlscan-cli": {"--help"},
+    "vt": {"--help"},
+    "wafw00f": {"--help"},
+    "wget": {"-h", "--help"},
+    "whois": {"--help"},
+    "wpscan": {"-h", "--help"},
+}
+
 _DNS_SIGNAL_ROOTS = {"dig", "host", "nslookup"}
 _CRAWL_URL_ROOTS = {"katana"}
-_PD_HTTPX_RESULT_RE = re.compile(r"^https?://\S+\s+\[\d{3}\](?:\s+\[[^\]]*\])*", re.I)
+_PROJECTDISCOVERY_ROOTS = {"chaos", "dnsx", "httpx", "katana", "naabu", "nuclei", "subfinder"}
+_HTTPX_RESULT_RE = re.compile(r"^https?://\S+\s+\[\d{3}\](?:\s+\[[^\]]*\])*", re.I)
+_PROJECTDISCOVERY_ENTITY_NOISE_RE = re.compile(r"^\t\tprojectdiscovery\.io\s*$", re.I)
+_GOBUSTER_RESULT_RE = re.compile(
+    r"^\S(?:.*\S)?\s+\(Status:\s*\d{3}\)\s+\[Size:\s*\d+\](?:\s+\[-->\s+\S+\])?$",
+    re.I,
+)
+_GOBUSTER_CONFIG_RE = re.compile(
+    r"^\[\+\]\s+(?:Url|Method|Threads|Wordlist|Negative Status codes|User Agent|Timeout):\s+.+$",
+    re.I,
+)
 _WAFW00F_RESULT_RE = re.compile(r"^\[\+\]\s+The site\s+https?://\S+\s+is behind\s+.+\bWAF\.", re.I)
 _WAFW00F_REQUESTS_RE = re.compile(r"^\[~\]\s+Number of requests:\s*\d+\b", re.I)
 _NIKTO_SKIP_RE = re.compile(
@@ -167,6 +220,11 @@ _HOSTNAME_RE = re.compile(
     re.I,
 )
 _NMAP_REPORT_TARGET_RE = re.compile(r"^Nmap scan report for\s+(.+?)(?:\s+\(([^)]+)\))?$", re.I)
+_NMAP_ENTITY_NOISE_RE = re.compile(
+    r"^(?:Starting Nmap\b.*\bhttps://nmap\.org\b|"
+    r"Service detection performed\. Please report any incorrect results at https://nmap\.org/submit/ \.)",
+    re.I,
+)
 _ENTITY_IPV4_RE = re.compile(
     r"(?<![\w.])(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}(?![\w.])"
 )
@@ -428,8 +486,10 @@ def _is_command_scoped_finding(root: str, stripped: str) -> bool:
         return bool(_CIDR_RE.search(stripped))
     if root == "dnsrecon":
         return bool(re.match(r"^\[\*\]\s+DNSSEC is configured for\s+\S+", stripped, re.I))
-    if root in {"pd-httpx", "httpx"}:
-        return bool(_PD_HTTPX_RESULT_RE.search(stripped))
+    if root == "httpx":
+        return bool(_HTTPX_RESULT_RE.search(stripped))
+    if root == "gobuster":
+        return bool(_GOBUSTER_RESULT_RE.search(stripped))
     if root in _CRAWL_URL_ROOTS:
         return _looks_like_clean_url(stripped)
     if root == "wafw00f":
@@ -471,6 +531,22 @@ def _is_command_scoped_summary(root: str, stripped: str) -> bool:
     return False
 
 
+def _is_command_scoped_signal_noise(root: str, stripped: str) -> bool:
+    if root == "gobuster" and _GOBUSTER_CONFIG_RE.search(stripped):
+        return True
+    return False
+
+
+def _extract_entities_for_command(root: str, text: str, *, source_line: int | None = None) -> list[dict[str, object]]:
+    stripped = _normalize_signal_text(text)
+    plain = _strip_ansi_codes(str(text or "")).rstrip("\n\r")
+    if root in _PROJECTDISCOVERY_ROOTS and _PROJECTDISCOVERY_ENTITY_NOISE_RE.search(plain):
+        return []
+    if root == "nmap" and _NMAP_ENTITY_NOISE_RE.search(stripped):
+        return []
+    return extract_entities(text, source_line=source_line)
+
+
 def tokenize_command(command: str) -> list[str]:
     tokens: list[str] = []
     source = str(command or "").strip()
@@ -504,6 +580,24 @@ def tokenize_command(command: str) -> list[str]:
     if current:
         tokens.append(current)
     return tokens
+
+
+def _is_help_output_command(command: str, root: str | None = None) -> bool:
+    tokens = tokenize_command(command)
+    resolved_root = str(root if root is not None else (tokens[0] if tokens else "")).lower()
+    if not resolved_root:
+        return False
+    help_flags = _HELP_FLAGS_BY_ROOT.get(resolved_root)
+    if not help_flags:
+        return False
+    return any(_normalize_help_flag_token(token) in help_flags for token in tokens[1:])
+
+
+def _normalize_help_flag_token(token: str) -> str:
+    raw = str(token or "")
+    if raw.startswith("--") or len(raw) > 2:
+        return raw.lower()
+    return raw
 
 
 def command_root(command: str) -> str:
@@ -580,7 +674,7 @@ def extract_target(command: str) -> str | None:
         target = _dns_target(tokens, root)
         return _strip_url_target(target) if target else None
 
-    if root in {"curl", "httpx", "pd-httpx", "wafw00f"}:
+    if root in {"curl", "httpx", "wafw00f"}:
         positionals = _positional_targets(
             tokens,
             skip_values_after={
@@ -639,6 +733,7 @@ class OutputSignalClassifier:
     def __post_init__(self) -> None:
         self.root = command_root(self.command)
         self.target = extract_target(self.command)
+        self.is_help_output = _is_help_output_command(self.command, self.root)
         self.current_target: str | None = None
         self.line_index = 0
         self.previous_text = ""
@@ -665,7 +760,7 @@ class OutputSignalClassifier:
             command=self.command,
             root=self.root,
             previous_text=self.previous_text,
-            include_signals=self.cmd_type not in {"builtin"},
+            include_signals=self.cmd_type not in {"builtin"} and not self.is_help_output,
         )
         metadata: dict[str, object] = {
             "line_index": self.line_index,
@@ -675,8 +770,8 @@ class OutputSignalClassifier:
             metadata["target"] = target
         if scopes:
             metadata["signals"] = scopes
-        if self.cmd_type not in {"builtin"}:
-            entities = extract_entities(text, source_line=self.line_index)
+        if self.cmd_type not in {"builtin"} and not self.is_help_output:
+            entities = _extract_entities_for_command(self.root, text, source_line=self.line_index)
             if entities:
                 metadata["entities"] = entities
         self.line_index += 1
@@ -702,6 +797,10 @@ def classify_line(
         return []
     scopes: list[str] = []
     root = root if root is not None else command_root(command)
+    if _is_help_output_command(command, root):
+        return scopes
+    if _is_command_scoped_signal_noise(root, stripped):
+        return scopes
 
     if cls == "notice":
         scopes.append("warnings")

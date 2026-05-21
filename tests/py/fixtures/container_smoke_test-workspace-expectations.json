@@ -37,11 +37,11 @@
       ]
     },
     {
-      "name": "pd_httpx_reads_urls_and_writes_results",
+      "name": "httpx_reads_urls_and_writes_results",
       "setup_files": {
         "urls.txt": "https://ip.darklab.sh\n"
       },
-      "command": "pd-httpx -l urls.txt -status-code -title -o httpx-results.txt",
+      "command": "httpx -l urls.txt -status-code -title -o httpx-results.txt",
       "assert_files": {
         "httpx-results.txt": [
           "https://ip.darklab.sh"
@@ -53,11 +53,11 @@
       ]
     },
     {
-      "name": "pd_httpx_stores_responses_directory",
+      "name": "httpx_stores_responses_directory",
       "setup_files": {
         "urls.txt": "https://ip.darklab.sh\n"
       },
-      "command": "pd-httpx -l urls.txt -status-code -sr -srd httpx-responses",
+      "command": "httpx -l urls.txt -status-code -sr -srd httpx-responses",
       "expected_text": [
         "[workspace] reading urls.txt",
         "[workspace] writing httpx-responses"
@@ -227,11 +227,11 @@
       ]
     },
     {
-      "name": "pd_httpx_reads_subdomains_and_writes_live_urls",
+      "name": "httpx_reads_subdomains_and_writes_live_urls",
       "setup_files": {
         "subdomains.txt": "ip.darklab.sh\n"
       },
-      "command": "pd-httpx -l subdomains.txt -silent -o live-urls.txt",
+      "command": "httpx -l subdomains.txt -silent -o live-urls.txt",
       "assert_files": {
         "live-urls.txt": [
           "ip.darklab.sh"
@@ -243,11 +243,11 @@
       ]
     },
     {
-      "name": "pd_httpx_reads_live_urls_and_writes_http_summary",
+      "name": "httpx_reads_live_urls_and_writes_http_summary",
       "setup_files": {
         "live-urls.txt": "https://ip.darklab.sh\n"
       },
-      "command": "pd-httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt",
+      "command": "httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt",
       "assert_files": {
         "http-summary.txt": [
           "https://ip.darklab.sh"
@@ -272,11 +272,11 @@
       ]
     },
     {
-      "name": "pd_httpx_reads_crawled_urls_and_writes_summary",
+      "name": "httpx_reads_crawled_urls_and_writes_summary",
       "setup_files": {
         "crawled-urls.txt": "https://ip.darklab.sh\n"
       },
-      "command": "pd-httpx -l crawled-urls.txt -status-code -title -o crawled-http.txt",
+      "command": "httpx -l crawled-urls.txt -status-code -title -o crawled-http.txt",
       "assert_files": {
         "crawled-http.txt": [
           "https://ip.darklab.sh"

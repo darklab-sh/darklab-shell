@@ -536,7 +536,7 @@ class TestIsCommandAllowedEdges:
 
             cases = [
                 (
-                    "pd-httpx -l urls.txt -o httpx.txt",
+                    "httpx -l urls.txt -o httpx.txt",
                     ["urls.txt"],
                     ["httpx.txt"],
                 ),

@@ -499,9 +499,10 @@ function _outputEntityRanges(text, entities) {
 }
 
 function _entityTokenFromText(text, entity, tabId) {
-  const token = document.createElement('button');
-  token.type = 'button';
+  const token = document.createElement('span');
   token.className = 'chip chip-action atlas-entity-token';
+  token.setAttribute('role', 'button');
+  token.setAttribute('tabindex', '0');
   token.dataset.atlasEntityType = String(entity && entity.type || '');
   token.dataset.atlasEntityValue = _outputEntityValue(entity);
   token.dataset.atlasEntityTab = _atlasTabForOutputEntity(entity && entity.type);
@@ -563,6 +564,11 @@ function _focusOutputEntityLine(token) {
 
 let _outputEntityMenu = null;
 let _outputEntityMenuOpener = null;
+
+function _hasOutputTextSelection() {
+  const selection = typeof window !== 'undefined' && window.getSelection ? window.getSelection() : null;
+  return !!(selection && !selection.isCollapsed && String(selection.toString() || '').length > 0);
+}
 
 function _closeOutputEntityMenu(options = {}) {
   const opener = _outputEntityMenuOpener;
@@ -659,6 +665,7 @@ function _bindOutputEntityTokenEvents() {
   document.addEventListener('click', (event) => {
     const token = event.target && event.target.closest ? event.target.closest('.atlas-entity-token') : null;
     if (token) {
+      if (_hasOutputTextSelection()) return;
       event.preventDefault();
       event.stopPropagation();
       _openAtlasForOutputEntity(token);
@@ -686,6 +693,20 @@ function _bindOutputEntityTokenEvents() {
     document.addEventListener(name, () => clearTimeout(_outputEntityLongPressTimer), { passive: true });
   });
   document.addEventListener('keydown', (event) => {
+    const token = event.target && event.target.closest ? event.target.closest('.atlas-entity-token') : null;
+    if (token && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      event.stopPropagation();
+      _openAtlasForOutputEntity(token);
+      return;
+    }
+    if (token && (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey))) {
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = token.getBoundingClientRect();
+      _showOutputEntityMenu(token, rect.left, rect.bottom);
+      return;
+    }
     if (event.key === 'Escape') _closeOutputEntityMenu({ restoreFocus: true });
   });
 }

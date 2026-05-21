@@ -249,8 +249,6 @@ The app now standardizes on TCP connect scans for nmap. `rewrite_command()` inje
 
 All Go tools (`nuclei`, `subfinder`, `httpx`, `dnsx`, `gobuster`) are installed with `ENV GOBIN=/usr/local/bin` in the Dockerfile. This puts binaries directly in `/usr/local/bin` with world-executable permissions, accessible to the `scanner` user. Without this, Go installs to `/root/go/bin` which is root-owned and inaccessible to `scanner`. Previous symlinks from `/root/go/bin/` to `/usr/local/bin/` also fail because symlinks inherit the target's permissions issue.
 
-`httpx` is renamed to `pd-httpx` via `mv` after install to avoid shadowing the Python `httpx` library used by the app and other Python tooling.
-
 ### SQLite WAL Mode
 
 **SQLite runs in WAL mode to support concurrent reads from multiple Gunicorn workers.**

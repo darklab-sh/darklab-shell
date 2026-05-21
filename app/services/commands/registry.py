@@ -1261,7 +1261,7 @@ def _builtin_workflows():
                     "note": "Resolve common subdomains and keep the DNS response context.",
                 },
                 {
-                    "cmd": "pd-httpx -u {{url}} -title -status-code -tech-detect",
+                    "cmd": "httpx -u {{url}} -title -status-code -tech-detect",
                     "note": "Probe HTTPS and collect status, title, and technology hints.",
                 },
             ],
@@ -1286,11 +1286,11 @@ def _builtin_workflows():
                     "note": "Discover subdomains and save one hostname per line to Files.",
                 },
                 {
-                    "cmd": "pd-httpx -l subdomains.txt -silent -o live-urls.txt",
+                    "cmd": "httpx -l subdomains.txt -silent -o live-urls.txt",
                     "note": "Read the generated subdomain file and save live HTTP(S) URLs.",
                 },
                 {
-                    "cmd": "pd-httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt",
+                    "cmd": "httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt",
                     "note": "Read live URLs and save status, title, and technology hints.",
                 },
             ],
@@ -1315,7 +1315,7 @@ def _builtin_workflows():
                     "note": "Crawl one level from the seed URL and save discovered URLs.",
                 },
                 {
-                    "cmd": "pd-httpx -l crawled-urls.txt -status-code -title -o crawled-http.txt",
+                    "cmd": "httpx -l crawled-urls.txt -status-code -title -o crawled-http.txt",
                     "note": "Read crawled URLs and save HTTP status/title context.",
                 },
                 {

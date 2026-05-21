@@ -1203,15 +1203,15 @@ test.describe('workflows modal', () => {
     await expect(page.locator('.tab')).toHaveCount(1)
     await expect(page.locator('body')).toContainText('[workflow] Running 3 steps sequentially in this tab.')
     await expect(page.locator('body')).toContainText('subfinder -d example.com -silent -o subdomains.txt')
-    await expect(page.locator('body')).toContainText('pd-httpx -l subdomains.txt -silent -o live-urls.txt')
+    await expect(page.locator('body')).toContainText('httpx -l subdomains.txt -silent -o live-urls.txt')
     await expect(page.locator('body')).toContainText(
-      'pd-httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt',
+      'httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt',
     )
     await expect(page.locator('body')).toContainText('[workflow] Completed all queued steps.')
     await expect.poll(() => postedCommands).toEqual([
       'subfinder -d example.com -silent -o subdomains.txt',
-      'pd-httpx -l subdomains.txt -silent -o live-urls.txt',
-      'pd-httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt',
+      'httpx -l subdomains.txt -silent -o live-urls.txt',
+      'httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt',
     ])
   })
 

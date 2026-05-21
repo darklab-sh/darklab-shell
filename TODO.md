@@ -7,6 +7,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
+  - [Structured output model — feature enhancement opportunities](#structured-output-model--feature-enhancement-opportunities)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
 - [Feature Enhancements](#feature-enhancements)
@@ -34,6 +35,45 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ---
 
 ## Open TODOs
+
+### Structured output model — feature enhancement opportunities
+
+Now that per-line `kind`, `role`, `signals`, `entities`, and `line_index` flow end-to-end on the run-output envelope (and are durable on artifacts via lazy upgrade-on-read), several existing features can be enhanced by consuming the structured fields instead of (or alongside) text/`cls` heuristics. None of the items below are committed work — they are candidates to scope individually.
+
+**High-impact / lower effort**
+
+- **History search filters.** Add `signals:findings`, `kind:error`, `role:exit-fail`, and `entity:<canonical>` filters alongside today's `q`/`command_root`/`exit_code`/`date_range`/`type`/`project_id` filters in `app/services/history/search.py` and `app/blueprints/history.py`. Turns the history page into a real "show runs that produced findings against host X" surface. No FTS schema change required if filtering happens at envelope-load time.
+- **CLI structured output selectors.** Extend `darklab grep` and `darklab output` with `--signal`, `--kind`, `--role`, and `--entity` filters once `/api/v1/runs/{id}/output` exposes the structured fields. This gives scripts a precise way to ask for "only finding lines", "only errors", or "only lines mentioning this canonical entity" without local JSON parsing.
+- **Run comparison diff.** `app/services/runs/comparison.py` already reads per-entry `signals` but compares text bodies. With structured fields it can mute structural noise (`role=status-line`/`progress`/`pty-marker`), surface set-diffs over `entities.canonical_value` as a first-class "new entities introduced" panel, and tag each hunk with severity from `kind`.
+- **Findings extraction quality.** `app/services/projects/findings.py` keys on `signals=["findings"]` alone. Promoting `kind=error` rows into the findings pipeline and using `role=section-header`/`kv` to suppress banner lines would cut the false-positive rate.
+- **Run summary cards.** Build a compact summary above restored output using counts by `kind`, `signals`, and entity type: findings, warnings/errors, CVEs, hosts, URLs, and notable exit/status rows. This can start as a Run Details enhancement and later feed History row badges, exports, and notifications.
+- **Run details panel outline.** The run-details modal currently renders as a flat transcript. With `role` it can render a real outline: section-headers as sticky headings, `kv` rows as a definition list, signals-tagged rows as a TOC at the top. Frontend-only.
+- **Export enhancements (HTML / PDF / share permalinks).** Severity badges per line (from `kind`), inline clickable entity tokens (from `entities.start/end`), and a findings-summary preamble (signal counts + entity rollup) make exports usable as deliverables. Data is already on the wire.
+
+**Medium-impact**
+
+- **Atlas click-through from any view.** `LineEntity.start/end` spans are captured but only the live runner makes tokens clickable. Refactor `_renderAnsiWithEntityTokens` in `app/static/js/output.js` into a shared helper used by history, run-details, exports, and share permalinks so users can jump from any historical line to the Atlas entity.
+- **Notifications enrichment.** Today's triggers are exit-code-centric. With durable `signals`/`entities` on artifacts, "first-time CVE seen" or "Nx more findings than last run" notifications become straightforward in `app/services/scheduler/dispatch.py` and `app/services/notifications/`.
+- **Watcher diff classifiers.** `app/services/watchers/classifiers/common.py` only uses `strip_ansi_codes`. Classifying changes by `role` (added findings vs. progress redraws vs. status-line churn) and by entity-set delta would reduce false positives on noisy targets.
+- **Reverse-i-search scoping.** Currently command-only by design. An opt-in "i-search through findings only" mode (FTS scoped to rows with `signals=findings`) addresses the "what was that vuln line I saw yesterday?" workflow.
+- **Structured saved views.** Let History, Atlas, and Project Workspace save recurring structured filters such as `signal=findings + entity_type=cve + kind!=info`. This would turn one-off structured searches into reusable review queues without inventing a separate alerting system.
+- **Evidence package manifests.** When Project packages include transcript excerpts, add a small machine-readable manifest of included line indexes, signals, entities, and source run ids. That makes packages easier to audit and lets downstream tooling map a screenshot/PDF excerpt back to the exact saved transcript line.
+- **Status Monitor / Command Constellation overlays.** Every star is currently uniform. Coloring by max `kind` severity in the run (green=info / amber=warn / red=error) and sizing by `signals.findings` count converts the constellation into a glanceable health map.
+
+**Smaller wins / quality**
+
+- **Virtual-scroll line coalescing.** `role=progress` and `role=status-line` are inherently last-value-wins. Folding consecutive same-role lines in the output renderer would let progress bars render as one updating line instead of thousands of stacked rows. Pairs with the existing high-volume-resume path.
+- **Builtin help / FAQ structured rendering.** `role=help-row`, `kv`, `section-header`, `faq-q`/`faq-a` are already classified. The Welcome screen could render these as a real table/accordion instead of text+ANSI.
+- **API v1 surface.** `/runs/{id}/output` does not yet expose `kind`/`role`/`signals`/`entities` through the documented v1 schema in `app/services/api_v1/openapi.py`. Once stable, exposing them is a free upgrade for external consumers.
+- **Diagnostics page classifier inspector.** `/diag` could grow a per-line inspector — paste a line, see how `OutputSignalClassifier` would assign `kind`/`role`/`signals`/`entities`. Useful for debugging classifier regressions without staging a real run.
+- **Scheduler dispatch summaries.** Lead the post-run notification with "3 new findings, 1 new CVE entity" instead of just exit code, using durable artifact fields.
+- **Classifier drift report.** Add a developer-only report that samples recent stored lines by `kind`/`role`/`signals` and highlights unknown or low-value buckets. This would make classifier regressions visible before they show up as noisy findings, watchers, or exports.
+- **PTY scrollback findings.** `app/services/pty/transcript.py:60` already has a `scrollback_findings` mode; filtering out `role=prompt-echo`/`pty-marker` would tighten its false-positive rate.
+
+**Explicitly out of scope (for now)**
+
+- Re-keying the SQLite FTS index on structured columns — current FTS-over-text already works; defer until the history-filter work above lands and query patterns are observed.
+- Client-side redaction overlays based on `entities` — redaction already happens at canonical-value level on the backend; doing it again client-side would duplicate logic.
 
 ## Known Issues
 

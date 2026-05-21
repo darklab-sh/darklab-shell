@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,170
+- behavior tests: 3,172
 - docs/inventory meta-tests: 33
-- `pytest`: 1722 (1689 behavior + 33 meta)
-- `vitest`: 1229
+- `pytest`: 1723 (1690 behavior + 33 meta)
+- `vitest`: 1230
 - `playwright`: 252
-- total: 3,203
+- total: 3,205
 
 This document is organized in two parts:
 
@@ -736,8 +736,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWelcomeAssetLoading.test_mobile_hints_overlay_appends_entries` | Checks that mobile hints overlay appends entries. |
 | `TestOutputSignals.test_command_root_and_target_extraction` | Verifies that backend output-signal classification extracts command roots and useful targets from common surfaced commands. |
 | `TestOutputSignals.test_classifies_common_findings` | Verifies that backend output-signal classification marks common scanner, DNS, and service rows as findings. |
+| `TestOutputSignals.test_help_output_does_not_feed_signals_or_entities` | Verifies that external help output stays visible without feeding finding signals or Atlas entity extraction. |
 | `TestOutputSignals.test_classifies_dns_enumeration_findings_by_command` | Verifies that DNS and subdomain enumeration tools classify command-scoped host, record, and network-range findings without making hostnames global findings. |
-| `TestOutputSignals.test_classifies_web_enumeration_findings_by_command` | Verifies that web probing, crawling, and WAF scanner outputs classify command-scoped URL, status, and WAF findings. |
+| `TestOutputSignals.test_classifies_web_enumeration_findings_by_command` | Verifies that web probing, crawling, gobuster, and WAF scanner outputs classify command-scoped URL, status, and WAF findings. |
 | `TestOutputSignals.test_classifies_web_scanner_findings_by_command` | Verifies that Nikto and WPScan classify useful scanner findings while skipping progress and footer lines. |
 | `TestOutputSignals.test_classifies_tls_scanner_findings_by_command` | Verifies that TLS scanner posture, certificate, cipher, and compliance lines classify into findings or errors. |
 | `TestOutputSignals.test_classifies_projectdiscovery_and_port_scanner_findings` | Verifies that ProjectDiscovery and port scanner outputs classify command-scoped findings and summaries. |
@@ -1229,7 +1230,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestIsCommandAllowedEdges.test_workspace_disabled_keeps_declared_file_flags_denied` | Verifies that declared workspace file flags remain denied while workspace storage is disabled. |
 | `TestIsCommandAllowedEdges.test_workspace_read_flags_rewrite_relative_files_but_keep_packaged_wordlists` | Verifies that workspace-aware read flags rewrite relative session file names while preserving allowed packaged absolute wordlists. |
 | `TestIsCommandAllowedEdges.test_workspace_write_flags_keep_dev_null_exception` | Verifies that workspace-aware write flags do not break the existing `/dev/null` output exception. |
-| `TestIsCommandAllowedEdges.test_workspace_flags_cover_common_list_wordlist_and_output_tools` | Verifies workspace read/write flag rewrites for `pd-httpx`, `gobuster`, `naabu`, `katana`, `nmap`, and Amass using the real command registry metadata. |
+| `TestIsCommandAllowedEdges.test_workspace_flags_cover_common_list_wordlist_and_output_tools` | Verifies workspace read/write flag rewrites for `httpx`, `gobuster`, `naabu`, `katana`, `nmap`, and Amass using the real command registry metadata. |
 | `TestIsCommandAllowedEdges.test_workspace_artifact_capture_skips_app_managed_amass_database` | Verifies that app-managed Amass database paths under `tools/amass` are not captured as workspace artifacts. |
 | `TestIsCommandAllowedEdges.test_restricted_command_input_cidrs_block_inline_literal_targets` | Verifies configured restricted networks block literal IP and URL-host command inputs in metadata-known target slots while allowing ordinary domains. |
 | `TestIsCommandAllowedEdges.test_restricted_command_input_cidrs_block_overlapping_cidr_targets` | Verifies configured restricted networks block overlapping CIDR command inputs in metadata-known target slots. |
@@ -2565,6 +2566,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `preserves absolute line numbers when line-number mode is enabled later` | Verifies that enabling line numbers after output trimming uses stored absolute line numbers for retained rows. |
 | `adds timestamp dataset fields` | Verifies that adds timestamp dataset fields. |
 | `stores server-provided signal metadata on DOM lines and rawLines` | Verifies that streamed backend signal metadata is attached to rendered output rows and retained in tab rawLines. |
+| `keeps highlighted entity text selectable with the rest of the output line` | Verifies that highlighted Atlas entity tokens remain part of normal transcript text selection and copying. |
 | `falls back to value matching when ANSI makes entity offsets stale` | Verifies entity-token rendering does not trust stale start/end offsets after ANSI stripping changes visible text positions. |
 | `supports keyboard navigation and outside-click close in the entity context menu` | Verifies the output entity context menu focuses its first action, supports arrow-key movement, returns focus to the token on Escape, and closes on outside click. |
 | `keeps cached signal counts in sync when old lines are trimmed` | Verifies that per-tab signal counts decrement when max-line trimming removes old signal rows. |

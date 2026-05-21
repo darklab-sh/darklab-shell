@@ -309,7 +309,7 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "pd-httpx -h",
+      "command": "httpx -h",
       "expected_text": [
         "httpx is a fast and"
       ]
@@ -317,7 +317,7 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect",
+      "command": "httpx -u https://ip.darklab.sh -title -status-code -tech-detect",
       "expected_text": [
         "Nginx"
       ]
@@ -325,7 +325,7 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "pd-httpx -u https://ip.darklab.sh -status-code",
+      "command": "httpx -u https://ip.darklab.sh -status-code",
       "expected_text": [
         "https://ip.darklab.sh"
       ]
@@ -333,7 +333,7 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "pd-httpx -u https://ip.darklab.sh -follow-redirects",
+      "command": "httpx -u https://ip.darklab.sh -follow-redirects",
       "expected_text": [
         "ip.darklab.sh"
       ]
@@ -1034,7 +1034,7 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect",
+      "command": "httpx -u https://ip.darklab.sh -title -status-code -tech-detect",
       "expected_text": [
         "Current httpx"
       ]

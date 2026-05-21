@@ -38,7 +38,7 @@ Command-specific runtime behavior is declared in `app/conf/commands.yaml`. The r
 | `nuclei` | Adds `-ud /tmp/nuclei-templates` when no update-directory flag is present, wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>/tools` when Files are enabled, and declares workspace paths for response stores, Markdown/SARIF/JSON/JSONL exports, trace/error logs, resume files, and selected config/secret inputs. | Template storage must be writable under the read-only container filesystem, while useful per-session evidence and logs should be visible in Files without exposing template caches as session artifacts. |
 | `subfinder` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>/tools` when Files are enabled and declares workspace paths for list input, per-domain output directories, resolver lists, config files, and provider config files. | Subfinder otherwise falls back to `$HOME/.config` under `/tmp`, hiding useful session artifacts; provider configs can contain API keys and remain session-owned rather than share/export artifacts. |
 | `dnsx` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>/tools` when Files are enabled and declares workspace paths for list input, wordlists, and normal outputs. | DNSX shares the ProjectDiscovery config path conventions and should keep generated state under the session-owned tool folder. |
-| `pd-httpx` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>/tools` when Files are enabled and declares workspace paths for list/raw-request inputs, normal outputs, response/screenshot store directories, and config files. | Response stores and screenshots are high-value session evidence, while config state should remain visible only to the active session owner. |
+| `httpx` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>/tools` when Files are enabled and declares workspace paths for list/raw-request inputs, normal outputs, response/screenshot store directories, and config files. | Response stores and screenshots are high-value session evidence, while config state should remain visible only to the active session owner. |
 | `katana` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>/tools` when Files are enabled and declares workspace paths for list/config inputs, error logs, stored response directories, and stored field directories. | Katana can generate useful secondary request/response and field-extraction artifacts; keeping those directories in Files makes them inspectable and reusable. |
 | `naabu` | Adds `-scan-type c` when no scan type is present, wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>/tools` when Files are enabled, and declares workspace paths for host lists, exclude lists, ports files, and normal outputs. | TCP connect scanning works reliably inside container runtimes where raw SYN scanning via libpcap may fail; config state and secondary input lists should remain session-visible. |
 | `amass enum` / `amass subs` / `amass track` / `amass viz` | Adds managed `-dir tools/amass` when absent, rewrites it to the session workspace, and launches with `XDG_CONFIG_HOME=<session workspace>/tools`. | Amass v5 is database-first and auto-starts `amass engine`; the engine and CLI must use the same per-session database path instead of falling back to `$HOME/.config/amass`. |
@@ -60,7 +60,7 @@ Validation behavior:
 - Write and read/write flags prepare the destination path before subprocess launch.
 - Directory flags can create and prepare managed session directories.
 
-This covers normal file input/output tools such as `nmap -iL`, `nmap -oN`, `curl -o`, `ffuf -o`, `subfinder -dL`, `naabu -list`, `nuclei -l`, and Amass database directories. It also covers selected ProjectDiscovery flags that create directories, such as `katana -srd`, `katana -sfd`, `pd-httpx -srd`, `subfinder -oD`, and `nuclei -srd` / `-me`.
+This covers normal file input/output tools such as `nmap -iL`, `nmap -oN`, `curl -o`, `ffuf -o`, `subfinder -dL`, `naabu -list`, `nuclei -l`, and Amass database directories. It also covers selected ProjectDiscovery flags that create directories, such as `katana -srd`, `katana -sfd`, `httpx -srd`, `subfinder -oD`, and `nuclei -srd` / `-me`.
 
 ## Runtime Adaptations
 
@@ -170,7 +170,7 @@ Plain non-PTY commands keep their normal adaptations. For example, `mtr darklab.
 
 ProjectDiscovery tools commonly resolve config and resume paths through `XDG_CONFIG_HOME`, falling back to `$HOME/.config` when the variable is absent. Because the scanner wrapper keeps `HOME=/tmp`, those default files would otherwise be written to anonymous tmpfs paths outside the session Files view.
 
-When workspace storage is enabled, `subfinder`, `dnsx`, `pd-httpx`, `katana`, `naabu`, and `nuclei` are launched with:
+When workspace storage is enabled, `subfinder`, `dnsx`, `httpx`, `katana`, `naabu`, and `nuclei` are launched with:
 
 ```bash
 env XDG_CONFIG_HOME=/workspaces/sess_<hash>/tools <tool> ...
@@ -192,7 +192,7 @@ This keeps useful generated state under session-visible folders such as:
 Several ProjectDiscovery flags are also declared as workspace-aware paths so generated files and secondary outputs can be inspected in Files:
 
 - `katana -srd` / `-store-response-dir` and `katana -sfd` / `-store-field-dir`
-- `pd-httpx -srd` / `-store-response-dir`, including response stores and screenshot output directories
+- `httpx -srd` / `-store-response-dir`, including response stores and screenshot output directories
 - `nuclei -srd` / `-store-resp-dir`, `-me`, SARIF/JSON/JSONL exports, trace/error logs, and resume/config inputs
 - `subfinder -oD`, resolver lists, config files, and provider config files
 - `naabu` host-list, exclude-list, ports-file, and output paths

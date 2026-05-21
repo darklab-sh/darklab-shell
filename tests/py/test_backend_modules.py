@@ -5238,7 +5238,7 @@ class TestDerivedCommandRegistry:
             ("amass", "enum:-df", "domain"),
             ("amass", "enum:-nf", "host"),
             ("dnsx", "-l", "host"),
-            ("pd-httpx", "-l", "url"),
+            ("httpx", "-l", "url"),
             ("gobuster", "dir:-u", "url"),
             ("gobuster", "tftp:-s", "host"),
             ("ffuf", "-u", "url"),
@@ -5499,13 +5499,13 @@ class TestDerivedCommandRegistry:
                 "amass track -d darklab.sh": ([], ["tools/amass"]),
                 "amass viz -d darklab.sh -d3 -o amass-viz": ([], ["amass-viz", "tools/amass"]),
                 "dnsx -l subdomains.txt -o dnsx.txt": (["subdomains.txt"], ["dnsx.txt"]),
-                "pd-httpx -rr request.txt -status-code -o httpx-raw.txt": (
+                "httpx -rr request.txt -status-code -o httpx-raw.txt": (
                     ["request.txt"], ["httpx-raw.txt"],
                 ),
-                "pd-httpx -l urls.txt -status-code -sr -srd httpx-responses": (
+                "httpx -l urls.txt -status-code -sr -srd httpx-responses": (
                     ["urls.txt"], ["httpx-responses"],
                 ),
-                "pd-httpx -l urls.txt -screenshot -srd httpx-screenshots -config httpx-config.yaml": (
+                "httpx -l urls.txt -screenshot -srd httpx-screenshots -config httpx-config.yaml": (
                     ["urls.txt", "httpx-config.yaml"], ["httpx-screenshots"],
                 ),
                 "wafw00f -i urls.txt -o wafw00f.txt": (["urls.txt"], ["wafw00f.txt"]),
@@ -8314,6 +8314,27 @@ class TestOutputSignals:
         assert classify_line("104.21.4.35", command="cat ips.txt") == []
         assert classify_line("fw-vx1.darklab.sh", command="cat hosts.txt") == []
 
+    def test_help_output_does_not_feed_signals_or_entities(self):
+        assert classify_line("443/tcp open https", command="nmap -h") == []
+        assert classify_line("static (Status: 200) [Size: 100]", command="gobuster -h") == []
+        assert classify_line("warning: retrying request", cls="notice", command="whois -h whois.iana.org darklab.sh") == [
+            "warnings",
+        ]
+        assert classify_line("+ Server: nginx", command="nikto -h ip.darklab.sh -p 443 -ssl") == ["findings"]
+        assert classify_line("+ Target Hostname: ip.darklab.sh", command="nikto -Help") == []
+        assert classify_line(
+            "HTTP/2 200",
+            command='curl -H "Accept: application/json" https://darklab.sh',
+        ) == ["findings"]
+
+        classifier = OutputSignalClassifier("nmap -h")
+        metadata = classifier.classify_line("EXAMPLES: nmap -A scanme.nmap.org")
+
+        assert metadata["line_index"] == 0
+        assert metadata["command_root"] == "nmap"
+        assert "signals" not in metadata
+        assert "entities" not in metadata
+
     def test_classifies_dns_enumeration_findings_by_command(self):
         assert classify_line("ip.darklab.sh", command="dnsx -d darklab.sh -w dns.txt") == ["findings"]
         assert classify_line("www.darklab.sh", command="dnsx -d darklab.sh -w dns.txt") == ["findings"]
@@ -8330,7 +8351,7 @@ class TestOutputSignals:
     def test_classifies_web_enumeration_findings_by_command(self):
         assert classify_line(
             "https://ip.darklab.sh [200] [Nginx]",
-            command="pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect",
+            command="httpx -u https://ip.darklab.sh -title -status-code -tech-detect",
         ) == ["findings"]
         assert classify_line(
             "https://p.darklab.sh/js/privatebin.js?2.0.4",
@@ -8339,6 +8360,19 @@ class TestOutputSignals:
             "findings",
         ]
         assert classify_line("https://p.darklab.sh/js/'+t+'", command="katana -u https://p.darklab.sh") == []
+        assert classify_line(
+            "static               (Status: 301) [Size: 169] [--> https://tor-stats.darklab.sh/static/]",
+            command="gobuster dir -u https://tor-stats.darklab.sh -w common.txt",
+        ) == ["findings"]
+        assert classify_line(
+            "index.html           (Status: 200) [Size: 991254]",
+            command="gobuster dir -u https://tor-stats.darklab.sh -w common.txt",
+        ) == ["findings"]
+        gobuster_command = "gobuster dir -u https://tor-stats.darklab.sh"
+        assert classify_line("Progress: 1 / 1000", command=gobuster_command) == []
+        assert classify_line("[+] Timeout:                 10s", command=gobuster_command) == []
+        assert classify_line("[+] User Agent:              gobuster/3.8.2", command=gobuster_command) == []
+        assert classify_line("[+] Negative Status codes:   404", command=gobuster_command) == []
         assert classify_line(
             "[+] The site https://darklab.sh is behind Cloudflare (Cloudflare Inc.) WAF.",
             command="wafw00f https://darklab.sh",
@@ -8415,7 +8449,7 @@ class TestOutputSignals:
         examples = [
             (
                 "https://ip.darklab.sh [200] [Nginx]",
-                "pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect",
+                "httpx -u https://ip.darklab.sh -title -status-code -tech-detect",
                 ["findings"],
             ),
             (
@@ -8558,6 +8592,17 @@ class TestOutputSignals:
         by_type = {(item["type"], item["canonical_value"]): item for item in entities}
         assert by_type[("domain", "darklab.sh")]["start"] == 0
         assert by_type[("domain", "darklab.sh")]["end"] == len("darklab.sh")
+
+        nmap_classifier = OutputSignalClassifier("nmap darklab.sh")
+        assert "entities" not in nmap_classifier.classify_line("Starting Nmap 7.95 ( https://nmap.org )")
+        assert "entities" not in nmap_classifier.classify_line(
+            "Service detection performed. Please report any incorrect results at https://nmap.org/submit/ ."
+        )
+        nuclei_classifier = OutputSignalClassifier("nuclei -u https://darklab.sh")
+        assert "entities" not in nuclei_classifier.classify_line("\t\tprojectdiscovery.io")
+        assert "entities" in OutputSignalClassifier("curl https://projectdiscovery.io").classify_line(
+            "https://projectdiscovery.io"
+        )
 
     def test_nmap_input_file_sections_update_signal_target(self):
         classifier = OutputSignalClassifier("nmap -iL darklab_inputs.txt -sT")
@@ -9438,8 +9483,8 @@ class TestWorkflowInputLoading:
         assert subdomain["feature_required"] == "workspace"
         assert [step["cmd"] for step in subdomain["steps"]] == [
             "subfinder -d {{domain}} -silent -o subdomains.txt",
-            "pd-httpx -l subdomains.txt -silent -o live-urls.txt",
-            "pd-httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt",
+            "httpx -l subdomains.txt -silent -o live-urls.txt",
+            "httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt",
         ]
 
 

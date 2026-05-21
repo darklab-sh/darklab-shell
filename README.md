@@ -204,7 +204,7 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `nuclei` | Fast CVE/misconfiguration scanner using community templates |
 | `subfinder` | Passive subdomain enumeration (ProjectDiscovery) |
 | `amass` | OWASP subdomain enumeration, asset discovery, tracking, and visualization |
-| `pd-httpx` | HTTP/HTTPS probing — status codes, titles, tech detection (ProjectDiscovery). Renamed from `httpx` to avoid conflict with the Python `httpx` library |
+| `httpx` | HTTP/HTTPS probing — status codes, titles, tech detection (ProjectDiscovery) |
 | `dnsx` | Fast DNS resolution and record querying (ProjectDiscovery) |
 | `gobuster` | Directory, file, DNS, and vhost brute-forcing. Wordlists installed at `/usr/share/wordlists/seclists/` |
 | `fping` | Fast parallel ICMP ping — sweep multiple hosts or a CIDR range simultaneously |
@@ -261,7 +261,7 @@ masscan is a raw-packet-only scanner with no TCP connect fallback. It requires `
 
 `nuclei` stores its template library and cache in `$HOME` by default. The app runs nuclei as the `scanner` user with `HOME=/tmp` so generic scratch writes go to the tmpfs mount. The `-ud /tmp/nuclei-templates` flag is automatically injected if not already present so templates are stored and reused across runs within the same container session. Templates are lost on container restart and re-downloaded on the first nuclei run, which takes 30–60 seconds.
 
-When Files are enabled, ProjectDiscovery tools (`nuclei`, `subfinder`, `dnsx`, `pd-httpx`, `katana`, and `naabu`) are also launched with `XDG_CONFIG_HOME` pointed at the active session workspace's `tools/` folder. Tool-owned config, resume, and generated state paths therefore appear in Files under folders such as `/tools/katana`, `/tools/subfinder`, `/tools/dnsx`, `/tools/httpx`, `/tools/naabu`, and `/tools/nuclei` instead of disappearing into `/tmp/.config`. Terminal output rewrites absolute session-workspace paths back to user-facing paths such as `/tools/katana/resume.cfg`. Selected secondary output flags are workspace-aware too, including `katana` response/field directories, `pd-httpx` response/screenshot directories, `nuclei` response stores/exports/logs, `subfinder` per-domain output directories, and `naabu` auxiliary input files.
+When Files are enabled, ProjectDiscovery tools (`nuclei`, `subfinder`, `dnsx`, `httpx`, `katana`, and `naabu`) are also launched with `XDG_CONFIG_HOME` pointed at the active session workspace's `tools/` folder. Tool-owned config, resume, and generated state paths therefore appear in Files under folders such as `/tools/katana`, `/tools/subfinder`, `/tools/dnsx`, `/tools/httpx`, `/tools/naabu`, and `/tools/nuclei` instead of disappearing into `/tmp/.config`. Terminal output rewrites absolute session-workspace paths back to user-facing paths such as `/tools/katana/resume.cfg`. Selected secondary output flags are workspace-aware too, including `katana` response/field directories, `httpx` response/screenshot directories, `nuclei` response stores/exports/logs, `subfinder` per-domain output directories, and `naabu` auxiliary input files.
 
 ---
 

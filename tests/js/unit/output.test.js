@@ -342,6 +342,9 @@ describe('appendLine', () => {
     expect(line?.dataset.signalTarget).toBe('ip.darklab.sh')
     expect(token?.dataset.atlasEntityType).toBe('domain')
     expect(token?.dataset.atlasEntityValue).toBe('ip.darklab.sh')
+    expect(token?.tagName).toBe('SPAN')
+    expect(token?.getAttribute('role')).toBe('button')
+    expect(token?.getAttribute('tabindex')).toBe('0')
     expect(token?.classList.contains('chip')).toBe(true)
     expect(token?.classList.contains('chip-action')).toBe(true)
 
@@ -366,6 +369,31 @@ describe('appendLine', () => {
       summaries: 0,
     })
     expect(_getTabs()[0]._outputSignalCountsValid).toBe(true)
+  })
+
+  it('keeps highlighted entity text selectable with the rest of the output line', () => {
+    const { appendLine } = loadOutputFns()
+
+    appendLine('https://tor-stats.darklab.sh/static/', '', 'tab-1', {
+      entities: [{
+        type: 'domain',
+        value: 'tor-stats.darklab.sh',
+        canonical_value: 'tor-stats.darklab.sh',
+        start: 8,
+        end: 28,
+      }],
+    })
+
+    const content = document.querySelector('.line-content')
+    const selection = window.getSelection()
+    const range = document.createRange()
+    expect(content?.textContent).toBe('https://tor-stats.darklab.sh/static/')
+
+    range.selectNodeContents(content)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+
+    expect(selection?.toString()).toBe('https://tor-stats.darklab.sh/static/')
   })
 
   it('falls back to value matching when ANSI makes entity offsets stale', () => {

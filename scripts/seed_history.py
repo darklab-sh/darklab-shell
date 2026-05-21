@@ -141,7 +141,7 @@ def _fake_output_for_command(command: str) -> tuple[list[str], int]:
             "ip.darklab.sh",
             "tor-stats.darklab.sh",
         ], 0)
-    if root in {"curl", "wget", "pd-httpx", "whatweb", "katana"}:
+    if root in {"curl", "wget", "httpx", "whatweb", "katana"}:
         return ([
             "HTTP/2 200",
             "content-type: text/html; charset=utf-8",
