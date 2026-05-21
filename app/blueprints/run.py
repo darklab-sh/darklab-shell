@@ -15,6 +15,7 @@ import subprocess
 import threading
 import uuid
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import TypedDict
@@ -68,6 +69,7 @@ from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, run_kind_fo
 from services.runs.output_model import (
     LineEvent,
     LineKind,
+    from_wire,
     legacy_cls_for_event,
     line_event_from_legacy,
     to_legacy_entry,
@@ -380,12 +382,61 @@ def _broker_output_payload(event_type, text: str = "", *, cls: str = "", metadat
     return payload
 
 
+_SEARCH_ENTITY_MAX_BYTES = 4096
+
+
+def _line_events_from_output_entries(entries) -> list[LineEvent]:
+    events = []
+    for line in entries or []:
+        if line is None:
+            continue
+        if isinstance(line, dict):
+            events.append(from_wire(line))
+        else:
+            events.append(line_event_from_legacy(str(line)))
+    return events
+
+
+def _bounded_entity_search_values(values: Sequence[str], max_bytes: int = _SEARCH_ENTITY_MAX_BYTES) -> list[str]:
+    selected: list[str] = []
+    used = 0
+    for value in values:
+        encoded = value.encode("utf-8")
+        separator = 1 if selected else 0
+        if used + separator + len(encoded) > max_bytes:
+            continue
+        selected.append(value)
+        used += separator + len(encoded)
+    return selected
+
+
+def _search_text_from_events(events: Sequence[LineEvent]) -> str:
+    lines = [event.text for event in events]
+    entity_values = []
+    seen_entities = set()
+    for event in events:
+        for entity in event.entities:
+            canonical_value = entity.canonical_value.strip()
+            if not canonical_value or canonical_value == "<redacted>":
+                continue
+            key = (entity.type.strip(), canonical_value)
+            if not key[0] or key in seen_entities:
+                continue
+            seen_entities.add(key)
+            entity_values.append(key)
+    sorted_values = []
+    seen_values = set()
+    for _, value in sorted(entity_values):
+        if value in seen_values:
+            continue
+        seen_values.add(value)
+        sorted_values.append(value)
+    lines.extend(_bounded_entity_search_values(sorted_values))
+    return "\n".join(lines)
+
+
 def _extract_output_search_text(preview_lines):
-    return "\n".join(
-        str(line.get("text", "")) if isinstance(line, dict) else str(line)
-        for line in preview_lines
-        if line is not None
-    )
+    return _search_text_from_events(_line_events_from_output_entries(preview_lines))
 
 
 def _link_active_project_run_entities_for_finalize(conn, session_id, project_id, run_id):

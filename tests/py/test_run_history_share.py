@@ -3689,6 +3689,63 @@ class TestRunStreaming:
 
 
 class TestRunOutputArtifacts:
+    def test_history_search_finds_entity_canonical_values_indexed_from_run_output(self):
+        client = get_client()
+        session_id = "sess-output-search-entity"
+        run_id = "run-output-search-entity"
+
+        class FakeCapture:
+            preview_lines = [{
+                "text": "resolved alias target",
+                "cls": "",
+                "tsC": "",
+                "tsE": "",
+                "entities": [{
+                    "type": "domain",
+                    "value": "alias target",
+                    "canonical_value": "canonical-only.example",
+                    "confidence": "high",
+                }],
+            }]
+            preview_truncated = False
+            output_line_count = 1
+            full_output_available = False
+            full_output_truncated = False
+            full_output_bytes = 0
+            artifact_rel_path = None
+
+            def finalize(self):
+                return None
+
+        run_routes._save_completed_run(
+            run_id,
+            session_id,
+            "lookup alias-target",
+            "2026-05-21T00:00:00Z",
+            "2026-05-21T00:00:01Z",
+            0,
+            FakeCapture(),
+            link_active_project=False,
+        )
+
+        with db_connect() as conn:
+            row = conn.execute(
+                "SELECT output_search_text FROM runs WHERE id = ?",
+                (run_id,),
+            ).fetchone()
+        assert row is not None
+        assert "canonical-only.example" in row["output_search_text"]
+
+        resp = client.get(
+            "/history?q=canonical-only.example&include_total=1",
+            headers={"X-Session-ID": session_id},
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["total_count"] == 1
+        assert data["runs"][0]["id"] == run_id
+
     def _insert_run_with_artifact(self, run_id, session_id="sess-artifact"):
         ensure_run_output_dir()
         artifact_path = Path(RUN_OUTPUT_DIR) / f"{run_id}.txt.gz"

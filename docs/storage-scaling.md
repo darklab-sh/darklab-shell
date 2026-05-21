@@ -124,6 +124,20 @@ Postgres is still the better answer when the pain is concurrent writes, shared p
 
 FTS deserves separate treatment on SQLite. The measured FTS shadow tables consume about 197 MB for about 107 MB of `output_search_text`, so search doubles a large part of the run-output footprint. Postgres does not reproduce SQLite FTS5 directly; it uses trigram indexes that preserve the current command/output lookup behavior.
 
+## Run Output Artifact Format
+
+Full run output artifacts live under `data_dir/run-output` as gzip-compressed JSONL files. New artifacts start with a small header line:
+
+```json
+{"v":1,"created":"2026-05-21T00:00:00Z","run_id":"<run-id>"}
+```
+
+Every following line is one versioned output event. The event keeps the legacy `text`, `cls`, `tsC`, and `tsE` fields for compatibility, and also includes typed `kind` and `role` fields so newer code can tell semantic output (`warn`, `error`, `notice`) apart from display roles such as prompt echoes, PTY markers, and built-in key/value rows.
+
+Older artifacts did not have the header and may contain either legacy JSON rows or plain text rows. darklab_shell does not rewrite those files in place. Readers detect the shape when they open the artifact: headered files skip the first line, headerless JSON rows are upgraded through the compatibility parser, and plain text rows are treated as normal body output.
+
+The inline `runs.output_preview` column stays in the older JSON-array shape so History and run-detail reads remain cheap and stable. The searchable `runs.output_search_text` value is derived from the structured events and includes validated entity canonical values when the run captured them, while the SQLite FTS table itself keeps the same schema.
+
 ## Operating Guidance
 
 Use `/diag` Storage breakdown for point-in-time analysis and `/metrics` for trend graphs. On SQLite, the most useful signals are total database size, `runs` allocation, `runs_fts_*` allocation, snapshot bytes, output artifact bytes, largest run payloads, and freelist bytes. On Postgres, watch relation sizes in `/diag`, table row/size gauges in `/metrics`, largest run payloads, and artifact bytes.

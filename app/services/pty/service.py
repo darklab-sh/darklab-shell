@@ -38,7 +38,7 @@ from services.pty.capture import (
     PtyTerminalCapture as _BasePtyTerminalCapture,
     _terminal_history_line_limit,
 )
-from services.runs.output_model import LineKind, line_event_from_legacy, to_legacy_entry
+from services.runs.output_model import LineKind, from_wire, line_event_from_legacy, to_wire
 from services import metrics as app_metrics
 
 log = logging.getLogger("shell")
@@ -485,21 +485,30 @@ def _load_active_pty_meta_for_session(run_id: str, session_id: str) -> tuple[dic
     return meta, ""
 
 
+def _pty_snapshot_wire_entry(entry: object) -> dict[str, object]:
+    if isinstance(entry, dict):
+        return to_wire(from_wire(entry))
+    return to_wire(line_event_from_legacy(str(entry)))
+
+
+def _pty_snapshot_wire_entries(entries: Sequence[object]) -> list[dict[str, object]]:
+    return [_pty_snapshot_wire_entry(entry) for entry in entries]
+
+
 def _limited_snapshot_entries(entries: Sequence[dict[str, object]], ansi_snapshot: str) -> list[dict[str, object]]:
     if ansi_snapshot:
         return []
     fallback_entry_limit = _pty_snapshot_fallback_entry_limit()
     if len(entries) <= fallback_entry_limit:
-        return [dict(entry) for entry in entries]
+        return _pty_snapshot_wire_entries(entries)
     return [
-        to_legacy_entry(
+        to_wire(
             line_event_from_legacy(
                 "[earlier PTY snapshot entries omitted; terminal snapshot resumes visually]",
                 kind=LineKind.notice,
             ),
-            include_timestamps=False,
         ),
-        *[dict(entry) for entry in entries[-fallback_entry_limit:]],
+        *_pty_snapshot_wire_entries(entries[-fallback_entry_limit:]),
     ]
 
 
@@ -515,7 +524,7 @@ def _pty_snapshot_payload_from_run(run: PtyRun, *, distributed: bool = False) ->
         "rows": run.rows,
         "cols": run.cols,
         "after_event_id": run.capture_event_id,
-        "entries": _limited_snapshot_entries(entries, ansi_snapshot) if distributed else entries,
+        "entries": _limited_snapshot_entries(entries, ansi_snapshot) if distributed else _pty_snapshot_wire_entries(entries),
         "snapshot_format": "ansi" if ansi_snapshot else "plain",
         "ansi_snapshot": ansi_snapshot,
         "snapshot_truncated": snapshot_truncated,
@@ -578,6 +587,7 @@ def _load_pty_snapshot(run_id: str, session_id: str) -> dict[str, Any] | None:
     if not isinstance(payload, dict) or payload.get("session_id") != session_id:
         return None
     response = dict(payload)
+    response["entries"] = _pty_snapshot_wire_entries(response.get("entries") or [])
     try:
         created_at = float(response.get("created_at", 0) or 0)
     except (TypeError, ValueError):

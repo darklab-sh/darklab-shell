@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,150
+- behavior tests: 3,155
 - docs/inventory meta-tests: 32
-- `pytest`: 1706 (1674 behavior + 32 meta)
+- `pytest`: 1711 (1679 behavior + 32 meta)
 - `vitest`: 1224
 - `playwright`: 252
-- total: 3,182
+- total: 3,187
 
 This document is organized in two parts:
 
@@ -756,9 +756,13 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunOutputCapture.test_full_output_artifact_round_trips_lines` | Checks that full output artifact round trips lines. |
 | `TestRunOutputCapture.test_full_output_artifact_round_trips_signal_metadata` | Verifies that persisted full-output artifacts preserve backend signal metadata with each line. |
 | `TestRunOutputCapture.test_add_event_preserves_legacy_output_shape` | Verifies typed run-output events still write the legacy preview and artifact shape. |
-| `TestRunOutputCapture.test_legacy_add_line_matches_typed_add_event_bytes` | Verifies legacy `add_line` output and typed `add_event` output stay byte-identical. |
+| `TestRunOutputCapture.test_legacy_add_line_matches_typed_add_event_bytes` | Verifies legacy `add_line` output and typed `add_event` output write matching event rows after the artifact header. |
 | `TestRunOutputCapture.test_full_output_artifact_respects_byte_cap` | Checks that full output artifact respects byte cap. |
 | `TestRunOutputCapture.test_full_output_artifact_loads_legacy_plain_text_rows` | Checks that full output artifact loads legacy plain text rows. |
+| `TestRunOutputCapture.test_full_output_artifact_loads_headerless_legacy_json_rows` | Verifies headerless legacy JSON artifacts still decode through the line-event compatibility path. |
+| `TestRunOutputCapture.test_full_output_artifact_loads_enveloped_wire_rows` | Verifies headered v1 artifact files skip the header and decode versioned line-event rows. |
+| `TestRunOutputCapture.test_empty_full_output_capture_does_not_create_artifact_file` | Verifies empty persisted-output captures do not create gzip artifact files. |
+| `TestRunOutputCapture.test_search_text_from_events_includes_deduped_capped_entities` | Verifies run-output search text includes deduped entity canonical values while skipping oversized and redacted values. |
 | `TestRunOutputCapture.test_missing_hints_file_returns_empty_list` | Checks that missing hints file returns empty list. |
 | `TestRunOutputCapture.test_hints_loader_ignores_blank_lines_and_comments` | Checks that hints loader ignores blank lines and comments. |
 | `TestRunOutputCapture.test_hints_loader_skips_workspace_section_when_disabled` | Verifies that workspace-scoped welcome hints are hidden when Files are disabled and restored when Files are enabled. |
@@ -1719,6 +1723,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestRunStreaming.test_session_variables_expand_before_validation_and_preserve_typed_history` | Verifies that `/runs` expands session variables before launch, emits the expanded-command notice, and keeps typed command history. |
 | `TestRunStreaming.test_session_variables_reject_undefined_reference_before_spawn` | Verifies that undefined session-variable references fail before spawning a process. |
 | `TestRunStreaming.test_session_variables_validate_policy_after_expansion` | Verifies that command policy receives the expanded command rather than the typed variable reference. |
+| `TestRunOutputArtifacts.test_history_search_finds_entity_canonical_values_indexed_from_run_output` | Verifies History search finds canonical entity values indexed from structured run output. |
 | `TestRunOutputArtifacts.test_delete_run_removes_output_artifact` | Checks that delete run removes output artifact. |
 | `TestRunOutputArtifacts.test_clear_history_removes_output_artifacts_for_session` | Checks that clear history removes output artifacts for session. |
 | `TestHistoryIsolation.test_history_only_returns_runs_for_current_session` | Checks that history only returns runs for current session. |

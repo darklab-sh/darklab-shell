@@ -800,13 +800,22 @@ function _ptyHistoryLineMetadata(entry) {
 
 function _ptyEntryForTranscript(entry) {
   if (entry && typeof entry === 'object') {
+    const model = window.DarklabRunOutputModel || null;
+    const event = model && typeof model.fromWireLineEvent === 'function'
+      ? model.fromWireLineEvent(entry)
+      : null;
+    const legacy = event && model && typeof model.toLegacyWireLineEvent === 'function'
+      ? model.toLegacyWireLineEvent(event)
+      : entry;
     const line = {
-      text: String(entry.text ?? ''),
-      cls: String(entry.cls || ''),
-      metadata: _ptyHistoryLineMetadata(entry),
+      text: String((event && event.text) ?? entry.text ?? ''),
+      cls: String((legacy && legacy.cls) || entry.cls || ''),
+      metadata: _ptyHistoryLineMetadata(legacy || entry),
     };
-    if (typeof entry.kind === 'string' && entry.kind) line.kind = entry.kind;
-    if (typeof entry.role === 'string' && entry.role) line.role = entry.role;
+    if (event && event.kind) line.kind = event.kind;
+    else if (typeof entry.kind === 'string' && entry.kind) line.kind = entry.kind;
+    if (event && event.role) line.role = event.role;
+    else if (typeof entry.role === 'string' && entry.role) line.role = entry.role;
     return line;
   }
   return { text: String(entry ?? ''), cls: '', metadata: null };

@@ -70,7 +70,7 @@ from services.history.permalinks import (
 )
 from core.output_signals import OutputSignalClassifier, classify_line, command_root, extract_entities, extract_target
 from core.redaction import RAW_ONLY_INTEL_PLACEHOLDER, line_entries_from_events, omit_raw_only_line_entries
-from services.runs.output_model import LineEvent, LineKind, LineSignal
+from services.runs.output_model import LineEvent, LineKind, LineRole, LineSignal, from_wire
 from services.runs.output_store import (
     RunOutputCapture,
     RUN_OUTPUT_DIR,
@@ -8559,6 +8559,11 @@ class TestRunOutputCapture:
                 if name.startswith("test-run-output-"):
                     os.unlink(os.path.join(RUN_OUTPUT_DIR, name))
 
+    @staticmethod
+    def _artifact_rows(rel_path):
+        with gzip.open(os.path.join(RUN_OUTPUT_DIR, rel_path), "rt", encoding="utf-8") as handle:
+            return [json.loads(line) for line in handle.read().splitlines()]
+
     def test_preview_keeps_only_last_n_lines(self):
         capture = RunOutputCapture("test-run-output-preview", preview_limit=2, persist_full_output=False, full_output_max_bytes=0)
         capture.add_line("one")
@@ -8625,6 +8630,13 @@ class TestRunOutputCapture:
             {"text": "alpha", "cls": "", "tsC": "", "tsE": ""},
             {"text": "beta", "cls": "", "tsC": "", "tsE": ""},
         ]
+        rows = self._artifact_rows(artifact_rel_path)
+        assert rows[0]["v"] == 1
+        assert rows[0]["run_id"] == "test-run-output-artifact"
+        assert "created" in rows[0]
+        assert rows[1]["v"] == 1
+        assert rows[1]["kind"] == "info"
+        assert rows[1]["role"] == "body"
 
     def test_full_output_artifact_round_trips_signal_metadata(self):
         capture = RunOutputCapture("test-run-output-signals", preview_limit=5, persist_full_output=True, full_output_max_bytes=0)
@@ -8719,6 +8731,7 @@ class TestRunOutputCapture:
         typed_capture.add_event(LineEvent(
             text="section",
             kind=LineKind.info,
+            role=LineRole.section_header,
             legacy_cls="builtin-section",
             ts_clock="12:00:00",
             ts_elapsed="+0.1s",
@@ -8729,14 +8742,12 @@ class TestRunOutputCapture:
         assert list(legacy_capture.preview_lines) == list(typed_capture.preview_lines)
         assert legacy_capture.artifact_rel_path is not None
         assert typed_capture.artifact_rel_path is not None
-        with gzip.open(os.path.join(RUN_OUTPUT_DIR, legacy_capture.artifact_rel_path), "rb") as legacy_file:
-            legacy_bytes = legacy_file.read()
-        with gzip.open(os.path.join(RUN_OUTPUT_DIR, typed_capture.artifact_rel_path), "rb") as typed_file:
-            typed_bytes = typed_file.read()
-        assert legacy_bytes == typed_bytes
+        legacy_rows = self._artifact_rows(legacy_capture.artifact_rel_path)
+        typed_rows = self._artifact_rows(typed_capture.artifact_rel_path)
+        assert legacy_rows[1:] == typed_rows[1:]
 
     def test_full_output_artifact_respects_byte_cap(self):
-        capture = RunOutputCapture("test-run-output-cap", preview_limit=10, persist_full_output=True, full_output_max_bytes=60)
+        capture = RunOutputCapture("test-run-output-cap", preview_limit=10, persist_full_output=True, full_output_max_bytes=160)
         capture.add_line("1234")
         capture.add_line("5678")
         capture.finalize()
@@ -8759,6 +8770,84 @@ class TestRunOutputCapture:
             {"text": "legacy two", "cls": "", "tsC": "", "tsE": ""},
         ]
         assert [event.text for event in load_full_output_events(artifact_rel_path)] == ["legacy one", "legacy two"]
+
+    def test_full_output_artifact_loads_headerless_legacy_json_rows(self):
+        artifact_rel_path = "test-run-output-legacy-json.txt.gz"
+        path = os.path.join(RUN_OUTPUT_DIR, artifact_rel_path)
+        os.makedirs(RUN_OUTPUT_DIR, exist_ok=True)
+        with gzip.open(path, "wt", encoding="utf-8") as f:
+            f.write(json.dumps({"text": "legacy one", "cls": "notice"}) + "\n")
+            f.write(json.dumps({"text": "legacy two", "cls": ""}) + "\n")
+
+        assert load_full_output_entries(artifact_rel_path) == [
+            {"text": "legacy one", "cls": "notice", "tsC": "", "tsE": ""},
+            {"text": "legacy two", "cls": "", "tsC": "", "tsE": ""},
+        ]
+        events = load_full_output_events(artifact_rel_path)
+        assert [event.text for event in events] == ["legacy one", "legacy two"]
+        assert events[0].kind == LineKind.notice
+
+    def test_full_output_artifact_loads_enveloped_wire_rows(self):
+        artifact_rel_path = "test-run-output-envelope.txt.gz"
+        path = os.path.join(RUN_OUTPUT_DIR, artifact_rel_path)
+        os.makedirs(RUN_OUTPUT_DIR, exist_ok=True)
+        with gzip.open(path, "wt", encoding="utf-8") as f:
+            f.write(json.dumps({"v": 1, "created": "2026-05-21T00:00:00Z", "run_id": "test-run-output-envelope"}) + "\n")
+            f.write(json.dumps({
+                "v": 1,
+                "text": "enveloped",
+                "cls": "notice",
+                "tsC": "",
+                "tsE": "",
+                "kind": "notice",
+                "role": "body",
+            }) + "\n")
+
+        assert load_full_output_entries(artifact_rel_path) == [
+            {"text": "enveloped", "cls": "notice", "tsC": "", "tsE": ""},
+        ]
+        events = load_full_output_events(artifact_rel_path)
+        assert len(events) == 1
+        assert events[0].text == "enveloped"
+        assert events[0].kind == LineKind.notice
+
+    def test_empty_full_output_capture_does_not_create_artifact_file(self):
+        capture = RunOutputCapture(
+            "test-run-output-empty",
+            preview_limit=10,
+            persist_full_output=True,
+            full_output_max_bytes=0,
+        )
+        assert capture.artifact_rel_path == "test-run-output-empty.txt.gz"
+        assert not os.path.exists(os.path.join(RUN_OUTPUT_DIR, capture.artifact_rel_path))
+
+        capture.finalize()
+
+        assert capture.artifact_rel_path is None
+
+    def test_search_text_from_events_includes_deduped_capped_entities(self):
+        from blueprints import run as run_blueprint
+
+        event = from_wire({
+            "text": "line text",
+            "entities": [
+                {"type": "domain", "canonical_value": "beta.example", "value": "beta.example", "confidence": "high"},
+                {"type": "ip", "canonical_value": "192.0.2.10", "value": "192.0.2.10", "confidence": "medium"},
+                {"type": "domain", "canonical_value": "beta.example", "value": "beta.example", "confidence": "high"},
+                {"type": "domain", "canonical_value": "<redacted>", "value": "<redacted>", "confidence": "high"},
+            ],
+        })
+        long_value = "x" * 5000
+        capped_event = from_wire({
+            "text": "second line",
+            "entities": [{"type": "domain", "canonical_value": long_value, "value": long_value, "confidence": "medium"}],
+        })
+
+        search_text = run_blueprint._search_text_from_events([event, capped_event])
+
+        assert search_text.splitlines() == ["line text", "second line", "beta.example", "192.0.2.10"]
+        assert long_value not in search_text
+        assert "<redacted>" not in search_text
 
     def test_missing_hints_file_returns_empty_list(self):
         with mock.patch("services.commands.registry.APP_HINTS_FILE", "/nonexistent/app_hints.txt"):

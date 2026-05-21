@@ -11,15 +11,17 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
+from datetime import UTC, datetime
 import gzip
 import json
 import os
 
 from config import resolve_data_dir
-from services.runs.output_model import LineEvent, from_wire, line_event_from_legacy, to_legacy_wire
+from services.runs.output_model import LineEvent, from_wire, line_event_from_legacy, to_legacy_wire, to_wire
 
 DATA_DIR = resolve_data_dir()
 RUN_OUTPUT_DIR = os.path.join(DATA_DIR, "run-output")
+RUN_OUTPUT_ARTIFACT_FORMAT_VERSION = 1
 
 
 def ensure_run_output_dir():
@@ -52,10 +54,7 @@ class RunOutputCapture:
         self._artifact_file = None
 
         if self.persist_full_output:
-            ensure_run_output_dir()
             self.artifact_rel_path = f"{run_id}.txt.gz"
-            artifact_path = get_artifact_path(self.artifact_rel_path)
-            self._artifact_file = gzip.open(artifact_path, "wt", encoding="utf-8")
 
     @staticmethod
     def _entry_storage_bytes(entry: dict[str, object]) -> int:
@@ -107,6 +106,34 @@ class RunOutputCapture:
         if self.preview_max_bytes > 0:
             while self.preview_bytes > self.preview_max_bytes and len(self.preview_lines) > 1:
                 self._drop_oldest_preview_line()
+
+    @staticmethod
+    def _jsonl_bytes(payload: dict[str, object]) -> int:
+        return len((json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8"))
+
+    def _artifact_header(self) -> dict[str, object]:
+        return {
+            "v": RUN_OUTPUT_ARTIFACT_FORMAT_VERSION,
+            "created": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            "run_id": self.run_id,
+        }
+
+    def _ensure_artifact_file(self) -> bool:
+        if not self.persist_full_output or self._artifact_file:
+            return bool(self._artifact_file)
+        if not self.artifact_rel_path:
+            self.artifact_rel_path = f"{self.run_id}.txt.gz"
+        header = self._artifact_header()
+        header_bytes = self._jsonl_bytes(header)
+        if self.full_output_max_bytes and header_bytes >= self.full_output_max_bytes:
+            self.full_output_truncated = True
+            return False
+        ensure_run_output_dir()
+        artifact_path = get_artifact_path(self.artifact_rel_path)
+        self._artifact_file = gzip.open(artifact_path, "wt", encoding="utf-8")
+        self._artifact_file.write(json.dumps(header, separators=(",", ":")) + "\n")
+        self.full_output_bytes += header_bytes
+        return True
 
     @staticmethod
     def _normalize_entities(entities: Sequence[Mapping[str, object]] | None) -> list[dict[str, object]]:
@@ -167,17 +194,21 @@ class RunOutputCapture:
 
         self._append_preview_entry(entry)
 
-        if not self._artifact_file:
+        if not self.persist_full_output or not self._ensure_artifact_file():
+            return
+        artifact_file = self._artifact_file
+        if artifact_file is None:
             return
 
-        serialized = json.dumps(entry, separators=(",", ":"))
+        wire_entry = to_wire(storage_event)
+        serialized = json.dumps(wire_entry, separators=(",", ":"))
         encoded = (serialized + "\n").encode("utf-8")
         if self.full_output_max_bytes and self.full_output_bytes + len(encoded) > self.full_output_max_bytes:
             self.full_output_truncated = True
             self.close()
             return
 
-        self._artifact_file.write(serialized + "\n")
+        artifact_file.write(serialized + "\n")
         self.full_output_bytes += len(encoded)
         self.full_output_available = True
 
@@ -215,15 +246,27 @@ def load_full_output_events(rel_path: str) -> list[LineEvent]:
         rows = f.read().splitlines()
 
     events: list[LineEvent] = []
-    for row in rows:
+    for index, row in enumerate(rows):
         try:
             item = json.loads(row)
         except json.JSONDecodeError:
             return [line_event_from_legacy(line) for line in rows]
+        if index == 0 and _is_artifact_header(item):
+            continue
         if not isinstance(item, dict) or not isinstance(item.get("text"), str):
             return [line_event_from_legacy(line) for line in rows]
         events.append(from_wire(item))
     return events
+
+
+def _is_artifact_header(item: object) -> bool:
+    return (
+        isinstance(item, dict)
+        and item.get("v") == RUN_OUTPUT_ARTIFACT_FORMAT_VERSION
+        and isinstance(item.get("created"), str)
+        and isinstance(item.get("run_id"), str)
+        and "text" not in item
+    )
 
 
 def load_full_output_entries(rel_path: str) -> list[dict[str, object]]:
