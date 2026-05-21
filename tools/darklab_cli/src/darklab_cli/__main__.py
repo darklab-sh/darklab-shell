@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import getpass
 import json
 from pathlib import Path
 import shlex
 import sys
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .client import DarklabClient, DarklabCliError, die, iter_sse_events, load_config, print_json
 
@@ -458,7 +460,9 @@ def _schedule(client: DarklabClient, args: argparse.Namespace) -> int:
             }
             return _print_schedule(client.request("POST", "/schedules", body=body), args.format)
         case "info":
-            return _print_schedule(client.request("GET", f"/schedules/{args.schedule_id}"), args.format)
+            schedule_payload = client.request("GET", f"/schedules/{args.schedule_id}")
+            fires_payload = client.request("GET", f"/schedules/{args.schedule_id}/fires", params={"limit": 5, "offset": 0})
+            return _print_schedule_info(schedule_payload, fires_payload, args.format)
         case "pause":
             payload = client.request(
                 "PATCH",
@@ -520,6 +524,60 @@ def _print_schedule(payload: dict[str, Any], output_format: str) -> int:
     return 0
 
 
+def _print_schedule_info(payload: dict[str, Any], fires_payload: dict[str, Any], output_format: str) -> int:
+    if output_format == "json":
+        combined = dict(payload) if isinstance(payload, dict) else {}
+        if isinstance(fires_payload, dict):
+            combined["fires"] = fires_payload.get("fires", [])
+            combined["fires_total"] = fires_payload.get("total")
+            combined["fires_has_more"] = fires_payload.get("has_more")
+        return _print_payload(combined, "json")
+
+    schedule = payload.get("schedule") if isinstance(payload, dict) else {}
+    if not isinstance(schedule, dict):
+        return 0
+    timezone_name = str(schedule.get("timezone") or "UTC")
+    next_fires = payload.get("next_fires") if isinstance(payload, dict) else []
+    if not isinstance(next_fires, list):
+        next_fires = []
+    fires = fires_payload.get("fires") if isinstance(fires_payload, dict) else []
+    if not isinstance(fires, list):
+        fires = []
+
+    _print_detail_section("Schedule", (
+        ("ID", schedule.get("id")),
+        ("Label", schedule.get("label") or "(none)"),
+        ("Status", _schedule_status(schedule)),
+        ("Created", _format_schedule_time(schedule.get("created"), timezone_name)),
+        ("Updated", _format_schedule_time(schedule.get("updated"), timezone_name)),
+    ))
+    _print_detail_section("Command", (("", schedule.get("command_text")),))
+    _print_detail_section("Cadence", (
+        ("Preset", schedule.get("cadence_preset") or "custom"),
+        ("Cron", schedule.get("cron_expr")),
+        ("Timezone", timezone_name),
+        ("Next run", _format_schedule_time(schedule.get("next_run_at"), timezone_name)),
+        ("Next fires", "\n".join(_format_schedule_time(value, timezone_name) for value in next_fires[:3])),
+    ))
+    _print_detail_section("Last Fire", (
+        ("Last fired", _format_schedule_time(schedule.get("last_run_at"), timezone_name) or "(never)"),
+        ("Last run", schedule.get("last_run_id") or "(none)"),
+        ("Failures", schedule.get("consecutive_failures")),
+        ("Last error", schedule.get("last_error")),
+    ))
+    print("Recent Fires")
+    recent_fires = [
+        {**fire, "fired_at": _format_schedule_time(fire.get("fired_at"), timezone_name)}
+        for fire in fires
+        if isinstance(fire, dict)
+    ]
+    if recent_fires:
+        _print_table(recent_fires, ("fired_at", "status", "run_id", "reason"))
+    else:
+        print("  none")
+    return 0
+
+
 def _print_schedule_fire(payload: dict[str, Any], output_format: str) -> int:
     if output_format == "json":
         return _print_payload(payload, "json")
@@ -531,6 +589,56 @@ def _print_schedule_fire(payload: dict[str, Any], output_format: str) -> int:
     if status or fired_at:
         print(f"fire: {status} {fired_at}".rstrip())
     return 0
+
+
+def _schedule_status(schedule: dict[str, Any]) -> str:
+    if schedule.get("enabled"):
+        return "active"
+    reason = str(schedule.get("paused_reason") or "").strip()
+    return f"paused ({reason})" if reason else "paused"
+
+
+def _print_detail_section(title: str, rows: tuple[tuple[str, Any], ...]) -> None:
+    print(title)
+    labels = [label for label, value in rows if label and _format_detail_value(value)]
+    label_width = max((len(label) for label in labels), default=0)
+    for label, value in rows:
+        rendered = _format_detail_value(value)
+        if not rendered:
+            continue
+        if not label:
+            print(f"  {rendered}")
+            continue
+        if "\n" in rendered:
+            first, *rest = rendered.splitlines()
+            print(f"  {label + ':':<{label_width + 1}}  {first}")
+            for line in rest:
+                print(f"  {'':<{label_width + 1}}  {line}")
+        else:
+            print(f"  {label + ':':<{label_width + 1}}  {rendered}")
+    print()
+
+
+def _format_detail_value(value: Any) -> str:
+    if value in (None, "", []):
+        return ""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    return str(value)
+
+
+def _format_schedule_time(value: Any, timezone_name: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=ZoneInfo("UTC"))
+        local = parsed.astimezone(ZoneInfo(timezone_name or "UTC"))
+    except (ValueError, ZoneInfoNotFoundError):
+        return text
+    return local.strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
 def _watch(client: DarklabClient, args: argparse.Namespace) -> int:

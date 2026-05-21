@@ -120,6 +120,7 @@ Useful places to inspect scheduler behavior:
 - **Schedules modal** — current schedules, next fires, paused state, and fire audit rows
 - **History** — `scheduled` badges on runs created by a schedule
 - **Run Details** — the originating schedule link for scheduled runs
+- `darklab schedule info <id>` — one schedule's full command, cadence, next fires, last fire, and recent audit rows
 - `/api/v1/schedules/<id>/fires` or `darklab schedule fires <id>` — paged audit rows
 - logs — `SCHEDULE_CREATED`, `SCHEDULE_UPDATED`, `SCHEDULE_DELETED`, `SCHEDULE_RUN_NOW`, `API_SCHEDULE_CREATED`, `API_SCHEDULE_UPDATED`, `API_SCHEDULE_DELETED`, `API_SCHEDULE_RUN_NOW`, `BUILTIN_SCHEDULE_CREATED`, `BUILTIN_SCHEDULE_PAUSED`, `BUILTIN_SCHEDULE_RESUMED`, `BUILTIN_SCHEDULE_DELETED`, `BUILTIN_SCHEDULE_RUN_NOW`, `SCHEDULE_FIRED`, `SCHEDULE_FIRE_SKIPPED_OVERLAP`, `SCHEDULE_FIRE_FAILED`, `SCHEDULE_FAILURE_NOTIFICATION_ERROR`, `SCHEDULE_REQUEST_REJECTED`, `API_SCHEDULE_REJECTED`, `BUILTIN_SCHEDULE_REJECTED`, `SCHEDULE_DISABLED_REVOKED`, `SCHEDULE_RECOVERY_SKIPPED_INVALID_NEXT_RUN`, `SCHEDULE_RECOVERY_SKIPPED_STALE`, `SCHEDULER_WORKER_STARTED`, `SCHEDULER_WORKER_LOCK_HELD`, `SCHEDULER_WORKER_STOPPED`, `SCHEDULER_WORKER_CRASHED`, and `SCHEDULER_RECOVERY_APPLIED`
 

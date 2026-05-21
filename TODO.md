@@ -26,7 +26,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [PWA install and service-worker push](#pwa-install-and-service-worker-push)
   - [Engagement report builder](#engagement-report-builder)
 - [Architecture](#architecture)
-  - [Structured output model](#structured-output-model)
   - [Unified terminal built-in lifecycle](#unified-terminal-built-in-lifecycle)
   - [Plugin-style helper command registry](#plugin-style-helper-command-registry)
   - [Lightweight Jinja base template](#lightweight-jinja-base-template)
@@ -36,80 +35,152 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-- **Status Monitor Command Constellation full-sky polish**
+- **Structured output model**
   - Goal
-    - The Status Monitor's Command Constellation maps run history onto a 24-hour clock-time X axis and a log-elapsed Y axis. Most operators run commands during a 6–16 hour daily window, so the canvas always contains a large dead zone (typically 22:00–09:00) that reads as visual void instead of constellation.
-    - Keep the existing time-of-day X axis semantics intact for operators who want strict clock-time reading, but make the **default** rendering visually balanced — the canvas should look like a continuous sky regardless of which hours the operator actually uses.
-    - Three additive changes combined into one feature: auto-fit X axis to the operator's active window (with a Full-day toggle), diurnal-weighted ambient star density so empty patches still have texture, and a daylight-gradient backdrop that paints the 24h cycle as an atmospheric tone.
-    - Non-goals: redesigning the axis contract (Y stays log-elapsed, X stays time-of-day), radial / clock-face alternate view, multi-day stacked strips. Those are bigger swings; this TODO is polish on the current chart.
-  - Phase 0 — measurement scaffolding and toggle plumbing
-    - Add helpers in `app/static/js/status_monitor.js` near the existing `_renderConstellationPanel`:
-      - `_constellationHourDensity(stars)` — returns a length-24 array of bin counts, normalized to `[0, 1]` against the busiest hour. Reused by Phase 1 and Phase 2.
-      - `_constellationActiveWindow(stars, { paddingMinutes = 60 } = {})` — returns `{startMin, endMin}` computed from the 5th and 95th percentile of `started.getHours() * 60 + getMinutes()` across the plotted stars, padded ±`paddingMinutes`, clamped to `[0, 1440]`. Returns the full `{0, 1440}` window when there are fewer than 6 stars (avoid pathological narrow windows on a brand-new session).
-      - `_constellationMinuteToX(window)` — closure returning `minute → x` mapped onto `CONSTELLATION_PLOT_LEFT … CONSTELLATION_PLOT_RIGHT`. Replaces the inline `(minutes / 1440) * CONSTELLATION_PLOT_WIDTH` math at the existing star-placement site (`status_monitor.js:1869`) so all downstream renderers (stars, ambient, streak-paths, time guides, popovers) use one mapping.
-    - Add a `constellation.full_day` boolean to the existing Options/preferences shape (default `false`). The toggle lives in the constellation legend, not in Options modal — it's a per-view setting, not a session-wide one. Persist via the existing session-preferences flow so a reload remembers it.
+    - Replace the loose `dict[str, object]` line shape in `app/services/runs/output_store.py` with a versioned, validated, well-typed `LineEvent` model that every producer and consumer agrees on. Today line dicts carry `text`, `cls`, `tsC`, `tsE`, and optional `signals`/`line_index`/`command_root`/`target`/`entities` — but the `cls` string is overloaded with two unrelated concepts (semantic kind like `notice`/`error`/`warn` and structural role like `prompt-echo`/`pty-marker`/`builtin-section`/`builtin-kv`), no schema enforces field presence or value, and each producer adds its own ad-hoc keys. The result: comparison re-parses text instead of diffing structure; redaction touches `text` only; search keeps a separate `output_search_text` column; permalink/export/transcript renderers each branch on the union of historical `cls` values; builtins synthesize line dicts in a shape that doesn't quite match real-run output.
+    - The new model splits the overloaded `cls` into two orthogonal axes — semantic `kind` (severity-ish: `info`/`notice`/`warn`/`error`) and structural `role` (renderer hint: `body`/`prompt-echo`/`section-header`/`kv`/`pty-marker`/`progress`/`status-line`) — adds explicit `kind` and `role` fields to the future v1 line-event wire shape, keeps the legacy `cls` string populated for compatibility, adds a stable schema envelope to artifact JSONL, keeps `text` byte-identical to today's value, and locks the optional metadata bag to a documented schema (`signals[]` typed against an enum, `entities[]` validated through the existing `RunOutputCapture._normalize_entities` shape, `command_root`/`target`/`line_index` typed). Every callsite that emits a line event goes through one typed factory and every callsite that consumes a line event reads from the same typed accessor.
+    - The unit of value: comparison, redaction, search, exports, permalinks, command outcome summaries, and future structured features (auto-finding promotion, structured PTY replays, machine-readable run digests) all read one model. Future producers (a new built-in, a new tool wrapper, a future ingestion path) can add fields without retraining every consumer to understand them.
+    - Non-goals for v1: changing user-visible terminal rendering at the byte level, redoing the SQLite `runs.output` preview column shape (Phase 4 keeps the same JSON-array-of-events column), rewriting the FTS5 `runs_fts` virtual table (Phase 4 keeps `output_search_text` but derives it from structured events), moving the SSE/NDJSON wire format off `event: output` (Phase 6 keeps event types stable and only versions the JSON payload).
+    - Land **before** "Command outcome summaries", the "Run comparison enhancements" structured diff work, and any future structured-search feature. Each of those reuses the same `LineEvent` accessors and would otherwise re-invent partial schemas.
+    - Each phase is independently shippable, but phases land in numerical order. Phase 0 leaves production callsites untouched; Phase 1 keeps the wire format unchanged; Phase 2 keeps the on-disk format unchanged; Phase 4 changes new artifact storage while preserving upgrade-on-read for historical artifacts; Phase 6 changes the output payload shape while keeping SSE/NDJSON event types stable.
+  - Phase 0 — schema definition and contract tests
+    - Add `app/services/runs/output_model.py` owning the schema:
+      - `class LineKind(str, Enum)` with `info`, `notice`, `warn`, `error`. `info` is the default for unclassified output lines. Add a `LineKind.from_legacy_cls(value: str) -> LineKind` shim that maps current `cls` strings (`""`, `"notice"`, `"warn"`, `"error"`) to the enum, defaulting to `info` for unrecognised values.
+      - `class LineRole(str, Enum)` with `body` (the default), `prompt-echo`, `section-header`, `kv`, `help-row`, `pty-marker`, `progress`, `status-line`, `success`, `denied`, `exit-ok`, `exit-fail`. Add a `LineRole.from_legacy_cls(value: str) -> LineRole` shim that maps every known production `cls` string that carries visual or structural meaning (`prompt-echo`, `pty-marker`, `builtin-section`, `builtin-help-row`, `builtin-kv`, `builtin-note`, `builtin-success`, `denied`, `exit-ok`, `exit-fail`, `welcome-output`) to a real enum value. Unknown historical strings default to `body` and are documented as non-load-bearing.
+      - `class LineSignal(str, Enum)` enumerating the existing `signals[]` values produced by `app/core/output_signals.py` (`severity_critical`, `severity_high`, `severity_medium`, `severity_low`, `severity_info`, `error_token`, `warn_token`, `success_token`, `progress_marker`, `denied_marker`, and every other current `_collect_signals` output). Phase 0 adds a fixture generated from the current `output_signals.py` source of truth so "all current signals" is concrete and testable. Do not add new signal values in Phase 0. When a later PR adds a signal in `output_signals.py`, the same PR must add it to `LineSignal` and `app/static/js/core/run_output_model.js`; `tests/py/test_output_signals_against_line_signal.py` asserts that every emitted signal is covered by `LineSignal`.
+      - `@dataclass(frozen=True) class LineEntity` with `type: str`, `value: str`, `canonical_value: str`, `confidence: str`, `source_line: int | None`, `start: int | None`, `end: int | None`. Mirror today's `RunOutputCapture._normalize_entities` output exactly.
+      - `@dataclass(frozen=True) class LineEvent` with required fields `text: str`, `kind: LineKind`, `role: LineRole`, `ts_clock: str`, `ts_elapsed: str` and optional fields `signals: tuple[LineSignal, ...] = ()`, `line_index: int | None = None`, `command_root: str = ""`, `target: str = ""`, `entities: tuple[LineEntity, ...] = ()`.
+      - `LINE_EVENT_SCHEMA_VERSION: int = 1` constant. Bump the schema version on required-field changes, removals, or semantic changes to existing fields. Optional-field additions can stay on the current version only when old clients can safely ignore the new field and the meaning of existing fields is unchanged; optional fields that affect rendering, search, redaction, or comparison semantics require a version bump.
+      - `def to_wire(event: LineEvent) -> dict` and `def from_wire(payload: dict) -> LineEvent`. The v1 wire dict keeps the current keys (`text`, `cls`, `tsC`, `tsE`, `signals`, `line_index`, `command_root`, `target`, `entities`) and adds explicit `v: 1`, `kind`, and `role` fields. `cls` is still derived from `(kind, role)` for compatibility with older readers: emit the legacy semantic string when `role == body` (e.g., `"notice"`), emit the legacy role string when `role != body` (e.g., `"prompt-echo"`), and rely on the explicit `kind` field to carry severity when both axes are non-default. New readers must prefer explicit `kind` and `role` over decoding `cls`; only fall back to `cls` when those keys are missing. `from_wire` clamps unknown `kind`/`role` values to `info`/`body`, drops unknown `signals`, and reports unknown values to a caller-supplied collector. `from_wire` stays stateless; `load_full_output_entries` uses a per-load set and stream adapters use a per-stream set so callers can log each unknown family once through `log.warning("LINE_EVENT_UNKNOWN_*", ...)` without storing global state in `output_model.py`.
+      - `def to_legacy_wire(event: LineEvent) -> dict` serialises the current pre-v1 shape (`text`, `cls`, `tsC`, `tsE`, optional metadata) without `v`, `kind`, or `role`. Producer migration phases use this until the storage and stream phases intentionally change their external wire/storage shapes. Preserve the exact key order currently produced by `RunOutputCapture.add_line`: `text`, `cls`, `tsC`, `tsE`, then optional metadata in today's insertion order.
+      - `def event_search_text(event: LineEvent) -> str` — extracts the canonical search-indexed substring for an event (today this is just `text`; later phases can include entity canonical values).
+    - Contract tests in `tests/py/test_run_output_model.py`:
+      - `to_wire(from_wire(payload)) == payload` round-trip for every fully-versioned v1 payload with explicit `kind` and `role`.
+      - Legacy payloads without `v`, `kind`, or `role` decode to the expected `LineKind`/`LineRole`; serialising them with `to_wire` preserves `text`, `cls`, timestamps, and optional metadata while adding `v`, `kind`, and `role`.
+      - `to_legacy_wire(from_wire(payload))` preserves the legacy reader contract for every documented current `cls` value.
+      - `from_wire` accepts a missing `v` field and treats it as legacy (no schema version).
+      - `from_wire` accepts a missing `kind`/`role` field and falls back through `from_legacy_cls`.
+      - Every legacy `cls` string in the codebase (gather via grep into a fixture list) maps to an expected `kind`/`role` pair; known structural strings map to real roles, and explicitly non-load-bearing historical strings map to `body`.
+      - `LineKind.from_legacy_cls` and `LineRole.from_legacy_cls` run independently; fixture coverage proves every historical `cls` decodes to exactly one intended `(kind, role)` pair without collisions.
+      - Unknown `kind`/`role`/`signals` values fall back according to the Python policy above and are reported to the caller-supplied collector; loader tests assert warnings are emitted once per artifact load.
+      - Entity normalisation matches the current `RunOutputCapture._normalize_entities` output for a fixture set captured from existing tests.
+      - `LineKind.from_legacy_cls("error")` returns `LineKind.error`; `LineKind.from_legacy_cls("prompt-echo")` returns `LineKind.info` (because `prompt-echo` is a role, not a kind).
+    - Add a JS twin at `app/static/js/core/run_output_model.js` as a classic-script namespace, e.g. `window.DarklabRunOutputModel = Object.freeze({...})`, containing the same enums (frozen string maps) and helper functions (`toWireLineEvent`, `toLegacyWireLineEvent`, `fromWireLineEvent`, `legacyClsToKind`, `legacyClsToRole`). Load it before `runner.js`, `permalink.js`, `pty.js`, `export_pdf.js`, `welcome.js`, `output.js`, `history.js`. Keep this hand-written with parity tests rather than adding code generation or a new frontend build step.
+    - Add a JS contract test `tests/js/unit/run_output_model.test.js` mirroring the Python contract tests so the two implementations cannot drift.
+    - Add a Python↔JS schema-drift test `tests/py/test_run_output_model_parity.py` that loads `app/static/js/core/run_output_model.js` as text, extracts the enum value lists via regex (the file is a classic-script module so the harness pattern matches `app_preferences_core.js`), and asserts that the Python `LineKind`/`LineRole`/`LineSignal` value sets equal the JS value sets.
     - Acceptance criteria
-      - Hover/click position math still hits the right star after the X mapping moves through `_constellationMinuteToX` (existing tests in `tests/js/unit/status_monitor.test.js` or similar — verify and extend if needed).
-      - Toggle round-trips through reload.
-      - `_constellationActiveWindow` returns `{0, 1440}` for fewer than 6 stars; returns a padded window otherwise.
-  - Phase 1 — auto-fit X axis with Full-day toggle (the "Option 1" piece)
-    - When `constellation.full_day` is `false` (default), compute the active window and the interior dead bands, then use a piecewise X-mapping. Re-derive on every render so the layout adapts as new runs land.
-      - `_constellationActiveWindow(stars)` trims the EDGES (typical workday operator: window resolves to `08:00–19:00` from `09:00–18:00` runs with ±60 min padding).
-      - `_constellationDeadBands(stars)` trims INTERIOR low-density bands (operators whose active hours stretch across both ends of the day with a sleep window in the middle): contiguous runs of hours with relative density ≤ 0.15, length ≥ 2 h, with ±30 min edge padding pulled inward. Only kicks in for sessions with ≥ 30 plotted stars.
-      - `_constellationVisibleSegments(window, deadBands)` returns the visible spans. Single span when no dead bands. Multiple spans when interior dead bands were found.
-      - `_constellationMinuteToX(window, segments)` is linear when `segments` describes a single span, piecewise when it describes multiple. Dead-band minutes clamp to the seam x between adjacent segments. Clock time stays monotonic within each segment.
-      - Real stars whose started-minute falls inside a collapsed dead band are dropped from the visible panel (so they don't pile at the seam). Operators can flip Full day to see them.
-    - When `true`, fall back to the single full-day `{0, 1440}` window with no cropping — strict 24-hour reading.
-    - Update `_appendConstellationTimeGuides(svg)` to pick guide positions from the current segments:
-      - Major guides at evenly-spaced ticks inside each visible segment (4 ticks for narrow combined spans ≤ 6 hours, 5 for medium 6–12 hours, 6 for wide spans > 12 hours, hour-aligned).
-      - Minor guides at half-intervals between majors, scoped per segment.
-      - Labels keep `HH` clock format. Hours that fall inside a dead band are suppressed. The rightmost-edge label is suppressed when it lands at the window boundary.
-    - Add `_appendConstellationSeamMarkers(svg, window, segments)` to draw a dashed vertical line plus a `//` glyph at each seam between segments so the discontinuity reads as intentional. Both styles use theme tokens for contrast.
-    - Legend gains a small toggle pressable using the `.toggle-btn` primitive (per `ARCHITECTURE.md` Design System): `Active hours / Full day`. Pressing it flips the preference and re-renders the panel only (not the whole Status Monitor).
-    - Meta line shows the window — `06:32–22:14 · 142 plotted` in single-segment auto-fit mode, `00:15–04:00, 11:00–23:41 · 358 plotted` when dead bands have been cropped, and `142 plotted · last 30 days` in full-day mode.
+      - `to_wire`/`from_wire` round-trip is lossless for v1 payloads, and legacy payloads upgrade predictably for every `cls` value that appears in current production artifacts (gathered from `tests/py/fixtures/run_output_legacy_cls.json` — Phase 0 also adds that fixture).
+      - Python and JS enum value sets stay in sync; the parity test fails if either side adds a value without the other.
+      - No production code yet uses the new model — Phase 0 is type definitions and tests only.
+  - Phase 1 — producer migration (Python)
+    - Update `RunOutputCapture.add_line()` in `app/services/runs/output_store.py`:
+      - Accept either the existing dict-style call or a new keyword-only `event: LineEvent | None` parameter. When `event` is `None`, construct one from the remaining kwargs using `LineEvent(text=text, kind=LineKind.from_legacy_cls(cls), role=LineRole.from_legacy_cls(cls), ts_clock=ts_clock, ts_elapsed=ts_elapsed, signals=tuple(LineSignal(s) for s in (signals or ())), line_index=line_index, command_root=command_root, target=target, entities=normalized_entities)`.
+      - Internally always work with `LineEvent`; the preview entry and the JSONL line still come from `to_legacy_wire(event)` in this phase so the storage and browser/API wire shapes remain unchanged. Phase 4 switches new artifact files to `to_wire(event)`, and Phase 6 switches live stream payloads to `to_wire(event)`.
+      - Add `RunOutputCapture.add_event(event: LineEvent)` as the typed entry point. `add_line(...)` stays as a thin wrapper that builds a `LineEvent` and calls `add_event`.
+    - Migrate every Python producer of line dicts to construct `LineEvent` directly:
+      - `app/services/commands/builtins_format.py` — `output_line(text, role)` becomes `output_line(text, role=LineRole.section_header)` etc. Update every caller in `app/services/commands/builtins*.py` to pass enum members. Replace the legacy strings (`"builtin-section"`, `"builtin-help-row"`, `"builtin-kv"`, `"builtin-note"`, `"builtin-success"`) with the new `LineRole` members. `to_legacy_wire` still emits the legacy `cls` strings so on-disk and on-wire output remains unchanged in this phase.
+      - `app/blueprints/run.py`: every `cls="notice"` callsite (lines ≈ 1240, 1615, 1620, 1625, 1647) becomes `kind=LineKind.notice`. `_broker_output_payload` and `_capture_add_line_with_signals` accept `LineEvent` (or build one from kwargs).
+      - `app/services/pty/service.py:495` `cls: "notice"` becomes `kind=LineKind.notice`. `app/services/pty/transcript.py` builds `LineEvent` objects.
+      - `app/core/redaction.py:103` `cls: "notice"` becomes `kind=LineKind.notice`.
+    - Add `tests/py/test_run_output_capture.py` (or extend the existing capture test) cases that verify:
+      - A run captured with the new typed entry point produces preview + full-output JSONL with the current legacy keys and expected `cls`/`text` values.
+      - A run captured via the legacy `add_line(text, cls="notice")` path produces byte-identical preview + JSONL output to the typed `add_event` path.
+      - Every line in `_extract_output_search_text` covers the same text it did pre-migration (no FTS regression).
     - Acceptance criteria
-      - Empty session: defaults to full-day layout (no narrow degenerate window).
-      - 30 days of 09:00–18:00 runs: active window resolves to roughly `08:00–19:00` with one-hour padding either side; no dead bands; single segment.
-      - 30 days of 00:00–04:00 + 11:00–23:00 runs (sleep window in middle of clock): dead-band detector finds 04:30–10:30, segments resolve to `00:15–04:00, 11:00–23:41` and the seam marker renders between them.
-      - Full-day toggle flips back to a single 24h segment regardless of detected dead bands.
-      - Toggle is keyboard-activatable, routes through `bindPressable`, and is announced via `aria-pressed`.
-  - Phase 2 — diurnal-weighted ambient stars (the "Option 4" piece)
-    - Modify `_ambientConstellationStars()` to accept an optional `density` array (length 24, from Phase 0's `_constellationHourDensity`) plus the current window. Ambient star X positions sample from a probability distribution that is **inverse** to real-star density inside the window, and uniform outside the window (so the chrome at idle edges still feels lived-in).
-    - Distinguish ambient from real stars visually so hover/keyboard behaviour stays unambiguous:
-      - Ambient stars are smaller (`radius ≤ 1.8px`), zero CSS glow, lower max opacity (`≤ 0.45`), no `.status-monitor-star-node` class, no `data-star-id`, no pointer events.
-      - Use a separate hue token (e.g., a desaturated tone of `--muted`) so ambient never collides with the real category tone palette. The current `--ambient-hue/saturation/lightness` style vars already exist — just lock them to a desaturated palette rather than the wide ranges the helper produces today.
-    - Cap total ambient star count between 80 and 160 (current implementation is similar; verify the bounds work for the new density-aware distribution). Re-randomize the ambient layout on every constellation render so it doesn't read as "fixed" decoration.
+      - `grep -rn 'cls\s*=\s*"' app/services/ app/blueprints/ app/core/redaction.py` returns zero hits outside `output_model.py`, `output_store.py`, and tests.
+      - `grep -rn 'cls *: *"' app/services/ app/blueprints/ app/core/redaction.py` returns zero hits outside the same files.
+      - Existing pytest run + history-output snapshot tests still pass without changes.
+  - Phase 2 — consumer migration (Python)
+    - Add `load_full_output_events(rel_path) -> list[LineEvent]` in `output_store.py`. The JSON-decoder uses `from_wire` per line; lines without `v` field are decoded through the legacy shim.
+    - Keep `load_full_output_entries(rel_path)` returning `list[dict]` for compatibility during this phase, implemented by loading events and serialising them through `to_legacy_wire`. Provide `load_full_output_entries_wire(rel_path) -> list[dict]` only if a route boundary needs to preserve a v1 wire payload once Phase 4 lands.
+    - Update `load_full_output_lines(rel_path) -> list[str]` to call the typed loader and read `event.text`.
+    - Update consumers that read line dicts:
+      - `app/services/runs/comparison.py` — `preview_output_entries_from_run`, `compare_full_output_entries`, `_extract_run_comparison_entries`. Consumers index events by `event.line_index` (when present) and `event.text`; diff output keeps wire-shape entries so the browser still receives the legacy keys.
+      - `app/core/redaction.py` — `omit_raw_only_line_entries`, `redact_line_entries` accept `LineEvent` lists, use `dataclasses.replace()` or small helper functions to replace text/entities/signals on frozen events, and return `LineEvent` lists. Wire serialisation happens at the route boundary.
+      - `app/blueprints/history.py` — every `{"cls": "notice", ...}` construction (lines ≈ 1620, 1675, 1919) replaced by `LineEvent(kind=LineKind.notice, ...)` then `to_legacy_wire` at the JSON-response boundary. Route-boundary serializers keep using `to_legacy_wire` through Phase 5; Phase 6 flips stream/API output payloads to `to_wire`.
+      - `app/blueprints/run.py` — `_extract_output_search_text` reads `event.text` via a typed iteration; `_normalize_*` helpers route through `from_wire`.
     - Acceptance criteria
-      - A session with all runs at 14:00 produces ambient stars clustered at non-14:00 hours, not in the middle of the data band.
-      - Ambient stars never raise the popover, never gain keyboard focus.
-      - Color-blind smoke check: in a high-contrast theme, ambient stars don't look like dim real stars.
-  - Phase 3 — daylight gradient backdrop (the "Option 7" piece)
-    - Add a single `<linearGradient id="constellation-sky">` definition inside the constellation `<svg>`, then a `<rect>` filling `CONSTELLATION_PLOT_LEFT … CONSTELLATION_PLOT_RIGHT` and the plot height at the **bottom** of the SVG render order (paints first, ambient + real stars on top).
-    - Gradient stops are fixed by hour-of-day, not by data, so the backdrop reads the same regardless of operator activity:
-      - `00:00–05:00` — deep navy (`--theme-panel-bg` shifted toward `--theme-panel-shadow`).
-      - `05:00–07:00` — pre-dawn lift (very subtle warm gradient).
-      - `07:00–17:00` — daytime wash (slightly lighter than baseline).
-      - `17:00–20:00` — dusk gradient (slight warm tone).
-      - `20:00–24:00` — fade back to deep navy.
-    - When the X axis is auto-fit (Phase 1 default), the gradient is **pinned to true 24h coordinates** via `_constellationMinuteToX`: noon stays at minute 720, dusk at minute 1020, midnight at minute 0/1440. With a narrow active window the gradient extends off-canvas on both sides; only the slice between `startMin` and `endMin` is visible. The backdrop `<rect>` spans from `_constellationMinuteToX(0)` to `_constellationMinuteToX(1440)` so the gradient's coordinate space remains anchored to real clock time regardless of the visible window — "noon" appears wherever 12:00 lands in the mapping, not at the visual midpoint.
-    - Honor themes: define the gradient stops as `color-mix(in srgb, var(--theme-panel-bg) X%, var(--theme-panel-shadow) Y%)` patterns (or equivalent) so light / dark / high-contrast themes all produce a coherent backdrop. No hard-coded hex colors.
+      - `grep -rn '"cls":' app/blueprints/ app/services/ app/core/` returns zero hits outside `output_model.py`, `output_store.py`, route-boundary serialisers, and tests.
+      - `tests/py/test_history_routes.py`, `tests/py/test_run_routes.py`, `tests/py/test_run_comparison.py`, `tests/py/test_redaction.py` pass unchanged.
+      - The history detail JSON for a stored run still includes `output_entries` with the same keys as today (route-boundary serializers use `to_legacy_wire` through Phase 5; Phase 4 changes new artifact files and Phase 6 adds `v`/`kind`/`role` to live stream lines).
+  - Phase 3 — consumer migration (JavaScript)
+    - Update browser consumers to use `legacyClsToKind` / `legacyClsToRole` from `run_output_model.js`:
+      - `app/static/js/output.js` — `appendLine(text, cls, ...)` becomes `appendLine(event, ...)` (or accepts both). Inside, it reads `event.kind` and `event.role` instead of branching on the `cls` string. Update the existing `if (cls === 'prompt-echo')`, `if (cls === 'exit-ok' || cls === 'exit-fail' || cls === 'denied' || cls === 'notice')` branches to read the new fields.
+      - `app/static/js/runner.js` — every `appendLine(line.text, line.cls || '', tabId)` callsite (lines ≈ 2371, 2663, 2664) passes the typed event instead.
+      - `app/static/js/permalink.js`, `app/static/js/export_pdf.js`, `app/static/js/welcome.js`, `app/static/js/history.js`, `app/static/js/pty.js` — all branches on `cls` strings consult `event.role` / `event.kind` via the helper.
+      - `app/static/js/features/permalink/permalink_view.js` and any other consumer in `app/static/js/features/**` follow the same pattern.
+    - JS-side renderer tests in `tests/js/unit/output.test.js`, `tests/js/unit/permalink.test.js`, `tests/js/unit/export_pdf.test.js`, `tests/js/unit/pty.test.js`:
+      - Render a `LineEvent` with `kind=notice` → the rendered DOM has `class="notice"` (or whatever the current renderer emits for `cls=notice`).
+      - Render a `LineEvent` with `role=prompt-echo` → matches today's prompt-echo rendering.
+      - Round-trip a wire-dict input through `fromWireLineEvent` → renderer output matches direct-typed-event input.
+      - Unknown `kind` or `role` values render safely as `info`/`body`; stream-aware callers log the unknown value once per stream through `logClientError` and include the raw unknown value in any available diagnostic/debug bucket.
     - Acceptance criteria
-      - The backdrop is visible in every shipped theme without breaking text contrast on guide labels.
-      - In auto-fit mode the gradient covers the window edge-to-edge with no visible seam between gradient and plot frame.
-      - In full-day mode the gradient covers `0–24` with the standard atmospheric progression.
-  - Phase 4 — tests, docs, and release
-    - Browser unit tests
-      - `_constellationHourDensity` returns a 24-length normalized array for given star fixtures.
-      - `_constellationActiveWindow` returns full-day for sparse fixtures, a padded window for clustered fixtures, and clamps to `[0, 1440]`.
-      - Auto-fit mapping math: a star at minute 800 inside a `{startMin: 600, endMin: 1080}` window maps to the canvas position `(800-600)/(1080-600) * CONSTELLATION_PLOT_WIDTH + CONSTELLATION_PLOT_LEFT`.
-      - Toggle round-trips through preferences and re-renders the panel.
-      - Ambient stars do not carry `data-star-id` and do not appear in `starsByNodeId`.
-    - Visual smoke
-      - Capture screenshots in `tests/ui-capture-scenes.md` for active-hours mode (typical operator), full-day mode (toggle on), and sparse session (no data → ambient + gradient backdrop only).
-    - Docs
-      - `FEATURES.md` "Status HUD" or the Status Monitor section gets one paragraph: "The Command Constellation defaults to your active hours so the canvas stays full — toggle to Full day if you want strict 24-hour reading."
-      - `CHANGELOG.md`, v2.0 merge-request, and release-notes updates.
-      - `ARCHITECTURE.md` Frontend Design System section does **not** need a new primitive; this feature reuses `.toggle-btn` and existing constellation classes.
+      - `grep -rn "\\.cls ===" app/static/js/` returns zero hits outside `run_output_model.js` and tests.
+      - Existing UI capture screenshots (`tests/ui-capture-scenes.md` desktop scenes that exercise notice/error/prompt-echo rendering — `permalink-page`, `snapshot-page`, etc.) regenerate byte-identical against the current output.
+  - Phase 4 — storage envelope, search derivation, and on-read migration
+    - On-disk artifact JSONL gains a one-line envelope:
+      - The first line of `<run_id>.txt.gz` is now a header: `{"v":1,"created":"<ISO>","run_id":"<id>"}`. Subsequent lines are the line events (each with `v: 1` baked in).
+      - `RunOutputCapture` writes the header on first `add_event` (lazy so empty runs don't materialise an artifact file). Phase 4 also defers the `gzip.open(...)` call from `RunOutputCapture.__init__` to first `add_event`; today's eager open touches disk before any line lands.
+      - `load_full_output_entries` peeks at line 0; if it's a header, skip it. If the first line decodes as a `LineEvent`, treat it as a headerless legacy artifact.
+      - Historical artifact files are not rewritten. New runs use the envelope; older files stay headerless and upgrade on read through the legacy shim.
+      - PTY snapshot serialization moves to the same `to_wire`/envelope policy alongside run artifacts; reattach replay loads snapshots through `from_wire` so historical snapshots and new snapshots share one parser.
+      - SQLite preview arrays and browser route output remain legacy-shaped through Phase 5, so `output_preview_max_mb` behavior does not change in Phase 4. If a future phase stores v1 payloads in preview arrays, note the larger per-event byte cost in `CHANGELOG.md` and suggest that operators with custom preview caps revisit the setting.
+    - `output_search_text` derivation:
+      - Add `_search_text_from_events(events: Sequence[LineEvent]) -> str` that joins `event.text` plus validated, deduped canonical entity values (so `nmap` runs that mention `192.0.2.1` find both the IP and any `entities[].canonical_value`). Sort entity values deterministically by `(type, canonical_value)`, cap the joined entity contribution at 4 KB per run before joining, and replace the body of `_extract_output_search_text` (`app/blueprints/run.py:359`) with a call to that helper.
+      - The FTS5 `runs_fts` virtual table stays the same; only the indexed text content changes.
+    - Migration tests in `tests/py/test_run_output_store.py`:
+      - Read a fixture artifact written in the headerless legacy format — entries decode correctly with `v` defaulted.
+      - Read a fixture artifact written in the new envelope format — header is skipped, entries decode.
+      - A new artifact written by `RunOutputCapture` starts with the header line, stores subsequent entries through `to_wire(event)`, and survives a load+reload round trip.
+      - `_search_text_from_events` includes validated, deduped entity canonical values when present and caps their total contribution.
+    - Operator docs:
+      - Add a `Run output artifact format` subsection to `docs/storage-scaling.md` documenting the header + JSONL layout and the upgrade-on-read policy.
+    - Acceptance criteria
+      - No on-disk rewrite of legacy artifacts; they continue to load via the legacy code path.
+      - New runs produce envelope artifacts; the `output_search_text` cached on each `runs` row now includes entity canonical values for runs that captured entities.
+      - `runs_fts` reindex (`tests/py/test_history_routes.py::test_full_text_search`) finds entity values in indexed runs.
+  - Phase 5 — comparison and redaction structural diff
+    - Update `app/services/runs/comparison.py` to diff structured events:
+      - Add `def compare_line_events(left: Sequence[LineEvent], right: Sequence[LineEvent]) -> ComparisonResult` that diffs by `event.line_index` when both sides have indices, falling back to text-equality. Existing text-level diff stays as a fallback for events without `line_index`.
+      - The browser-facing JSON for `/history/compare` adds an optional `role`/`kind` field to changed lines so the renderer can colour structurally-changed lines (e.g., a section header that turned into an error) differently from text-only diffs.
+    - Update `app/core/redaction.py` so `redact_line_entries`:
+      - Operates on `event.text` and `event.entities[i].canonical_value` together; entities whose canonical value gets redacted have their `canonical_value` field zeroed (or replaced with `"<redacted>"`) so downstream search and exports stay consistent.
+      - Treat `"<redacted>"` as a sentinel, not a real entity value: search indexing, Atlas/entity dedupe, and project workspace entity bucketing must ignore it.
+      - Continues to support the `omit_raw_only_line_entries` path for share-redaction rules that drop entire lines.
+    - Tests
+      - `tests/py/test_run_comparison.py`: events with matching `line_index` and identical text show as unchanged; events with matching `line_index` and divergent role show as structurally-changed; new events show as additions.
+      - `tests/py/test_redaction.py`: a redacted IP literal also replaces the matching `entities[].canonical_value` via frozen-event replacement helpers.
+    - Acceptance criteria
+      - Existing run-comparison UI flows still render identical output for unchanged sections.
+      - Redaction no longer leaves the canonical entity value visible after the text was scrubbed.
+  - Phase 6 — SSE/NDJSON wire format envelope
+    - The live `/runs/<id>/stream` and `/api/v1/runs/<id>/stream` paths emit:
+      - One initial `event: schema` SSE frame (and the NDJSON equivalent) with payload `{"type": "schema", "event": "schema", "v": 1, "kind": "line_event"}` as the first frame/row on every connection, before `started` on initial connections and before replayed output on reconnects.
+      - Subsequent `event: output` frames carry the `to_wire(event)` payload (so `v: 1` is on every line). NDJSON keeps today's `type` discriminator (`"output"`, `"exit"`, `"heartbeat"`, etc.); Phase 6 may add `event` as an alias for schema/control rows, but it must not remove `type`. CLI/external consumers that render text must accept both shapes and filter to `(event || type) == "output"` before reading `text`.
+    - Update `app/services/runs/broker.py` (the event publisher) to accept `LineEvent` and serialise via `to_wire` so the broker has one input shape.
+    - Rolling deploys are safe without a feature flag because old consumers already read `type`/`text` and ignore unknown extra keys; new consumers use the schema frame and explicit `kind`/`role`.
+    - Browser stream consumers (`app/static/js/runner.js`, `app/static/js/api_streams.js`) read the schema frame, switch to typed parsing, and warn (`logClientError`) once per unknown version or unknown `kind`/`role` value while continuing to render via `info`/`body` fallback.
+    - Tests
+      - `tests/py/test_run_stream.py`: SSE and NDJSON streams begin with the `schema` frame/row on initial connections and reconnects; subsequent `output` frames include `v: 1` in their JSON and keep `type: "output"`.
+      - `tests/js/unit/api_streams.test.js`: receiving a higher `v` than supported, or an unknown `kind`/`role`, triggers `logClientError` once per stream and continues to render via safe fallback.
+    - Acceptance criteria
+      - External API consumers that don't know about the schema frame (`darklab` CLI before this phase) still work because `darklab` reads `type`/`text` only from output events and ignores unknown event types / rows. The CLI smoke test covers legacy type-only NDJSON rows and new rows that also carry an `event` alias.
+      - The `darklab` CLI remains text-only in this phase. Do not add CLI `kind`/`role` filtering or display until operators ask for a structured-output CLI mode.
+      - The new `schema` frame is documented in `docs/api-v1-openapi.json` under the stream paths.
+  - Phase 7 — cleanup, docs, release
+    - Drop the legacy `add_line(text, cls=...)` thin wrapper from `RunOutputCapture` after every internal caller has migrated to `add_event`. Keep `from_legacy_cls` shims forever — they're called when loading historical artifacts.
+    - Delete the `cls` keyword path from JS renderers: `appendLine(event, ...)` is the only signature; `event.role` and `event.kind` are the only branches.
+    - Keep compatibility `cls` populated in `to_wire`/`to_legacy_wire` forever for cached/stored data, older consumers, and external mirrors of the line-event payload. Cleanup only removes internal `cls` keyword arguments and renderer branching.
+    - Add an `Output Model` subsection to `ARCHITECTURE.md` (`### Backend Composition` or a new `### Run Output Model`):
+      - Describe the `LineEvent` shape, the `kind`/`role` split, the storage envelope, and the upgrade-on-read policy.
+      - Reference the contract tests and the Python↔JS parity test.
+    - Update `FEATURES.md` "Output Streaming and Display" with a one-line note that structured `kind`/`role` metadata flows through transcripts, permalinks, exports, and `/api/v1` streams.
+    - Update `CHANGELOG.md`, the v2.x merge-request draft, and the v2.x release notes with one entry summarising the foundation, the migration policy (legacy artifacts read upgraded-on-read; no on-disk rewrite), and the API surface change (the `schema` SSE frame).
+    - Acceptance criteria
+      - `grep -rn '"cls":\|cls=' app/ tests/` returns zero hits outside legacy shim functions, compatibility serializers, route/API wire compatibility assertions, fixtures, and tests that intentionally cover historical payloads.
+      - `pytest tests/py/test_run_output_model_parity.py` passes (Python and JS schemas in sync).
+      - The full suite (`npm run test:unit` + `pytest tests/py/`) passes; `tests/py/test_docs.py` accepts the bumped counts.
+
 ## Known Issues
 
 No known issues are currently tracked.
@@ -316,11 +387,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 ---
 
 ## Architecture
-
-### Structured output model
-- Preserve richer line/event details consistently for all runs.
-- This would improve search, comparison, redaction, exports, and permalink fidelity.
-- Command outcome summaries are buildable without this foundation, but design them so they can move onto the structured model later. Summary parsers should consume structured line events, not re-parse raw text forever.
 
 ### Unified terminal built-in lifecycle
 - Browser-owned built-ins (`theme`, `config`, and `session-token`) need browser execution for DOM state, local storage, clipboard, and transcript-owned confirmations, while server-owned built-ins naturally flow through `/runs`.

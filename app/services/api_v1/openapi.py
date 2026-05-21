@@ -736,7 +736,10 @@ OPENAPI_SPEC: dict = {
             "ScheduleResponse": {
                 "type": "object",
                 "required": ["schedule"],
-                "properties": {"schedule": _ref("Schedule")},
+                "properties": {
+                    "schedule": _ref("Schedule"),
+                    "next_fires": {"type": "array", "items": {"type": "string"}},
+                },
             },
             "ScheduleCreateRequest": {
                 "type": "object",

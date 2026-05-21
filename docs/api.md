@@ -105,7 +105,7 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `GET` | `/api/v1/projects/<project_id>/packages` | Read-only evidence package page. |
 | `GET` | `/api/v1/schedules` | Scheduled-command page for the token session. |
 | `POST` | `/api/v1/schedules` | Create a scheduled command with `command`, `cron_expr` or `cadence_preset`, optional `timezone`, and optional `label`. |
-| `GET` | `/api/v1/schedules/<schedule_id>` | One scheduled command. |
+| `GET` | `/api/v1/schedules/<schedule_id>` | One scheduled command plus a next-fire preview. |
 | `PATCH` | `/api/v1/schedules/<schedule_id>` | Update a scheduled command's command, cadence, timezone, label, or enabled state. |
 | `DELETE` | `/api/v1/schedules/<schedule_id>` | Delete a scheduled command. |
 | `POST` | `/api/v1/schedules/<schedule_id>/run-now` | Fire a scheduled command immediately and return the updated schedule row. |
@@ -247,6 +247,8 @@ darklab schedule delete sch_123
 
 `--every` accepts `hourly`, `daily`, or `weekly`. `--cron` accepts the same strict five-field cron expressions as the browser schedule routes. The CLI joins everything after `--` with spaces and sends that as the command body, so normal shell-shaped command arguments do not need to be wrapped as one quoted string.
 
+`darklab schedule info <id>` shows the full command, status, cron, timezone, next fire preview, last-fire fields, and the five most recent fire audit rows. Use `darklab schedule fires <id>` when you need a paged audit list.
+
 Schedule list and fire-audit routes use the normal `limit`, `offset`, and `has_more` envelope. `darklab schedule list` and `darklab schedule fires` default to 50 rows and cap at 100.
 
 ---
@@ -359,7 +361,8 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab project-packages <project_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List evidence packages. `--limit` defaults to 50 and caps at 100. |
 | `darklab schedule list [--limit N] [--offset N] [--format text\|json\|ndjson]` | List scheduled commands. `--limit` defaults to 50 and caps at 100. |
 | `darklab schedule create (--cron CRON \| --every hourly\|daily\|weekly) [--label TEXT] [--timezone TZ] -- COMMAND` | Create a scheduled command from shell-shaped arguments after `--`. |
-| `darklab schedule info\|pause\|resume\|delete\|run <schedule_id>` | Inspect, pause, resume, delete, or immediately fire one scheduled command. |
+| `darklab schedule info <schedule_id>` | Inspect one scheduled command, including cadence, next fires, last fire, and recent fire audit rows. |
+| `darklab schedule pause\|resume\|delete\|run <schedule_id>` | Pause, resume, delete, or immediately fire one scheduled command. |
 | `darklab schedule fires <schedule_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List fire audit rows for a scheduled command. `--limit` defaults to 50 and caps at 100. |
 | `darklab watch list [--limit N] [--offset N] [--format text\|json\|ndjson]` | List change-detection watchers. `--limit` defaults to 50 and caps at 100. |
 | `darklab watch create <baseline_run_id> (--cron CRON \| --every hourly\|daily\|weekly) [--label TEXT] [--timezone TZ] [--suppress-removals] [--notify-metadata-changes] [-- COMMAND]` | Create a watcher from a completed baseline run. Omit `-- COMMAND` to inherit the baseline command. |

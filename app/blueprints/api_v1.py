@@ -70,7 +70,7 @@ from services.runs.broker import (
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL
 from services.runs.output_store import load_full_output_entries
 from services.scheduler.commands import ScheduleCommandValidationError, validate_schedule_command
-from services.scheduler.cron import ScheduleCronError
+from services.scheduler.cron import ScheduleCronError, next_fire
 from services.scheduler.dispatch import fire_schedule
 from services.scheduler.serialization import get_user_schedule_for_session, schedule_fire_payload, schedule_payload
 from services.scheduler.service import (
@@ -243,6 +243,15 @@ def _api_schedule_log_payload(schedule=None, *, session_id: str = "", **extra) -
         })
     payload.update(extra)
     return payload
+
+
+def _api_schedule_next_fires(schedule, *, count: int = 3) -> list[str]:
+    cursor = datetime.now(timezone.utc)
+    next_fires: list[str] = []
+    for _ in range(count):
+        cursor = next_fire(schedule.cron_expr, cursor, schedule.timezone)
+        next_fires.append(cursor.isoformat())
+    return next_fires
 
 
 def _watcher_for_api_session(watcher_id: str, session_id: str, *, conn=None):
@@ -1144,9 +1153,10 @@ def api_schedule_create():
 def api_schedule(schedule_id):
     try:
         schedule = _schedule_for_api_session(schedule_id, _require_session_id())
-    except ApiAuthError as exc:
+        next_fires = _api_schedule_next_fires(schedule)
+    except (ApiAuthError, ScheduleError, ScheduleCronError, ValueError) as exc:
         return _schedule_api_error(exc)
-    return jsonify({"schedule": schedule_payload(schedule)})
+    return jsonify({"schedule": schedule_payload(schedule), "next_fires": next_fires})
 
 
 @api_v1_bp.route("/schedules/<schedule_id>", methods=["PATCH"])

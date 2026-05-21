@@ -2187,6 +2187,12 @@
       },
       "ScheduleResponse": {
         "properties": {
+          "next_fires": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "schedule": {
             "$ref": "#/components/schemas/Schedule"
           }

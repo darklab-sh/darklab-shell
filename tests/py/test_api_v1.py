@@ -785,7 +785,8 @@ def test_api_v1_schedules_crud_run_now_and_fire_audit_are_token_scoped(monkeypat
 
     listed = json.loads(client.get("/api/v1/schedules?limit=10&offset=0", headers=_headers(token)).data)
     other_listed = json.loads(client.get("/api/v1/schedules", headers=_headers(other_token)).data)
-    detail = json.loads(client.get(f"/api/v1/schedules/{schedule['id']}", headers=_headers(token)).data)["schedule"]
+    detail_payload = json.loads(client.get(f"/api/v1/schedules/{schedule['id']}", headers=_headers(token)).data)
+    detail = detail_payload["schedule"]
     cross_detail = client.get(f"/api/v1/schedules/{schedule['id']}", headers=_headers(other_token))
     cross_patch = client.patch(
         f"/api/v1/schedules/{schedule['id']}",
@@ -811,6 +812,8 @@ def test_api_v1_schedules_crud_run_now_and_fire_audit_are_token_scoped(monkeypat
     assert listed["schedules"][0]["id"] == schedule["id"]
     assert other_listed["schedules"] == []
     assert detail["label"] == "API Schedule"
+    assert len(detail_payload["next_fires"]) == 3
+    assert all(str(value).endswith("+00:00") for value in detail_payload["next_fires"])
     assert cross_detail.status_code == 404
     assert json.loads(cross_detail.data)["error"]["code"] == "not_found"
     assert cross_patch.status_code == 404
@@ -1280,10 +1283,18 @@ def test_darklab_cli_schedule_commands_manage_api_schedules(monkeypatch, capsys)
     schedule = {
         "id": "sch_cli",
         "enabled": True,
+        "cron_expr": "0 * * * *",
+        "cadence_preset": "hourly",
+        "timezone": "UTC",
         "next_run_at": "2026-05-20T00:00:00+00:00",
         "last_run_at": "",
         "last_run_id": "",
+        "consecutive_failures": 0,
         "label": "Hourly Echo",
+        "paused_reason": "",
+        "last_error": "",
+        "created": "2026-05-19T23:00:00+00:00",
+        "updated": "2026-05-19T23:30:00+00:00",
         "command_text": "echo 'hello world' 'semi;colon'",
     }
 
@@ -1306,7 +1317,14 @@ def test_darklab_cli_schedule_commands_manage_api_schedules(monkeypatch, capsys)
                 assert params == {"limit": 10, "offset": 0}
                 return {"schedules": [schedule], "total": 1, "limit": 10, "offset": 0, "has_more": False}
             if path == "/schedules/sch_cli" and method == "GET":
-                return {"schedule": schedule}
+                return {
+                    "schedule": schedule,
+                    "next_fires": [
+                        "2026-05-20T00:00:00+00:00",
+                        "2026-05-20T01:00:00+00:00",
+                        "2026-05-20T02:00:00+00:00",
+                    ],
+                }
             if path == "/schedules/sch_cli" and method == "PATCH":
                 assert body is not None
                 updated = {**schedule, "enabled": bool(body["enabled"])}
@@ -1354,7 +1372,12 @@ def test_darklab_cli_schedule_commands_manage_api_schedules(monkeypatch, capsys)
     assert "ENABLED" in list_output
     assert "Hourly Echo" in list_output
     assert cli_main.main(["schedule", "info", "sch_cli"]) == 0
-    assert "echo 'hello world' 'semi;colon'" in capsys.readouterr().out
+    info_output = capsys.readouterr().out
+    assert "Schedule" in info_output
+    assert "Cadence" in info_output
+    assert "Recent Fires" in info_output
+    assert "2026-05-20 01:00:00 UTC" in info_output
+    assert "echo 'hello world' 'semi;colon'" in info_output
     assert cli_main.main(["schedule", "pause", "sch_cli"]) == 0
     assert "no" in capsys.readouterr().out
     assert cli_main.main(["schedule", "resume", "sch_cli"]) == 0
@@ -1370,6 +1393,7 @@ def test_darklab_cli_schedule_commands_manage_api_schedules(monkeypatch, capsys)
         "/schedules",
         "/schedules",
         "/schedules/sch_cli",
+        "/schedules/sch_cli/fires",
         "/schedules/sch_cli",
         "/schedules/sch_cli",
         "/schedules/sch_cli/run-now",
@@ -1587,6 +1611,7 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert schemas["PackagePage"]["properties"]["packages"]["items"] == {"$ref": "#/components/schemas/EvidencePackage"}
     assert schemas["SchedulePage"]["properties"]["schedules"]["items"] == {"$ref": "#/components/schemas/Schedule"}
     assert schemas["ScheduleFirePage"]["properties"]["fires"]["items"] == {"$ref": "#/components/schemas/ScheduleFire"}
+    assert schemas["ScheduleResponse"]["properties"]["next_fires"]["items"] == {"type": "string"}
     assert schemas["WatcherPage"]["properties"]["watchers"]["items"] == {"$ref": "#/components/schemas/Watcher"}
     assert schemas["WatcherFirePage"]["properties"]["fires"]["items"] == {"$ref": "#/components/schemas/WatcherFire"}
     schedule_schema = schemas["Schedule"]
