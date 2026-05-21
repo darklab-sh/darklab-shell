@@ -70,7 +70,18 @@ def finalize_watcher_run(run_id: str, *, conn=None) -> tuple[Watcher, WatcherFir
                 conn.commit()
             return updated
 
-        diff = watcher_diff.diff_runs(baseline_run, current_run, options=watcher.options, conn=conn)
+        try:
+            diff = watcher_diff.diff_runs(baseline_run, current_run, options=watcher.options, conn=conn)
+        except Exception as exc:
+            log.warning(
+                "WATCHER_DIFF_FAILED",
+                exc_info=True,
+                extra=_log_payload(watcher, run_id=run_id, error=str(exc)),
+            )
+            updated = _mark_error(conn, watcher, fire, f"watcher diff failed: {exc}", run_id=run_id)
+            if ctx is not None:
+                conn.commit()
+            return updated
         updated = _apply_diff(conn, watcher, fire, diff, run_id=run_id)
         if ctx is not None:
             conn.commit()

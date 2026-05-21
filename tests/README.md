@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,117
+- behavior tests: 3,118
 - docs/inventory meta-tests: 32
-- `pytest`: 1691 (1659 behavior + 32 meta)
+- `pytest`: 1692 (1660 behavior + 32 meta)
 - `vitest`: 1211
 - `playwright`: 252
-- total: 3,154
+- total: 3,155
 
 This document is organized in two parts:
 
@@ -488,6 +488,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWatchersFoundation.test_watcher_fire_insert_is_idempotent_for_same_watcher_and_run` | Verifies duplicate watcher-fire records for the same watcher and run reuse the existing audit row. |
 | `TestWatchersFoundation.test_watcher_update_pause_resume_and_accept_baseline_update_owned_schedule` | Verifies watcher edit, pause, resume, and accept-baseline actions keep the watcher row and owned schedule aligned. |
 | `TestWatchersFoundation.test_watcher_schedule_fire_launches_run_and_records_pending_fire` | Verifies watcher-owned schedules launch through scheduler dispatch, mark the watcher as firing, and record a pending watcher fire. |
+| `TestWatchersFoundation.test_watcher_full_cycle_fires_detects_change_notifies_and_accepts_baseline` | Verifies a watcher can fire with no changes, fire again with a detected change, queue a notification, and promote the changed run as the new baseline. |
 | `TestWatchersFoundation.test_watcher_finalize_changed_diff_updates_state_and_queues_notification` | Verifies completed watcher runs with a textual diff move to changed state and queue a watcher-changed notification. |
 | `TestWatchersFoundation.test_watcher_finalize_no_change_recovers_only_after_changed_state` | Verifies no-change watcher fires stay quiet from ok state and emit recovered only after a prior changed state. |
 | `TestWatchersFoundation.test_watcher_finalize_failed_run_disables_after_threshold` | Verifies failed watcher runs record error state, queue watcher-error notifications, and disable after the failure threshold. |

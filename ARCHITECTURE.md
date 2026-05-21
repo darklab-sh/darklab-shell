@@ -1588,6 +1588,7 @@ The current event inventory is:
 | WARN | `SCHEDULE_DISABLED_REVOKED` | scheduler dispatch | schedule_id, owner_kind, session, fired_at, next_run_at, command_root |
 | WARN | `WATCHER_FIRE_SKIPPED_OVERLAP` | scheduler dispatch | schedule_id, owner_kind, session, run_id, fired_at, active_run_count, command_root |
 | WARN | `WATCHER_ERROR` | watcher finalization | watcher_id, schedule_id, session, state, run_id, error, notification_count |
+| WARN | `WATCHER_DIFF_FAILED` | watcher finalization | watcher_id, schedule_id, session, state, run_id, error |
 | WARN | `WATCHER_DISABLED_AFTER_ERRORS` | watcher finalization | watcher_id, schedule_id, session, state, run_id, consecutive_failures |
 | WARN | `WATCHER_BASELINE_DELETED` | run cleanup | watcher_id, baseline_run_id, session |
 | WARN | `SCHEDULE_RECOVERY_SKIPPED_INVALID_NEXT_RUN` | scheduler recovery | schedule_id, owner_kind, next_run_at, fired_at |
@@ -1724,12 +1725,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,117
+- behavior tests: 3,118
 - docs/inventory meta-tests: 32
-- `pytest`: 1691 (1659 behavior + 32 meta)
+- `pytest`: 1692 (1660 behavior + 32 meta)
 - `vitest`: 1211
 - `playwright`: 252
-- total: 3,154
+- total: 3,155
 
 ### Testing Architecture
 

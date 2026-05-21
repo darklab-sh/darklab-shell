@@ -18,6 +18,10 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Why:** scripts and CI jobs need the same baseline, cadence, fire-audit, run-now, and accept-baseline controls that the browser and terminal built-in expose.
   - **What:** added `/api/v1/watchers` list/create/detail/update/delete routes, manual `run-now`, paged fire-audit reads, accept-baseline promotion, OpenAPI schemas, `darklab watch list/create/info/pause/resume/delete/run/accept/fires`, and `docs/watchers.md` for baseline, diff, scheduler, and notification behavior.
   - **Tests:** added API coverage for watcher CRUD, fire audit rows, accept-baseline, cross-session isolation, invalid body handling, baseline validation, command-policy rejection, OpenAPI contract drift, and CLI watcher command wiring. Current suite total: 1691 pytest + 1211 Vitest + 252 Playwright = **3,154 tests**.
+- **Watcher hardening and release cleanup** — watcher finalization now logs diff failures explicitly and the TODO plan is retired.
+  - **Why:** watcher operations should leave clear operational breadcrumbs, and the feature needed one full lifecycle smoke before leaving the TODO list.
+  - **What:** added `WATCHER_DIFF_FAILED` as a structured warning before watcher diff failures move through the normal watcher-error path, documented the event in the logging table, and removed the completed Watchers plan from `TODO.md`.
+  - **Tests:** added a backend smoke covering create, scheduler fire with no change, scheduler fire with a detected change, watcher-changed notification enqueueing, and accept-baseline promotion. Current suite total: 1692 pytest + 1211 Vitest + 252 Playwright = **3,155 tests**.
 
 - **Command Constellation full-sky polish** — the Status Monitor's run constellation now keeps a continuous sky regardless of which hours an operator actually uses.
   - **Why:** the constellation maps run history onto a 24-hour clock-time X axis, so most operators saw a 22:00–09:00 dead zone reading as visual void instead of texture.

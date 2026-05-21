@@ -36,16 +36,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-- **Watchers (change-detection monitors)**
-  - Goal
-    - First-class change-detection. Each watcher is "rerun command X on cadence Y, diff against baseline Z, deliver a notification only when the diff is non-empty." Builds on the scheduler service for cadence and the notifications service for delivery; reuses `app/services/runs/comparison.py` for diff computation.
-    - The unit of value: operators stop watching their tabs for "is anything new on this nmap?" and the app tells them.
-    - Land **after** scheduler and notifications. A watcher without a scheduler is just a manual diff; a watcher without notifications is just a database row.
-    - Non-goals for v1: watchers across multiple commands, watcher graphs, threshold-based alerting (e.g., "only fire if 3 new ports"), watcher history retention beyond a fixed cap.
-  - Phase 7 — hardening, docs, release
-    - Log events: `WATCHER_FIRED`, `WATCHER_CHANGED`, `WATCHER_RECOVERED`, `WATCHER_ERROR`, `WATCHER_BASELINE_ACCEPTED`, `WATCHER_DIFF_FAILED`, `WATCHER_DISABLED_AFTER_ERRORS`.
-    - Smoke tests cover a full create → fire (no change) → fire (changed) → notify → accept-baseline cycle.
-
 - **Status Monitor Command Constellation full-sky polish**
   - Goal
     - The Status Monitor's Command Constellation maps run history onto a 24-hour clock-time X axis and a log-elapsed Y axis. Most operators run commands during a 6–16 hour daily window, so the canvas always contains a large dead zone (typically 22:00–09:00) that reads as visual void instead of constellation.
