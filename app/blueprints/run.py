@@ -333,7 +333,7 @@ def _run_output_capture(run_id):
     )
 
 
-def _capture_add_line_with_signals(
+def _capture_event_with_signals(
     capture,
     classifier,
     text: str = "",
@@ -819,9 +819,9 @@ def _persist_completed_pty_run(
         text = str(item.get("text", ""))
         cls = str(item.get("cls", ""))
         if cls == "pty-marker":
-            capture.add_line(text, cls=cls)
+            capture.add_event(line_event_from_legacy(text, cls))
             continue
-        _capture_add_line_with_signals(capture, signal_classifier, text, cls=cls)
+        _capture_event_with_signals(capture, signal_classifier, text, cls=cls)
     _save_completed_run(
         run.run_id,
         run.session_id,
@@ -1572,7 +1572,7 @@ def _publish_broker_captured_line(
         ts_clock=line_dt.strftime("%H:%M:%S"),
         ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
     )
-    metadata, captured_event = _capture_add_line_with_signals(
+    metadata, captured_event = _capture_event_with_signals(
         capture,
         signal_classifier,
         event=base_event,

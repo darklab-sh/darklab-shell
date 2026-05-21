@@ -217,6 +217,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 **Behavior:**
 
 - Command output arrives line-by-line over SSE; fast commands batch flushes, slow scans stream each line as it arrives.
+- Each output row carries structured `kind` and `role` metadata, so live transcripts, restored history, permalinks, exports, and `/api/v1` streams agree on whether a line is normal output, a notice, a prompt echo, a section header, or another known row type.
 - The output view follows the live tail automatically, including during bursty runs that repaint quickly. Only a real user scroll-away disables follow mode and shows the tab-scoped jump-to-live / jump-to-bottom helper until the tail is rejoined.
 - A live elapsed run-timer sits next to the status pill while a command runs; the final elapsed time is recorded in the exit line.
 - Timestamps (elapsed or clock) and line numbers are independently toggleable from the tabbar controls (or the mobile menu). Timestamp fragments stay on each row, while line numbers are assigned once as output is emitted so high-volume commands do not have to renumber thousands of visible rows after `max_output_lines` trimming begins.

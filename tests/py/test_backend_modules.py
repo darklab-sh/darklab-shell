@@ -76,7 +76,7 @@ from core.redaction import (
     omit_raw_only_line_entries,
     redact_line_entries,
 )
-from services.runs.output_model import LineEntity, LineEvent, LineKind, LineRole, LineSignal, from_wire
+from services.runs.output_model import LineEntity, LineEvent, LineKind, LineRole, LineSignal, from_wire, line_event_from_legacy
 from services.runs.output_store import (
     RunOutputCapture,
     RUN_OUTPUT_DIR,
@@ -8600,9 +8600,9 @@ class TestRunOutputCapture:
 
     def test_preview_keeps_only_last_n_lines(self):
         capture = RunOutputCapture("test-run-output-preview", preview_limit=2, persist_full_output=False, full_output_max_bytes=0)
-        capture.add_line("one")
-        capture.add_line("two")
-        capture.add_line("three")
+        capture.add_event(line_event_from_legacy("one"))
+        capture.add_event(line_event_from_legacy("two"))
+        capture.add_event(line_event_from_legacy("three"))
         capture.finalize()
 
         assert list(capture.preview_lines) == [
@@ -8620,9 +8620,9 @@ class TestRunOutputCapture:
             full_output_max_bytes=0,
             preview_max_bytes=150,
         )
-        capture.add_line("a" * 20)
-        capture.add_line("b" * 20)
-        capture.add_line("c" * 20)
+        capture.add_event(line_event_from_legacy("a" * 20))
+        capture.add_event(line_event_from_legacy("b" * 20))
+        capture.add_event(line_event_from_legacy("c" * 20))
         capture.finalize()
 
         assert list(capture.preview_lines) == [
@@ -8640,7 +8640,7 @@ class TestRunOutputCapture:
             full_output_max_bytes=0,
             preview_max_bytes=120,
         )
-        capture.add_line("x" * 1000)
+        capture.add_event(line_event_from_legacy("x" * 1000))
         capture.finalize()
 
         assert len(capture.preview_lines) == 1
@@ -8652,8 +8652,8 @@ class TestRunOutputCapture:
 
     def test_full_output_artifact_round_trips_lines(self):
         capture = RunOutputCapture("test-run-output-artifact", preview_limit=2, persist_full_output=True, full_output_max_bytes=0)
-        capture.add_line("alpha")
-        capture.add_line("beta")
+        capture.add_event(line_event_from_legacy("alpha"))
+        capture.add_event(line_event_from_legacy("beta"))
         capture.finalize()
 
         assert capture.full_output_available is True
@@ -8674,13 +8674,13 @@ class TestRunOutputCapture:
 
     def test_full_output_artifact_round_trips_signal_metadata(self):
         capture = RunOutputCapture("test-run-output-signals", preview_limit=5, persist_full_output=True, full_output_max_bytes=0)
-        capture.add_line(
+        capture.add_event(line_event_from_legacy(
             "443/tcp open https",
-            signals=["findings"],
+            signals=(LineSignal.findings,),
             line_index=0,
             command_root="nmap",
             target="ip.darklab.sh",
-            entities=[{
+            entities=RunOutputCapture._normalize_entities([{
                 "type": "domain",
                 "value": "ip.darklab.sh",
                 "canonical_value": "ip.darklab.sh",
@@ -8688,8 +8688,8 @@ class TestRunOutputCapture:
                 "source_line": 0,
                 "start": 14,
                 "end": 27,
-            }],
-        )
+            }]),
+        ))
         capture.finalize()
 
         expected = [{
@@ -8747,7 +8747,7 @@ class TestRunOutputCapture:
         assert capture.artifact_rel_path is not None
         assert load_full_output_entries(capture.artifact_rel_path) == expected
 
-    def test_legacy_add_line_matches_typed_add_event_bytes(self):
+    def test_legacy_event_factory_matches_typed_add_event_bytes(self):
         legacy_capture = RunOutputCapture(
             "test-run-output-legacy-equivalence",
             preview_limit=5,
@@ -8761,7 +8761,12 @@ class TestRunOutputCapture:
             full_output_max_bytes=0,
         )
 
-        legacy_capture.add_line("section", cls="builtin-section", ts_clock="12:00:00", ts_elapsed="+0.1s")
+        legacy_capture.add_event(line_event_from_legacy(
+            "section",
+            "builtin-section",
+            ts_clock="12:00:00",
+            ts_elapsed="+0.1s",
+        ))
         typed_capture.add_event(LineEvent(
             text="section",
             kind=LineKind.info,
@@ -8782,8 +8787,8 @@ class TestRunOutputCapture:
 
     def test_full_output_artifact_respects_byte_cap(self):
         capture = RunOutputCapture("test-run-output-cap", preview_limit=10, persist_full_output=True, full_output_max_bytes=160)
-        capture.add_line("1234")
-        capture.add_line("5678")
+        capture.add_event(line_event_from_legacy("1234"))
+        capture.add_event(line_event_from_legacy("5678"))
         capture.finalize()
 
         assert capture.full_output_available is True

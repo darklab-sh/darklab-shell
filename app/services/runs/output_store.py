@@ -159,34 +159,6 @@ class RunOutputCapture:
             normalized.append(item)
         return normalized
 
-    def add_line(
-        self,
-        text: str = "",
-        cls: str = "",
-        ts_clock: str = "",
-        ts_elapsed: str = "",
-        signals: Sequence[str] | None = None,
-        line_index: int | None = None,
-        command_root: str = "",
-        target: str = "",
-        entities: Sequence[Mapping[str, object]] | None = None,
-        *,
-        event: LineEvent | None = None,
-    ):
-        if event is None:
-            event = line_event_from_legacy(
-                text,
-                cls,
-                ts_clock=ts_clock,
-                ts_elapsed=ts_elapsed,
-                signals=signals,
-                line_index=line_index,
-                command_root=command_root,
-                target=target,
-                entities=self._normalize_entities(entities),
-            )
-        self.add_event(event)
-
     def add_event(self, event: LineEvent):
         storage_event = replace(event, text=event.text.rstrip("\n"))
         entry = to_legacy_wire(storage_event)

@@ -35,28 +35,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-- **Structured output model**
-  - Goal
-    - Replace the loose `dict[str, object]` line shape in `app/services/runs/output_store.py` with a versioned, validated, well-typed `LineEvent` model that every producer and consumer agrees on. Today line dicts carry `text`, `cls`, `tsC`, `tsE`, and optional `signals`/`line_index`/`command_root`/`target`/`entities` — but the `cls` string is overloaded with two unrelated concepts (semantic kind like `notice`/`error`/`warn` and structural role like `prompt-echo`/`pty-marker`/`builtin-section`/`builtin-kv`), no schema enforces field presence or value, and each producer adds its own ad-hoc keys. The result: comparison re-parses text instead of diffing structure; redaction touches `text` only; search keeps a separate `output_search_text` column; permalink/export/transcript renderers each branch on the union of historical `cls` values; builtins synthesize line dicts in a shape that doesn't quite match real-run output.
-    - The new model splits the overloaded `cls` into two orthogonal axes — semantic `kind` (severity-ish: `info`/`notice`/`warn`/`error`) and structural `role` (renderer hint: `body`/`prompt-echo`/`section-header`/`kv`/`pty-marker`/`progress`/`status-line`) — adds explicit `kind` and `role` fields to the future v1 line-event wire shape, keeps the legacy `cls` string populated for compatibility, adds a stable schema envelope to artifact JSONL, keeps `text` byte-identical to today's value, and locks the optional metadata bag to a documented schema (`signals[]` typed against an enum, `entities[]` validated through the existing `RunOutputCapture._normalize_entities` shape, `command_root`/`target`/`line_index` typed). Every callsite that emits a line event goes through one typed factory and every callsite that consumes a line event reads from the same typed accessor.
-    - The unit of value: comparison, redaction, search, exports, permalinks, command outcome summaries, and future structured features (auto-finding promotion, structured PTY replays, machine-readable run digests) all read one model. Future producers (a new built-in, a new tool wrapper, a future ingestion path) can add fields without retraining every consumer to understand them.
-    - Non-goals for v1: changing user-visible terminal rendering at the byte level, redoing the SQLite `runs.output` preview column shape (it stays the same JSON-array-of-events column), rewriting the FTS5 `runs_fts` virtual table (the schema stays the same while `output_search_text` is derived from structured events), moving the SSE/NDJSON wire format off `event: output` (stream event types stay stable and only the JSON payload is versioned).
-    - Land **before** "Command outcome summaries", the "Run comparison enhancements" structured diff work, and any future structured-search feature. Each of those reuses the same `LineEvent` accessors and would otherwise re-invent partial schemas.
-    - Each phase is independently shippable, but phases land in numerical order. The remaining work is the cleanup/docs/release pass after the typed producers/consumers, headered artifact storage, structured search-text derivation, upgrade-on-read compatibility for historical artifacts, and live stream envelope are in place.
-  - Phase 7 — cleanup, docs, release
-    - Drop the legacy `add_line(text, cls=...)` thin wrapper from `RunOutputCapture` after every internal caller has migrated to `add_event`. Keep `from_legacy_cls` shims forever — they're called when loading historical artifacts.
-    - Delete the `cls` keyword path from JS renderers: `appendLine(event, ...)` is the only signature; `event.role` and `event.kind` are the only branches.
-    - Keep compatibility `cls` populated in `to_wire`/`to_legacy_wire` forever for cached/stored data, older consumers, and external mirrors of the line-event payload. Cleanup only removes internal `cls` keyword arguments and renderer branching.
-    - Add an `Output Model` subsection to `ARCHITECTURE.md` (`### Backend Composition` or a new `### Run Output Model`):
-      - Describe the `LineEvent` shape, the `kind`/`role` split, the storage envelope, and the upgrade-on-read policy.
-      - Reference the contract tests and the Python↔JS parity test.
-    - Update `FEATURES.md` "Output Streaming and Display" with a one-line note that structured `kind`/`role` metadata flows through transcripts, permalinks, exports, and `/api/v1` streams.
-    - Update `CHANGELOG.md`, the v2.x merge-request draft, and the v2.x release notes with one entry summarising the foundation, the migration policy (legacy artifacts read upgraded-on-read; no on-disk rewrite), and the API surface change (the `schema` SSE frame).
-    - Acceptance criteria
-      - `grep -rn '"cls":\|cls=' app/ tests/` returns zero hits outside legacy shim functions, compatibility serializers, route/API wire compatibility assertions, fixtures, and tests that intentionally cover historical payloads.
-      - `pytest tests/py/test_run_output_model_parity.py` passes (Python and JS schemas in sync).
-      - The full suite (`npm run test:unit` + `pytest tests/py/`) passes; `tests/py/test_docs.py` accepts the bumped counts.
-
 ## Known Issues
 
 No known issues are currently tracked.

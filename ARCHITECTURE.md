@@ -14,6 +14,7 @@ For the architectural rationale, tradeoffs, and implementation-history notes beh
 - [HTTP Route Inventory](#http-route-inventory)
 - [Frontend](#frontend)
 - [Back-end Architecture](#back-end-architecture)
+- [Run Output Model](#run-output-model)
 - [Run Lifecycle](#run-lifecycle)
 - [Secrets and Vault](#secrets-and-vault)
 - [Intel and Provider Integrations](#intel-and-provider-integrations)
@@ -822,6 +823,25 @@ This boundary view answers a different question than the dependency graph above:
 - The configured database plus artifact files own durable run, snapshot, token, workflow, workspace metadata, project workspace, package, and search state.
 - Scanner subprocesses remain an out-of-process boundary rather than an in-worker extension of the Flask app.
 - Config and theme YAML files are filesystem-backed dependencies that shape both backend behavior and frontend presentation but do not become a general runtime datastore.
+
+## Run Output Model
+
+Run output moves through the app as `LineEvent` data. The model keeps the user-visible `text` stable while splitting line meaning into two fields:
+
+- `kind` describes severity-like meaning: `info`, `notice`, `warn`, or `error`.
+- `role` describes how the line should render: body text, prompt echo, section header, key/value row, PTY marker, progress, status line, success, denied, or exit status.
+
+The legacy `cls` field still exists at storage and API boundaries so cached transcripts, old artifacts, older clients, exports, and mirrors keep working. Internal producers use typed factories and `RunOutputCapture.add_event()`, while readers call the shared Python or browser decoder before rendering, comparing, redacting, exporting, or deriving search text.
+
+Full-output artifacts are versioned JSONL. New files start with a small header row that names the artifact format version, creation time, and run id. Older headerless JSONL or plain-text artifacts are upgraded in memory when read; the app does not rewrite historical files on disk. Preview output in the database keeps the existing JSON-array shape for fast history loads, and `output_search_text` is derived from decoded line events so captured entity values can be searched without teaching FTS about the line-event schema.
+
+Live streams advertise the same contract. `/runs/<id>/stream` and `/api/v1/runs/<id>/stream` send a `schema` frame or row first, then keep using `output` events with a versioned line-event payload. Older clients can keep reading `type` and `text`; newer clients use `kind`, `role`, `signals`, and `entities`.
+
+The contract is guarded from both sides:
+
+- Python unit tests cover legacy-class decoding, entity normalization, artifact header/read compatibility, search-text derivation, redaction, and structural comparison.
+- Browser unit tests cover typed rendering and unknown-value fallbacks.
+- `tests/py/test_run_output_model_parity.py` verifies the Python and browser enum lists stay in sync.
 
 ### Notifications Architecture
 
