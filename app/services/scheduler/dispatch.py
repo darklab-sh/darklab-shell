@@ -177,18 +177,94 @@ def _fire_user_schedule(conn, schedule: Schedule, *, fired_at: str) -> tuple[str
 
 
 def _fire_watcher_schedule(conn, schedule: Schedule, *, fired_at: str) -> tuple[str, str]:
+    if not _session_token_exists(conn, schedule.session_token):
+        record_schedule_fire(
+            conn,
+            schedule,
+            status=FIRE_STATUS_SKIPPED_REVOKED,
+            fired_at=fired_at,
+            reason="session token revoked",
+        )
+        log.warning(
+            "SCHEDULE_DISABLED_REVOKED",
+            extra=_schedule_log_payload(schedule, fired_at=fired_at),
+        )
+        return FIRE_STATUS_SKIPPED_REVOKED, ""
+
+    if _schedule_has_fresh_fire_claim(schedule):
+        record_schedule_fire(
+            conn,
+            schedule,
+            status=FIRE_STATUS_SKIPPED_OVERLAP,
+            fired_at=fired_at,
+            reason="watcher fire already in progress",
+        )
+        log.info(
+            "WATCHER_FIRE_SKIPPED_OVERLAP",
+            extra=_schedule_log_payload(
+                schedule,
+                fired_at=fired_at,
+                run_id=schedule.last_run_id,
+                active_run_count=0,
+            ),
+        )
+        return FIRE_STATUS_SKIPPED_OVERLAP, ""
+
+    previous_active, active_run_count = _previous_run_is_active(schedule)
+    if previous_active:
+        record_schedule_fire(
+            conn,
+            schedule,
+            status=FIRE_STATUS_SKIPPED_OVERLAP,
+            fired_at=fired_at,
+            reason="previous watcher run is still active",
+        )
+        log.info(
+            "WATCHER_FIRE_SKIPPED_OVERLAP",
+            extra=_schedule_log_payload(
+                schedule,
+                fired_at=fired_at,
+                run_id=schedule.last_run_id,
+                active_run_count=active_run_count,
+            ),
+        )
+        return FIRE_STATUS_SKIPPED_OVERLAP, schedule.last_run_id
+
+    if not _claim_schedule_fire(conn, schedule, fired_at=fired_at):
+        record_schedule_fire(
+            conn,
+            schedule,
+            status=FIRE_STATUS_SKIPPED_OVERLAP,
+            fired_at=fired_at,
+            reason="watcher fire already claimed",
+        )
+        log.info(
+            "WATCHER_FIRE_SKIPPED_OVERLAP",
+            extra=_schedule_log_payload(
+                schedule,
+                fired_at=fired_at,
+                run_id=schedule.last_run_id,
+                active_run_count=active_run_count,
+            ),
+        )
+        return FIRE_STATUS_SKIPPED_OVERLAP, ""
+
+    from services.watchers import runner as watcher_runner  # noqa: PLC0415
+
+    run_id = watcher_runner.handle_fire(conn, schedule, fired_at=fired_at, launch_run=_launch_user_schedule_run)
     record_schedule_fire(
         conn,
         schedule,
         status=FIRE_STATUS_FIRED,
         fired_at=fired_at,
-        reason="dispatch pending watcher integration",
+        run_id=run_id,
+        reason="started watcher run",
     )
-    log.warning(
-        "SCHEDULE_WATCHER_FIRE_SKIPPED_UNIMPLEMENTED",
-        extra=_schedule_log_payload(schedule, fired_at=fired_at),
+    log.info(
+        "WATCHER_SCHEDULE_FIRED",
+        extra=_schedule_log_payload(schedule, fired_at=fired_at, run_id=run_id),
     )
-    return FIRE_STATUS_FIRED, ""
+    return FIRE_STATUS_FIRED, run_id
 
 
 def _session_token_exists(conn, session_token: str) -> bool:

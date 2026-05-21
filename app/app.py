@@ -74,6 +74,7 @@ from blueprints.notifications import notifications_bp  # noqa: E402
 from blueprints.schedules import schedules_bp  # noqa: E402
 from blueprints.session import session_bp  # noqa: E402
 from blueprints.secrets import secrets_bp  # noqa: E402
+from blueprints.watchers import watchers_bp  # noqa: E402
 from blueprints.workspace import workspace_bp  # noqa: E402
 from blueprints.projects import projects_bp  # noqa: E402
 from services.workspace.files import cleanup_inactive_workspaces  # noqa: E402
@@ -193,6 +194,7 @@ app.register_blueprint(notifications_bp)
 app.register_blueprint(schedules_bp)
 app.register_blueprint(session_bp)
 app.register_blueprint(secrets_bp)
+app.register_blueprint(watchers_bp)
 app.register_blueprint(workspace_bp)
 app.register_blueprint(projects_bp)
 

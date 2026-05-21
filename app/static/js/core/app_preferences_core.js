@@ -18,6 +18,7 @@
     'pref_compare_context',
     'pref_options_modal_last_tab',
     'pref_tour_seen_version',
+    'pref_constellation_full_day',
   ]);
   const WELCOME_INTRO_MODES = Object.freeze(['animated', 'disable_animation', 'remove']);
   const SHARE_REDACTION_DEFAULT_MODES = Object.freeze(['unset', 'redacted', 'raw']);
@@ -47,6 +48,10 @@
   }
 
   function coerceRunNotifyMode(value) {
+    return value === 'on' ? 'on' : 'off';
+  }
+
+  function coerceConstellationFullDayMode(value) {
     return value === 'on' ? 'on' : 'off';
   }
 
@@ -96,6 +101,7 @@
       pref_compare_context: '3',
       pref_options_modal_last_tab: 'preferences',
       pref_tour_seen_version: '',
+      pref_constellation_full_day: 'off',
     };
   }
 
@@ -121,6 +127,7 @@
     prefs.pref_compare_context = coerceCompareContextMode(source.pref_compare_context);
     prefs.pref_options_modal_last_tab = coerceOptionsModalTab(source.pref_options_modal_last_tab);
     prefs.pref_tour_seen_version = coerceTourSeenVersion(source.pref_tour_seen_version);
+    prefs.pref_constellation_full_day = coerceConstellationFullDayMode(source.pref_constellation_full_day);
     return prefs;
   }
 
@@ -141,6 +148,7 @@
     coerceWelcomeIntroMode,
     coerceShareRedactionDefaultMode,
     coerceRunNotifyMode,
+    coerceConstellationFullDayMode,
     coerceHudClockMode,
     coerceCompareViewMode,
     coerceCompareContextMode,

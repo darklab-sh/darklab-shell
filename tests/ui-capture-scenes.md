@@ -90,7 +90,7 @@ scene where one of these appears to have drifted.
 - **Typography & rhythm** — prompt line, output line, header row, and sheet
   rows should sit on a consistent line-height grid across themes.
 
-## Desktop pack (37 scenes)
+## Desktop pack (40 scenes)
 
 Order matches the scene array in `tests/js/e2e/ui-capture.desktop.capture.js`.
 
@@ -133,6 +133,9 @@ Order matches the scene array in `tests/js/e2e/ui-capture.desktop.capture.js`.
 | 35 | `permalink-page` | `/history/:id` | Permalink landing page from `/history`. | Prompt prefix on echoed command lines renders the configured prompt username/domain (not a bare `$`); header metadata alignment; green border removed from the page title. |
 | 36 | `status-monitor-active-telemetry` | `/` | Status Monitor drawer open while a command is active and resource telemetry has populated. | Drawer grows from the HUD without covering the rail; row uses the green active accent; CPU/MEM circular meters show populated values, not `n/a`; meter labels remain readable across themes. |
 | 37 | `diag-page` | `/diag` | Operator `/diag` page. | Activity and Outcomes cards are split; refreshed-at freshness line under the header; config `true` values not green-by-default; diag back-button present only at mobile/touch breakpoints (it should not appear here). |
+| 38 | `status-monitor-constellation-active-hours` | `/` | Status Monitor open against 30 days of business-hours run history. | Constellation X axis auto-fit to roughly `HH:MM–HH:MM` (the active hours line); meta line reads `HH:MM–HH:MM · N plotted`; legend `Active hours` toggle present with `aria-pressed="false"`; daylight gradient backdrop visible behind stars; ambient stars fill the chrome at idle edges. |
+| 39 | `status-monitor-constellation-full-day` | `/` | Status Monitor open with the same fixture and the legend toggle flipped to Full day. | X axis spans `0–24` with the `24` label suppressed; meta line reads `N plotted · last X days`; toggle now reads `Full day` with `aria-pressed="true"`; gradient backdrop covers the full sweep so noon sits at the visual midpoint. |
+| 40 | `status-monitor-constellation-sparse` | `/` | Status Monitor open against a fresh session with no run history yet. | No real stars; ambient stars visible across the canvas; gradient backdrop legible against the panel background; "Run history will populate this constellation." sparse-message visible; meta reads `awaiting run history · last X days`. |
 
 ## Mobile pack (30 scenes)
 

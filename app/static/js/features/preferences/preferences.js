@@ -99,6 +99,7 @@ function _buildCurrentSessionPreferenceSnapshot() {
     pref_compare_context: getCompareContextPreference(),
     pref_options_modal_last_tab: getOptionsModalLastTabPreference(),
     pref_tour_seen_version: getTourSeenVersionPreference(),
+    pref_constellation_full_day: getConstellationFullDayPreference(),
   };
   const activeProject = typeof globalThis.getActiveProjectContext === 'function'
     ? globalThis.getActiveProjectContext()
@@ -166,6 +167,7 @@ async function loadSessionPreferences() {
     applyPromptUsernamePreference(prefs.pref_prompt_username, false);
     applyCompareViewModePreference(prefs.pref_compare_view_mode, false);
     applyCompareContextPreference(prefs.pref_compare_context, false);
+    applyConstellationFullDayPreference(prefs.pref_constellation_full_day, false);
     if (typeof applyRunNotifyPreference === 'function') {
       await applyRunNotifyPreference(prefs.pref_run_notify, false);
     }
@@ -196,6 +198,10 @@ function getProjectAutoLinkRunEntitiesPreference() {
 
 function getRunNotifyPreference() {
   return PreferenceCore.coerceRunNotifyMode(getPreference('pref_run_notify'));
+}
+
+function getConstellationFullDayPreference() {
+  return PreferenceCore.coerceConstellationFullDayMode(getPreference('pref_constellation_full_day'));
 }
 
 function getHudClockPreference() {
@@ -452,6 +458,23 @@ function applyProjectAutoLinkRunEntitiesPreference(mode, persist = true) {
     _primePreferenceValue('pref_project_auto_link_run_entities', nextMode);
   }
   syncOptionsControls();
+}
+
+function applyConstellationFullDayPreference(mode, persist = true) {
+  // The Status Monitor Command Constellation auto-fits its X axis to the
+  // operator's active hours by default ('off'). Setting this to 'on' falls
+  // back to the strict 24-hour layout. The render layer reads the value via
+  // `getConstellationFullDayPreference()` on each render, so this helper only
+  // primes the cookie/override and persists. Panel-level re-render is owned
+  // by the constellation legend toggle handler so the rest of the Status
+  // Monitor (active runs, pulse strip, treemap, heatmap) stays untouched.
+  const nextMode = PreferenceCore.coerceConstellationFullDayMode(mode);
+  _primePreferenceValue('pref_constellation_full_day', nextMode);
+  if (persist) {
+    try { void _persistCurrentSessionPreferences(); }
+    catch (err) { logClientError('failed to persist constellation full-day preference', err); }
+  }
+  return nextMode;
 }
 
 function applyCompareViewModePreference(mode, persist = true) {

@@ -1097,6 +1097,13 @@ def delete_run_artifacts(conn, run_ids):
     if not ids:
         return
 
+    try:
+        from services.watchers.service import pause_watchers_for_deleted_baselines  # noqa: PLC0415
+
+        pause_watchers_for_deleted_baselines(conn, ids)
+    except Exception:
+        log.error("WATCHER_BASELINE_DELETE_HOOK_ERROR", exc_info=True)
+
     placeholders = ",".join("?" for _ in ids)
     rows = conn.execute(
         f"SELECT rel_path FROM run_output_artifacts WHERE run_id IN ({placeholders})",  # nosec

@@ -718,6 +718,15 @@ def _finalize_completed_run(
         finalize_summary=finalize_summary,
         cfg=CFG,
     )
+    try:
+        from services.watchers.finalize import finalize_watcher_run  # noqa: PLC0415
+
+        finalize_watcher_run(run_id)
+    except Exception:
+        log.error("WATCHER_FINALIZE_ERROR", exc_info=True, extra={
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+        })
     return {"elapsed": elapsed, "active_project_link": active_project_link}
 
 

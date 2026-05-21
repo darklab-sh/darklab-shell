@@ -68,7 +68,6 @@
   const _formatCount = _statusMonitorCore.formatCount;
   const _truncateText = _statusMonitorCore.truncateText;
   const _normalizedHash = _statusMonitorCore.normalizedHash;
-  const _seededUnit = _statusMonitorCore.seededUnit;
   const _parseIsoDateOnly = _statusMonitorCore.parseIsoDateOnly;
   const _formatIsoDateOnly = _statusMonitorCore.formatIsoDateOnly;
   const _isoWeekdayRow = _statusMonitorCore.isoWeekdayRow;
@@ -259,41 +258,155 @@
     return item;
   }
 
-  function _ambientConstellationSeed() {
-    if (typeof CLIENT_ID !== 'undefined' && CLIENT_ID) return _normalizedHash(`ambient:${CLIENT_ID}`);
-    return _normalizedHash('ambient:darklab');
+  // Default "full day" window: every minute mapper falls back to this when the
+  // caller doesn't pass an explicit window, which keeps Phase 0 behavior
+  // identical to the previous inline math.
+  const CONSTELLATION_FULL_DAY_WINDOW = Object.freeze({ startMin: 0, endMin: 1440 });
+
+  function _constellationStarMinutes(star) {
+    const started = Date.parse(String(star?.started || ''));
+    if (!Number.isFinite(started)) return null;
+    const date = new Date(started);
+    return (date.getHours() * 60) + date.getMinutes();
   }
 
-  function _ambientConstellationStars() {
-    const seed = _ambientConstellationSeed();
-    const columns = 18;
-    const rows = 8;
-    const stars = [];
-    for (let row = 0; row < rows; row += 1) {
-      for (let column = 0; column < columns; column += 1) {
-        const index = (row * columns) + column;
-        const jitterX = _seededUnit(seed + (index * 37) + 11);
-        const jitterY = _seededUnit(seed + (index * 53) + 19);
-        const scale = _seededUnit(seed + (index * 71) + 23);
-        const tone = _seededUnit(seed + (index * 89) + 31);
-        const depth = _seededUnit(seed + (index * 113) + 59);
-        const bright = depth > 0.88;
-        const baseRadius = 0.85 + (scale * 1.25);
-        const baseOpacity = 0.42 + (_seededUnit(seed + (index * 97) + 43) * 0.34);
-        stars.push({
-          x: 12 + ((column + (jitterX * 0.88) + 0.06) / columns) * 616,
-          y: 12 + ((row + (jitterY * 0.86) + 0.07) / rows) * 276,
-          radius: baseRadius + (bright ? 0.45 + (depth * 0.35) : 0),
-          opacity: Math.min(0.92, baseOpacity + (bright ? 0.16 + ((depth - 0.88) * 0.75) : 0)),
-          hue: tone > 0.86 ? 48 : 92 + (tone * 55),
-          saturation: bright ? 92 : 72 + (tone * 16),
-          lightness: bright ? 82 + ((depth - 0.88) * 32) : 68 + (scale * 8),
-          glow: 2.5 + (scale * 3.5) + (bright ? 3.4 : 0),
-          glowAlpha: bright ? 0.54 : 0.3,
-        });
+  function _constellationHourDensity(stars) {
+    const bins = new Array(24).fill(0);
+    if (!Array.isArray(stars)) return bins;
+    for (const star of stars) {
+      const minutes = _constellationStarMinutes(star);
+      if (minutes === null) continue;
+      const hour = Math.min(23, Math.max(0, Math.floor(minutes / 60)));
+      bins[hour] += 1;
+    }
+    const peak = bins.reduce((max, value) => (value > max ? value : max), 0);
+    if (peak <= 0) return bins.map(() => 0);
+    return bins.map(value => value / peak);
+  }
+
+  function _constellationPercentileMinute(sortedMinutes, fraction) {
+    if (!sortedMinutes.length) return 0;
+    if (sortedMinutes.length === 1) return sortedMinutes[0];
+    const clamped = Math.min(1, Math.max(0, fraction));
+    const position = clamped * (sortedMinutes.length - 1);
+    const lower = Math.floor(position);
+    const upper = Math.ceil(position);
+    if (lower === upper) return sortedMinutes[lower];
+    const weight = position - lower;
+    return (sortedMinutes[lower] * (1 - weight)) + (sortedMinutes[upper] * weight);
+  }
+
+  function _constellationActiveWindow(stars, { paddingMinutes = 60 } = {}) {
+    const minutes = [];
+    if (Array.isArray(stars)) {
+      for (const star of stars) {
+        const value = _constellationStarMinutes(star);
+        if (value !== null) minutes.push(value);
       }
     }
-    return stars;
+    if (minutes.length < 6) return { startMin: 0, endMin: 1440 };
+    minutes.sort((left, right) => left - right);
+    const lower = _constellationPercentileMinute(minutes, 0.05);
+    const upper = _constellationPercentileMinute(minutes, 0.95);
+    const pad = Math.max(0, Number(paddingMinutes) || 0);
+    const startMin = Math.max(0, Math.floor(lower - pad));
+    const endMin = Math.min(1440, Math.ceil(upper + pad));
+    if (endMin <= startMin) return { startMin: 0, endMin: 1440 };
+    return { startMin, endMin };
+  }
+
+  function _constellationMinuteToX(window) {
+    const startMin = Number(window?.startMin);
+    const endMin = Number(window?.endMin);
+    const safeStart = Number.isFinite(startMin) ? startMin : 0;
+    const safeEnd = Number.isFinite(endMin) && endMin > safeStart ? endMin : 1440;
+    const span = safeEnd - safeStart;
+    return function constellationMinuteToX(minute) {
+      const value = Number(minute);
+      const offset = Number.isFinite(value) ? value - safeStart : 0;
+      return CONSTELLATION_PLOT_LEFT + ((offset / span) * CONSTELLATION_PLOT_WIDTH);
+    };
+  }
+
+  // Ambient stars are decorative chrome — they exist to keep the canvas
+  // feeling like a continuous sky even when an operator only runs commands
+  // during a narrow band of the day. The palette is locked to a desaturated
+  // twilight blue so ambient never collides with the category tone palette
+  // real stars use; radius/opacity/glow bounds keep ambient subordinate so
+  // hover and keyboard focus only reach real stars.
+  const AMBIENT_HUE = 218;
+  const AMBIENT_SAT_MIN = 12;
+  const AMBIENT_SAT_MAX = 24;
+  const AMBIENT_LIGHT_MIN = 52;
+  const AMBIENT_LIGHT_MAX = 66;
+  const AMBIENT_OPACITY_MIN = 0.18;
+  const AMBIENT_OPACITY_MAX = 0.42;
+  const AMBIENT_RADIUS_MIN = 0.7;
+  const AMBIENT_RADIUS_MAX = 1.7;
+  const AMBIENT_COUNT_MIN = 80;
+  const AMBIENT_COUNT_MAX = 160;
+
+  function _ambientHourWeights(stars, displayWindow) {
+    // Inside the active window we want ambient to be *inverse* to real-star
+    // density so the chrome fills lulls without competing with the data
+    // band. Outside the active window we want uniform fill — those hours
+    // have no real-star density to invert, but the chrome there should
+    // still read as a lived-in sky. Hours that fall fully outside the
+    // visible display window get zero weight so we don't waste samples on
+    // off-canvas minutes when auto-fit has narrowed the X axis.
+    const density = _constellationHourDensity(stars);
+    const active = _constellationActiveWindow(stars);
+    const activeStartH = active.startMin / 60;
+    const activeEndH = active.endMin / 60;
+    const windowStartH = (Number(displayWindow?.startMin) || 0) / 60;
+    const windowEndH = (Number(displayWindow?.endMin) || 1440) / 60;
+    const weights = new Array(24).fill(0);
+    for (let h = 0; h < 24; h += 1) {
+      if (h + 1 <= windowStartH || h >= windowEndH) continue;
+      if (h >= activeStartH && h < activeEndH) {
+        weights[h] = Math.max(0.08, 1 - density[h]);
+      } else {
+        weights[h] = 1;
+      }
+    }
+    return weights;
+  }
+
+  function _ambientSampleHour(cdf, total) {
+    const target = Math.random() * total;
+    for (let h = 0; h < cdf.length; h += 1) {
+      if (target <= cdf[h]) return h;
+    }
+    return cdf.length - 1;
+  }
+
+  function _ambientConstellationStars({ stars = [], window: displayWindow = CONSTELLATION_FULL_DAY_WINDOW } = {}) {
+    const weights = _ambientHourWeights(stars, displayWindow);
+    let total = 0;
+    const cdf = weights.map((value) => { total += value; return total; });
+    if (total <= 0) return [];
+    const totalCount = AMBIENT_COUNT_MIN
+      + Math.floor(Math.random() * (AMBIENT_COUNT_MAX - AMBIENT_COUNT_MIN + 1));
+    const minuteToX = _constellationMinuteToX(displayWindow);
+    const placed = [];
+    const attemptCap = totalCount * 4;
+    for (let attempt = 0; attempt < attemptCap && placed.length < totalCount; attempt += 1) {
+      const hour = _ambientSampleHour(cdf, total);
+      const minute = (hour * 60) + (Math.random() * 60);
+      const x = minuteToX(minute);
+      if (x < CONSTELLATION_PLOT_LEFT - 1 || x > CONSTELLATION_PLOT_RIGHT + 1) continue;
+      const y = 14 + (Math.random() * 268);
+      placed.push({
+        x,
+        y,
+        radius: AMBIENT_RADIUS_MIN + (Math.random() * (AMBIENT_RADIUS_MAX - AMBIENT_RADIUS_MIN)),
+        opacity: AMBIENT_OPACITY_MIN + (Math.random() * (AMBIENT_OPACITY_MAX - AMBIENT_OPACITY_MIN)),
+        hue: AMBIENT_HUE,
+        saturation: AMBIENT_SAT_MIN + (Math.random() * (AMBIENT_SAT_MAX - AMBIENT_SAT_MIN)),
+        lightness: AMBIENT_LIGHT_MIN + (Math.random() * (AMBIENT_LIGHT_MAX - AMBIENT_LIGHT_MIN)),
+      });
+    }
+    return placed;
   }
 
   function _svgEl(tag, attrs = {}) {
@@ -1623,8 +1736,182 @@
     return commands.join(' ');
   }
 
-  function _constellationTimeGuideX(hour) {
-    return CONSTELLATION_PLOT_LEFT + ((hour * 60) / 1440) * CONSTELLATION_PLOT_WIDTH;
+  // Major-tick step candidates in hours. Powers-of-2 and clean factors of 24
+  // keep half-intervals on whole or half hours, which reads cleanly as a clock
+  // and makes minor ticks land at sensible positions between majors.
+  const CONSTELLATION_TICK_STEP_CANDIDATES = [1, 2, 3, 4, 6, 8, 12];
+
+  function _constellationTickSpec(window) {
+    const startMin = Number(window?.startMin) || 0;
+    const endMin = Number(window?.endMin) || 1440;
+    const spanH = (endMin - startMin) / 60;
+    const target = spanH <= 6 ? 4 : spanH <= 12 ? 5 : 6;
+    let bestStep = CONSTELLATION_TICK_STEP_CANDIDATES[0];
+    let bestScore = Infinity;
+    CONSTELLATION_TICK_STEP_CANDIDATES.forEach((step) => {
+      const firstHour = Math.ceil((startMin / 60) / step) * step;
+      let count = 0;
+      for (let hour = firstHour; hour <= endMin / 60 + 1e-9; hour += step) count += 1;
+      // Prefer at-least-target ticks (never too sparse); within that, the
+      // count closest to the target wins; tie-breaking by larger step keeps
+      // labels from getting visually crowded.
+      const undershoot = count < target ? (target - count) * 100 : 0;
+      const distance = Math.abs(count - target);
+      const score = undershoot + distance - (step * 0.001);
+      if (score < bestScore) {
+        bestScore = score;
+        bestStep = step;
+      }
+    });
+    const majors = [];
+    const firstHour = Math.ceil((startMin / 60) / bestStep) * bestStep;
+    for (let hour = firstHour; hour <= endMin / 60 + 1e-9; hour += bestStep) {
+      majors.push(hour);
+    }
+    const minors = [];
+    const half = bestStep / 2;
+    if (half > 0) {
+      majors.forEach((hour, index) => {
+        const next = majors[index + 1];
+        if (typeof next === 'number' && next - hour > half * 1.5) return;
+        const candidate = hour + half;
+        if (candidate > startMin / 60 + 1e-9 && candidate < endMin / 60 - 1e-9) {
+          minors.push(candidate);
+        }
+      });
+      // Add a leading minor before the first major if there's room (so a
+      // narrow window like 09:30 → … still shows a half-step mark before
+      // the first hour-aligned major).
+      const leading = (firstHour - half);
+      if (leading > startMin / 60 + 1e-9) minors.unshift(leading);
+    }
+    return { stepHours: bestStep, majors, minors };
+  }
+
+  function _formatConstellationWindowLabel(window) {
+    const pad = (value) => String(Math.floor(value)).padStart(2, '0');
+    const startMin = Math.max(0, Math.min(1440, Number(window?.startMin) || 0));
+    const endMin = Math.max(0, Math.min(1440, Number(window?.endMin) || 1440));
+    return `${pad(startMin / 60)}:${pad(startMin % 60)}–${pad(endMin / 60)}:${pad(endMin % 60)}`;
+  }
+
+  function _isConstellationFullDay() {
+    return typeof getConstellationFullDayPreference === 'function'
+      && getConstellationFullDayPreference() === 'on';
+  }
+
+  // Daylight gradient backdrop. Stops are anchored to clock hours so the
+  // atmospheric progression reads the same in any theme and in any mode:
+  //   00:00–05:00 deep navy, 07:00 pre-dawn lift, 08:00–17:00 daytime wash,
+  //   19:00 dusk warmth, 20:00 fade back, 24:00 deep navy.
+  // All colors are color-mix() patterns over `--theme-panel-bg` and
+  // `--theme-panel-shadow` so light, dark, and high-contrast themes all
+  // produce a coherent gradient — no hard-coded hex values.
+  const CONSTELLATION_SKY_GRADIENT_ID = 'constellation-sky';
+  const CONSTELLATION_SKY_STOPS = [
+    { hour: 0,  bg: 28, shadow: 72 },
+    { hour: 5,  bg: 28, shadow: 72 },
+    { hour: 7,  bg: 44, shadow: 56 },
+    { hour: 8,  bg: 62, shadow: 38 },
+    { hour: 17, bg: 62, shadow: 38 },
+    { hour: 19, bg: 44, shadow: 56 },
+    { hour: 20, bg: 32, shadow: 68 },
+    { hour: 24, bg: 28, shadow: 72 },
+  ];
+  const CONSTELLATION_SKY_TOP = 12;
+  const CONSTELLATION_SKY_BOTTOM = 286;
+
+  function _appendConstellationSkyBackdrop(svg, window) {
+    const minuteToX = _constellationMinuteToX(window);
+    // The rect is anchored to true clock-time coordinates: x at 00:00 and
+    // width spanning to 24:00. In auto-fit mode the rect extends past the
+    // visible viewBox on either side and SVG's overflow clipping hides the
+    // off-canvas portion, leaving only the active-window slice visible.
+    // The gradient's coordinate space stays tied to real hours so noon
+    // appears wherever 12:00 lands in the mapping.
+    const x = minuteToX(0);
+    const width = minuteToX(1440) - x;
+    const defs = _svgEl('defs');
+    const gradient = _svgEl('linearGradient', {
+      id: CONSTELLATION_SKY_GRADIENT_ID,
+      x1: '0%',
+      y1: '0%',
+      x2: '100%',
+      y2: '0%',
+    });
+    CONSTELLATION_SKY_STOPS.forEach(({ hour, bg, shadow }) => {
+      gradient.appendChild(_svgEl('stop', {
+        offset: `${(hour / 24) * 100}%`,
+        'stop-color': `color-mix(in srgb, var(--theme-panel-bg) ${bg}%, var(--theme-panel-shadow) ${shadow}%)`,
+      }));
+    });
+    defs.appendChild(gradient);
+    svg.appendChild(defs);
+    svg.appendChild(_svgEl('rect', {
+      class: 'status-monitor-constellation-sky',
+      x,
+      y: CONSTELLATION_SKY_TOP,
+      width,
+      height: CONSTELLATION_SKY_BOTTOM - CONSTELLATION_SKY_TOP,
+      fill: `url(#${CONSTELLATION_SKY_GRADIENT_ID})`,
+    }));
+  }
+
+  function _rerenderConstellationPanelInPlace() {
+    const existing = document.querySelector('.status-monitor-constellation-card');
+    if (!existing) return;
+    const fresh = _renderConstellationPanel();
+    existing.replaceWith(fresh);
+  }
+
+  function _constellationMetaText(stars, fullDay, window) {
+    const count = Array.isArray(stars) ? stars.length : 0;
+    const windowLabel = _insightWindowLabel('constellation', 30);
+    if (!count) return `awaiting run history · ${windowLabel}`;
+    // When auto-fit falls back to the full 24h (sparse session, <6 stars),
+    // the X axis spans the same range as full-day mode — so the operator
+    // gets the same `N plotted · last X days` reading they're used to,
+    // instead of a redundant `00:00–24:00`. Only show the window label
+    // when auto-fit has actually narrowed the axis.
+    const isFullDayWindow = Number(window?.startMin) <= 0 && Number(window?.endMin) >= 1440;
+    if (fullDay || isFullDayWindow) return `${_formatCount(count)} plotted · ${windowLabel}`;
+    return `${_formatConstellationWindowLabel(window)} · ${_formatCount(count)} plotted`;
+  }
+
+  function _toggleConstellationFullDay() {
+    const next = _isConstellationFullDay() ? 'off' : 'on';
+    if (typeof applyConstellationFullDayPreference === 'function') {
+      applyConstellationFullDayPreference(next, true);
+    }
+    _rerenderConstellationPanelInPlace();
+  }
+
+  function _buildConstellationFullDayToggle(fullDay) {
+    // `.toggle-btn` is the allowlisted primitive for on/off toggles per the
+    // Design System Primitive contract in ARCHITECTURE.md. The button label
+    // names the current mode; `aria-pressed` flags whether the strict-24h
+    // override is engaged. Click + Enter/Space all route through
+    // `bindPressable` so activation, focus, and refocus stay consistent.
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toggle-btn status-monitor-constellation-toggle';
+    btn.setAttribute('aria-pressed', fullDay ? 'true' : 'false');
+    btn.title = fullDay
+      ? 'Switch to active-hours layout'
+      : 'Switch to full-day layout';
+    btn.setAttribute('aria-label', fullDay
+      ? 'Constellation showing full 24-hour day. Activate to switch to active-hours layout.'
+      : 'Constellation showing active hours. Activate to switch to full 24-hour layout.');
+    btn.textContent = fullDay ? 'Full day' : 'Active hours';
+    if (typeof bindPressable === 'function') {
+      bindPressable(btn, {
+        onActivate: _toggleConstellationFullDay,
+        refocusComposer: false,
+      });
+    } else {
+      btn.addEventListener('click', _toggleConstellationFullDay);
+    }
+    return btn;
   }
 
   function _formatConstellationAxisDuration(seconds) {
@@ -1671,10 +1958,13 @@
     }
   }
 
-  function _appendConstellationTimeGuides(svg) {
-    for (let hour = 0; hour <= 24; hour += 2) {
-      if (hour % 4 === 0) continue;
-      const x = _constellationTimeGuideX(hour);
+  function _appendConstellationTimeGuides(svg, window = CONSTELLATION_FULL_DAY_WINDOW) {
+    const { majors, minors } = _constellationTickSpec(window);
+    const minuteToX = _constellationMinuteToX(window);
+    const endMin = Number(window?.endMin) || 1440;
+    const endHour = endMin / 60;
+    minors.forEach((hour) => {
+      const x = minuteToX(hour * 60);
       svg.appendChild(_svgEl('line', {
         class: 'status-monitor-constellation-guide status-monitor-constellation-guide-minor',
         x1: x,
@@ -1682,9 +1972,9 @@
         x2: x,
         y2: 286,
       }));
-    }
-    for (let hour = 0; hour <= 24; hour += 4) {
-      const x = _constellationTimeGuideX(hour);
+    });
+    majors.forEach((hour) => {
+      const x = minuteToX(hour * 60);
       svg.appendChild(_svgEl('line', {
         class: 'status-monitor-constellation-guide status-monitor-constellation-guide-major',
         x1: x,
@@ -1692,19 +1982,25 @@
         x2: x,
         y2: 286,
       }));
-      // Stars max out at minute 1439 (23:59), so the `24` tick can never
-      // carry data — drop the label so the rightmost cluster reads as
-      // 20:00–midnight rather than as overflow at the next-day boundary.
-      if (hour === 24) continue;
+      // Suppress the rightmost-edge label when it sits at the window
+      // boundary — for the full-day window that's the `24` tick (stars
+      // max out at minute 1439, so `24` can never carry data); for narrow
+      // windows it avoids visually overlapping the plot frame. The tick
+      // itself stays so the right gutter still reads as gridded.
+      if (hour >= endHour - 1e-6) return;
+      // Wrap-around defensively for any future window crossing midnight
+      // (current `_constellationActiveWindow` returns clamped [0,1440],
+      // so this is a no-op today).
+      const displayHour = ((Math.round(hour) % 24) + 24) % 24;
       const label = _svgEl('text', {
         class: 'status-monitor-constellation-guide-label',
         x: Math.max(CONSTELLATION_PLOT_LEFT, Math.min(CONSTELLATION_PLOT_RIGHT + 4, x)),
         y: 289,
         'text-anchor': 'middle',
       });
-      label.textContent = String(hour).padStart(2, '0');
+      label.textContent = String(displayHour).padStart(2, '0');
       svg.appendChild(label);
-    }
+    });
   }
 
   function _syncConstellationAspect(svg) {
@@ -1757,6 +2053,13 @@
     const panel = document.createElement('section');
     panel.className = 'status-monitor-visual-card status-monitor-constellation-card';
 
+    // Resolve the window once per render. Star positions, time guides, meta
+    // text, and the toggle's pressed state all key off the same values.
+    const fullDayConstellation = _isConstellationFullDay();
+    const constellationWindow = fullDayConstellation
+      ? CONSTELLATION_FULL_DAY_WINDOW
+      : _constellationActiveWindow(stars);
+
     const header = document.createElement('div');
     header.className = 'status-monitor-visual-header';
     const title = document.createElement('div');
@@ -1764,9 +2067,7 @@
     title.textContent = 'Command Constellation';
     const meta = document.createElement('div');
     meta.className = 'status-monitor-visual-meta';
-    meta.textContent = stars.length
-      ? `${_formatCount(stars.length)} plotted · ${_insightWindowLabel('constellation', 30)}`
-      : `awaiting run history · ${_insightWindowLabel('constellation', 30)}`;
+    meta.textContent = _constellationMetaText(stars, fullDayConstellation, constellationWindow);
     const legend = _categoryLegend(stars);
     if (legend && stars.length) {
       const hasFailed = stars.some(star => _isFailedExitCode(star?.exit_code));
@@ -1783,8 +2084,13 @@
         label: 'Output',
       }));
     }
+    const fullDayToggle = _buildConstellationFullDayToggle(fullDayConstellation);
+    if (legend) {
+      legend.appendChild(fullDayToggle);
+    }
     header.append(title);
     if (legend) header.appendChild(legend);
+    else header.appendChild(fullDayToggle);
     header.appendChild(meta);
 
     const plot = document.createElement('div');
@@ -1842,9 +2148,16 @@
     const ceilingElapsed = _computeConstellationCeiling(
       stars.map(star => star.elapsed_seconds),
     );
-    _appendConstellationTimeGuides(svg);
+    // `constellationWindow` was resolved above so the header meta line and
+    // the SVG share one source of truth. Recomputing on every render keeps
+    // the X axis adaptive as new runs land.
+    const constellationMinuteToX = _constellationMinuteToX(constellationWindow);
+    // Sky backdrop paints first so guides, ambient, and real stars all
+    // render on top of the atmospheric gradient.
+    _appendConstellationSkyBackdrop(svg, constellationWindow);
+    _appendConstellationTimeGuides(svg, constellationWindow);
     _appendConstellationElapsedGuides(svg, ceilingElapsed);
-    _ambientConstellationStars().forEach(star => {
+    _ambientConstellationStars({ stars, window: constellationWindow }).forEach(star => {
       svg.appendChild(_svgEl('circle', {
         class: 'status-monitor-star-ambient',
         cx: star.x,
@@ -1855,8 +2168,6 @@
           `--ambient-saturation:${star.saturation.toFixed(1)}%`,
           `--ambient-lightness:${star.lightness.toFixed(1)}%`,
           `--ambient-opacity:${star.opacity.toFixed(2)}`,
-          `--ambient-glow:${star.glow.toFixed(1)}px`,
-          `--ambient-glow-alpha:${star.glowAlpha.toFixed(2)}`,
         ].join(';'),
       }));
     });
@@ -1866,7 +2177,7 @@
       const date = new Date(started);
       const minutes = date.getHours() * 60 + date.getMinutes();
       const jitter = _normalizedHash(star.id || star.command || star.root);
-      const x = CONSTELLATION_PLOT_LEFT + (minutes / 1440) * CONSTELLATION_PLOT_WIDTH + ((jitter % 29) - 14) * 0.45;
+      const x = constellationMinuteToX(minutes) + ((jitter % 29) - 14) * 0.45;
       const elapsed = Number(star.elapsed_seconds || 0);
       const offScale = elapsed > ceilingElapsed;
       const yBase = CONSTELLATION_Y_BASELINE - ((Math.log1p(elapsed) / Math.log1p(ceilingElapsed)) * CONSTELLATION_Y_RANGE);
@@ -3251,4 +3562,19 @@
   window.closeStatusMonitor = closeStatusMonitor;
   window.isStatusMonitorOpen = isStatusMonitorOpen;
   window.refreshStatusMonitor = refreshStatusMonitor;
+
+  // Test-only hook: lets unit tests exercise the constellation math
+  // helpers directly without rendering the full Status Monitor. These
+  // are not part of the public surface and only exist to keep the
+  // jsdom unit suite focused on the helper contracts (hour density,
+  // active-window detection, minute-to-x mapping) rather than asserting
+  // them indirectly via SVG output.
+  window.__constellationTestHelpers = {
+    hourDensity: _constellationHourDensity,
+    activeWindow: _constellationActiveWindow,
+    minuteToX: _constellationMinuteToX,
+    fullDayWindow: CONSTELLATION_FULL_DAY_WINDOW,
+    plotLeft: CONSTELLATION_PLOT_LEFT,
+    plotWidth: CONSTELLATION_PLOT_WIDTH,
+  };
 }());

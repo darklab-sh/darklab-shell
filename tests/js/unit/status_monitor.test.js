@@ -1509,3 +1509,156 @@ describe('Status Monitor', () => {
     await vi.waitFor(() => expect(document.getElementById('status-monitor')?.classList.contains('u-hidden')).toBe(false))
   })
 })
+
+describe('Status Monitor — Constellation full-sky polish', () => {
+  beforeEach(() => {
+    document.body.className = ''
+    document.body.innerHTML = `
+      <div id="rail"></div>
+      <div id="hud-status-cell">
+        <span id="status">IDLE</span>
+      </div>
+    `
+    sessionStorage.clear()
+    document.cookie = 'pref_constellation_full_day=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT'
+    delete window.applyConstellationFullDayPreference
+    delete window.getConstellationFullDayPreference
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+  })
+
+  it('_constellationHourDensity returns a 24-length normalized array', () => {
+    loadStatusMonitor()
+    const { hourDensity } = window.__constellationTestHelpers
+    const stars = [
+      { started: '2026-01-03T09:15:00' },
+      { started: '2026-01-03T09:45:00' },
+      { started: '2026-01-03T14:00:00' },
+    ]
+    const density = hourDensity(stars)
+    expect(density).toHaveLength(24)
+    expect(density[9]).toBe(1)
+    expect(density[14]).toBe(0.5)
+    expect(density[0]).toBe(0)
+    density.forEach((value) => {
+      expect(value).toBeGreaterThanOrEqual(0)
+      expect(value).toBeLessThanOrEqual(1)
+    })
+  })
+
+  it('_constellationHourDensity returns all zeros for empty input', () => {
+    loadStatusMonitor()
+    const { hourDensity } = window.__constellationTestHelpers
+    const density = hourDensity([])
+    expect(density).toHaveLength(24)
+    expect(density.every((value) => value === 0)).toBe(true)
+  })
+
+  it('_constellationActiveWindow returns the full day for sparse fixtures', () => {
+    loadStatusMonitor()
+    const { activeWindow } = window.__constellationTestHelpers
+    expect(activeWindow([])).toEqual({ startMin: 0, endMin: 1440 })
+    const fiveStars = Array.from({ length: 5 }, (_, i) => ({
+      started: `2026-01-03T${String(9 + i).padStart(2, '0')}:00:00`,
+    }))
+    expect(activeWindow(fiveStars)).toEqual({ startMin: 0, endMin: 1440 })
+  })
+
+  it('_constellationActiveWindow returns a padded window for clustered fixtures', () => {
+    loadStatusMonitor()
+    const { activeWindow } = window.__constellationTestHelpers
+    const stars = Array.from({ length: 30 }, (_, i) => {
+      const hour = 9 + (i % 9)
+      const minute = (i * 7) % 60
+      return { started: `2026-01-03T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00` }
+    })
+    const result = activeWindow(stars)
+    expect(result.startMin).toBeGreaterThanOrEqual(0)
+    expect(result.endMin).toBeLessThanOrEqual(1440)
+    expect(result.startMin).toBeLessThan(result.endMin)
+    expect(result.endMin - result.startMin).toBeLessThan(1440)
+    expect(result.startMin).toBeLessThanOrEqual(9 * 60)
+    expect(result.endMin).toBeGreaterThanOrEqual(17 * 60)
+  })
+
+  it('_constellationActiveWindow clamps padded edges to [0, 1440]', () => {
+    loadStatusMonitor()
+    const { activeWindow } = window.__constellationTestHelpers
+    const earlyStars = Array.from({ length: 20 }, (_, i) => ({
+      started: `2026-01-03T00:${String(i % 60).padStart(2, '0')}:00`,
+    }))
+    expect(activeWindow(earlyStars).startMin).toBe(0)
+    const lateStars = Array.from({ length: 20 }, (_, i) => ({
+      started: `2026-01-03T23:${String(i % 60).padStart(2, '0')}:00`,
+    }))
+    expect(activeWindow(lateStars).endMin).toBe(1440)
+  })
+
+  it('_constellationMinuteToX maps a star at minute 800 inside {600, 1080} to the expected position', () => {
+    loadStatusMonitor()
+    const { minuteToX, plotLeft, plotWidth } = window.__constellationTestHelpers
+    const mapper = minuteToX({ startMin: 600, endMin: 1080 })
+    const expected = plotLeft + ((800 - 600) / (1080 - 600)) * plotWidth
+    expect(mapper(800)).toBeCloseTo(expected, 6)
+    expect(mapper(600)).toBeCloseTo(plotLeft, 6)
+    expect(mapper(1080)).toBeCloseTo(plotLeft + plotWidth, 6)
+  })
+
+  it('full-day toggle round-trips through preferences and re-renders the panel', async () => {
+    // Stub the preference helpers — preferences.js itself is exercised by
+    // app.test.js. Here we just verify the constellation toggle reads the
+    // current preference, asks `applyConstellationFullDayPreference` to
+    // persist the new value, and re-renders the panel against the updated
+    // state.
+    let constellationFullDay = 'off'
+    const applySpy = vi.fn((mode) => {
+      constellationFullDay = mode === 'on' ? 'on' : 'off'
+      document.cookie = `pref_constellation_full_day=${constellationFullDay}; path=/`
+      return constellationFullDay
+    })
+    window.applyConstellationFullDayPreference = applySpy
+    window.getConstellationFullDayPreference = () => constellationFullDay
+
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor()
+    await openStatusMonitor({ source: 'test' })
+
+    const toggleBefore = document.querySelector('.status-monitor-constellation-toggle')
+    expect(toggleBefore).not.toBeNull()
+    expect(toggleBefore.getAttribute('aria-pressed')).toBe('false')
+    expect(toggleBefore.textContent).toBe('Active hours')
+
+    toggleBefore.click()
+
+    expect(applySpy).toHaveBeenCalledWith('on', true)
+    expect(constellationFullDay).toBe('on')
+    expect(document.cookie).toContain('pref_constellation_full_day=on')
+
+    const toggleAfter = document.querySelector('.status-monitor-constellation-toggle')
+    expect(toggleAfter).not.toBe(toggleBefore)
+    expect(toggleAfter.getAttribute('aria-pressed')).toBe('true')
+    expect(toggleAfter.textContent).toBe('Full day')
+
+    // And toggling back flips state and re-renders again.
+    toggleAfter.click()
+    expect(applySpy).toHaveBeenLastCalledWith('off', true)
+    const toggleFinal = document.querySelector('.status-monitor-constellation-toggle')
+    expect(toggleFinal.getAttribute('aria-pressed')).toBe('false')
+    expect(toggleFinal.textContent).toBe('Active hours')
+
+    closeStatusMonitor()
+  })
+
+  it('ambient stars carry no data-star-id and do not gain pointer focus', async () => {
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor()
+    await openStatusMonitor({ source: 'test' })
+
+    const ambientNodes = document.querySelectorAll('.status-monitor-star-ambient')
+    expect(ambientNodes.length).toBeGreaterThan(0)
+    ambientNodes.forEach((node) => {
+      expect(node.hasAttribute('data-star-id')).toBe(false)
+      expect(node.classList.contains('status-monitor-star-node')).toBe(false)
+      expect(node.getAttribute('tabindex')).toBeNull()
+    })
+
+    closeStatusMonitor()
+  })
+})

@@ -53,6 +53,29 @@ def _create_schedule(client, token: str, **payload):
     return client.post("/schedules", headers={"X-Session-ID": token}, json=body)
 
 
+def _insert_completed_run(
+    token: str,
+    run_id: str,
+    *,
+    command: str = "nmap -sV darklab.sh",
+    finished: str | None = "2026-05-20T00:00:01+00:00",
+):
+    with db_connect() as conn:
+        conn.execute(
+            "INSERT INTO runs "
+            "(id, session_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+            "VALUES (?, ?, 'external', ?, ?, ?, 0, '[]', 0)",
+            (
+                run_id,
+                token,
+                command,
+                "2026-05-20T00:00:00+00:00",
+                finished,
+            ),
+        )
+        conn.commit()
+
+
 class TestSchedulesRoutes:
     def test_schedule_crud_for_current_session(self, monkeypatch, tmp_path):
         client, _db_path = _schedule_client(monkeypatch, tmp_path)
@@ -348,6 +371,156 @@ class TestSchedulesRoutes:
         assert second_payload["offset"] == 2
         assert second_payload["has_more"] is False
         assert [fire["run_id"] for fire in second_payload["fires"]] == ["run_page_0"]
+
+
+class TestWatchersRoutes:
+    def test_watcher_routes_crud_and_cascade_owned_schedule(self, monkeypatch, tmp_path):
+        client, _db_path = _schedule_client(monkeypatch, tmp_path)
+        owner = "tok_watcher_routes_owner"
+        other = "tok_watcher_routes_other"
+        _register_token(owner)
+        _register_token(other)
+        _insert_completed_run(owner, "run_watcher_baseline", command="nmap -sV darklab.sh")
+
+        created = client.post(
+            "/watchers",
+            headers={"X-Session-ID": owner},
+            json={"baseline_run_id": "run_watcher_baseline", "cadence_preset": "hourly", "label": "Nmap drift"},
+        )
+        watcher = created.get_json()["watcher"]
+        other_patch = client.patch(f"/watchers/{watcher['id']}", headers={"X-Session-ID": other}, json={"state": "paused"})
+        other_delete = client.delete(f"/watchers/{watcher['id']}", headers={"X-Session-ID": other})
+        listed = client.get("/watchers", headers={"X-Session-ID": owner})
+        other_listed = client.get("/watchers", headers={"X-Session-ID": other})
+        paused = client.patch(f"/watchers/{watcher['id']}", headers={"X-Session-ID": owner}, json={"state": "paused"})
+        resumed = client.patch(
+            f"/watchers/{watcher['id']}",
+            headers={"X-Session-ID": owner},
+            json={"state": "ok", "label": "Nmap drift v2"},
+        )
+        deleted = client.delete(f"/watchers/{watcher['id']}", headers={"X-Session-ID": owner})
+
+        assert created.status_code == 201
+        assert watcher["command_text"] == "nmap -sV darklab.sh"
+        assert watcher["label"] == "Nmap drift"
+        assert watcher["baseline_run_id"] == "run_watcher_baseline"
+        assert watcher["schedule"]["owner_kind"] == "watcher"
+        assert watcher["schedule"]["cadence_preset"] == "hourly"
+        assert "session_token" not in watcher
+        assert listed.status_code == 200
+        assert [item["id"] for item in listed.get_json()["watchers"]] == [watcher["id"]]
+        assert other_listed.get_json()["watchers"] == []
+        assert other_patch.status_code == 404
+        assert other_delete.status_code == 404
+        assert paused.status_code == 200
+        assert paused.get_json()["watcher"]["state"] == "paused"
+        assert paused.get_json()["watcher"]["schedule"]["enabled"] is False
+        assert resumed.status_code == 200
+        assert resumed.get_json()["watcher"]["state"] == "ok"
+        assert resumed.get_json()["watcher"]["label"] == "Nmap drift v2"
+        assert resumed.get_json()["watcher"]["schedule"]["enabled"] is True
+        assert deleted.status_code == 200
+        assert deleted.get_json()["removed"] is True
+        with db_connect() as conn:
+            watcher_count = conn.execute("SELECT COUNT(*) AS count FROM watchers WHERE id = ?", (watcher["id"],)).fetchone()
+            schedule_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM schedules WHERE id = ?",
+                (watcher["schedule_id"],),
+            ).fetchone()
+        assert watcher_count["count"] == 0
+        assert schedule_count["count"] == 0
+
+    def test_watcher_create_validates_baseline_visibility_and_completion(self, monkeypatch, tmp_path):
+        client, _db_path = _schedule_client(monkeypatch, tmp_path)
+        owner = "tok_watcher_baseline_owner"
+        other = "tok_watcher_baseline_other"
+        _register_token(owner)
+        _register_token(other)
+        _insert_completed_run(other, "run_other_baseline")
+        _insert_completed_run(owner, "run_unfinished_baseline", finished=None)
+
+        missing = client.post(
+            "/watchers",
+            headers={"X-Session-ID": owner},
+            json={"baseline_run_id": "run_other_baseline", "cadence_preset": "hourly"},
+        )
+        unfinished = client.post(
+            "/watchers",
+            headers={"X-Session-ID": owner},
+            json={"baseline_run_id": "run_unfinished_baseline", "cadence_preset": "hourly"},
+        )
+
+        assert missing.status_code == 404
+        assert missing.get_json()["error"] == "baseline_run_not_found"
+        assert unfinished.status_code == 400
+        assert unfinished.get_json()["error"] == "invalid_baseline"
+        assert unfinished.get_json()["message"] == "baseline run must be completed"
+
+    def test_watcher_accept_baseline_promotes_latest_fire_and_resets_state(self, monkeypatch, tmp_path):
+        from services.watchers import service as watcher_service
+
+        client, _db_path = _schedule_client(monkeypatch, tmp_path)
+        token = "tok_watcher_accept"
+        _register_token(token)
+        _insert_completed_run(token, "run_accept_baseline")
+        _insert_completed_run(token, "run_accept_latest")
+        created = client.post(
+            "/watchers",
+            headers={"X-Session-ID": token},
+            json={"baseline_run_id": "run_accept_baseline", "cadence_preset": "hourly"},
+        )
+        watcher_id = created.get_json()["watcher"]["id"]
+        with db_connect() as conn:
+            watcher = watcher_service.get_watcher(watcher_id, conn=conn)
+            assert watcher is not None
+            watcher_service.record_watcher_fire(conn, watcher, run_id="run_accept_latest", state_at_fire="changed")
+            conn.execute(
+                "UPDATE watchers SET state = 'changed', state_reason = 'diff', consecutive_changed = 2 WHERE id = ?",
+                (watcher_id,),
+            )
+            conn.commit()
+
+        accepted = client.post(f"/watchers/{watcher_id}/accept-baseline", headers={"X-Session-ID": token}, json={})
+
+        assert accepted.status_code == 200
+        payload = accepted.get_json()["watcher"]
+        assert payload["baseline_run_id"] == "run_accept_latest"
+        assert payload["state"] == "ok"
+        assert payload["state_reason"] == ""
+        assert payload["consecutive_changed"] == 0
+
+    def test_watcher_run_now_keeps_same_command_fire_audits_separate(self, monkeypatch, tmp_path):
+        from services.scheduler import dispatch
+
+        client, _db_path = _schedule_client(monkeypatch, tmp_path)
+        token = "tok_watcher_run_now"
+        _register_token(token)
+        _insert_completed_run(token, "run_first_baseline", command="nmap -sV darklab.sh")
+        _insert_completed_run(token, "run_second_baseline", command="nmap -sV darklab.sh")
+        first = client.post(
+            "/watchers",
+            headers={"X-Session-ID": token},
+            json={"baseline_run_id": "run_first_baseline", "cadence_preset": "hourly"},
+        ).get_json()["watcher"]
+        second = client.post(
+            "/watchers",
+            headers={"X-Session-ID": token},
+            json={"baseline_run_id": "run_second_baseline", "cadence_preset": "hourly"},
+        ).get_json()["watcher"]
+        monkeypatch.setattr(dispatch, "_launch_user_schedule_run", lambda schedule: f"run_fire_{schedule.owner_id[-8:]}")
+
+        fired = client.post(f"/watchers/{first['id']}/run-now", headers={"X-Session-ID": token})
+        first_fires = client.get(f"/watchers/{first['id']}/fires", headers={"X-Session-ID": token})
+        second_fires = client.get(f"/watchers/{second['id']}/fires", headers={"X-Session-ID": token})
+
+        assert fired.status_code == 200
+        assert fired.get_json()["status"] == "fired"
+        assert fired.get_json()["watcher"]["state"] == "firing"
+        assert first_fires.status_code == 200
+        assert first_fires.get_json()["total"] == 1
+        assert first_fires.get_json()["fires"][0]["watcher_id"] == first["id"]
+        assert second_fires.status_code == 200
+        assert second_fires.get_json()["total"] == 0
 
 
 class TestScheduleBuiltin:

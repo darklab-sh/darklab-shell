@@ -392,6 +392,17 @@
   white-space: nowrap;
 }
 
+/* Constellation full-day toggle. Composes the `.toggle-btn` primitive (per
+   ARCHITECTURE.md Design System) and only tightens density so the toggle
+   fits inside the legend strip without overpowering the category chips. */
+.status-monitor-constellation-toggle {
+  min-height: 18px;
+  padding: 2px 6px;
+  font-size: 9px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
 .status-monitor-legend-key-glyph {
   display: inline-flex;
   flex: 0 0 auto;
@@ -460,12 +471,22 @@
   background-size: 100% 42px;
 }
 
+/* Sky backdrop for the Command Constellation. The fill is set inline via
+   `url(#constellation-sky)` so the JS can rebuild the gradient stops per
+   render; `pointer-events: none` keeps it inert so hover/click hit-test
+   still routes to stars on top of it. */
+.status-monitor-constellation-sky {
+  pointer-events: none;
+}
+
 .status-monitor-star-ambient {
-  fill: hsl(var(--ambient-hue, 120) var(--ambient-saturation, 80%) var(--ambient-lightness, 72%) / var(--ambient-opacity, 0.5));
-  filter: drop-shadow(
-    0 0 var(--ambient-glow, 4px)
-    hsl(var(--ambient-hue, 120) 92% 68% / var(--ambient-glow-alpha, 0.36))
-  );
+  /* Ambient stars are pure background chrome — desaturated, no glow, no
+     pointer events — so hover and keyboard activation only reach real
+     stars. The hue/saturation/lightness/opacity vars are written per-star
+     by the JS sampler; defaults match the desaturated-twilight palette in
+     case the inline style is missing. */
+  fill: hsl(var(--ambient-hue, 218) var(--ambient-saturation, 18%) var(--ambient-lightness, 60%) / var(--ambient-opacity, 0.32));
+  pointer-events: none;
   transform: scaleX(var(--constellation-star-scale-x, 1));
   transform-box: fill-box;
   transform-origin: center;

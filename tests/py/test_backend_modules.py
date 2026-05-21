@@ -1610,6 +1610,42 @@ class TestWatchersFoundation:
             (token, "2026-05-20T10:00:00+00:00", ""),
         )
 
+    def _insert_run(self, conn, run_id: str, lines: list[str], *, exit_code: int = 0):
+        conn.execute(
+            "INSERT INTO runs "
+            "(id, session_id, command, started, finished, exit_code, output_preview, output_line_count) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                run_id,
+                "tok_watchers",
+                "nmap -sV darklab.sh",
+                "2026-05-20T10:00:00+00:00",
+                "2026-05-20T10:00:01+00:00",
+                exit_code,
+                json.dumps(lines),
+                len(lines),
+            ),
+        )
+
+    def _insert_notification_channel(self, conn, trigger: str):
+        conn.execute(
+            "INSERT INTO notification_channels "
+            "(id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                f"ntc_{trigger}",
+                "tok_watchers",
+                "webhook",
+                f"watcher {trigger}",
+                "{}",
+                "{}",
+                json.dumps([trigger]),
+                0,
+                "2026-05-20T10:00:00+00:00",
+                "2026-05-20T10:00:00+00:00",
+            ),
+        )
+
     def test_watcher_create_inserts_owned_schedule_and_hides_it_from_normal_schedule_lists(self, monkeypatch, tmp_path):
         from services.scheduler import service as schedule_service
         from services.watchers import service as watcher_service
@@ -1785,6 +1821,224 @@ class TestWatchersFoundation:
         assert first.diff_kind == "signal"
         assert first.notification_event_ids == ["nte_1"]
         assert first.state_at_fire == "changed"
+
+    def test_watcher_update_pause_resume_and_accept_baseline_update_owned_schedule(self, monkeypatch, tmp_path):
+        from services.scheduler import service as schedule_service
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="curl https://darklab.sh",
+                baseline_run_id="run_baseline",
+                cadence_preset="hourly",
+                label="old label",
+                conn=conn,
+            )
+            updated = watcher_service.update_watcher(
+                watcher.id,
+                {
+                    "label": "Home page drift",
+                    "command_text": "curl https://darklab.sh/status",
+                    "cadence_preset": "daily",
+                    "options": {"notify_metadata_changes": True},
+                },
+                conn=conn,
+            )
+            paused = watcher_service.pause_watcher(watcher.id, "operator paused", conn=conn)
+            resumed = watcher_service.resume_watcher(watcher.id, conn=conn)
+            assert resumed is not None
+            watcher_service.record_watcher_fire(conn, resumed, run_id="run_latest")
+            accepted = watcher_service.accept_baseline(watcher.id, conn=conn)
+            schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
+
+        assert updated is not None
+        assert updated.label == "Home page drift"
+        assert updated.command_text == "curl https://darklab.sh/status"
+        assert updated.options == {"suppress_removals": False, "notify_metadata_changes": True}
+        assert paused is not None
+        assert paused.state == "paused"
+        assert resumed.state == "ok"
+        assert accepted is not None
+        assert accepted.baseline_run_id == "run_latest"
+        assert schedule is not None
+        assert schedule.command_text == "curl https://darklab.sh/status"
+        assert schedule.cadence_preset == "daily"
+        assert schedule.enabled is True
+
+    def test_watcher_schedule_fire_launches_run_and_records_pending_fire(self, monkeypatch, tmp_path):
+        from services.scheduler import dispatch as scheduler_dispatch
+        from services.scheduler import service as schedule_service
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_baseline",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
+            assert schedule is not None
+            monkeypatch.setattr(scheduler_dispatch, "_launch_user_schedule_run", lambda _schedule: "run_fire")
+
+            status = scheduler_dispatch.fire_schedule(conn, schedule, fired_at="2026-05-20T10:05:00+00:00")
+            refreshed = watcher_service.get_watcher(watcher.id, conn=conn)
+            fires, total = watcher_service.list_watcher_fires(watcher.id, conn=conn)
+            schedule_fires = conn.execute(
+                "SELECT status, run_id, reason FROM schedule_fires WHERE schedule_id = ?",
+                (watcher.schedule_id,),
+            ).fetchall()
+
+        assert status == "fired"
+        assert refreshed is not None
+        assert refreshed.state == "firing"
+        assert refreshed.last_run_id == "run_fire"
+        assert total == 1
+        assert fires[0].run_id == "run_fire"
+        assert fires[0].state_at_fire == "firing"
+        assert [(row["status"], row["run_id"], row["reason"]) for row in schedule_fires] == [
+            ("fired", "run_fire", "started watcher run"),
+        ]
+
+    def test_watcher_finalize_changed_diff_updates_state_and_queues_notification(self, monkeypatch, tmp_path):
+        from services.notifications.models import TRIGGER_WATCHER_CHANGED
+        from services.watchers import finalize as watcher_finalize
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_notification_channel(conn, TRIGGER_WATCHER_CHANGED)
+            self._insert_run(conn, "run_baseline", ["80/tcp open http"])
+            self._insert_run(conn, "run_current", ["80/tcp open http", "443/tcp open https"])
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_baseline",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            watcher_service.record_watcher_fire(conn, watcher, run_id="run_current", state_at_fire="firing")
+
+            result = watcher_finalize.finalize_watcher_run("run_current", conn=conn)
+            refreshed = watcher_service.get_watcher(watcher.id, conn=conn)
+            fire = watcher_service.list_watcher_fires(watcher.id, conn=conn)[0][0]
+            event_count = conn.execute("SELECT COUNT(*) AS count FROM notification_events").fetchone()["count"]
+
+        assert result is not None
+        assert refreshed is not None
+        assert refreshed.state == "changed"
+        assert refreshed.consecutive_changed == 1
+        assert refreshed.last_run_id == "run_current"
+        assert refreshed.last_diff_summary["classifier"] == "ports"
+        assert refreshed.last_diff_summary["added_port_count"] == 1
+        assert fire.diff_kind == "signal"
+        assert fire.state_at_fire == "changed"
+        assert len(fire.notification_event_ids) == 1
+        assert event_count == 1
+
+    def test_watcher_finalize_no_change_recovers_only_after_changed_state(self, monkeypatch, tmp_path):
+        from services.notifications.models import TRIGGER_WATCHER_RECOVERED
+        from services.watchers import finalize as watcher_finalize
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_notification_channel(conn, TRIGGER_WATCHER_RECOVERED)
+            self._insert_run(conn, "run_baseline", ["open port 80"])
+            self._insert_run(conn, "run_same", ["open port 80"])
+            self._insert_run(conn, "run_same_again", ["open port 80"])
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_baseline",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            watcher_service.record_watcher_fire(conn, watcher, run_id="run_same", state_at_fire="firing")
+            watcher_finalize.finalize_watcher_run("run_same", conn=conn)
+            quiet_count = conn.execute("SELECT COUNT(*) AS count FROM notification_events").fetchone()["count"]
+            conn.execute("UPDATE watchers SET state = ? WHERE id = ?", ("changed", watcher.id))
+            changed = watcher_service.get_watcher(watcher.id, conn=conn)
+            assert changed is not None
+            watcher_service.record_watcher_fire(conn, changed, run_id="run_same_again", state_at_fire="firing")
+
+            watcher_finalize.finalize_watcher_run("run_same_again", conn=conn)
+            recovered = watcher_service.get_watcher(watcher.id, conn=conn)
+            recovered_count = conn.execute("SELECT COUNT(*) AS count FROM notification_events").fetchone()["count"]
+
+        assert quiet_count == 0
+        assert recovered is not None
+        assert recovered.state == "ok"
+        assert recovered.state_reason == "recovered"
+        assert recovered.consecutive_changed == 0
+        assert recovered_count == 1
+
+    def test_watcher_finalize_failed_run_disables_after_threshold(self, monkeypatch, tmp_path):
+        from services.notifications.models import TRIGGER_WATCHER_ERROR
+        from services.scheduler import service as schedule_service
+        from services.watchers import finalize as watcher_finalize
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_notification_channel(conn, TRIGGER_WATCHER_ERROR)
+            self._insert_run(conn, "run_baseline", ["open port 80"])
+            self._insert_run(conn, "run_failed", ["scanner failed"], exit_code=2)
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_baseline",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+            conn.execute("UPDATE watchers SET consecutive_failures = ? WHERE id = ?", (4, watcher.id))
+            watcher = watcher_service.get_watcher(watcher.id, conn=conn)
+            assert watcher is not None
+            watcher_service.record_watcher_fire(conn, watcher, run_id="run_failed", state_at_fire="firing")
+
+            watcher_finalize.finalize_watcher_run("run_failed", conn=conn)
+            refreshed = watcher_service.get_watcher(watcher.id, conn=conn)
+            schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
+            fire = watcher_service.list_watcher_fires(watcher.id, conn=conn)[0][0]
+
+        assert refreshed is not None
+        assert refreshed.state == "error"
+        assert refreshed.consecutive_failures == 5
+        assert "exited with code 2" in refreshed.last_error
+        assert schedule is not None
+        assert schedule.enabled is False
+        assert fire.state_at_fire == "error"
+        assert len(fire.notification_event_ids) == 1
+
+    def test_deleted_baseline_run_pauses_watcher_and_owned_schedule(self, monkeypatch, tmp_path):
+        from services.scheduler import service as schedule_service
+        from services.watchers import service as watcher_service
+
+        with self._watcher_db(monkeypatch, tmp_path) as conn:
+            self._register_token(conn)
+            self._insert_run(conn, "run_baseline", ["open port 80"])
+            watcher = watcher_service.create_watcher(
+                "tok_watchers",
+                command_text="nmap -sV darklab.sh",
+                baseline_run_id="run_baseline",
+                cadence_preset="hourly",
+                conn=conn,
+            )
+
+            database.delete_run_artifacts(conn, ["run_baseline"])
+            refreshed = watcher_service.get_watcher(watcher.id, conn=conn)
+            schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
+
+        assert refreshed is not None
+        assert refreshed.state == "error"
+        assert refreshed.state_reason == "baseline_deleted"
+        assert refreshed.last_error == "baseline run was deleted"
+        assert schedule is not None
+        assert schedule.enabled is False
 
 
 class TestNotificationsPhase0:

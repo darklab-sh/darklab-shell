@@ -69,3 +69,6 @@ class WatcherDiff:
     summary: dict[str, Any]
     kind: str
     truncated: bool = False
+
+
+WATCHER_FAILURE_DISABLE_THRESHOLD = 5

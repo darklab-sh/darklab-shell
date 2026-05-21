@@ -451,6 +451,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── schedules.py        # /schedules* browser scheduled-run CRUD and manual fire routes
 │   │   ├── secrets.py          # /session/secrets* encrypted per-session secret metadata and write routes
 │   │   ├── session.py          # /session/token/*, /session/preferences, /session/variables, /session/workflows*, /session/recent-values, /session/migrate, /session/starred*
+│   │   ├── watchers.py         # /watchers* browser watcher CRUD, fire audit, run-now, and baseline routes
 │   │   └── workspace.py        # /workspace/files* app-managed session file routes
 │   ├── conf/                   # Operator-configurable files — edit these to customize the deployment
 │   │   ├── app_hints.txt           # Rotating footer hints for the welcome animation (optional)
@@ -648,8 +649,20 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── body_store.py   # Compressed large-body offload helpers for DB text columns
 │   │   ├── watchers/
 │   │   │   ├── __init__.py     # Watcher change-detection service package marker
+│   │   │   ├── classifiers/
+│   │   │   │   ├── __init__.py # Watcher diff classifier registry and priority ordering
+│   │   │   │   ├── common.py   # Shared parser, host, and bounded-list helpers for watcher classifiers
+│   │   │   │   ├── findings.py # Structured finding fingerprint diff classifier
+│   │   │   │   ├── hosts.py    # Host and subdomain list diff classifier
+│   │   │   │   ├── ports.py    # nmap-style port and service diff classifier
+│   │   │   │   ├── textual.py  # Line-level textual fallback diff classifier
+│   │   │   │   └── tls.py      # openssl s_client certificate-field diff classifier
+│   │   │   ├── diff.py         # Watcher diff wrapper over shared run-comparison helpers
+│   │   │   ├── finalize.py     # Completed watcher-run diff, state transition, and notification hook
 │   │   │   ├── models.py       # Watcher, watcher-fire, and watcher-diff dataclasses and constants
-│   │   │   └── service.py      # Watcher create/delete, option validation, quota, and fire-audit helpers
+│   │   │   ├── runner.py       # Scheduler hook that starts watcher runs and records pending fire rows
+│   │   │   ├── serialization.py # Shared watcher and watcher-fire payload shaping helpers
+│   │   │   └── service.py      # Watcher CRUD, state changes, option validation, quota, and fire-audit helpers
 │   │   ├── workflows/
 │   │   │   ├── __init__.py     # Workflow service package marker
 │   │   │   ├── catalog.py      # Built-in/configured workflow catalog loading and normalization helpers
@@ -996,7 +1009,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   ├── test_run_history_share.py # Higher-value /runs, history, share, built-in command, and persistence flows
     │   ├── test_schedules.py   # Scheduled-run route and terminal built-in CRUD, validation, quota, isolation, and manual fire coverage
     │   ├── test_session_routes.py # session-token generation/verify/migrate/revoke/starred/preferences route coverage
-    │   └── test_validation.py  # Tests for command validation, rewrites, and runtime availability helpers
+    │   ├── test_validation.py  # Tests for command validation, rewrites, and runtime availability helpers
+    │   └── test_watchers_classifiers.py # Watcher findings, ports, hosts, TLS, textual fallback, and classifier registry coverage
     └── ui-capture-scenes.md    # Reviewer hand-off manifest for the UI screenshot capture pack — per-scene "what to check" tables for design review
 └── tools/
     └── darklab_cli/

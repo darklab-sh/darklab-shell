@@ -11,11 +11,14 @@ from core import database
 from core.database_backend import dialect_for_backend
 from services.notifications.models import require_durable_session_token
 from services.scheduler.models import OWNER_KIND_WATCHER
-from services.scheduler.service import create_schedule, delete_schedule
+from services.scheduler.service import create_schedule, delete_schedule, pause_schedule, resume_schedule, update_schedule
 from services.watchers.models import (
     DIFF_KIND_NONE,
     DIFF_KINDS,
+    WATCHER_FAILURE_DISABLE_THRESHOLD,
     WATCHER_OPTION_DEFAULTS,
+    WATCHER_STATE_ERROR,
+    WATCHER_STATE_FIRING,
     WATCHER_STATE_OK,
     WATCHER_STATE_PAUSED,
     WATCHER_STATES,
@@ -178,6 +181,33 @@ def list_for_session(session_token: str, *, conn=None) -> list[Watcher]:
             ctx.__exit__(None, None, None)
 
 
+def list_watcher_fires(watcher_id: str, *, limit: int = 50, offset: int = 0, conn=None) -> tuple[list[WatcherFire], int]:
+    ctx = None
+    if conn is None:
+        ctx = database.db_connect()
+        conn = ctx.__enter__()
+    assert conn is not None
+    try:
+        total_row = conn.execute(
+            "SELECT COUNT(*) AS count FROM watcher_fires WHERE watcher_id = ?",
+            (watcher_id,),
+        ).fetchone()
+        total = int(_value(total_row, "count", 0) or 0)
+        rows = conn.execute(
+            """
+            SELECT * FROM watcher_fires
+            WHERE watcher_id = ?
+            ORDER BY created DESC, id DESC
+            LIMIT ? OFFSET ?
+            """,
+            (watcher_id, max(0, int(limit)), max(0, int(offset))),
+        ).fetchall()
+        return [row_to_watcher_fire(row) for row in rows], total
+    finally:
+        if ctx is not None:
+            ctx.__exit__(None, None, None)
+
+
 def create_watcher(
     session_token: str,
     *,
@@ -268,6 +298,126 @@ def create_watcher(
             ctx.__exit__(None, None, None)
 
 
+def update_watcher(watcher_id: str, updates: dict[str, Any], *, conn=None) -> Watcher | None:
+    watcher = get_watcher(watcher_id, conn=conn)
+    if watcher is None:
+        return None
+    label = str(updates.get("label", watcher.label) or "").strip()
+    options = normalize_watcher_options(updates.get("options", watcher.options))
+    schedule_updates: dict[str, Any] = {}
+    for key in ("command_text", "cron_expr", "cadence_preset", "timezone", "enabled", "paused_reason"):
+        if key in updates:
+            schedule_updates[key] = updates[key]
+    if "command_text" in updates:
+        next_command = str(updates.get("command_text") or "").strip()
+        if not next_command:
+            raise WatcherError("command text is required")
+    else:
+        next_command = watcher.command_text
+    ctx = None
+    if conn is None:
+        ctx = database.db_connect()
+        conn = ctx.__enter__()
+    assert conn is not None
+    try:
+        if schedule_updates:
+            updated_schedule = update_schedule(watcher.schedule_id, schedule_updates, conn=conn)
+            if updated_schedule is None:
+                raise WatcherError("watcher schedule not found")
+            next_command = updated_schedule.command_text
+        now = _utc_now()
+        conn.execute(
+            """
+            UPDATE watchers
+            SET label = ?, command_text = ?, options_json = ?, updated = ?
+            WHERE id = ?
+            """,
+            (label, next_command, _dialect().json_param(options), now, watcher.id),
+        )
+        if ctx is not None:
+            conn.commit()
+        refreshed = get_watcher(watcher.id, conn=conn)
+        if refreshed is not None:
+            log.info("WATCHER_UPDATED", extra={
+                "watcher_id": refreshed.id,
+                "schedule_id": refreshed.schedule_id,
+                "session": refreshed.session_token,
+            })
+        return refreshed
+    finally:
+        if ctx is not None:
+            ctx.__exit__(None, None, None)
+
+
+def pause_watcher(watcher_id: str, reason: str = "", *, conn=None) -> Watcher | None:
+    return set_watcher_state(
+        watcher_id,
+        state=WATCHER_STATE_PAUSED,
+        state_reason=reason or "paused",
+        schedule_enabled=False,
+        conn=conn,
+    )
+
+
+def resume_watcher(watcher_id: str, *, conn=None) -> Watcher | None:
+    watcher = set_watcher_state(
+        watcher_id,
+        state=WATCHER_STATE_OK,
+        state_reason="",
+        last_error="",
+        consecutive_failures=0,
+        schedule_enabled=True,
+        conn=conn,
+    )
+    return watcher
+
+
+def accept_baseline(watcher_id: str, *, run_id: str | None = None, conn=None) -> Watcher | None:
+    watcher = get_watcher(watcher_id, conn=conn)
+    if watcher is None:
+        return None
+    ctx = None
+    if conn is None:
+        ctx = database.db_connect()
+        conn = ctx.__enter__()
+    assert conn is not None
+    try:
+        baseline_run_id = str(run_id or "").strip()
+        if not baseline_run_id:
+            row = conn.execute(
+                "SELECT run_id FROM watcher_fires WHERE watcher_id = ? AND run_id != '' "
+                "ORDER BY created DESC, id DESC LIMIT 1",
+                (watcher.id,),
+            ).fetchone()
+            baseline_run_id = str(_value(row, "run_id") or "")
+        if not baseline_run_id:
+            raise WatcherError("no watcher fire is available to accept")
+        now = _utc_now()
+        conn.execute(
+            """
+            UPDATE watchers
+            SET baseline_run_id = ?, state = ?, state_reason = ?, last_error = ?,
+                consecutive_no_change = ?, consecutive_changed = ?, consecutive_failures = ?,
+                updated = ?
+            WHERE id = ?
+            """,
+            (baseline_run_id, WATCHER_STATE_OK, "", "", 0, 0, 0, now, watcher.id),
+        )
+        if ctx is not None:
+            conn.commit()
+        refreshed = get_watcher(watcher.id, conn=conn)
+        if refreshed is not None:
+            log.info("WATCHER_BASELINE_ACCEPTED", extra={
+                "watcher_id": refreshed.id,
+                "baseline_run_id": refreshed.baseline_run_id,
+                "session": refreshed.session_token,
+            })
+        return refreshed
+    finally:
+        if ctx is not None:
+            ctx.__exit__(None, None, None)
+
+
 def delete_watcher(watcher_id: str, *, conn=None) -> bool:
     ctx = None
     if conn is None:
@@ -344,3 +494,149 @@ def record_watcher_fire(
     if row is None:
         raise WatcherError("watcher fire disappeared during create")
     return row_to_watcher_fire(row)
+
+
+def update_watcher_fire(
+    conn,
+    fire_id: str,
+    *,
+    diff_summary: dict[str, Any],
+    diff_kind: str,
+    truncated: bool,
+    notification_event_ids: list[str] | None = None,
+    state_at_fire: str,
+) -> WatcherFire | None:
+    if diff_kind not in DIFF_KINDS:
+        raise WatcherError("unsupported watcher diff kind")
+    if state_at_fire not in WATCHER_STATES:
+        raise WatcherError("unsupported watcher state")
+    conn.execute(
+        """
+        UPDATE watcher_fires
+        SET diff_summary_json = ?, diff_kind = ?, truncated = ?,
+            notification_event_ids_json = ?, state_at_fire = ?
+        WHERE id = ?
+        """,
+        (
+            _dialect().json_param(diff_summary),
+            diff_kind,
+            _bool_param(truncated),
+            _dialect().json_param(notification_event_ids or []),
+            state_at_fire,
+            fire_id,
+        ),
+    )
+    row = conn.execute("SELECT * FROM watcher_fires WHERE id = ?", (fire_id,)).fetchone()
+    return row_to_watcher_fire(row) if row else None
+
+
+def pending_fire_for_run(conn, run_id: str) -> tuple[Watcher, WatcherFire] | None:
+    row = conn.execute(
+        "SELECT * FROM watcher_fires WHERE run_id = ? AND state_at_fire = ? ORDER BY created ASC LIMIT 1",
+        (run_id, WATCHER_STATE_FIRING),
+    ).fetchone()
+    if row is None:
+        return None
+    fire = row_to_watcher_fire(row)
+    watcher = get_watcher(fire.watcher_id, conn=conn)
+    if watcher is None:
+        return None
+    return watcher, fire
+
+
+def set_watcher_state(
+    watcher_id: str,
+    *,
+    state: str,
+    state_reason: str = "",
+    last_error: str = "",
+    last_run_id: str | None = None,
+    last_diff_summary: dict[str, Any] | None = None,
+    consecutive_no_change: int | None = None,
+    consecutive_changed: int | None = None,
+    consecutive_failures: int | None = None,
+    schedule_enabled: bool | None = None,
+    conn=None,
+) -> Watcher | None:
+    if state not in WATCHER_STATES:
+        raise WatcherError("unsupported watcher state")
+    watcher = get_watcher(watcher_id, conn=conn)
+    if watcher is None:
+        return None
+    ctx = None
+    if conn is None:
+        ctx = database.db_connect()
+        conn = ctx.__enter__()
+    assert conn is not None
+    try:
+        now = _utc_now()
+        next_no_change = watcher.consecutive_no_change if consecutive_no_change is None else max(0, int(consecutive_no_change))
+        next_changed = watcher.consecutive_changed if consecutive_changed is None else max(0, int(consecutive_changed))
+        next_failures = watcher.consecutive_failures if consecutive_failures is None else max(0, int(consecutive_failures))
+        conn.execute(
+            """
+            UPDATE watchers
+            SET state = ?, state_reason = ?, last_error = ?, last_run_id = ?,
+                last_diff_summary_json = ?, consecutive_no_change = ?,
+                consecutive_changed = ?, consecutive_failures = ?, updated = ?
+            WHERE id = ?
+            """,
+            (
+                state,
+                state_reason,
+                last_error,
+                watcher.last_run_id if last_run_id is None else last_run_id,
+                _dialect().json_param(watcher.last_diff_summary if last_diff_summary is None else last_diff_summary),
+                next_no_change,
+                next_changed,
+                next_failures,
+                now,
+                watcher.id,
+            ),
+        )
+        if schedule_enabled is False:
+            pause_schedule(watcher.schedule_id, state_reason or state, conn=conn)
+        elif schedule_enabled is True:
+            resume_schedule(watcher.schedule_id, conn=conn)
+        if ctx is not None:
+            conn.commit()
+        return get_watcher(watcher.id, conn=conn)
+    finally:
+        if ctx is not None:
+            ctx.__exit__(None, None, None)
+
+
+def pause_watchers_for_deleted_baselines(conn, run_ids: list[str]) -> int:
+    ids = [str(run_id or "").strip() for run_id in run_ids if str(run_id or "").strip()]
+    if not ids:
+        return 0
+    placeholders = ", ".join("?" for _ in ids)
+    rows = conn.execute(
+        "SELECT id, session_token, schedule_id, baseline_run_id FROM watchers "  # nosec B608
+        f"WHERE baseline_run_id IN ({placeholders})",
+        ids,
+    ).fetchall()
+    count = 0
+    for row in rows:
+        watcher_id = str(_value(row, "id") or "")
+        baseline_run_id = str(_value(row, "baseline_run_id") or "")
+        updated = set_watcher_state(
+            watcher_id,
+            state=WATCHER_STATE_ERROR,
+            state_reason="baseline_deleted",
+            last_error="baseline run was deleted",
+            schedule_enabled=False,
+            conn=conn,
+        )
+        if updated is not None:
+            count += 1
+            log.warning("WATCHER_BASELINE_DELETED", extra={
+                "watcher_id": watcher_id,
+                "baseline_run_id": baseline_run_id,
+                "session": str(_value(row, "session_token") or ""),
+            })
+    return count
+
+
+def failure_disable_threshold() -> int:
+    return WATCHER_FAILURE_DISABLE_THRESHOLD

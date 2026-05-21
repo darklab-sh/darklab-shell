@@ -51,6 +51,7 @@ _SESSION_PREFERENCE_KEYS = {
     "pref_options_modal_last_tab",
     "pref_tour_seen_version",
     "pref_atlas_saved_views",
+    "pref_constellation_full_day",
 }
 
 _PROMPT_USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
@@ -103,6 +104,8 @@ def _normalize_session_preferences(raw):
             continue
         if key in {"pref_project_auto_link_external_runs", "pref_project_auto_link_run_entities"}:
             value = "off" if value.lower() in {"0", "false", "no", "off"} else "on"
+        if key == "pref_constellation_full_day":
+            value = "on" if value.lower() in {"1", "true", "yes", "on"} else "off"
         if key == "pref_prompt_username" and not _PROMPT_USERNAME_RE.fullmatch(value):
             continue
         if key == "pref_compare_view_mode":

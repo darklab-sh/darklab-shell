@@ -285,6 +285,7 @@ describe('app helpers', () => {
       'pref_compare_context',
       'pref_options_modal_last_tab',
       'pref_tour_seen_version',
+      'pref_constellation_full_day',
     ].forEach((name) => {
       document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
     })

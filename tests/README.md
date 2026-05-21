@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,079
+- behavior tests: 3,103
 - docs/inventory meta-tests: 32
-- `pytest`: 1668 (1636 behavior + 32 meta)
-- `vitest`: 1191
+- `pytest`: 1684 (1652 behavior + 32 meta)
+- `vitest`: 1199
 - `playwright`: 252
-- total: 3,111
+- total: 3,135
 
 This document is organized in two parts:
 
@@ -483,6 +483,12 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWatchersFoundation.test_watcher_create_requires_durable_token_valid_options_and_quota` | Verifies watcher creation requires durable tokens, strict option booleans, known option keys, and the per-session watcher cap. |
 | `TestWatchersFoundation.test_watchers_with_same_command_keep_separate_schedules_and_state` | Verifies duplicate command watchers keep separate schedules, baselines, and state counters. |
 | `TestWatchersFoundation.test_watcher_fire_insert_is_idempotent_for_same_watcher_and_run` | Verifies duplicate watcher-fire records for the same watcher and run reuse the existing audit row. |
+| `TestWatchersFoundation.test_watcher_update_pause_resume_and_accept_baseline_update_owned_schedule` | Verifies watcher edit, pause, resume, and accept-baseline actions keep the watcher row and owned schedule aligned. |
+| `TestWatchersFoundation.test_watcher_schedule_fire_launches_run_and_records_pending_fire` | Verifies watcher-owned schedules launch through scheduler dispatch, mark the watcher as firing, and record a pending watcher fire. |
+| `TestWatchersFoundation.test_watcher_finalize_changed_diff_updates_state_and_queues_notification` | Verifies completed watcher runs with a textual diff move to changed state and queue a watcher-changed notification. |
+| `TestWatchersFoundation.test_watcher_finalize_no_change_recovers_only_after_changed_state` | Verifies no-change watcher fires stay quiet from ok state and emit recovered only after a prior changed state. |
+| `TestWatchersFoundation.test_watcher_finalize_failed_run_disables_after_threshold` | Verifies failed watcher runs record error state, queue watcher-error notifications, and disable after the failure threshold. |
+| `TestWatchersFoundation.test_deleted_baseline_run_pauses_watcher_and_owned_schedule` | Verifies deleting a baseline run moves the watcher to baseline-deleted error state and pauses its owned schedule. |
 | `TestNotificationsPhase0.test_dispatcher_sync_delivery_fans_out_once_per_channel` | Verifies the notification dispatcher can synchronously fan out a run-complete trigger to two subscribed channels exactly once each. |
 | `TestNotificationsPhase0.test_dispatcher_event_claims_are_single_use` | Verifies notification event claims are leased so two workers cannot claim the same due event at the same time. |
 | `TestNotificationsPhase0.test_dispatcher_dnd_defers_without_consuming_attempts` | Verifies notification do-not-disturb defers delivery without burning provider retry attempts. |
@@ -1724,6 +1730,10 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestSchedulesRoutes.test_schedule_create_enforces_session_cap` | Verifies normal schedules respect the configured per-session schedule cap. |
 | `TestSchedulesRoutes.test_schedule_create_and_patch_normalize_edge_inputs` | Verifies browser schedule routes normalize disabled string booleans, trim labels, reject invalid timezones and blank commands, and preserve paused schedules during cadence updates. |
 | `TestSchedulesRoutes.test_schedule_fires_pagination_bounds` | Verifies schedule fire audit pagination returns stable limits, offsets, totals, has-more flags, and newest-first rows. |
+| `TestWatchersRoutes.test_watcher_routes_crud_and_cascade_owned_schedule` | Verifies browser watcher create/list/pause/resume/delete behavior, cross-session isolation, and owned-schedule cascade cleanup. |
+| `TestWatchersRoutes.test_watcher_create_validates_baseline_visibility_and_completion` | Verifies watcher creation hides cross-session baseline runs and rejects unfinished current-session baselines. |
+| `TestWatchersRoutes.test_watcher_accept_baseline_promotes_latest_fire_and_resets_state` | Verifies accept-baseline promotes the latest watcher fire and clears changed-state counters. |
+| `TestWatchersRoutes.test_watcher_run_now_keeps_same_command_fire_audits_separate` | Verifies manual watcher fire creates audit rows only for the selected watcher even when another watcher has the same command. |
 | `TestScheduleBuiltin.test_schedule_builtin_create_list_info_and_state_changes` | Verifies the terminal schedule command creates, lists, inspects, pauses, resumes, and deletes current-session schedules. |
 | `TestScheduleBuiltin.test_schedule_builtin_rejects_disallowed_command` | Verifies the terminal schedule command rejects commands that fail command policy before persistence. |
 | `TestScheduleBuiltin.test_schedule_builtin_run_records_fire` | Verifies the terminal schedule run subcommand records a schedule fire and advances schedule metadata. |
@@ -1910,6 +1920,17 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestRuntimeCommandHelpers.test_runtime_missing_command_name_returns_root_when_missing` | Checks that runtime missing command name returns root when missing. |
 | `TestRuntimeCommandHelpers.test_runtime_missing_command_name_skips_env_assignments` | Checks that missing-command detection looks through simple `env NAME=value` wrappers. |
 | `TestRuntimeCommandHelpers.test_runtime_missing_command_message_is_stable` | Checks that runtime missing command message is stable. |
+
+#### `test_watchers_classifiers.py`
+
+| Test | Description |
+| --- | --- |
+| `test_findings_classifier_uses_structured_finding_fingerprints` | Verifies watcher diffs prefer structured finding fingerprints when both runs have persisted findings. |
+| `test_textual_classifier_is_fallback_and_honors_suppress_removals` | Verifies the textual fallback handles plain output diffs and can suppress removal-only changes. |
+| `test_ports_classifier_reports_added_changed_and_removed_ports` | Verifies nmap-shaped output reports added, removed, and changed port/service signals. |
+| `test_hosts_classifier_reports_added_hosts_for_subdomain_lists` | Verifies host-list commands report newly discovered hosts. |
+| `test_tls_classifier_reports_certificate_field_changes` | Verifies openssl s_client output reports changed certificate fields. |
+| `test_classifier_registry_keeps_structured_classifiers_before_textual_fallback` | Verifies structured watcher classifiers run before the textual fallback. |
 
 ### Vitest
 
@@ -2879,6 +2900,14 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `uses mobile sheet chrome and shared sheet binding on mobile` | Verifies that the mobile Status Monitor opens with sheet chrome and shared mobile-sheet dismissal behavior. |
 | `calculates CPU from cumulative samples, keeps the last value, and caps display at 100%` | Verifies that the Status Monitor derives CPU percentage from adjacent cumulative CPU samples, preserves the last value when a later poll lacks CPU data, and display-caps at 100%. |
 | `keeps HUD status monitor triggers clickable without running-state affordances` | Verifies that STATUS, LAST EXIT, and TABS still open Status Monitor without adding the old running-state glyph or pulse. |
+| `_constellationHourDensity returns a 24-length normalized array` | Verifies that the Status Monitor constellation density helper produces one normalized value per hour. |
+| `_constellationHourDensity returns all zeros for empty input` | Verifies that the Status Monitor constellation density helper returns an all-zero day when no stars exist. |
+| `_constellationActiveWindow returns the full day for sparse fixtures` | Verifies that sparse constellation data keeps the full-day view instead of overfitting to too little history. |
+| `_constellationActiveWindow returns a padded window for clustered fixtures` | Verifies that clustered constellation data produces a padded active window around the observed command times. |
+| `_constellationActiveWindow clamps padded edges to [0, 1440]` | Verifies that active-window padding never extends before the start or after the end of the day. |
+| `_constellationMinuteToX maps a star at minute 800 inside {600, 1080} to the expected position` | Verifies that active-window minute mapping places stars correctly inside the focused time range. |
+| `full-day toggle round-trips through preferences and re-renders the panel` | Verifies that the Status Monitor full-day constellation toggle persists through preferences and redraws the panel. |
+| `ambient stars carry no data-star-id and do not gain pointer focus` | Verifies that decorative constellation stars remain non-data, non-focusable background points. |
 
 #### `tabs.test.js`
 

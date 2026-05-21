@@ -285,6 +285,8 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 | **DB** | Configured database connection state | `ONLINE` green, `OFFLINE` red |
 | **REDIS** | Redis connection state | `ONLINE` green, `OFFLINE` red, `N/A` muted when no Redis is configured |
 
+**Command Constellation:** the Status Monitor visualises recent run history as a constellation chart with a clock-time X axis and a log-elapsed Y axis. By default the X axis auto-fits to your active hours so the canvas stays a full sky rather than a long dead zone — toggle to **Full day** in the legend if you want strict 24-hour reading. Hours with no real runs are filled by a desaturated ambient layer, and a clock-pinned daylight gradient paints the 24h cycle behind the stars so noon, dusk, and night always appear at their true hour-of-day positions.
+
 ---
 
 ## Built-In Pipe Support

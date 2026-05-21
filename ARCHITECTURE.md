@@ -353,6 +353,18 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | `POST` | `/schedules/<schedule_id>/run-now` | Fires one current-session schedule immediately from the web worker and records a schedule fire audit row. |
 | `GET` | `/schedules/<schedule_id>/fires` | Returns paged fire audit rows for one current-session normal schedule. |
 
+### Watcher Routes
+
+| Method | Endpoint | Description |
+| -------- | ---------- | ------------- |
+| `GET` | `/watchers` | Lists change-detection watchers owned by the current durable session token, including owned schedule metadata. |
+| `POST` | `/watchers` | Creates a watcher from a completed current-session baseline run, inheriting the baseline command unless an override command is supplied. |
+| `PATCH` | `/watchers/<watcher_id>` | Updates one current-session watcher label, cadence, timezone, options, command override, or pause/resume state. |
+| `DELETE` | `/watchers/<watcher_id>` | Deletes one current-session watcher and its owned schedule and fire audit rows. |
+| `GET` | `/watchers/<watcher_id>/fires` | Returns paged watcher fire audit rows for one current-session watcher. |
+| `POST` | `/watchers/<watcher_id>/accept-baseline` | Promotes the latest watcher fire, or a supplied run id, to the watcher's new baseline and resets changed/error counters. |
+| `POST` | `/watchers/<watcher_id>/run-now` | Fires one current-session watcher immediately from the web worker and records schedule and watcher fire audit rows. |
+
 ### Session Routes
 
 | Method | Endpoint | Description |
@@ -831,9 +843,13 @@ Cron support is intentionally strict: five-field POSIX cron only, with `hourly`,
 
 Watchers are durable change-detection monitors owned by `tok_` session tokens. Each watcher stores the command text, baseline run id, current state, validated diff-policy options, consecutive outcome counters, and a unique link to one scheduler-owned cadence row. The paired schedule uses `owner_kind='watcher'` and `owner_id=<watcher_id>`, so normal schedule lists and the Schedules UI keep watcher cadence separate from ordinary scheduled commands.
 
-Watcher storage is split between `watchers` for current state and `watcher_fires` for append-only audit. `watcher_fires` has a unique `(watcher_id, run_id)` constraint so duplicate run-finalization paths cannot create duplicate diff records or notification fan-out. `options_json` currently accepts only `suppress_removals` and `notify_metadata_changes`; additions and removals count as diffs by default, while metadata-only changes stay opt-in until classifier behavior is stable.
+Watcher storage is split between `watchers` for current state and `watcher_fires` for append-only audit. `watcher_fires` has a unique `(watcher_id, run_id)` constraint so duplicate run-finalization paths cannot create duplicate diff records or notification fan-out. `options_json` currently accepts only `suppress_removals` and `notify_metadata_changes`; additions and removals count as diffs by default, while metadata-only changes stay opt-in until classifier behavior is stable. If a baseline run is deleted from history, the cleanup path pauses the owned schedule, moves the watcher to `error`, sets `state_reason='baseline_deleted'`, and logs `WATCHER_BASELINE_DELETED` so operators do not keep firing against a missing baseline.
 
-Watcher creation and deletion use one database transaction for the watcher row and its owned schedule row. A session can own up to `watchers.max_per_session` watchers, defaulting to 32. Multiple watchers can wrap the same command, but they still keep separate schedules, baselines, state, and fire audit rows.
+Watcher creation and deletion use one database transaction for the watcher row and its owned schedule row. A session can own up to `watchers.max_per_session` watchers, defaulting to 32. Multiple watchers can wrap the same command, but they still keep separate schedules, baselines, state, and fire audit rows. Update, pause, resume, and accept-baseline operations go through the watcher service so the watcher row and owned schedule stay in sync.
+
+The scheduler does not have a separate watcher timer. When a due row has `owner_kind='watcher'`, `scheduler.dispatch` claims the fire, launches the command through the same brokered run path as a normal schedule, records a pending watcher fire, and returns without waiting for the scan to finish. When the run finalizes, `services.watchers.finalize` claims that pending fire, compares the completed run to the watcher's baseline through the shared run-comparison helpers, updates watcher state, and queues `watcher_changed`, `watcher_error`, or `watcher_recovered` notifications. A non-empty diff moves the watcher to `changed`; an empty diff after `changed` moves it back to `ok` and can send `watcher_recovered`; an empty diff after `ok` stays quiet. Failed watcher runs do not replace the baseline, and five consecutive failures disable the owned schedule with `WATCHER_DISABLED_AFTER_ERRORS`.
+
+Diffs route through `services.watchers.classifiers` in priority order. Persisted run findings compare by stable finding signature first, then command-shaped classifiers cover nmap ports, subdomain/host-list tools, and `openssl s_client` certificate fields. The textual classifier is the final fallback for generic output and is intentionally noisier on tools with non-deterministic ordering. Diff summaries store bounded added/removed/changed signal lists, carry `truncated=true` when source output or changed-signal lists were capped, and honor `suppress_removals` so removal-only churn can stay quiet.
 
 ---
 
@@ -1527,6 +1543,12 @@ The current event inventory is:
 | INFO | `BUILTIN_SCHEDULE_RUN_NOW` | terminal schedule built-in | session, source, schedule_id, status, fired_at, run_id, last_error |
 | INFO | `SCHEDULE_FIRED` | scheduler dispatch | schedule_id, owner_kind, session, run_id, fired_at, next_run_at, command_root |
 | INFO | `SCHEDULE_FIRE_SKIPPED_OVERLAP` | scheduler dispatch | schedule_id, session, run_id, fired_at, active_run_count, command_root |
+| INFO | `WATCHER_FIRED` | watcher scheduler hook | watcher_id, schedule_id, run_id, baseline_run_id, session, fired_at |
+| INFO | `WATCHER_SCHEDULE_FIRED` | scheduler dispatch | schedule_id, owner_kind, session, run_id, fired_at, command_root |
+| INFO | `WATCHER_UPDATED` | watcher service | watcher_id, schedule_id, session |
+| INFO | `WATCHER_BASELINE_ACCEPTED` | watcher service | watcher_id, baseline_run_id, session |
+| INFO | `WATCHER_CHANGED` | watcher finalization | watcher_id, schedule_id, session, state, run_id, notification_count |
+| INFO | `WATCHER_RECOVERED` | watcher finalization | watcher_id, schedule_id, session, state, run_id, notification_count |
 | INFO | `SCHEDULER_WORKER_STARTED` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
 | INFO | `SCHEDULER_WORKER_LOCK_HELD` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
 | INFO | `SCHEDULER_WORKER_STOPPED` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
@@ -1554,7 +1576,10 @@ The current event inventory is:
 | WARN | `API_SCHEDULE_REJECTED` | API schedule routes | ip, session, code, status, route, method, error |
 | WARN | `BUILTIN_SCHEDULE_REJECTED` | terminal schedule built-in | session, source, subcommand, error |
 | WARN | `SCHEDULE_DISABLED_REVOKED` | scheduler dispatch | schedule_id, owner_kind, session, fired_at, next_run_at, command_root |
-| WARN | `SCHEDULE_WATCHER_FIRE_SKIPPED_UNIMPLEMENTED` | scheduler dispatch | schedule_id, owner_kind, session, fired_at |
+| WARN | `WATCHER_FIRE_SKIPPED_OVERLAP` | scheduler dispatch | schedule_id, owner_kind, session, run_id, fired_at, active_run_count, command_root |
+| WARN | `WATCHER_ERROR` | watcher finalization | watcher_id, schedule_id, session, state, run_id, error, notification_count |
+| WARN | `WATCHER_DISABLED_AFTER_ERRORS` | watcher finalization | watcher_id, schedule_id, session, state, run_id, consecutive_failures |
+| WARN | `WATCHER_BASELINE_DELETED` | run cleanup | watcher_id, baseline_run_id, session |
 | WARN | `SCHEDULE_RECOVERY_SKIPPED_INVALID_NEXT_RUN` | scheduler recovery | schedule_id, owner_kind, next_run_at, fired_at |
 | WARN | `SCHEDULE_RECOVERY_SKIPPED_STALE` | scheduler recovery | schedule_id, owner_kind, next_run_at, fired_at, catchup_window_seconds |
 | WARN | `SCHEDULE_FIRE_LOOKUP_UNAVAILABLE` | scheduler history helper | run_count, error |
@@ -1578,6 +1603,8 @@ The current event inventory is:
 | ERROR | `RUN_SPAWN_ERROR` | `run_command` | ip, session, cmd (+ traceback) |
 | ERROR | `RUN_STREAM_ERROR` | `generate()` | ip, run_id, session, cmd (+ traceback) |
 | ERROR | `RUN_SAVED_ERROR` | `generate()` | run_id, session, cmd (+ traceback) |
+| ERROR | `WATCHER_FINALIZE_ERROR` | run finalization watcher hook | run_id, session (+ traceback) |
+| ERROR | `WATCHER_BASELINE_DELETE_HOOK_ERROR` | run cleanup watcher hook | (+ traceback) |
 | ERROR | `PACKAGE_BUILD_FAILED` | evidence package builders | ip, session, project_id, package_id, job_id, stage, error (+ traceback) |
 | ERROR | `PACKAGE_JOB_FAILED` | evidence package job worker | session, project_id, package_id, job_id, stage, error (+ traceback) |
 | ERROR | `NOTIFICATION_RUN_COMPLETE_ENQUEUE_ERROR` | run finalization notification hook | run_id, session (+ traceback) |
@@ -1687,12 +1714,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,079
+- behavior tests: 3,103
 - docs/inventory meta-tests: 32
-- `pytest`: 1668 (1636 behavior + 32 meta)
-- `vitest`: 1191
+- `pytest`: 1684 (1652 behavior + 32 meta)
+- `vitest`: 1199
 - `playwright`: 252
-- total: 3,111
+- total: 3,135
 
 ### Testing Architecture
 
