@@ -50,6 +50,8 @@ _CURRENT_SHORTCUTS = [
         ({"mac": "Option+P", "other": "Alt+P"}, "open or close the Projects modal"),
         ({"mac": "Option+M", "other": "Alt+M"}, "open or close the Status Monitor"),
         ({"mac": "Option+S", "other": "Alt+S"}, "toggle the transcript search bar"),
+        ({"mac": "Option+Shift+S", "other": "Alt+Shift+S"}, "open or close the Schedules modal"),
+        ({"mac": "Option+Shift+W", "other": "Alt+Shift+W"}, "open or close the Watchers modal"),
         ({"mac": "Option+H", "other": "Alt+H"}, "toggle the history drawer"),
         ({"mac": "Option+Shift+F", "other": "Alt+Shift+F"}, "open the Files modal"),
         ({"mac": "Option+,", "other": "Alt+,"}, "open the options panel"),

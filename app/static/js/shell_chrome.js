@@ -391,6 +391,10 @@
       void global.openSchedulesModal();
       return;
     }
+    if (action === 'watchers' && typeof global.openWatchersModal === 'function') {
+      void global.openWatchersModal();
+      return;
+    }
     if (action === 'projects' && typeof global.openProjectWorkspace === 'function') {
       void global.openProjectWorkspace();
       return;

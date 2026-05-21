@@ -201,6 +201,9 @@ function _closeMajorOverlays() {
   if (typeof isSchedulesOverlayOpen === 'function' && isSchedulesOverlayOpen()) {
     if (typeof closeSchedulesModal === 'function') closeSchedulesModal({ refocus: false });
   }
+  if (typeof isWatchersOverlayOpen === 'function' && isWatchersOverlayOpen()) {
+    if (typeof closeWatchersModal === 'function') closeWatchersModal({ refocus: false });
+  }
   if (typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen()) {
     if (typeof closeWorkspace === 'function') closeWorkspace();
     else hideWorkspaceOverlay();

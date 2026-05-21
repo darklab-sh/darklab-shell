@@ -1518,6 +1518,15 @@ function _historyRenderPanelData(data) {
           if (typeof openAtlas === 'function') void openAtlas({ source: 'history-run' });
         },
       });
+      bindPressable(entry.querySelector('[data-action="watch-command"]'), {
+        refocusComposer: false,
+        onActivate: (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          _closeHistoryActionMenus();
+          if (typeof openWatchersModal === 'function') void openWatchersModal({ baselineRun: run });
+        },
+      });
       bindPressable(entry.querySelector('[data-action="compare"]'), {
         refocusComposer: false,
         onActivate: () => {

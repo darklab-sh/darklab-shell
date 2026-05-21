@@ -101,6 +101,7 @@ function _createHistoryActionMenu(run, { includeDelete = false } = {}) {
   ];
   if (isProjectLinkableRun) items.push(['open-atlas', 'open in atlas']);
   items.push(
+    ...(isProjectLinkableRun ? [['watch-command', 'create watcher from this baseline']] : []),
     ['permalink', 'permalink'],
     ['compare', 'compare'],
   );

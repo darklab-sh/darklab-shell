@@ -339,6 +339,7 @@ function _historyRunActionMenu() {
   const items = [
     ['copy-command', 'Copy command'],
     ['schedule-command', 'Schedule this command'],
+    ['watch-command', 'Create watcher from this baseline'],
     ['edit-metadata', 'Edit metadata'],
   ];
   if (_historyRunCanOpenAtlas()) items.push(['open-atlas', 'Open in Atlas']);
@@ -1107,6 +1108,11 @@ async function _handleHistoryRunModalAction(action) {
     closeHistoryRunOverlay();
     if (typeof openSchedulesModal === 'function') {
       void openSchedulesModal({ command: run.command || '' });
+    }
+  } else if (action === 'watch-command') {
+    closeHistoryRunOverlay();
+    if (typeof openWatchersModal === 'function') {
+      void openWatchersModal({ baselineRun: run });
     }
   } else if (action === 'open-schedule') {
     closeHistoryRunOverlay();

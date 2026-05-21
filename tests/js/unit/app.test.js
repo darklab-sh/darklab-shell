@@ -57,7 +57,7 @@ function loadSchedulesModalTestFns({
       bindDismissible,
       refocusComposerAfterAction: vi.fn(),
     },
-    '({ _bindSchedulesModal, _deleteSelectedSchedule, refreshSchedulesModal, _newSchedule })',
+    '({ _bindSchedulesModal, _deleteSelectedSchedule, refreshSchedulesModal, _newSchedule, closeSchedulesModal })',
   )
   return {
     ...fns,
@@ -68,6 +68,59 @@ function loadSchedulesModalTestFns({
     openHistoryRunDetails,
     list: document.getElementById('schedules-list'),
     detail: document.getElementById('schedules-detail'),
+  }
+}
+
+function loadWatchersModalTestFns({
+  apiFetch = vi.fn(async () => ({ ok: true, json: async () => ({}) })),
+  showConfirm = vi.fn(async () => null),
+  showToast = vi.fn(),
+  openHistoryRunDetails = vi.fn(),
+} = {}) {
+  document.body.innerHTML = `
+    <div id="watchers-overlay" class="u-hidden">
+      <div id="watchers-modal">
+        <button class="watchers-close" type="button"></button>
+        <button id="watchers-new-btn" type="button"></button>
+        <button id="watchers-refresh-btn" type="button"></button>
+        <span id="watchers-count"></span>
+        <div id="watchers-list"></div>
+        <div id="watchers-detail"></div>
+      </div>
+    </div>
+  `
+  const bindDismissible = vi.fn()
+  const compareMetricCell = (label, value, tone = '') => {
+    const cell = document.createElement('div')
+    cell.className = `history-compare-metric${tone ? ` ${tone}` : ''}`
+    cell.textContent = `${label}${value}`
+    return cell
+  }
+  const fns = fromDomScripts(
+    ['app/static/js/features/watchers/watchers_modal.js'],
+    {
+      document,
+      window,
+      apiFetch,
+      showConfirm,
+      showToast,
+      openHistoryRunDetails,
+      _compareMetricCell: compareMetricCell,
+      _closeMajorOverlays: vi.fn(),
+      bindDismissible,
+      refocusComposerAfterAction: vi.fn(),
+    },
+    '({ _bindWatchersModal, _deleteSelectedWatcher, refreshWatchersModal, _newWatcher, openWatchersModal, closeWatchersModal })',
+  )
+  return {
+    ...fns,
+    apiFetch,
+    bindDismissible,
+    showConfirm,
+    showToast,
+    openHistoryRunDetails,
+    list: document.getElementById('watchers-list'),
+    detail: document.getElementById('watchers-detail'),
   }
 }
 
@@ -301,6 +354,7 @@ describe('app helpers', () => {
       'project-package-wizard-modal',
       'project-entity-editor-modal',
       'schedules-modal',
+      'watchers-modal',
     ].forEach((id) => {
       expect(document.getElementById(id)?.dataset.focusTrapBound).toBe('1')
     })
@@ -331,7 +385,7 @@ describe('app helpers', () => {
     expect(apiFetch).toHaveBeenCalledWith('/schedules/sch_1', { method: 'DELETE' })
   })
 
-  it('opens schedule fire runs without using the run id as the command title', () => {
+  it('opens schedule fire runs without using the run id as the command title', async () => {
     const openHistoryRunDetails = vi.fn()
     const { _bindSchedulesModal } = loadSchedulesModalTestFns({ openHistoryRunDetails })
     _bindSchedulesModal()
@@ -342,7 +396,7 @@ describe('app helpers', () => {
     document.getElementById('schedules-overlay').appendChild(button)
     button.click()
 
-    expect(openHistoryRunDetails).toHaveBeenCalledWith({ id: 'run_scheduled_1' })
+    await vi.waitFor(() => expect(openHistoryRunDetails).toHaveBeenCalledWith({ id: 'run_scheduled_1' }))
   })
 
   it('creates schedules from the modal with cadence preview details', async () => {
@@ -381,13 +435,24 @@ describe('app helpers', () => {
       throw new Error(`unexpected request ${url}`)
     })
     const showToast = vi.fn()
-    const { _bindSchedulesModal, _newSchedule, list } = loadSchedulesModalTestFns({ apiFetch, showToast })
+    const showConfirm = vi.fn(async () => null)
+    const { _bindSchedulesModal, _newSchedule, closeSchedulesModal, list } = loadSchedulesModalTestFns({
+      apiFetch,
+      showConfirm,
+      showToast,
+    })
     _bindSchedulesModal()
 
     _newSchedule('ping -c 1 darklab.sh')
     await vi.waitFor(() => expect(document.getElementById('schedules-form')).not.toBeNull())
     expect(document.getElementById('schedules-detail').textContent).toContain('Next runs (UTC)')
     document.getElementById('schedules-label-input').value = 'Hourly darklab'
+    await closeSchedulesModal()
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      body: 'Discard unsaved schedule changes?',
+      tone: 'warning',
+    }))
+    expect(document.getElementById('schedules-form')).not.toBeNull()
     document.getElementById('schedules-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
 
     await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Schedule created', 'success'))
@@ -471,6 +536,237 @@ describe('app helpers', () => {
     Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Run now').click()
     await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Schedule fired', 'success'))
     expect(document.getElementById('schedules-detail').textContent).toContain('Open run')
+  })
+
+  it('prompts before switching schedules or creating a new schedule with unsaved edits', async () => {
+    const schedules = [
+      {
+        id: 'sch_one',
+        label: 'One',
+        command_text: 'ping one.darklab.sh',
+        cadence_preset: 'hourly',
+        cron_expr: '0 * * * *',
+        timezone: 'UTC',
+        enabled: true,
+      },
+      {
+        id: 'sch_two',
+        label: 'Two',
+        command_text: 'ping two.darklab.sh',
+        cadence_preset: 'hourly',
+        cron_expr: '0 * * * *',
+        timezone: 'UTC',
+        enabled: true,
+      },
+    ]
+    const apiFetch = vi.fn(async (url) => {
+      if (url === '/schedules') {
+        return { ok: true, json: async () => ({ schedules }) }
+      }
+      if (url.startsWith('/schedules/preview')) {
+        return {
+          ok: true,
+          json: async () => ({
+            cron_expr: '0 * * * *',
+            cadence_preset: 'hourly',
+            timezone: 'UTC',
+            next_fires: [],
+          }),
+        }
+      }
+      if (url.includes('/fires')) {
+        return { ok: true, json: async () => ({ fires: [], total: 0, limit: 20, offset: 0, has_more: false }) }
+      }
+      return { ok: true, json: async () => ({}) }
+    })
+    const showConfirm = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce('discard')
+    const { _bindSchedulesModal, refreshSchedulesModal } = loadSchedulesModalTestFns({ apiFetch, showConfirm })
+    _bindSchedulesModal()
+
+    await refreshSchedulesModal({ selectId: 'sch_one' })
+    await vi.waitFor(() => expect(document.getElementById('schedules-label-input')).not.toBeNull())
+    const labelInput = document.getElementById('schedules-label-input')
+    labelInput.value = 'Changed one'
+    labelInput.dispatchEvent(new Event('input', { bubbles: true }))
+    document.querySelector('[data-schedule-id="sch_two"]').click()
+
+    await vi.waitFor(() => expect(showConfirm).toHaveBeenCalledTimes(1))
+    expect(document.getElementById('schedules-label-input').value).toBe('Changed one')
+
+    document.getElementById('schedules-new-btn').click()
+    await vi.waitFor(() => expect(showConfirm).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => {
+      expect(document.getElementById('schedules-detail').textContent).toContain('New schedule')
+    })
+  })
+
+  it('creates watchers from a baseline run and renders diff audit rows', async () => {
+    let watchers = []
+    const apiFetch = vi.fn(async (url, options = {}) => {
+      if (url === '/watchers' && !options.method) {
+        return { ok: true, json: async () => ({ watchers }) }
+      }
+      if (url.startsWith('/schedules/preview')) {
+        return {
+          ok: true,
+          json: async () => ({
+            cron_expr: '0 * * * *',
+            cadence_preset: 'hourly',
+            timezone: 'UTC',
+            next_fires: ['2026-05-20T13:00:00+00:00'],
+          }),
+        }
+      }
+      if (url === '/watchers' && options.method === 'POST') {
+        watchers = [{
+          id: 'wtr_created',
+          label: 'Watch nmap',
+          command_text: 'nmap -sV darklab.sh',
+          baseline_run_id: 'run_base',
+          last_run_id: 'run_current',
+          state: 'changed',
+          options: { suppress_removals: true, notify_metadata_changes: false },
+          last_diff_summary: {
+            classifier: 'ports',
+            added_port_count: 1,
+            added_ports: [{ key: '443/tcp', state: 'open', service: 'https' }],
+          },
+          schedule: {
+            id: 'sch_watcher',
+            cadence_preset: 'hourly',
+            cron_expr: '0 * * * *',
+            timezone: 'UTC',
+            enabled: true,
+          },
+        }]
+        return { ok: true, json: async () => ({ watcher: watchers[0] }) }
+      }
+      if (url.startsWith('/watchers/wtr_created/fires')) {
+        return {
+          ok: true,
+          json: async () => ({
+            fires: [{
+              id: 'fire_1',
+              watcher_id: 'wtr_created',
+              run_id: 'run_current',
+              diff_kind: 'signal',
+              diff_summary: { classifier: 'ports' },
+              state_at_fire: 'changed',
+              created: '2026-05-20T12:00:00+00:00',
+            }],
+            total: 1,
+            limit: 20,
+            offset: 0,
+            has_more: false,
+          }),
+        }
+      }
+      throw new Error(`unexpected request ${url}`)
+    })
+    const showToast = vi.fn()
+    const showConfirm = vi.fn(async () => null)
+    const { _bindWatchersModal, openWatchersModal, closeWatchersModal, detail, list } = loadWatchersModalTestFns({
+      apiFetch,
+      showConfirm,
+      showToast,
+    })
+    _bindWatchersModal()
+
+    await openWatchersModal({ baselineRun: { id: 'run_base', command: 'nmap -sV darklab.sh' } })
+    await vi.waitFor(() => expect(document.getElementById('watchers-form')).not.toBeNull())
+    const baselineHelp = document.querySelector('.watchers-help-trigger')
+    expect(baselineHelp.textContent).toBe('?')
+    baselineHelp.click()
+    expect(document.querySelector('.watchers-help-card').classList.contains('u-hidden')).toBe(false)
+    expect(document.querySelector('.watchers-help-card').textContent).toContain('Create watcher from this baseline')
+    document.getElementById('watchers-label-input').value = 'Watch nmap'
+    document.getElementById('watchers-suppress-removals-input').checked = true
+    await closeWatchersModal()
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      body: 'Discard unsaved watcher changes?',
+      tone: 'warning',
+    }))
+    expect(document.getElementById('watchers-form')).not.toBeNull()
+    document.getElementById('watchers-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Watcher created', 'success'))
+    const postCall = apiFetch.mock.calls.find(([url, options]) => url === '/watchers' && options?.method === 'POST')
+    expect(JSON.parse(postCall[1].body)).toMatchObject({
+      baseline_run_id: 'run_base',
+      command: 'nmap -sV darklab.sh',
+      cadence_preset: 'hourly',
+      options: { suppress_removals: true },
+    })
+    expect(list.textContent).toContain('Watch nmap')
+    expect(detail.textContent).toContain('Last diff')
+    expect(detail.textContent).toContain('443/tcp')
+    expect(detail.textContent).toContain('Open run')
+  })
+
+  it('pauses resumes fires and accepts watcher baselines from action buttons', async () => {
+    let watcher = {
+      id: 'wtr_actions',
+      label: 'Action watcher',
+      command_text: 'echo watch',
+      baseline_run_id: 'run_base',
+      last_run_id: 'run_current',
+      state: 'ok',
+      options: {},
+      last_diff_summary: { classifier: 'textual', added_line_count: 0 },
+      schedule: {
+        id: 'sch_watcher',
+        cadence_preset: 'hourly',
+        cron_expr: '0 * * * *',
+        timezone: 'UTC',
+        enabled: true,
+      },
+    }
+    const apiFetch = vi.fn(async (url, options = {}) => {
+      if (url === '/watchers' && !options.method) {
+        return { ok: true, json: async () => ({ watchers: [watcher] }) }
+      }
+      if (url.startsWith('/schedules/preview')) {
+        return { ok: true, json: async () => ({ cron_expr: '0 * * * *', timezone: 'UTC', next_fires: [] }) }
+      }
+      if (url.startsWith('/watchers/wtr_actions/fires')) {
+        return {
+          ok: true,
+          json: async () => ({ fires: [], total: 0, limit: 20, offset: 0, has_more: false }),
+        }
+      }
+      if (url === '/watchers/wtr_actions' && options.method === 'PATCH') {
+        const body = JSON.parse(options.body)
+        watcher = { ...watcher, state: body.resume ? 'ok' : 'paused' }
+        return { ok: true, json: async () => ({ watcher }) }
+      }
+      if (url === '/watchers/wtr_actions/run-now' && options.method === 'POST') {
+        watcher = { ...watcher, last_run_id: 'run_current' }
+        return { ok: true, json: async () => ({ status: 'fired', watcher }) }
+      }
+      if (url === '/watchers/wtr_actions/accept-baseline' && options.method === 'POST') {
+        watcher = { ...watcher, baseline_run_id: 'run_current', state: 'ok' }
+        return { ok: true, json: async () => ({ watcher }) }
+      }
+      throw new Error(`unexpected request ${url}`)
+    })
+    const showToast = vi.fn()
+    const showConfirm = vi.fn(async () => 'accept')
+    const { _bindWatchersModal, refreshWatchersModal } = loadWatchersModalTestFns({ apiFetch, showToast, showConfirm })
+    _bindWatchersModal()
+
+    await refreshWatchersModal()
+    await vi.waitFor(() => expect(document.getElementById('watchers-detail').textContent).toContain('Action watcher'))
+    Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Pause').click()
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Watcher paused', 'success'))
+    Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Resume').click()
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Watcher resumed', 'success'))
+    Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Run now').click()
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Watcher fired', 'success'))
+    Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Accept baseline').click()
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Baseline accepted', 'success'))
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({ tone: 'warning' }))
   })
 
   it('does not let history outside-click dismissal close behind modal overlays', async () => {
@@ -4357,6 +4653,70 @@ describe('app helpers', () => {
     )
 
     expect(closeWorkspace).toHaveBeenCalled()
+  })
+
+  it('supports Alt+Shift+S and Alt+Shift+W to toggle Schedules and Watchers from the terminal prompt', async () => {
+    const openSchedulesModal = vi.fn()
+    const closeSchedulesModal = vi.fn()
+    const openWatchersModal = vi.fn()
+    const closeWatchersModal = vi.fn()
+    let schedulesOpen = false
+    let watchersOpen = false
+    const { cmdInput } = await loadAppFns({
+      openSchedulesModal,
+      closeSchedulesModal,
+      isSchedulesOverlayOpen: vi.fn(() => schedulesOpen),
+      openWatchersModal,
+      closeWatchersModal,
+      isWatchersOverlayOpen: vi.fn(() => watchersOpen),
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+    })
+
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'S',
+        code: 'KeyS',
+        altKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    )
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'W',
+        code: 'KeyW',
+        altKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    )
+
+    expect(openSchedulesModal).toHaveBeenCalledTimes(1)
+    expect(openWatchersModal).toHaveBeenCalledTimes(1)
+
+    schedulesOpen = true
+    watchersOpen = true
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'ß',
+        code: 'KeyS',
+        altKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    )
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: '„',
+        code: 'KeyW',
+        altKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    )
+
+    expect(closeSchedulesModal).toHaveBeenCalledTimes(1)
+    expect(closeWatchersModal).toHaveBeenCalledTimes(1)
   })
 
   it('supports Ctrl+L to clear the active tab without dropping a running command', async () => {

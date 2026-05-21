@@ -34,6 +34,11 @@ export async function loadAppFns({
   closeWorkspace: closeWorkspaceOverride = vi.fn(),
   isWorkspaceOverlayOpen: isWorkspaceOverlayOpenOverride = vi.fn(() => false),
   isSchedulesOverlayOpen: isSchedulesOverlayOpenOverride = vi.fn(() => false),
+  openSchedulesModal: openSchedulesModalOverride = vi.fn(),
+  closeSchedulesModal: closeSchedulesModalOverride = vi.fn(),
+  isWatchersOverlayOpen: isWatchersOverlayOpenOverride = vi.fn(() => false),
+  openWatchersModal: openWatchersModalOverride = vi.fn(),
+  closeWatchersModal: closeWatchersModalOverride = vi.fn(),
   openStatusMonitor: openStatusMonitorOverride = vi.fn(() => Promise.resolve(false)),
   closeStatusMonitor: closeStatusMonitorOverride = vi.fn(),
   isStatusMonitorOpen: isStatusMonitorOpenOverride = vi.fn(() => false),
@@ -215,6 +220,11 @@ export async function loadAppFns({
     <div id="schedules-overlay" class="u-hidden">
       <div id="schedules-modal">
         <button class="schedules-close"></button>
+      </div>
+    </div>
+    <div id="watchers-overlay" class="u-hidden">
+      <div id="watchers-modal">
+        <button class="watchers-close"></button>
       </div>
     </div>
     <div id="theme-overlay"></div>
@@ -629,6 +639,11 @@ export async function loadAppFns({
       closeWorkspace: closeWorkspaceOverride,
       isWorkspaceOverlayOpen: isWorkspaceOverlayOpenOverride,
       isSchedulesOverlayOpen: isSchedulesOverlayOpenOverride,
+      openSchedulesModal: openSchedulesModalOverride,
+      closeSchedulesModal: closeSchedulesModalOverride,
+      isWatchersOverlayOpen: isWatchersOverlayOpenOverride,
+      openWatchersModal: openWatchersModalOverride,
+      closeWatchersModal: closeWatchersModalOverride,
       openStatusMonitor: openStatusMonitorOverride,
       closeStatusMonitor: closeStatusMonitorOverride,
       isStatusMonitorOpen: isStatusMonitorOpenOverride,

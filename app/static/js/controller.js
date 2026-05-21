@@ -281,6 +281,7 @@ function setupModalFocusTraps() {
     'workflows-modal',
     'workflow-editor-form',
     'schedules-modal',
+    'watchers-modal',
   ];
   ids.forEach((id) => {
     const card = document.getElementById(id);
@@ -660,6 +661,7 @@ function isAnyPanelOverlayOpen() {
     || (typeof isWorkflowsOverlayOpen === 'function' && isWorkflowsOverlayOpen())
     || (typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen())
     || (typeof isSchedulesOverlayOpen === 'function' && isSchedulesOverlayOpen())
+    || (typeof isWatchersOverlayOpen === 'function' && isWatchersOverlayOpen())
     || (typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
     || (typeof isHistoryRunOverlayOpen === 'function' && isHistoryRunOverlayOpen())
     || (typeof isOptionsOverlayOpen === 'function' && isOptionsOverlayOpen())
@@ -687,6 +689,7 @@ document.addEventListener('keydown', e => {
     || isWorkflowsOverlayOpen()
     || (typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen())
     || (typeof isSchedulesOverlayOpen === 'function' && isSchedulesOverlayOpen())
+    || (typeof isWatchersOverlayOpen === 'function' && isWatchersOverlayOpen())
     || isHistoryPanelOpen()
     || (typeof isAtlasOverlayOpen === 'function' && isAtlasOverlayOpen())
     || (typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
@@ -806,6 +809,7 @@ document.addEventListener('keydown', e => {
     && !isFaqOverlayOpen() && !isWorkflowsOverlayOpen() && !isOptionsOverlayOpen() && !isThemeOverlayOpen()
     && !(typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen())
     && !(typeof isSchedulesOverlayOpen === 'function' && isSchedulesOverlayOpen())
+    && !(typeof isWatchersOverlayOpen === 'function' && isWatchersOverlayOpen())
     && !(typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
     && !(typeof isHistoryRunOverlayOpen === 'function' && isHistoryRunOverlayOpen())
     && !(typeof isConfirmOpen === 'function' && isConfirmOpen())

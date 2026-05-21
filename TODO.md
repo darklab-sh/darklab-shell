@@ -42,13 +42,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
     - The unit of value: operators stop watching their tabs for "is anything new on this nmap?" and the app tells them.
     - Land **after** scheduler and notifications. A watcher without a scheduler is just a manual diff; a watcher without notifications is just a database row.
     - Non-goals for v1: watchers across multiple commands, watcher graphs, threshold-based alerting (e.g., "only fire if 3 new ports"), watcher history retention beyond a fixed cap.
-  - Phase 5 — Browser Watchers modal
-    - New `app/static/js/features/watchers/`. Modal lives beside Schedules.
-    - Watcher row state: `ok` (last fire matched baseline) / `changed` (last fire had a non-empty diff and is awaiting accept) / `firing` (fire in progress) / `paused` / `error`.
-    - Detail pane shows the last diff using a reusable component shared with the existing Run Comparison overlay so visual treatment stays consistent.
-    - Empty-diff fires are visible in watcher audit as `diff_kind='none'` so operators can confirm a watcher is still running even when nothing changed.
-    - Run Details gets a "Create watcher from this baseline" action that opens the Watchers modal pre-filled with that run as the baseline.
-    - Accept-baseline is a confirm modal (discards the prior baseline); resume from paused is a single click.
   - Phase 6 — CLI and API surfaces
     - `/api/v1/watchers` GET/POST/PATCH/DELETE plus `/api/v1/watchers/<id>/accept-baseline`, `/run-now`, and `/fires` (paginated audit).
     - CLI: `darklab watch list / create / pause / resume / delete / accept / run / info / fires`.
@@ -75,17 +68,25 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
       - Toggle round-trips through reload.
       - `_constellationActiveWindow` returns `{0, 1440}` for fewer than 6 stars; returns a padded window otherwise.
   - Phase 1 — auto-fit X axis with Full-day toggle (the "Option 1" piece)
-    - When `constellation.full_day` is `false` (default), compute the active window and use it for X-mapping. Re-derive on every render so the window adapts as new runs land.
-    - When `true`, fall back to the existing `{0, 1440}` mapping.
-    - Update `_appendConstellationTimeGuides(svg)` to pick guide positions from the current window:
-      - Major guides at evenly-spaced ticks **inside** the window (4 ticks for narrow windows ≤ 6 hours, 5 for medium 6–12 hours, 6 for wide windows > 12 hours, hour-aligned).
-      - Minor guides at half-intervals between majors.
-      - Labels keep `HH` clock format. Suppress the rightmost-edge label if it would overlap the visual boundary.
+    - When `constellation.full_day` is `false` (default), compute the active window and the interior dead bands, then use a piecewise X-mapping. Re-derive on every render so the layout adapts as new runs land.
+      - `_constellationActiveWindow(stars)` trims the EDGES (typical workday operator: window resolves to `08:00–19:00` from `09:00–18:00` runs with ±60 min padding).
+      - `_constellationDeadBands(stars)` trims INTERIOR low-density bands (operators whose active hours stretch across both ends of the day with a sleep window in the middle): contiguous runs of hours with relative density ≤ 0.15, length ≥ 2 h, with ±30 min edge padding pulled inward. Only kicks in for sessions with ≥ 30 plotted stars.
+      - `_constellationVisibleSegments(window, deadBands)` returns the visible spans. Single span when no dead bands. Multiple spans when interior dead bands were found.
+      - `_constellationMinuteToX(window, segments)` is linear when `segments` describes a single span, piecewise when it describes multiple. Dead-band minutes clamp to the seam x between adjacent segments. Clock time stays monotonic within each segment.
+      - Real stars whose started-minute falls inside a collapsed dead band are dropped from the visible panel (so they don't pile at the seam). Operators can flip Full day to see them.
+    - When `true`, fall back to the single full-day `{0, 1440}` window with no cropping — strict 24-hour reading.
+    - Update `_appendConstellationTimeGuides(svg)` to pick guide positions from the current segments:
+      - Major guides at evenly-spaced ticks inside each visible segment (4 ticks for narrow combined spans ≤ 6 hours, 5 for medium 6–12 hours, 6 for wide spans > 12 hours, hour-aligned).
+      - Minor guides at half-intervals between majors, scoped per segment.
+      - Labels keep `HH` clock format. Hours that fall inside a dead band are suppressed. The rightmost-edge label is suppressed when it lands at the window boundary.
+    - Add `_appendConstellationSeamMarkers(svg, window, segments)` to draw a dashed vertical line plus a `//` glyph at each seam between segments so the discontinuity reads as intentional. Both styles use theme tokens for contrast.
     - Legend gains a small toggle pressable using the `.toggle-btn` primitive (per `ARCHITECTURE.md` Design System): `Active hours / Full day`. Pressing it flips the preference and re-renders the panel only (not the whole Status Monitor).
-    - Meta line shows the window — `06:32–22:14 · 142 plotted` in active-hours mode, `last 30 days · 142 plotted` in full-day mode.
+    - Meta line shows the window — `06:32–22:14 · 142 plotted` in single-segment auto-fit mode, `00:15–04:00, 11:00–23:41 · 358 plotted` when dead bands have been cropped, and `142 plotted · last 30 days` in full-day mode.
     - Acceptance criteria
       - Empty session: defaults to full-day layout (no narrow degenerate window).
-      - 30 days of 09:00–18:00 runs: active window resolves to roughly `08:00–19:00` with one-hour padding either side.
+      - 30 days of 09:00–18:00 runs: active window resolves to roughly `08:00–19:00` with one-hour padding either side; no dead bands; single segment.
+      - 30 days of 00:00–04:00 + 11:00–23:00 runs (sleep window in middle of clock): dead-band detector finds 04:30–10:30, segments resolve to `00:15–04:00, 11:00–23:41` and the seam marker renders between them.
+      - Full-day toggle flips back to a single 24h segment regardless of detected dead bands.
       - Toggle is keyboard-activatable, routes through `bindPressable`, and is announced via `aria-pressed`.
   - Phase 2 — diurnal-weighted ambient stars (the "Option 4" piece)
     - Modify `_ambientConstellationStars()` to accept an optional `density` array (length 24, from Phase 0's `_constellationHourDensity`) plus the current window. Ambient star X positions sample from a probability distribution that is **inverse** to real-star density inside the window, and uniform outside the window (so the chrome at idle edges still feels lived-in).

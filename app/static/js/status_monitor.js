@@ -315,16 +315,119 @@
     return { startMin, endMin };
   }
 
-  function _constellationMinuteToX(window) {
-    const startMin = Number(window?.startMin);
-    const endMin = Number(window?.endMin);
-    const safeStart = Number.isFinite(startMin) ? startMin : 0;
-    const safeEnd = Number.isFinite(endMin) && endMin > safeStart ? endMin : 1440;
-    const span = safeEnd - safeStart;
+  // Dead-band defaults. The active-window heuristic already trims low-density
+  // edges; dead-band detection complements it by finding INTERIOR low-density
+  // hours (operators whose runs span the whole clock but sleep through a
+  // mid-day window). Relative density ≤ 0.15 vs the busiest hour, runs of at
+  // least 2 hours qualify, and the cropped band is pulled inward by 30 min
+  // on each side so we don't clip stars near the boundary. Sessions with
+  // fewer than 30 plotted stars stay in single-window mode.
+  const CONSTELLATION_DEAD_BAND_DENSITY = 0.15;
+  const CONSTELLATION_DEAD_BAND_MIN_HOURS = 2;
+  const CONSTELLATION_DEAD_BAND_EDGE_PAD_MIN = 30;
+  const CONSTELLATION_DEAD_BAND_MIN_STARS = 30;
+
+  function _constellationDeadBands(stars, {
+    densityThreshold = CONSTELLATION_DEAD_BAND_DENSITY,
+    minBandHours = CONSTELLATION_DEAD_BAND_MIN_HOURS,
+    edgePaddingMinutes = CONSTELLATION_DEAD_BAND_EDGE_PAD_MIN,
+    minStars = CONSTELLATION_DEAD_BAND_MIN_STARS,
+  } = {}) {
+    if (!Array.isArray(stars) || stars.length < minStars) return [];
+    const density = _constellationHourDensity(stars);
+    const hourRuns = [];
+    let runStart = null;
+    for (let h = 0; h < 24; h += 1) {
+      const isDead = density[h] <= densityThreshold;
+      if (isDead && runStart === null) runStart = h;
+      if (!isDead && runStart !== null) {
+        if (h - runStart >= minBandHours) hourRuns.push({ startHour: runStart, endHour: h });
+        runStart = null;
+      }
+    }
+    if (runStart !== null && 24 - runStart >= minBandHours) {
+      hourRuns.push({ startHour: runStart, endHour: 24 });
+    }
+    return hourRuns
+      .map(({ startHour, endHour }) => ({
+        startMin: Math.min(1440, (startHour * 60) + edgePaddingMinutes),
+        endMin: Math.max(0, (endHour * 60) - edgePaddingMinutes),
+      }))
+      .filter((band) => band.endMin - band.startMin >= 60);
+  }
+
+  function _constellationVisibleSegments(window, deadBands) {
+    const safeWindow = {
+      startMin: Math.max(0, Number(window?.startMin) || 0),
+      endMin: Math.min(1440, Number(window?.endMin) || 1440),
+    };
+    if (safeWindow.endMin <= safeWindow.startMin) {
+      return [{ startMin: 0, endMin: 1440 }];
+    }
+    const bands = (Array.isArray(deadBands) ? deadBands : [])
+      .map((band) => ({
+        startMin: Math.max(safeWindow.startMin, Number(band?.startMin) || 0),
+        endMin: Math.min(safeWindow.endMin, Number(band?.endMin) || 0),
+      }))
+      .filter((band) => band.endMin > band.startMin)
+      .sort((left, right) => left.startMin - right.startMin);
+    if (!bands.length) return [{ startMin: safeWindow.startMin, endMin: safeWindow.endMin }];
+    const segments = [];
+    let cursor = safeWindow.startMin;
+    for (const band of bands) {
+      if (band.endMin <= cursor) continue;
+      if (band.startMin > cursor) segments.push({ startMin: cursor, endMin: band.startMin });
+      cursor = Math.max(cursor, band.endMin);
+    }
+    if (cursor < safeWindow.endMin) segments.push({ startMin: cursor, endMin: safeWindow.endMin });
+    return segments.length ? segments : [{ startMin: safeWindow.startMin, endMin: safeWindow.endMin }];
+  }
+
+  function _constellationMinuteToX(window, segments) {
+    // When called with a single contiguous window (no segments, or one
+    // segment covering the whole window) the mapper is linear. When the
+    // caller passes multiple segments, the mapper is piecewise: each
+    // segment maps proportionally to its share of the combined visible
+    // minute mass, and minutes that fall inside a dead band between
+    // segments are clamped to the seam between adjacent segments.
+    const rawWindowStart = Number(window?.startMin);
+    const rawWindowEnd = Number(window?.endMin);
+    const windowStart = Number.isFinite(rawWindowStart) ? rawWindowStart : 0;
+    const windowEnd = Number.isFinite(rawWindowEnd) && rawWindowEnd > windowStart ? rawWindowEnd : 1440;
+    const spans = Array.isArray(segments) && segments.length
+      ? segments.slice().sort((left, right) => left.startMin - right.startMin)
+      : [{ startMin: windowStart, endMin: windowEnd }];
+    let totalVisible = 0;
+    const meta = spans.map((s) => {
+      const startMin = Math.max(windowStart, Number(s.startMin) || 0);
+      const endMin = Math.min(windowEnd, Number(s.endMin) || 0);
+      const span = Math.max(0, endMin - startMin);
+      const cumulStart = totalVisible;
+      totalVisible += span;
+      return { startMin, endMin, span, cumulStart };
+    });
+    if (totalVisible <= 0) {
+      const fallbackSpan = Math.max(1, windowEnd - windowStart);
+      return function constellationMinuteToXFallback(minute) {
+        const value = Number(minute);
+        const offset = Number.isFinite(value) ? value - windowStart : 0;
+        return CONSTELLATION_PLOT_LEFT + ((offset / fallbackSpan) * CONSTELLATION_PLOT_WIDTH);
+      };
+    }
     return function constellationMinuteToX(minute) {
       const value = Number(minute);
-      const offset = Number.isFinite(value) ? value - safeStart : 0;
-      return CONSTELLATION_PLOT_LEFT + ((offset / span) * CONSTELLATION_PLOT_WIDTH);
+      const m = Number.isFinite(value) ? value : windowStart;
+      for (let i = 0; i < meta.length; i += 1) {
+        const seg = meta[i];
+        if (m < seg.startMin) {
+          return CONSTELLATION_PLOT_LEFT + ((seg.cumulStart / totalVisible) * CONSTELLATION_PLOT_WIDTH);
+        }
+        if (m <= seg.endMin) {
+          const offset = seg.cumulStart + (m - seg.startMin);
+          return CONSTELLATION_PLOT_LEFT + ((offset / totalVisible) * CONSTELLATION_PLOT_WIDTH);
+        }
+      }
+      return CONSTELLATION_PLOT_LEFT + CONSTELLATION_PLOT_WIDTH;
     };
   }
 
@@ -363,30 +466,37 @@
     return 1 - (smooth * (1 - AMBIENT_PEAK_FLOOR));
   }
 
-  function _ambientHourWeights(stars, displayWindow) {
+  function _ambientHourWeights(stars, displayWindow, segments) {
     // Inside the active window ambient sample weight is *inverse* to
     // real-star density so the chrome concentrates in lulls. Outside the
     // active window we want uniform fill — those hours have no real-star
     // density to invert, but the chrome there should still read as a
     // lived-in sky. Hours that fall fully outside the visible display
-    // window get zero weight so we don't waste samples on off-canvas
-    // minutes when auto-fit has narrowed the X axis.
+    // window — or fully inside a collapsed dead band — get zero weight so
+    // we don't waste samples on off-canvas minutes.
     //
     // The threshold-smooth curve in `_ambientInverseWeight` makes the
     // bias sharp enough to be perceptible: with ~5 quiet hours getting
     // weight 1 and ~10 peak hours getting weight 0.03, ambient
     // concentrates in the dead-zone band even when the active window
-    // spans almost the entire day (e.g., users who run commands across
-    // most clock hours but sleep through a 4-hour window in the middle).
+    // spans almost the entire day.
     const density = _constellationHourDensity(stars);
     const active = _constellationActiveWindow(stars);
     const activeStartH = active.startMin / 60;
     const activeEndH = active.endMin / 60;
     const windowStartH = (Number(displayWindow?.startMin) || 0) / 60;
     const windowEndH = (Number(displayWindow?.endMin) || 1440) / 60;
+    const visibleSpans = Array.isArray(segments) && segments.length ? segments : null;
+    const hourOverlapsVisible = (hour) => {
+      if (!visibleSpans) return true;
+      const hourStartMin = hour * 60;
+      const hourEndMin = (hour + 1) * 60;
+      return visibleSpans.some((s) => s.startMin < hourEndMin && s.endMin > hourStartMin);
+    };
     const weights = new Array(24).fill(0);
     for (let h = 0; h < 24; h += 1) {
       if (h + 1 <= windowStartH || h >= windowEndH) continue;
+      if (!hourOverlapsVisible(h)) continue;
       if (h >= activeStartH && h < activeEndH) {
         weights[h] = _ambientInverseWeight(density[h]);
       } else {
@@ -404,19 +514,29 @@
     return cdf.length - 1;
   }
 
-  function _ambientConstellationStars({ stars = [], window: displayWindow = CONSTELLATION_FULL_DAY_WINDOW } = {}) {
-    const weights = _ambientHourWeights(stars, displayWindow);
+  function _ambientConstellationStars({
+    stars = [],
+    window: displayWindow = CONSTELLATION_FULL_DAY_WINDOW,
+    segments,
+  } = {}) {
+    const weights = _ambientHourWeights(stars, displayWindow, segments);
     let total = 0;
     const cdf = weights.map((value) => { total += value; return total; });
     if (total <= 0) return [];
     const totalCount = AMBIENT_COUNT_MIN
       + Math.floor(Math.random() * (AMBIENT_COUNT_MAX - AMBIENT_COUNT_MIN + 1));
-    const minuteToX = _constellationMinuteToX(displayWindow);
+    const minuteToX = _constellationMinuteToX(displayWindow, segments);
+    const visibleSpans = Array.isArray(segments) && segments.length ? segments : null;
+    const minuteInVisible = (minute) => {
+      if (!visibleSpans) return true;
+      return visibleSpans.some((s) => minute >= s.startMin && minute <= s.endMin);
+    };
     const placed = [];
     const attemptCap = totalCount * 4;
     for (let attempt = 0; attempt < attemptCap && placed.length < totalCount; attempt += 1) {
       const hour = _ambientSampleHour(cdf, total);
       const minute = (hour * 60) + (Math.random() * 60);
+      if (!minuteInVisible(minute)) continue;
       const x = minuteToX(minute);
       if (x < CONSTELLATION_PLOT_LEFT - 1 || x > CONSTELLATION_PLOT_RIGHT + 1) continue;
       const y = 14 + (Math.random() * 268);
@@ -1765,20 +1885,31 @@
   // and makes minor ticks land at sensible positions between majors.
   const CONSTELLATION_TICK_STEP_CANDIDATES = [1, 2, 3, 4, 6, 8, 12];
 
-  function _constellationTickSpec(window) {
+  function _constellationTickSpec(window, segments) {
+    // Tick step is sized against the COMBINED visible minute mass, not the
+    // bounding window. For a piecewise axis (e.g. 00:15–04:00 + 11:00–23:41)
+    // the operator effectively sees ~16 visible hours rather than 24, so the
+    // step picks 2h instead of 4h and labels feel proportionate.
     const startMin = Number(window?.startMin) || 0;
     const endMin = Number(window?.endMin) || 1440;
-    const spanH = (endMin - startMin) / 60;
+    const spans = Array.isArray(segments) && segments.length
+      ? segments
+      : [{ startMin, endMin }];
+    const totalVisibleMin = spans.reduce(
+      (sum, s) => sum + Math.max(0, (Number(s.endMin) || 0) - (Number(s.startMin) || 0)),
+      0,
+    );
+    const spanH = totalVisibleMin / 60;
     const target = spanH <= 6 ? 4 : spanH <= 12 ? 5 : 6;
     let bestStep = CONSTELLATION_TICK_STEP_CANDIDATES[0];
     let bestScore = Infinity;
     CONSTELLATION_TICK_STEP_CANDIDATES.forEach((step) => {
-      const firstHour = Math.ceil((startMin / 60) / step) * step;
       let count = 0;
-      for (let hour = firstHour; hour <= endMin / 60 + 1e-9; hour += step) count += 1;
-      // Prefer at-least-target ticks (never too sparse); within that, the
-      // count closest to the target wins; tie-breaking by larger step keeps
-      // labels from getting visually crowded.
+      spans.forEach((s) => {
+        const firstHour = Math.ceil(((Number(s.startMin) || 0) / 60) / step) * step;
+        const endHour = (Number(s.endMin) || 0) / 60;
+        for (let hour = firstHour; hour <= endHour + 1e-9; hour += step) count += 1;
+      });
       const undershoot = count < target ? (target - count) * 100 : 0;
       const distance = Math.abs(count - target);
       const score = undershoot + distance - (step * 0.001);
@@ -1788,35 +1919,47 @@
       }
     });
     const majors = [];
-    const firstHour = Math.ceil((startMin / 60) / bestStep) * bestStep;
-    for (let hour = firstHour; hour <= endMin / 60 + 1e-9; hour += bestStep) {
-      majors.push(hour);
-    }
     const minors = [];
     const half = bestStep / 2;
-    if (half > 0) {
-      majors.forEach((hour, index) => {
-        const next = majors[index + 1];
-        if (typeof next === 'number' && next - hour > half * 1.5) return;
-        const candidate = hour + half;
-        if (candidate > startMin / 60 + 1e-9 && candidate < endMin / 60 - 1e-9) {
-          minors.push(candidate);
-        }
-      });
-      // Add a leading minor before the first major if there's room (so a
-      // narrow window like 09:30 → … still shows a half-step mark before
-      // the first hour-aligned major).
-      const leading = (firstHour - half);
-      if (leading > startMin / 60 + 1e-9) minors.unshift(leading);
-    }
+    spans.forEach((s) => {
+      const segStartMin = Number(s.startMin) || 0;
+      const segEndMin = Number(s.endMin) || 0;
+      const segStartH = segStartMin / 60;
+      const segEndH = segEndMin / 60;
+      const firstHour = Math.ceil(segStartH / bestStep) * bestStep;
+      const segMajors = [];
+      for (let hour = firstHour; hour <= segEndH + 1e-9; hour += bestStep) {
+        segMajors.push(hour);
+        majors.push(hour);
+      }
+      if (half > 0) {
+        segMajors.forEach((hour, index) => {
+          const next = segMajors[index + 1];
+          if (typeof next === 'number' && next - hour > half * 1.5) return;
+          const candidate = hour + half;
+          if (candidate > segStartH + 1e-9 && candidate < segEndH - 1e-9) {
+            minors.push(candidate);
+          }
+        });
+        const leading = firstHour - half;
+        if (leading > segStartH + 1e-9 && leading < segEndH - 1e-9) minors.push(leading);
+      }
+    });
     return { stepHours: bestStep, majors, minors };
   }
 
-  function _formatConstellationWindowLabel(window) {
+  function _formatConstellationSpanLabel(span) {
     const pad = (value) => String(Math.floor(value)).padStart(2, '0');
-    const startMin = Math.max(0, Math.min(1440, Number(window?.startMin) || 0));
-    const endMin = Math.max(0, Math.min(1440, Number(window?.endMin) || 1440));
+    const startMin = Math.max(0, Math.min(1440, Number(span?.startMin) || 0));
+    const endMin = Math.max(0, Math.min(1440, Number(span?.endMin) || 1440));
     return `${pad(startMin / 60)}:${pad(startMin % 60)}–${pad(endMin / 60)}:${pad(endMin % 60)}`;
+  }
+
+  function _formatConstellationWindowLabel(window, segments) {
+    if (Array.isArray(segments) && segments.length > 1) {
+      return segments.map(_formatConstellationSpanLabel).join(', ');
+    }
+    return _formatConstellationSpanLabel(window);
   }
 
   function _isConstellationFullDay() {
@@ -1845,14 +1988,15 @@
   const CONSTELLATION_SKY_TOP = 12;
   const CONSTELLATION_SKY_BOTTOM = 286;
 
-  function _appendConstellationSkyBackdrop(svg, window) {
-    const minuteToX = _constellationMinuteToX(window);
+  function _appendConstellationSkyBackdrop(svg, window, segments) {
+    const minuteToX = _constellationMinuteToX(window, segments);
     // The rect is anchored to true clock-time coordinates: x at 00:00 and
     // width spanning to 24:00. In auto-fit mode the rect extends past the
     // visible viewBox on either side and SVG's overflow clipping hides the
-    // off-canvas portion, leaving only the active-window slice visible.
-    // The gradient's coordinate space stays tied to real hours so noon
-    // appears wherever 12:00 lands in the mapping.
+    // off-canvas portion, leaving only the visible-segment slice visible.
+    // With piecewise mapping, gradient stops whose clock hour falls inside
+    // a dead band collapse onto the seam x-position, producing a sharp
+    // atmospheric transition exactly where the seam marker lives.
     const x = minuteToX(0);
     const width = minuteToX(1440) - x;
     const defs = _svgEl('defs');
@@ -1863,9 +2007,12 @@
       x2: '100%',
       y2: '0%',
     });
+    const span = Math.max(1, width);
     CONSTELLATION_SKY_STOPS.forEach(({ hour, bg, shadow }) => {
+      const stopX = minuteToX(hour * 60);
+      const offsetPercent = Math.max(0, Math.min(100, ((stopX - x) / span) * 100));
       gradient.appendChild(_svgEl('stop', {
-        offset: `${(hour / 24) * 100}%`,
+        offset: `${offsetPercent}%`,
         'stop-color': `color-mix(in srgb, var(--theme-panel-bg) ${bg}%, var(--theme-panel-shadow) ${shadow}%)`,
       }));
     });
@@ -1881,6 +2028,29 @@
     }));
   }
 
+  function _appendConstellationSeamMarkers(svg, window, segments) {
+    if (!Array.isArray(segments) || segments.length < 2) return;
+    const minuteToX = _constellationMinuteToX(window, segments);
+    for (let i = 0; i < segments.length - 1; i += 1) {
+      const seamX = minuteToX(segments[i].endMin);
+      svg.appendChild(_svgEl('line', {
+        class: 'status-monitor-constellation-seam',
+        x1: seamX,
+        y1: CONSTELLATION_SKY_TOP,
+        x2: seamX,
+        y2: CONSTELLATION_SKY_BOTTOM,
+      }));
+      const label = _svgEl('text', {
+        class: 'status-monitor-constellation-seam-label',
+        x: seamX,
+        y: 289,
+        'text-anchor': 'middle',
+      });
+      label.textContent = '//';
+      svg.appendChild(label);
+    }
+  }
+
   function _rerenderConstellationPanelInPlace() {
     const existing = document.querySelector('.status-monitor-constellation-card');
     if (!existing) return;
@@ -1888,7 +2058,7 @@
     existing.replaceWith(fresh);
   }
 
-  function _constellationMetaText(stars, fullDay, window) {
+  function _constellationMetaText(stars, fullDay, window, segments) {
     const count = Array.isArray(stars) ? stars.length : 0;
     const windowLabel = _insightWindowLabel('constellation', 30);
     if (!count) return `awaiting run history · ${windowLabel}`;
@@ -1896,10 +2066,14 @@
     // the X axis spans the same range as full-day mode — so the operator
     // gets the same `N plotted · last X days` reading they're used to,
     // instead of a redundant `00:00–24:00`. Only show the window label
-    // when auto-fit has actually narrowed the axis.
+    // when auto-fit has actually narrowed the axis OR cropped interior
+    // dead bands into a multi-segment view.
+    const hasDeadBands = Array.isArray(segments) && segments.length > 1;
     const isFullDayWindow = Number(window?.startMin) <= 0 && Number(window?.endMin) >= 1440;
-    if (fullDay || isFullDayWindow) return `${_formatCount(count)} plotted · ${windowLabel}`;
-    return `${_formatConstellationWindowLabel(window)} · ${_formatCount(count)} plotted`;
+    if ((fullDay || isFullDayWindow) && !hasDeadBands) {
+      return `${_formatCount(count)} plotted · ${windowLabel}`;
+    }
+    return `${_formatConstellationWindowLabel(window, segments)} · ${_formatCount(count)} plotted`;
   }
 
   function _toggleConstellationFullDay() {
@@ -1982,12 +2156,25 @@
     }
   }
 
-  function _appendConstellationTimeGuides(svg, window = CONSTELLATION_FULL_DAY_WINDOW) {
-    const { majors, minors } = _constellationTickSpec(window);
-    const minuteToX = _constellationMinuteToX(window);
+  function _appendConstellationTimeGuides(svg, window = CONSTELLATION_FULL_DAY_WINDOW, segments) {
+    const { majors, minors } = _constellationTickSpec(window, segments);
+    const minuteToX = _constellationMinuteToX(window, segments);
     const endMin = Number(window?.endMin) || 1440;
     const endHour = endMin / 60;
+    // Labels at segment boundaries are suppressed: the seam already carries
+    // a `//` glyph, so doubling up with hour labels at the boundary minute
+    // would look cluttered. Hours that fall inside a dead band would also
+    // collapse onto the seam, so we drop them too. This logic only kicks
+    // in when there are actually multiple segments — a single segment
+    // (full-day or contiguous active window) keeps the boundary labels.
+    const segmentSpans = Array.isArray(segments) && segments.length > 1 ? segments : null;
+    const hourIsVisible = (hour) => {
+      if (!segmentSpans) return true;
+      const minute = hour * 60;
+      return segmentSpans.some((s) => minute > s.startMin + 1e-6 && minute < s.endMin - 1e-6);
+    };
     minors.forEach((hour) => {
+      if (!hourIsVisible(hour)) return;
       const x = minuteToX(hour * 60);
       svg.appendChild(_svgEl('line', {
         class: 'status-monitor-constellation-guide status-monitor-constellation-guide-minor',
@@ -2012,6 +2199,9 @@
       // windows it avoids visually overlapping the plot frame. The tick
       // itself stays so the right gutter still reads as gridded.
       if (hour >= endHour - 1e-6) return;
+      // Inside a segmented axis, drop hour labels that coincide with seam
+      // positions so the `//` glyph reads as the only marker there.
+      if (!hourIsVisible(hour)) return;
       // Wrap-around defensively for any future window crossing midnight
       // (current `_constellationActiveWindow` returns clamped [0,1440],
       // so this is a no-op today).
@@ -2077,12 +2267,23 @@
     const panel = document.createElement('section');
     panel.className = 'status-monitor-visual-card status-monitor-constellation-card';
 
-    // Resolve the window once per render. Star positions, time guides, meta
-    // text, and the toggle's pressed state all key off the same values.
+    // Resolve the window and visible segments once per render. Star
+    // positions, time guides, meta text, and the toggle's pressed state
+    // all key off the same values. In full-day mode the segments collapse
+    // to a single span covering 00:00–24:00. In auto-fit mode interior
+    // dead bands (sleep-window low-density runs of ≥ 2 hours) get cropped
+    // out — the X axis becomes piecewise and the dead minutes collapse
+    // onto a seam marker so the canvas reads as a continuous sky even
+    // when an operator's active hours stretch across both ends of the day.
     const fullDayConstellation = _isConstellationFullDay();
     const constellationWindow = fullDayConstellation
       ? CONSTELLATION_FULL_DAY_WINDOW
       : _constellationActiveWindow(stars);
+    const constellationDeadBands = fullDayConstellation
+      ? []
+      : _constellationDeadBands(stars);
+    const constellationSegments = _constellationVisibleSegments(constellationWindow, constellationDeadBands);
+    const constellationHasDeadBands = constellationSegments.length > 1;
 
     const header = document.createElement('div');
     header.className = 'status-monitor-visual-header';
@@ -2091,7 +2292,7 @@
     title.textContent = 'Command Constellation';
     const meta = document.createElement('div');
     meta.className = 'status-monitor-visual-meta';
-    meta.textContent = _constellationMetaText(stars, fullDayConstellation, constellationWindow);
+    meta.textContent = _constellationMetaText(stars, fullDayConstellation, constellationWindow, constellationSegments);
     const legend = _categoryLegend(stars);
     if (legend && stars.length) {
       const hasFailed = stars.some(star => _isFailedExitCode(star?.exit_code));
@@ -2175,13 +2376,13 @@
     // `constellationWindow` was resolved above so the header meta line and
     // the SVG share one source of truth. Recomputing on every render keeps
     // the X axis adaptive as new runs land.
-    const constellationMinuteToX = _constellationMinuteToX(constellationWindow);
+    const constellationMinuteToX = _constellationMinuteToX(constellationWindow, constellationSegments);
     // Sky backdrop paints first so guides, ambient, and real stars all
     // render on top of the atmospheric gradient.
-    _appendConstellationSkyBackdrop(svg, constellationWindow);
-    _appendConstellationTimeGuides(svg, constellationWindow);
+    _appendConstellationSkyBackdrop(svg, constellationWindow, constellationSegments);
+    _appendConstellationTimeGuides(svg, constellationWindow, constellationSegments);
     _appendConstellationElapsedGuides(svg, ceilingElapsed);
-    _ambientConstellationStars({ stars, window: constellationWindow }).forEach(star => {
+    _ambientConstellationStars({ stars, window: constellationWindow, segments: constellationSegments }).forEach(star => {
       svg.appendChild(_svgEl('circle', {
         class: 'status-monitor-star-ambient',
         cx: star.x,
@@ -2196,7 +2397,20 @@
       }));
     });
     const now = Date.now();
-    const plottedStars = stars.map((star) => {
+    // When the X axis is piecewise (dead bands cropped), drop real stars
+    // whose started-minute falls inside a collapsed dead band — otherwise
+    // they would pile up at the seam x-position and read as a stack of
+    // misplaced runs. Operators who want to see those stars can flip to
+    // Full day. The threshold for dead-band detection is intentionally low
+    // (density ≤ 0.15) so the dropped count stays small.
+    const visibleStars = constellationHasDeadBands
+      ? stars.filter((star) => {
+        const minute = _constellationStarMinutes(star);
+        if (minute === null) return true;
+        return constellationSegments.some((s) => minute >= s.startMin && minute <= s.endMin);
+      })
+      : stars;
+    const plottedStars = visibleStars.map((star) => {
       const started = Date.parse(String(star.started || '')) || now;
       const date = new Date(started);
       const minutes = date.getHours() * 60 + date.getMinutes();
@@ -2307,6 +2521,7 @@
       node.append(circle, hit);
       svg.appendChild(node);
     });
+    _appendConstellationSeamMarkers(svg, constellationWindow, constellationSegments);
     plot.append(svg, _constellationPopover());
     const sparseMessage = _constellationSparseMessage(stars.length);
     if (sparseMessage) {
@@ -3597,6 +3812,8 @@
     hourDensity: _constellationHourDensity,
     activeWindow: _constellationActiveWindow,
     minuteToX: _constellationMinuteToX,
+    deadBands: _constellationDeadBands,
+    visibleSegments: _constellationVisibleSegments,
     fullDayWindow: CONSTELLATION_FULL_DAY_WINDOW,
     plotLeft: CONSTELLATION_PLOT_LEFT,
     plotWidth: CONSTELLATION_PLOT_WIDTH,

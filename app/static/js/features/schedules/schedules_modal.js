@@ -38,6 +38,9 @@ let _schedulesState = {
   previewTimer: null,
   previewController: null,
   missingScheduleId: '',
+  cleanDraft: null,
+  formDirty: false,
+  discardPromptOpen: false,
 };
 
 function _scheduleEls() {
@@ -227,8 +230,9 @@ function _changeScheduleFiresPage(direction) {
   _loadScheduleFires(_schedulesState.selectedId, { offset: nextOffset }).catch(() => {});
 }
 
-function _openScheduleRun(runId) {
-  closeSchedulesModal({ refocus: false });
+async function _openScheduleRun(runId) {
+  const closed = await closeSchedulesModal({ refocus: false });
+  if (!closed) return;
   if (typeof openHistoryRunDetails === 'function') {
     openHistoryRunDetails({ id: runId || '' });
   }
@@ -248,12 +252,86 @@ function isSchedulesOverlayOpen() {
   return !!(overlay && overlay.classList.contains('open'));
 }
 
-function closeSchedulesModal({ refocus = true } = {}) {
+function _normalizeScheduleComparable(data = {}) {
+  const preset = String(data.cadence_preset || '').trim();
+  return {
+    label: String(data.label || '').trim(),
+    command: String(data.command ?? data.command_text ?? '').trim(),
+    cadence_preset: preset === 'custom' ? '' : preset,
+    cron_expr: String(data.cron_expr || SCHEDULES_DEFAULT_CRON).trim(),
+    timezone: String(data.timezone || _scheduleDefaultTimezone()).trim(),
+    enabled: data.enabled !== false,
+  };
+}
+
+function _markScheduleClean(draft = _schedulesState.draft) {
+  _schedulesState.cleanDraft = draft ? _normalizeScheduleComparable(draft) : null;
+  _schedulesState.formDirty = false;
+}
+
+function _markScheduleDirty(event) {
+  if (event?.target?.closest?.('#schedules-form')) {
+    _schedulesState.formDirty = true;
+  }
+}
+
+function _scheduleCurrentComparable() {
+  const form = document.getElementById('schedules-form');
+  return form
+    ? _normalizeScheduleComparable(_collectScheduleDraft(form))
+    : _normalizeScheduleComparable(_schedulesState.draft || {});
+}
+
+function _scheduleNewDraftHasMeaningfulInput(draft) {
+  const data = _normalizeScheduleComparable(draft);
+  return !!(
+    data.label
+    || data.command
+    || data.cadence_preset !== 'hourly'
+    || data.cron_expr !== SCHEDULES_DEFAULT_CRON
+    || data.timezone !== _scheduleDefaultTimezone()
+    || data.enabled === false
+  );
+}
+
+function _scheduleHasUnsavedChanges() {
+  if (!document.getElementById('schedules-form')) return false;
+  const current = _scheduleCurrentComparable();
+  if (_schedulesState.mode === 'new') return _scheduleNewDraftHasMeaningfulInput(current);
+  if (!_schedulesState.cleanDraft) return _schedulesState.formDirty;
+  return _schedulesState.formDirty || JSON.stringify(current) !== JSON.stringify(_schedulesState.cleanDraft);
+}
+
+async function _confirmScheduleDiscardChanges() {
+  if (!_scheduleHasUnsavedChanges()) return true;
+  if (_schedulesState.discardPromptOpen) return false;
+  if (typeof showConfirm !== 'function') return true;
+  _schedulesState.discardPromptOpen = true;
+  try {
+    const choice = await showConfirm({
+      body: 'Discard unsaved schedule changes?',
+      tone: 'warning',
+      actions: [
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+        { id: 'discard', label: 'Discard changes', role: 'destructive' },
+      ],
+    });
+    return choice === 'discard';
+  } finally {
+    _schedulesState.discardPromptOpen = false;
+  }
+}
+
+async function closeSchedulesModal({ refocus = true, force = false } = {}) {
+  if (!force && !(await _confirmScheduleDiscardChanges())) return false;
   _cancelSchedulePreview();
+  _schedulesState.cleanDraft = null;
+  _schedulesState.formDirty = false;
   _setSchedulesOpen(false);
   if (refocus && typeof refocusComposerAfterAction === 'function') {
     refocusComposerAfterAction({ preventScroll: true, defer: true });
   }
+  return true;
 }
 
 function _cancelSchedulePreview() {
@@ -451,6 +529,7 @@ function _renderScheduleForm(parent, schedule) {
     if (draft.cadence_preset === preset) btn.classList.add('is-active');
     btn.textContent = label;
     _bindSchedulePressable(btn, () => {
+      _schedulesState.formDirty = true;
       _setScheduleCadencePreset(preset);
       _loadSchedulePreview({ immediate: true }).catch(() => {});
     });
@@ -797,6 +876,8 @@ async function refreshSchedulesModal({ selectId = '', command = '' } = {}) {
       _schedulesState.mode = 'missing';
       _schedulesState.selectedId = '';
       _schedulesState.missingScheduleId = requestedId;
+      _schedulesState.cleanDraft = null;
+      _schedulesState.formDirty = false;
     } else {
       const fallbackId = _schedulesState.schedules[0]?.id || '';
       _schedulesState.selectedId = hasCurrent ? currentId : fallbackId;
@@ -806,9 +887,15 @@ async function refreshSchedulesModal({ selectId = '', command = '' } = {}) {
       _schedulesState.selectedId = '';
       _schedulesState.missingScheduleId = '';
       _schedulesState.draft = _scheduleDraftFromSchedule(null, command);
+      _schedulesState.cleanDraft = null;
+      _schedulesState.formDirty = false;
     } else if (_schedulesState.selectedId) {
       _schedulesState.mode = 'view';
       _schedulesState.draft = _scheduleDraftFromSchedule(_selectedSchedule());
+      _markScheduleClean(_schedulesState.draft);
+    } else {
+      _schedulesState.cleanDraft = null;
+      _schedulesState.formDirty = false;
     }
     _schedulesState.fires = [];
   } catch (err) {
@@ -830,6 +917,7 @@ async function openSchedulesModal(options = {}) {
   _schedulesState.mode = options.command ? 'new' : 'view';
   _schedulesState.selectedId = String(options.scheduleId || '');
   _schedulesState.draft = options.command ? _scheduleDraftFromSchedule(null, options.command) : null;
+  _schedulesState.formDirty = false;
   await refreshSchedulesModal({
     selectId: options.scheduleId || '',
     command: options.command || '',
@@ -930,10 +1018,12 @@ async function _runSelectedSchedule(schedule) {
   }
 }
 
-function _selectSchedule(scheduleId) {
+async function _selectSchedule(scheduleId) {
+  if (!(await _confirmScheduleDiscardChanges())) return;
   _schedulesState.mode = 'view';
   _schedulesState.selectedId = String(scheduleId || '');
   _schedulesState.draft = _scheduleDraftFromSchedule(_selectedSchedule());
+  _markScheduleClean(_schedulesState.draft);
   _schedulesState.fires = [];
   _schedulesState.missingScheduleId = '';
   _renderSchedulesModal();
@@ -941,10 +1031,13 @@ function _selectSchedule(scheduleId) {
   _loadScheduleFires(_schedulesState.selectedId).catch(() => {});
 }
 
-function _newSchedule(command = '') {
+async function _newSchedule(command = '') {
+  if (!(await _confirmScheduleDiscardChanges())) return;
   _schedulesState.mode = 'new';
   _schedulesState.selectedId = '';
   _schedulesState.draft = _scheduleDraftFromSchedule(null, command);
+  _schedulesState.cleanDraft = null;
+  _schedulesState.formDirty = false;
   _schedulesState.fires = [];
   _schedulesState.missingScheduleId = '';
   _renderSchedulesModal();
@@ -970,11 +1063,13 @@ function _bindSchedulesModal() {
     }
   });
   overlay.addEventListener('input', (event) => {
+    _markScheduleDirty(event);
     if (event.target?.id !== 'schedules-cron-input') return;
     _setScheduleCadencePreset('custom');
     _loadSchedulePreview().catch(() => {});
   });
   overlay.addEventListener('change', (event) => {
+    _markScheduleDirty(event);
     if (event.target?.id !== 'schedules-timezone-input') return;
     _loadSchedulePreview().catch(() => {});
   });
@@ -982,7 +1077,9 @@ function _bindSchedulesModal() {
     if (event.target && event.target.id === 'schedules-form') _saveScheduleForm(event);
   });
   newBtn?.addEventListener('click', () => _newSchedule());
-  refreshBtn?.addEventListener('click', () => refreshSchedulesModal({ selectId: _schedulesState.selectedId }));
+  refreshBtn?.addEventListener('click', async () => {
+    if (await _confirmScheduleDiscardChanges()) refreshSchedulesModal({ selectId: _schedulesState.selectedId });
+  });
   if (typeof bindDismissible === 'function') {
     bindDismissible(overlay, {
       level: 'modal',

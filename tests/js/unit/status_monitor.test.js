@@ -1661,4 +1661,156 @@ describe('Status Monitor — Constellation full-sky polish', () => {
 
     closeStatusMonitor()
   })
+
+  it('_constellationDeadBands returns empty for sessions under the minimum-star floor', () => {
+    loadStatusMonitor()
+    const { deadBands } = window.__constellationTestHelpers
+    // Five clustered stars — under the 30-star floor — should never trigger
+    // dead-band detection regardless of how empty the rest of the day is.
+    const sparseStars = Array.from({ length: 5 }, (_, i) => ({
+      started: `2026-01-03T${String(14 + (i % 4)).padStart(2, '0')}:00:00`,
+    }))
+    expect(deadBands(sparseStars)).toEqual([])
+  })
+
+  it('_constellationDeadBands finds an interior low-density band when stars cluster at both edges of the day', () => {
+    loadStatusMonitor()
+    const { deadBands } = window.__constellationTestHelpers
+    // Mimic the operator with active hours 00–04 and 11–24 (a sleep window
+    // from roughly 04:00 to 11:00). Generate 200 stars so we're well past
+    // the 30-star floor.
+    const stars = []
+    for (let i = 0; i < 80; i += 1) {
+      const hour = i % 4
+      const minute = (i * 11) % 60
+      stars.push({ started: `2026-01-03T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00` })
+    }
+    for (let i = 0; i < 130; i += 1) {
+      const hour = 11 + (i % 13)
+      const minute = (i * 7) % 60
+      stars.push({ started: `2026-01-03T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00` })
+    }
+    const bands = deadBands(stars)
+    expect(bands.length).toBeGreaterThanOrEqual(1)
+    const sleep = bands.find((band) => band.startMin >= 4 * 60 && band.endMin <= 12 * 60)
+    expect(sleep).toBeDefined()
+    // Edge padding pulls the band inward by 30 min on each side.
+    expect(sleep.startMin).toBeGreaterThanOrEqual(4 * 60 + 30 - 1)
+    expect(sleep.endMin).toBeLessThanOrEqual(11 * 60 - 30 + 1)
+  })
+
+  it('_constellationVisibleSegments crops a single dead band into two visible segments', () => {
+    loadStatusMonitor()
+    const { visibleSegments } = window.__constellationTestHelpers
+    const segments = visibleSegments(
+      { startMin: 0, endMin: 1440 },
+      [{ startMin: 4 * 60 + 30, endMin: 11 * 60 - 30 }],
+    )
+    expect(segments).toEqual([
+      { startMin: 0, endMin: 4 * 60 + 30 },
+      { startMin: 11 * 60 - 30, endMin: 1440 },
+    ])
+  })
+
+  it('_constellationVisibleSegments returns a single segment when there are no dead bands', () => {
+    loadStatusMonitor()
+    const { visibleSegments } = window.__constellationTestHelpers
+    expect(visibleSegments({ startMin: 0, endMin: 1440 }, [])).toEqual([
+      { startMin: 0, endMin: 1440 },
+    ])
+    expect(visibleSegments({ startMin: 480, endMin: 1140 }, [])).toEqual([
+      { startMin: 480, endMin: 1140 },
+    ])
+  })
+
+  it('_constellationMinuteToX is piecewise when given multiple segments and clamps dead-band minutes to the seam', () => {
+    loadStatusMonitor()
+    const { minuteToX, plotLeft, plotWidth } = window.__constellationTestHelpers
+    const window_ = { startMin: 0, endMin: 1440 }
+    const segments = [
+      { startMin: 0, endMin: 270 },   // 00:00 – 04:30 visible (270 min)
+      { startMin: 630, endMin: 1440 }, // 10:30 – 24:00 visible (810 min)
+    ]
+    const map = minuteToX(window_, segments)
+    const totalVisible = 270 + 810
+    // First-segment start anchors to plotLeft, end anchors to seam x.
+    expect(map(0)).toBeCloseTo(plotLeft, 6)
+    expect(map(270)).toBeCloseTo(plotLeft + (270 / totalVisible) * plotWidth, 6)
+    // Any minute inside the dead band [270, 630] maps to the same seam x.
+    const seamX = plotLeft + (270 / totalVisible) * plotWidth
+    expect(map(360)).toBeCloseTo(seamX, 6)
+    expect(map(500)).toBeCloseTo(seamX, 6)
+    expect(map(630)).toBeCloseTo(seamX, 6)
+    // Second-segment start is at the same seam x; its interior maps
+    // proportionally to the combined visible minute mass.
+    expect(map(720)).toBeCloseTo(plotLeft + ((270 + (720 - 630)) / totalVisible) * plotWidth, 6)
+    expect(map(1440)).toBeCloseTo(plotLeft + plotWidth, 6)
+  })
+
+  it('piecewise X axis renders seam markers and skips guides inside the dead band', async () => {
+    // 200 stars clustered in two clear bands (00:00–04:00 and 11:00–23:00)
+    // so dead-band detection cleanly fires for the 04:00–11:00 window.
+    const constellation = []
+    for (let i = 0; i < 90; i += 1) {
+      const hour = i % 4
+      const minute = (i * 11) % 60
+      constellation.push({
+        id: `early-${i}`,
+        root: 'nmap',
+        category: 'Vulnerability Scanning',
+        command: 'nmap -sT example.com',
+        started: `2026-01-03T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`,
+        elapsed_seconds: 12,
+        exit_code: 0,
+        output_line_count: 8,
+      })
+    }
+    for (let i = 0; i < 130; i += 1) {
+      const hour = 11 + (i % 13)
+      const minute = (i * 7) % 60
+      constellation.push({
+        id: `late-${i}`,
+        root: 'curl',
+        category: 'Network Diagnostics',
+        command: 'curl https://example.com',
+        started: `2026-01-03T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`,
+        elapsed_seconds: 4,
+        exit_code: 0,
+        output_line_count: 5,
+      })
+    }
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
+      insights: {
+        days: 28,
+        first_run_date: '2026-01-01',
+        max_day_count: 30,
+        activity: [],
+        command_mix: [],
+        constellation,
+        events: [],
+        windows: { constellation: { days: 30, label: 'last 30 days' } },
+      },
+    })
+    await openStatusMonitor({ source: 'test' })
+
+    const seamLines = document.querySelectorAll('.status-monitor-constellation-seam')
+    const seamLabels = document.querySelectorAll('.status-monitor-constellation-seam-label')
+    expect(seamLines.length).toBe(1)
+    expect(seamLabels.length).toBe(1)
+    expect(seamLabels[0].textContent).toBe('//')
+
+    // Guide labels inside the dead band (06, 08, 10) should be suppressed.
+    const labels = [...document.querySelectorAll('.status-monitor-constellation-guide-label')]
+      .map((node) => node.textContent)
+    expect(labels).not.toContain('06')
+    expect(labels).not.toContain('08')
+    expect(labels).not.toContain('10')
+
+    // Meta line should show the multi-segment label.
+    const metaText = document.querySelector('.status-monitor-constellation-card .status-monitor-visual-meta')?.textContent || ''
+    expect(metaText).toContain(',')
+    expect(metaText).toMatch(/\d{2}:\d{2}–\d{2}:\d{2}/)
+
+    closeStatusMonitor()
+  })
 })

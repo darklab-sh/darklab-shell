@@ -49,6 +49,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Run notifications** — optional browser desktop notifications fire on run completion, using command-root-only titles and exit/elapsed summaries without sending anything outside the browser
 - **Outbound notifications** — durable `tok_` sessions can send queued external-run completion notifications and manual test sends to webhook, Slack, Discord, Telegram, Pushover, or email channels, with vault-backed secrets, masked list responses, retries, and delivery audit rows
 - **Scheduled runs** — durable `tok_` sessions can save recurring commands with hourly, daily, weekly, or custom cron cadence, choose a schedule timezone, preview the next fire times in that timezone, manually fire or pause schedules, and open scheduled history runs back to their originating schedule
+- **Watchers** — durable `tok_` sessions can turn a completed run into a recurring change monitor, rerun the baseline command on a schedule, review the latest diff and fire audit from the browser, pause/resume checks, and accept the latest run as the new baseline when a change is expected
 - **Themes and presentation** — named theme variants, a terminal-native `theme` command, theme-aware permalink/export rendering, mobile/desktop theme parity, browser-aligned permalink/saved-HTML export styling with best-effort PDF parity, MOTD support, a customizable welcome animation (ASCII art, sampled commands, rotating hints), a guided onboarding tour in the terminal and desktop carousel, a section-grouped operator-configurable FAQ modal, and user options for welcome-intro behavior plus default share-snapshot redaction that now follow the active session token instead of staying browser-local
 - **Built-in commands** — native shell commands like `help`, `commands`, `history`, `last`, `limits`, `status`, `runs`, `stats`, `project`, `schedule`, `watch`, `workflow`, `file`, `ls`, `cat`, `mv`, `rm`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available. `project` manages project selection, links, and targets from the terminal; `schedule` manages recurring commands; `watch` creates change-detection monitors from completed baseline runs; `commands info <tool>` and the desktop/mobile Command Registry expose supported external-tool descriptions, examples, flags, and subcommands from `commands.yaml`; `runs` / `jobs` show active app-run metadata with CPU and RSS memory, `runs --json` prints an automation-friendly snapshot, and `stats` summarizes session activity by command root
 - **Headless API and CLI** — `/api/v1` and the bundled `darklab` CLI let scripts and CI jobs authenticate with a session token, start non-interactive runs, wait for final status, list or tail active jobs as SSE or NDJSON, cancel active runs, read history/ranged output/artifacts, grep saved output with line context, inspect Atlas and project data, manage scheduled commands and outbound notification channels, read notification delivery audits, and link or unlink completed runs from active projects without driving the browser
@@ -687,6 +688,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   │   ├── run-comparison.css # Run Comparison modal, split-view, controls, transcript diff, and mobile compare layout
 │   │   │   │   ├── schedules.css # Schedules modal, recurring-run editor, and schedule-fire audit rows
 │   │   │   │   ├── status-monitor.css # Status Monitor modal, visual cards, active-run rows, and mobile sheet layout
+│   │   │   │   ├── watchers.css # Watchers modal, diff summary, cadence editor, and fire-audit rows
 │   │   │   │   ├── workflows.css # Workflows modal, workflow cards, editor, and rendered step controls
 │   │   │   │   └── workspace.css # Files modal, file viewer/editor, workspace rows, and workspace metadata chips
 │   │   │   ├── mobile-chrome.css # Mobile sheet handles, drag affordances, and pull-to-refresh suppression hooks
@@ -812,6 +814,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   │   └── theme.js # Theme registry lookup, preview card rendering, and theme selection lifecycle
 │   │       │   ├── tour/
 │   │       │   │   └── tour_cli.js # Terminal-guided onboarding tour command
+│   │       │   ├── watchers/
+│   │       │   │   └── watchers_modal.js # Watchers modal state, diff summary, cadence preview, fire audit, and run handoffs
 │   │       │   ├── workflows/
 │   │       │   │   └── workflows.js # Workflows modal, editor, terminal command, and runtime autocomplete support
 │   │       │   └── workspace/

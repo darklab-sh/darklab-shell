@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,108
+- behavior tests: 3,117
 - docs/inventory meta-tests: 32
 - `pytest`: 1688 (1656 behavior + 32 meta)
-- `vitest`: 1200
+- `vitest`: 1211
 - `playwright`: 252
-- total: 3,140
+- total: 3,151
 
 This document is organized in two parts:
 
@@ -1947,6 +1947,9 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `opens schedule fire runs without using the run id as the command title` | Verifies that Schedule fire rows open Run Details with only the run id so the run id is not shown as a temporary command title. |
 | `creates schedules from the modal with cadence preview details` | Verifies the Schedules modal creates a schedule from the form, shows preview data, sends the expected payload, and refreshes the list. |
 | `pauses resumes and fires schedules from the modal action buttons` | Verifies Schedules modal pause, resume, and run-now actions call the right endpoints and refresh action state. |
+| `prompts before switching schedules or creating a new schedule with unsaved edits` | Verifies that dirty Schedule modal edits prompt before selecting another schedule or starting a new one. |
+| `creates watchers from a baseline run and renders diff audit rows` | Verifies the Watchers modal creates a watcher from a Run Details baseline, sends cadence/options payloads, renders comparison-style diff details, and shows fire audit run handoffs. |
+| `pauses resumes fires and accepts watcher baselines from action buttons` | Verifies Watchers modal pause, resume, run-now, and accept-baseline actions call the right endpoints and confirmation flow. |
 | `does not let history outside-click dismissal close behind modal overlays` | Verifies that History drawer outside-click dismissal exempts modal overlays so stacked editors keep focus. |
 | `applies the saved theme at startup` | Verifies that applies the saved theme at startup. |
 | `applies saved timestamp, line number, HUD clock, and compare preferences from cookies at startup` | Verifies that saved timestamp, line number, HUD clock, and compare preferences are applied from cookies at startup. |
@@ -2082,6 +2085,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `supports macOS Option+Shift+C to copy output via physical key code` | Verifies that supports macOS Option+Shift+C to copy output via physical key code. |
 | `supports Alt+M to toggle the status monitor from the terminal prompt` | Verifies that Alt+M opens the Status Monitor when closed and closes it when already open. |
 | `supports Alt+Shift+F to toggle the Files modal from the terminal prompt` | Verifies that Alt+Shift+F opens and closes Files while preserving Alt+F for word-forward. |
+| `supports Alt+Shift+S and Alt+Shift+W to toggle Schedules and Watchers from the terminal prompt` | Verifies that Alt+Shift+S opens/closes Schedules and Alt+Shift+W opens/closes Watchers, including macOS physical-key fallback. |
 | `supports Ctrl+L to clear the active tab without dropping a running command` | Verifies that supports Ctrl+L to clear the active tab without dropping a running command. |
 | `does not apply Alt-based tab shortcuts while typing in non-terminal inputs` | Verifies that does not apply Alt-based tab shortcuts while typing in non-terminal inputs. |
 | `does not apply action shortcuts while typing in non-terminal inputs` | Verifies that does not apply action shortcuts while typing in non-terminal inputs. |
@@ -2355,6 +2359,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `centers restored finding highlights in the terminal output container` | Verifies that restored finding highlights are centered in the terminal output container. |
 | `refreshHistoryPanel permalink action falls back to execCommand when clipboard writes reject` | Verifies the history drawer permalink action falls back to execCommand when clipboard writeText rejects. |
 | `clicking a history entry row opens run details without closing the panel` | Verifies row click opens the Run Details modal while keeping the History drawer in context, leaving the composer untouched, and passing the run context to Atlas. |
+| `opens the watchers modal from the Run Details baseline action` | Verifies Run Details can open the Watchers modal with the current run as the prefilled baseline. |
 | `uses shared row primitives for fallback Run Details entity rows` | Verifies Run Details fallback entity rows use the shared clickable row primitives when the Atlas row renderer is unavailable. |
 | `shows remove from project in Run Details and can also unlink same-run entities` | Verifies Run Details replaces project add actions with remove for linked runs and can include same-run, non-curated Atlas entity unlinking. |
 | `uses Current Project attachment state for Run Details project actions when link metadata is missing` | Verifies Run Details still shows remove-from-project actions when an opened run lacks embedded project-link metadata but the Current Project card confirms the active project link. |
@@ -2913,6 +2918,12 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `_constellationMinuteToX maps a star at minute 800 inside {600, 1080} to the expected position` | Verifies that active-window minute mapping places stars correctly inside the focused time range. |
 | `full-day toggle round-trips through preferences and re-renders the panel` | Verifies that the Status Monitor full-day constellation toggle persists through preferences and redraws the panel. |
 | `ambient stars carry no data-star-id and do not gain pointer focus` | Verifies that decorative constellation stars remain non-data, non-focusable background points. |
+| `_constellationDeadBands returns empty for sessions under the minimum-star floor` | Verifies that interior dead-band detection only fires for sessions with enough plotted stars to be statistically meaningful. |
+| `_constellationDeadBands finds an interior low-density band when stars cluster at both edges of the day` | Verifies that contiguous low-density runs in the middle of the clock are detected as cropped dead bands. |
+| `_constellationVisibleSegments crops a single dead band into two visible segments` | Verifies that a known dead band produces the expected visible-span split around it. |
+| `_constellationVisibleSegments returns a single segment when there are no dead bands` | Verifies that the constellation axis remains contiguous when no interior dead band is detected. |
+| `_constellationMinuteToX is piecewise when given multiple segments and clamps dead-band minutes to the seam` | Verifies that minutes inside a collapsed dead band map to the same seam x while minutes inside the visible segments map proportionally to the combined visible mass. |
+| `piecewise X axis renders seam markers and skips guides inside the dead band` | Verifies that the dashed seam line plus `//` glyph render between visible segments, that hour-label guides for dead-band hours are suppressed, and that the meta line shows the multi-segment label. |
 
 #### `tabs.test.js`
 

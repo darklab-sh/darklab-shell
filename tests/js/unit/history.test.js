@@ -510,6 +510,7 @@ describe('history panel actions', () => {
     showConfirmImpl = vi.fn(() => Promise.resolve(null)),
     openMetadataEditorImpl = vi.fn(),
     openAtlasImpl = vi.fn(() => Promise.resolve()),
+    openWatchersModalImpl = vi.fn(() => Promise.resolve()),
     emitUiEvent = vi.fn(),
   } = {}) {
     document.body.innerHTML = `
@@ -717,6 +718,7 @@ describe('history panel actions', () => {
           }),
           emitUiEvent,
           openAtlas: openAtlasImpl,
+          openWatchersModal: openWatchersModalImpl,
           bindPressable,
           confirmHistAction: () => {},
           executeHistAction: () => {},
@@ -763,6 +765,7 @@ describe('history panel actions', () => {
       showConfirm: showConfirmImpl,
       openMetadataEditor: openMetadataEditorImpl,
       openAtlas: openAtlasImpl,
+      openWatchersModal: openWatchersModalImpl,
       emitUiEvent,
     }
   }
@@ -850,7 +853,7 @@ describe('history panel actions', () => {
       'Permalink',
       'Compare',
       'Atlas',
-      'ActionsCopy commandSchedule this commandEdit metadataOpen in AtlasAdd to active projectAdd to projectCopy run ID',
+      'ActionsCopy commandSchedule this commandCreate watcher from this baselineEdit metadataOpen in AtlasAdd to active projectAdd to projectCopy run ID',
     ])
     document.querySelector('.history-run-action-menu-trigger').click()
     expect(document.querySelector('.history-run-action-menu-wrap').classList.contains('open')).toBe(true)
@@ -872,6 +875,30 @@ describe('history panel actions', () => {
       runId: 'run-1',
       runLabel: 'ping darklab.sh',
     })
+  })
+
+  it('opens the watchers modal from the Run Details baseline action', async () => {
+    const openWatchersModal = vi.fn(() => Promise.resolve())
+    const { refreshHistoryPanel } = loadHistoryPanel({ openWatchersModalImpl: openWatchersModal })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+    document.querySelector('#history-list .history-entry')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    document.querySelector('.history-run-action-menu-trigger').click()
+    document
+      .querySelector('[data-history-run-action="watch-command"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+
+    expect(openWatchersModal).toHaveBeenCalledWith(expect.objectContaining({
+      baselineRun: expect.objectContaining({
+        command: 'ping darklab.sh',
+      }),
+    }))
   })
 
   it('uses shared row primitives for fallback Run Details entity rows', async () => {
@@ -1080,6 +1107,7 @@ describe('history panel actions', () => {
       .toEqual([
         'copy-command',
         'schedule-command',
+        'watch-command',
         'edit-metadata',
         'open-atlas',
         'remove-project',
@@ -1201,6 +1229,7 @@ describe('history panel actions', () => {
       .toEqual([
         'copy-command',
         'schedule-command',
+        'watch-command',
         'edit-metadata',
         'open-atlas',
         'remove-project',
@@ -1400,12 +1429,13 @@ describe('history panel actions', () => {
       'copy command',
       'restore',
       'delete',
-      'moreeditopen in atlaspermalinkcompareadd to active projectadd to projectcopy run id',
+      'moreeditopen in atlascreate watcher from this baselinepermalinkcompareadd to active projectadd to projectcopy run id',
     ])
     const menuActions = [...entry.querySelectorAll('.history-action-menu [data-action]')].map(el => el.dataset.action)
     expect(menuActions).toEqual([
       'edit-metadata',
       'open-atlas',
+      'watch-command',
       'permalink',
       'compare',
       'add-active-project',
@@ -1457,12 +1487,13 @@ describe('history panel actions', () => {
     expect(visibleActions).toEqual([
       'copy command',
       'restore',
-      'moreeditopen in atlaspermalinkcompareadd to active projectadd to projectcopy run iddelete',
+      'moreeditopen in atlascreate watcher from this baselinepermalinkcompareadd to active projectadd to projectcopy run iddelete',
     ])
     const menuActions = [...entry.querySelectorAll('.history-action-menu [data-action]')].map(el => el.dataset.action)
     expect(menuActions).toEqual([
       'edit-metadata',
       'open-atlas',
+      'watch-command',
       'permalink',
       'compare',
       'add-active-project',
@@ -2205,7 +2236,7 @@ describe('history panel actions', () => {
       })
     })
     const clipboard = { writeText: vi.fn(() => Promise.resolve()) }
-    const { refreshHistoryPanel } = loadHistoryPanel({
+    const { refreshHistoryPanel, openWatchersModal } = loadHistoryPanel({
       apiFetchImpl: apiFetch,
       clipboardImpl: clipboard,
       activeProject: { id: 'project-active', name: 'Active scope' },
@@ -2223,6 +2254,11 @@ describe('history panel actions', () => {
     entry.querySelector('[data-action="copy-run-id"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await Promise.resolve()
     expect(clipboard.writeText).toHaveBeenCalledWith('run-1')
+
+    entry.querySelector('[data-action="watch-command"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(openWatchersModal).toHaveBeenCalledWith({
+      baselineRun: expect.objectContaining({ id: 'run-1', command: 'ping darklab.sh' }),
+    })
 
     const documentClick = vi.fn()
     document.addEventListener('click', documentClick)
@@ -2332,6 +2368,7 @@ describe('history panel actions', () => {
     expect(menuActions).toEqual([
       'edit-metadata',
       'open-atlas',
+      'watch-command',
       'permalink',
       'compare',
       'remove-project',

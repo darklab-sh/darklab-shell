@@ -51,6 +51,7 @@ function dispatchMobileMenuAction(action, btn = null) {
   if (action === 'theme') openThemeSelector();
   if (action === 'workflows') openWorkflows();
   if (action === 'schedules' && typeof openSchedulesModal === 'function') void openSchedulesModal();
+  if (action === 'watchers' && typeof openWatchersModal === 'function') void openWatchersModal();
   if (action === 'workspace' && typeof openWorkspace === 'function') openWorkspace();
   if (action === 'faq') openFaq();
   if (action === 'diag') window.location.href = '/diag';

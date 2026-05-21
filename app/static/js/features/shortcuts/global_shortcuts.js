@@ -147,6 +147,24 @@ function handleChromeShortcut(e) {
     e.preventDefault();
     return true;
   }
+  if (e.shiftKey && eventMatchesLetter(e, 's')) {
+    if (typeof isSchedulesOverlayOpen === 'function' && isSchedulesOverlayOpen()) {
+      if (typeof closeSchedulesModal === 'function') void closeSchedulesModal();
+    } else if (typeof openSchedulesModal === 'function') {
+      void openSchedulesModal();
+    }
+    e.preventDefault();
+    return true;
+  }
+  if (e.shiftKey && eventMatchesLetter(e, 'w')) {
+    if (typeof isWatchersOverlayOpen === 'function' && isWatchersOverlayOpen()) {
+      if (typeof closeWatchersModal === 'function') void closeWatchersModal();
+    } else if (typeof openWatchersModal === 'function') {
+      void openWatchersModal();
+    }
+    e.preventDefault();
+    return true;
+  }
   // All remaining chrome chords are shift-free.
   if (e.shiftKey) return false;
   if (eventMatchesLetter(e, 'm')) {

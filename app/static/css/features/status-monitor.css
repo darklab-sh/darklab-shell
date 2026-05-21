@@ -479,6 +479,25 @@
   pointer-events: none;
 }
 
+/* Seam markers between visible segments when auto-fit crops interior
+   dead bands out of the X axis. The dashed vertical line + `//` glyph
+   make the discontinuity legible without dominating the chart, and the
+   colors are theme-relative so contrast holds in every theme. */
+.status-monitor-constellation-seam {
+  stroke: color-mix(in srgb, var(--muted) 55%, transparent);
+  stroke-width: 0.6;
+  stroke-dasharray: 3 3;
+  pointer-events: none;
+}
+
+.status-monitor-constellation-seam-label {
+  fill: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.6px;
+  pointer-events: none;
+}
+
 .status-monitor-star-ambient {
   /* Ambient stars are pure background chrome — desaturated, no glow, no
      pointer events — so hover and keyboard activation only reach real

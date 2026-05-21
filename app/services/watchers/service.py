@@ -612,7 +612,7 @@ def pause_watchers_for_deleted_baselines(conn, run_ids: list[str]) -> int:
         return 0
     placeholders = ", ".join("?" for _ in ids)
     rows = conn.execute(
-        "SELECT id, session_token, schedule_id, baseline_run_id FROM watchers "  # nosec B608
+        "SELECT id, session_token, schedule_id, baseline_run_id FROM watchers "  # nosec
         f"WHERE baseline_run_id IN ({placeholders})",
         ids,
     ).fetchall()

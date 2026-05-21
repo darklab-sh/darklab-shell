@@ -169,7 +169,7 @@ Autocomplete schema and authoring details live in [CONFIGURATION.md#command-regi
 
 **Configuration:** none — the chord list is defined in `app/services/commands/builtins.py` and not user-tunable.
 
-**Related files:** `app/static/js/app.js` (`handleTabShortcut` / `handleChromeShortcut` / `handleActionShortcut`), `app/static/js/controller.js` (document keydown cascade), `app/services/commands/builtins.py` (`_CURRENT_SHORTCUTS`), `app/blueprints/content.py` (`GET /shortcuts`).
+**Related files:** `app/static/js/features/shortcuts/global_shortcuts.js` (shortcut matching and dispatch), `app/static/js/controller.js` (document keydown cascade), `app/services/commands/builtins_catalog.py` (`_CURRENT_SHORTCUTS`), `app/blueprints/content.py` (`GET /shortcuts`).
 
 Shipped app-safe shortcuts:
 
@@ -186,6 +186,8 @@ Shipped app-safe shortcuts:
 | `Option+Shift+C` (`Alt+Shift+C`) | Copy active tab output | Kept distinct from terminal `Ctrl+C` |
 | `Option+M` (`Alt+M`) | Open/close the Status Monitor | Toggles the modal/sheet with live runs, session health, and idle dashboard metrics |
 | `Option+Shift+F` (`Alt+Shift+F`) | Open Files | Leaves `Option+F` / `Alt+F` available for terminal word-forward |
+| `Option+Shift+S` (`Alt+Shift+S`) | Open/close Schedules | Leaves `Option+S` / `Alt+S` for transcript search |
+| `Option+Shift+W` (`Alt+Shift+W`) | Open/close Watchers | Leaves `Option+W` / `Alt+W` for closing the current tab |
 | `Ctrl+L` | Clear current tab output | Shell-style convenience |
 | `Ctrl+D` | Close current tab | Same tab-close path as `exit` / `quit` and the tab close button |
 | `Ctrl+A` | Move cursor to start of line | Readline-style editing |
@@ -285,7 +287,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 | **DB** | Configured database connection state | `ONLINE` green, `OFFLINE` red |
 | **REDIS** | Redis connection state | `ONLINE` green, `OFFLINE` red, `N/A` muted when no Redis is configured |
 
-**Command Constellation:** the Status Monitor visualises recent run history as a constellation chart with a clock-time X axis and a log-elapsed Y axis. By default the X axis auto-fits to your active hours so the canvas stays a full sky rather than a long dead zone — toggle to **Full day** in the legend if you want strict 24-hour reading. Hours with no real runs are filled by a desaturated ambient layer, and a clock-pinned daylight gradient paints the 24h cycle behind the stars so noon, dusk, and night always appear at their true hour-of-day positions.
+**Command Constellation:** the Status Monitor visualises recent run history as a constellation chart with a clock-time X axis and a log-elapsed Y axis. By default the X axis auto-fits to your active hours so the canvas stays a full sky rather than a long dead zone: edges with no activity are trimmed, and interior low-density bands (the sleep window of an operator whose runs span both ends of the day) collapse onto a `//` seam marker so the visible canvas reads as continuous clock time. Toggle to **Full day** in the legend if you want strict 24-hour reading; the seam disappears and every hour gets its proportional share of the axis. Hours with no real runs are filled by a desaturated ambient layer, and a clock-pinned daylight gradient paints the 24h cycle behind the stars so noon, dusk, and night always appear at their true hour-of-day positions in either mode.
 
 ---
 
@@ -555,6 +557,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Each schedule stores one command, an optional label, an enabled/paused state, an IANA timezone chosen from a dropdown, and either an hourly/daily/weekly preset or a five-field cron expression.
 - The editor previews the next three fire times before saving. Preview timing is computed by the server and displayed in the selected schedule timezone, so the browser uses the same cron rules as the worker.
 - Saved schedules can be edited, paused, resumed, deleted, refreshed, or fired immediately from the modal. Manual fires use the same audit path as worker-fired runs.
+- The modal asks before closing, refreshing, opening a fired run, or switching schedules when the current form has unsaved changes.
 - Fired runs appear in normal History with a `scheduled` badge. Clicking that badge, or the Schedule row in Run Details, reopens the schedule that created the run.
 - Run Details includes **Schedule this command**, which opens the Schedules modal with the completed run's command already filled in.
 - The schedule detail view shows recent fire audit rows, and fired rows can open the resulting Run Details modal.
@@ -565,6 +568,28 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 **Configuration:** scheduler settings live under `scheduler` in `config.yaml`, including `max_per_session`, `default_timezone`, `tick_seconds`, `max_catchup_window_seconds`, `missed_fire_policy`, and the SQLite `lock_path`. See [CONFIGURATION.md](CONFIGURATION.md) and [docs/schedules.md](docs/schedules.md).
 
 **Related files:** `app/blueprints/schedules.py` (browser schedule routes), `app/services/scheduler/` (cron, storage, dispatch, and worker helpers), `app/static/js/features/schedules/schedules_modal.js` (Schedules modal), `app/static/css/features/schedules.css` (modal layout), and `docs/schedules.md` (operator guide).
+
+---
+
+## Watchers
+
+**Purpose:** recurring change checks that compare a new run against a completed baseline run.
+
+**Behavior:**
+
+- The **Watchers** modal opens from the desktop rail, mobile menu, or Run Details.
+- Run Details and the History drawer action menu include **Create watcher from this baseline**, which opens the modal with the completed run already selected as the baseline.
+- The Baseline run field includes a short helper card for operators who prefer to paste a run id manually.
+- Each watcher owns a schedule, reruns the baseline command on that cadence, and compares each completed watcher run against the current baseline.
+- Watcher rows show whether the latest check is `ok`, `changed`, `firing`, `paused`, or `error`.
+- The detail pane shows the last diff summary, recent fire audit rows, and links back to the runs created by watcher fires.
+- Empty checks still appear in the fire audit as `diff_kind='none'`, so it's clear the watcher is still running even when nothing changed.
+- Operators can pause, resume, manually fire, delete, or accept the latest run as the new baseline from the modal. Accepting a baseline asks for confirmation because it discards the previous comparison point.
+- The modal asks before closing, refreshing, opening a watcher run, or switching watchers when the current form has unsaved changes.
+
+**Limits:** watchers require a durable `tok_` session token. Anonymous sessions cannot create watchers because the scheduler needs a stable owner. Watchers monitor one baseline command at a time, use the same five-minute minimum custom cron interval as schedules, and keep bounded diff summaries rather than unlimited raw diff payloads.
+
+**Related files:** `app/blueprints/watchers.py` (browser watcher routes), `app/services/watchers/` (watcher state, diff classifiers, finalization, and fire audit helpers), `app/static/js/features/watchers/watchers_modal.js` (Watchers modal), and `app/static/css/features/watchers.css` (modal layout).
 
 ---
 

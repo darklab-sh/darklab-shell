@@ -223,6 +223,11 @@
             <span class="menu-item-label">schedules</span>
             <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="watchers">
+            <span class="menu-item-icon" aria-hidden="true">◌</span>
+            <span class="menu-item-label">watchers</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
           {% if workspace_enabled %}
           <button type="button" class="menu-item nav-item" data-menu-action="workspace">
             <span class="menu-item-icon" aria-hidden="true">▣</span>
@@ -307,6 +312,7 @@
       <button class="rail-nav-item nav-item" data-action="status-monitor" type="button" title="Status Monitor (Alt+M)"><span class="rail-nav-glyph">◉</span><span class="rail-nav-label">status</span></button>
       <button class="rail-nav-item nav-item" data-action="command-registry" type="button" title="Command Registry"><span class="rail-nav-glyph">⌘</span><span class="rail-nav-label">commands</span></button>
       <button class="rail-nav-item nav-item" data-action="schedules" type="button" title="Scheduled commands"><span class="rail-nav-glyph">↻</span><span class="rail-nav-label">schedules</span></button>
+      <button class="rail-nav-item nav-item" data-action="watchers" type="button" title="Change-detection watchers"><span class="rail-nav-glyph">◌</span><span class="rail-nav-label">watchers</span></button>
       {% if workspace_enabled %}
       <button class="rail-nav-item nav-item" data-action="workspace" type="button" title="Session files (Alt+Shift+F)"><span class="rail-nav-glyph">▣</span><span class="rail-nav-label">files</span></button>
       {% endif %}
@@ -765,6 +771,29 @@
         <div class="schedules-list nice-scroll" id="schedules-list" aria-live="polite"></div>
       </aside>
       <div class="schedules-detail nice-scroll" id="schedules-detail"></div>
+    </div>
+  </section>
+</div>
+
+<!-- Watchers Modal -->
+<div id="watchers-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
+  <section id="watchers-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="watchers-title">
+    <div class="faq-header">
+      <span class="faq-title" id="watchers-title">WATCHERS</span>
+      <div class="watchers-header-actions">
+        <button type="button" class="btn btn-secondary btn-compact" id="watchers-new-btn">New watcher</button>
+        <button type="button" class="close-btn watchers-close" aria-label="Close watchers">✕</button>
+      </div>
+    </div>
+    <div class="watchers-layout">
+      <aside class="watchers-sidebar">
+        <div class="watchers-sidebar-toolbar">
+          <button type="button" class="btn btn-secondary btn-compact" id="watchers-refresh-btn">Refresh</button>
+          <span class="watchers-count" id="watchers-count">0</span>
+        </div>
+        <div class="watchers-list nice-scroll" id="watchers-list" aria-live="polite"></div>
+      </aside>
+      <div class="watchers-detail nice-scroll" id="watchers-detail"></div>
     </div>
   </section>
 </div>
@@ -1284,6 +1313,7 @@
 <script src="/static/js/features/autocomplete/runtime_context.js"></script>
 <script src="/static/js/features/tour/tour_cli.js"></script>
 <script src="/static/js/features/schedules/schedules_modal.js"></script>
+<script src="/static/js/features/watchers/watchers_modal.js"></script>
 <script src="/static/js/features/workflows/workflows.js"></script>
 <script src="/static/js/features/mobile/mobile_menu_actions.js"></script>
 <script src="/static/js/features/shortcuts/global_shortcuts.js"></script>
