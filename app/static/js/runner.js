@@ -781,6 +781,66 @@ function _streamOutputMetadata(msg) {
   return Object.keys(metadata).length ? metadata : null;
 }
 
+function _runOutputModel() {
+  return typeof DarklabRunOutputModel !== 'undefined' ? DarklabRunOutputModel : null;
+}
+
+function _streamUnknownCollector(streamState) {
+  const state = streamState || {};
+  if (!state.unknownLineEventValues) state.unknownLineEventValues = new Set();
+  return (family, value) => {
+    const key = `${family}:${value}`;
+    if (state.unknownLineEventValues.has(key)) return;
+    state.unknownLineEventValues.add(key);
+    _logRunnerError(`unknown run output ${family}`, new Error(String(value || 'unknown')));
+  };
+}
+
+function _warnRunStreamSchema(streamState, family, value) {
+  const state = streamState || {};
+  if (!state.unknownLineEventValues) state.unknownLineEventValues = new Set();
+  const key = `schema:${family}:${value}`;
+  if (state.unknownLineEventValues.has(key)) return;
+  state.unknownLineEventValues.add(key);
+  _logRunnerError(`unknown run output schema ${family}`, new Error(String(value || 'unknown')));
+}
+
+function _handleRunStreamSchema(msg, streamState) {
+  if (!msg || typeof msg !== 'object') return;
+  const model = _runOutputModel();
+  const supported = model ? Number(model.LINE_EVENT_SCHEMA_VERSION || 1) : 1;
+  const version = Number(msg.v || 0);
+  if (version > supported) _warnRunStreamSchema(streamState, 'version', msg.v);
+  if (String(msg.kind || '') !== 'line_event') _warnRunStreamSchema(streamState, 'kind', msg.kind || '');
+}
+
+function _typedRunStreamLineMessage(msg, streamState) {
+  if (!msg || typeof msg !== 'object') return msg;
+  const model = _runOutputModel();
+  if (!model || typeof model.fromWireLineEvent !== 'function') return msg;
+  const hasTypedFields = msg.v !== undefined || msg.kind !== undefined || msg.role !== undefined || msg.signals !== undefined;
+  if (!hasTypedFields) return msg;
+  const version = Number(msg.v || 0);
+  if (version > Number(model.LINE_EVENT_SCHEMA_VERSION || 1)) {
+    _warnRunStreamSchema(streamState, 'version', msg.v);
+  }
+  const event = model.fromWireLineEvent(msg, _streamUnknownCollector(streamState));
+  const legacy = typeof model.toLegacyWireLineEvent === 'function'
+    ? model.toLegacyWireLineEvent(event)
+    : { text: event.text || '', cls: event.legacy_cls || '' };
+  return {
+    ...msg,
+    ...legacy,
+    kind: event.kind || 'info',
+    role: event.role || 'body',
+    signals: event.signals || [],
+    line_index: event.line_index,
+    command_root: event.command_root || '',
+    target: event.target || '',
+    entities: event.entities || [],
+  };
+}
+
 function _appendStreamLine(text, cls, tabId, msg, options = {}) {
   let metadata = _streamOutputMetadata(msg);
   if (options.liveOutput && APP_CONFIG && APP_CONFIG.high_volume_output_line_threshold) {
@@ -853,13 +913,16 @@ function _markTabRunStarted(tabId, runId) {
   }
 }
 
-function _handleRunStreamMessage(msg, tabId) {
+function _handleRunStreamMessage(msg, tabId, streamState = null) {
   if (!msg || typeof msg !== 'object') return;
   const t = getTab(tabId);
   if (t && msg.event_id) t.lastEventId = String(msg.event_id || '');
-  if (msg.type === 'started') {
+  if (msg.type === 'schema' || msg.event === 'schema') {
+    _handleRunStreamSchema(msg, streamState);
+  } else if (msg.type === 'started') {
     _markTabRunStarted(tabId, msg.run_id);
   } else if (msg.type === 'notice') {
+    msg = _typedRunStreamLineMessage(msg, streamState);
     _appendStreamLine(msg.text, 'notice', tabId, msg);
     const notifyProjectChange = typeof globalThis.notifyProjectWorkspaceChanged === 'function'
       ? globalThis.notifyProjectWorkspaceChanged
@@ -890,6 +953,7 @@ function _handleRunStreamMessage(msg, tabId) {
     const t = getTab(tabId);
     if (t) t.syntheticClear = true;
   } else if (msg.type === 'output') {
+    msg = _typedRunStreamLineMessage(msg, streamState);
     const t = getTab(tabId);
     if (t && typeof msg.text === 'string' && /^Unsupported built-in command: /.test(msg.text)) {
       t.unknownCommand = true;
@@ -1131,7 +1195,7 @@ function _streamRunResponse(res, tabId, state = null) {
       parts.forEach(part => {
         try {
           const msg = _sseMessageFromChunk(part);
-          if (msg) _handleRunStreamMessage(msg, tabId);
+          if (msg) _handleRunStreamMessage(msg, tabId, streamState);
         } catch(e) {}
       });
       read();

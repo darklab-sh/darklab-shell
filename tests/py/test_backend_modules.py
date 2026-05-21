@@ -6712,8 +6712,9 @@ class TestRunBrokerMemoryStore:
         with mock.patch.object(run_broker, "_store", return_value=store):
             events = list(run_broker.stream_run_events("run-1"))
 
-        assert '"text": "replayed"' in events[0]
-        assert '"type": "exit"' in events[1]
+        assert events[0].startswith("event: schema\n")
+        assert '"text": "replayed"' in events[1]
+        assert '"type": "exit"' in events[2]
         assert store.wait_after_id == "1-0"
 
     def test_stream_run_events_skips_trim_notice_when_resuming_live_tail(self):
@@ -6736,9 +6737,10 @@ class TestRunBrokerMemoryStore:
         with mock.patch.object(run_broker, "_store", return_value=store):
             events = list(run_broker.stream_run_events("run-1"))
 
-        assert events[0].startswith("data: ")
-        assert "id:" not in events[0]
-        assert '"text": "tail"' in events[1]
+        assert events[0].startswith("event: schema\n")
+        assert events[1].startswith("data: ")
+        assert "id:" not in events[1]
+        assert '"text": "tail"' in events[2]
         assert store.wait_after_id == "5-0"
 
     def test_stream_run_events_exits_cleanly_when_redis_stream_disconnects(self):
@@ -6756,7 +6758,8 @@ class TestRunBrokerMemoryStore:
              mock.patch.object(run_broker, "_store", return_value=FakeStore()):
             events = list(run_broker.stream_run_events("run-1"))
 
-        assert events == []
+        assert len(events) == 1
+        assert events[0].startswith("event: schema\n")
         log_debug.assert_called_once()
         assert log_debug.call_args.args == ("BROKER_STREAM_CLIENT_GONE",)
 

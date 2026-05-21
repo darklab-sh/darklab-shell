@@ -25,9 +25,9 @@ Current totals:
 - behavior tests: 3,155
 - docs/inventory meta-tests: 32
 - `pytest`: 1713 (1681 behavior + 32 meta)
-- `vitest`: 1225
+- `vitest`: 1226
 - `playwright`: 252
-- total: 3,190
+- total: 3,191
 
 This document is organized in two parts:
 
@@ -2716,6 +2716,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `attachActiveRunFromMonitor opens an attached subscribed tab with kill controls` | Verifies that Status Monitor Attach opens a live subscribed tab with normal kill controls. |
 | `attachActiveRunFromMonitor subscribes without claiming ownership` | Verifies that Status Monitor Attach subscribes directly to the broker stream without calling an ownership route. |
 | `keeps subscribed tabs killable on owner metadata and reports remote kills` | Verifies that owner metadata does not hide kill controls and that remote killed events render a clear notice. |
+| `parses typed stream output and logs unknown schema values once per stream` | Verifies that v1 stream output falls back safely and reports unknown schema, kind, role, and signal values once per stream. |
 | `resets high-volume output state when a new brokered run starts` | Verifies that a new brokered run clears high-volume output state from any previous run in the tab. |
 | `disables high-volume resume controls when a brokered run exits` | Verifies that completed brokered runs disable stale high-volume resume controls. |
 | `pollActiveRunsAfterReload restores a completed reconnected run through history` | Verifies that a reconnected placeholder tab swaps into the saved history view when the active run disappears. |

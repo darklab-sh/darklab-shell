@@ -716,6 +716,7 @@ function loadRunnerFns({
   disableHighVolumeOutputResumeControls = () => {},
   appendHighVolumeOutputFinalSummary = () => {},
   resetHighVolumeOutputState = () => {},
+  logClientError = () => {},
   runnerInitCode = '',
 } = {}) {
   const normalizedTabs = tabs.map((tab) => ({
@@ -789,6 +790,7 @@ function loadRunnerFns({
   const fns = fromDomScripts(
     [
       'app/static/js/core/runner_core.js',
+      'app/static/js/core/run_output_model.js',
       'app/static/js/features/runner/runner_active_restore.js',
       'app/static/js/features/runner/runner_persistence.js',
       'app/static/js/features/runner/runner_workspace.js',
@@ -862,7 +864,7 @@ function loadRunnerFns({
         }
         return `Request to the ${context} failed: ${message}`
       },
-      logClientError: () => {},
+      logClientError,
       clearTimeout,
       setTimeout,
       Event,
@@ -1535,6 +1537,56 @@ describe('runner helpers', () => {
       project_name: 'Demo',
       count: 2,
     })
+  })
+
+  it('parses typed stream output and logs unknown schema values once per stream', () => {
+    const appendLine = vi.fn()
+    const logClientError = vi.fn()
+    const streamState = {}
+    const { _handleRunStreamMessage } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'running', runId: 'run-1', pendingKill: false, killed: false }],
+      appendLine,
+      logClientError,
+    })
+
+    _handleRunStreamMessage({ type: 'schema', event: 'schema', v: 2, kind: 'line_event' }, 'tab-1', streamState)
+    _handleRunStreamMessage({ type: 'schema', event: 'schema', v: 2, kind: 'line_event' }, 'tab-1', streamState)
+    _handleRunStreamMessage({
+      type: 'output',
+      text: 'future row',
+      cls: 'notice',
+      v: 2,
+      kind: 'future-kind',
+      role: 'future-role',
+      signals: ['findings', 'future-signal'],
+    }, 'tab-1', streamState)
+    _handleRunStreamMessage({
+      type: 'output',
+      text: 'future row 2',
+      cls: 'notice',
+      v: 2,
+      kind: 'future-kind',
+      role: 'future-role',
+      signals: ['findings', 'future-signal'],
+    }, 'tab-1', streamState)
+
+    expect(appendLine).toHaveBeenCalledWith(
+      'future row',
+      'notice',
+      'tab-1',
+      expect.objectContaining({
+        kind: 'notice',
+        role: 'body',
+        signals: ['findings'],
+      }),
+    )
+    expect(logClientError).toHaveBeenCalledTimes(4)
+    expect(logClientError.mock.calls.map(call => call[0])).toEqual([
+      'unknown run output schema version',
+      'unknown run output kind',
+      'unknown run output role',
+      'unknown run output signal',
+    ])
   })
 
   it('resets high-volume output state when a new brokered run starts', () => {

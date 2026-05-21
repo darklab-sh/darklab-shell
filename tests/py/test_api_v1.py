@@ -407,6 +407,14 @@ def test_api_v1_run_start_uses_broker_and_streams_ndjson(monkeypatch):
     assert start_data["stream_url"] == f"/api/v1/runs/{run_id}/stream"
     assert stream.status_code == 200
     events = [json.loads(line) for line in stream.get_data(as_text=True).splitlines() if line]
+    assert events[0] == {"type": "schema", "event": "schema", "v": 1, "kind": "line_event"}
+    assert any(
+        event.get("type") == "output"
+        and event.get("v") == 1
+        and event.get("kind")
+        and event.get("role")
+        for event in events
+    )
     assert any(event.get("type") == "exit" and event.get("event_id") for event in events)
 
 
@@ -424,6 +432,9 @@ def test_api_v1_sse_stream_emits_idle_heartbeat(monkeypatch):
 
     stream = run_broker.stream_run_events("run_idle", after_id="1-0")
     try:
+        schema = next(stream)
+        assert schema.startswith("event: schema\n")
+        assert '"type": "schema"' in schema
         assert next(stream) == ": heartbeat\n\n"
     finally:
         close = getattr(stream, "close", None)
@@ -1908,7 +1919,8 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
 
     class FakeResponse:
         def __iter__(self):
-            yield b'{"type":"output","text":"ok","event_id":"1-0"}\n'
+            yield b'{"type":"schema","event":"schema","v":1,"kind":"line_event"}\n'
+            yield b'{"type":"output","event":"output","text":"ok","v":1,"kind":"info","role":"body","event_id":"1-0"}\n'
             yield b'{"type":"exit","code":0,"event_id":"2-0"}\n'
 
     class FakeClient:
@@ -2073,7 +2085,10 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert cli_main.main(["run", "echo linked", "--link-project", "CLI Project", "--wait"]) == 0
     assert "run_wait  succeeded  0  echo linked" in capsys.readouterr().out
     assert cli_main.main(["tail", "run_cli", "--format", "ndjson", "--after", "1-0"]) == 0
-    assert '"event_id":"2-0"' in capsys.readouterr().out
+    tail_output = capsys.readouterr().out
+    assert '"event":"schema"' in tail_output
+    assert '"event":"output"' in tail_output
+    assert '"event_id":"2-0"' in tail_output
     assert cli_main.main(["project-runs", "prj_cli"]) == 0
     assert "run_cli" in capsys.readouterr().out
     assert cli_main.main(["project-entities", "prj_cli", "--entity-type", "domain"]) == 0

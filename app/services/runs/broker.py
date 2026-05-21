@@ -16,22 +16,66 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from config import CFG
 from core.process import redis_client
-from services.runs.output_model import LineKind, line_event_from_legacy, to_legacy_entry
+from services.runs.output_model import (
+    LINE_EVENT_SCHEMA_VERSION,
+    LineEvent,
+    LineKind,
+    from_wire,
+    line_event_from_legacy,
+    to_wire,
+)
 
 log = logging.getLogger("shell")
 
 TERMINAL_EVENT_TYPES = {"exit", "error"}
 REPLAY_TRIM_NOTICE = "[live replay starts here; earlier output was trimmed due to size]"
 LINE_BOUNDED_REPLAY_TYPES = {"output", "notice"}
+LINE_EVENT_TYPES = {"output", "notice"}
 REDIS_STREAM_DISCONNECT_ERRORS = (RedisConnectionError, RedisTimeoutError)
+SCHEMA_EVENT_PAYLOAD = {
+    "type": "schema",
+    "event": "schema",
+    "v": LINE_EVENT_SCHEMA_VERSION,
+    "kind": "line_event",
+}
 
 
 def _stream_key(run_id: str) -> str:
     return f"runstream:{run_id}"
 
 
-def _event_payload(event_type: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    data = dict(payload or {})
+def _schema_sse() -> str:
+    return f"event: schema\ndata: {json.dumps(SCHEMA_EVENT_PAYLOAD)}\n\n"
+
+
+def _line_event_payload(event_type: str, payload: dict[str, Any] | LineEvent | None = None) -> dict[str, Any]:
+    if isinstance(payload, LineEvent):
+        return to_wire(payload)
+    if not isinstance(payload, dict) or "text" not in payload:
+        return dict(payload or {})
+
+    base = dict(payload)
+    if event_type == "notice" and not base.get("kind") and not base.get("cls"):
+        event = line_event_from_legacy(base.get("text", ""), kind=LineKind.notice)
+    else:
+        event = from_wire(base)
+    data = to_wire(event)
+    for key, value in base.items():
+        if key not in data and key not in {"type", "event", "created_at", "event_id"}:
+            data[key] = value
+    return data
+
+
+def _event_payload(event_type: str, payload: dict[str, Any] | LineEvent | None = None) -> dict[str, Any]:
+    data: dict[str, Any]
+    if event_type in LINE_EVENT_TYPES:
+        data = _line_event_payload(event_type, payload)
+    elif isinstance(payload, LineEvent):
+        data = to_wire(payload)
+    elif isinstance(payload, dict):
+        data = dict(payload)
+    else:
+        data = {}
     data["type"] = str(event_type)
     data.setdefault("created_at", time.time())
     return data
@@ -67,7 +111,7 @@ def _make_trim_notice_event() -> "BrokerEvent":
         f"{int(time.time() * 1000)}-trim",
         _event_payload(
             "notice",
-            to_legacy_entry(line_event_from_legacy(REPLAY_TRIM_NOTICE, kind=LineKind.notice), include_timestamps=False),
+            line_event_from_legacy(REPLAY_TRIM_NOTICE, kind=LineKind.notice),
         ),
     )
 
@@ -162,7 +206,7 @@ class _MemoryRunBrokerStore:
         self,
         run_id: str,
         event_type: str,
-        payload: dict[str, Any] | None = None,
+        payload: dict[str, Any] | LineEvent | None = None,
     ) -> BrokerEvent:
         with self._lock:
             self._purge_locked(run_id)
@@ -289,7 +333,7 @@ class _RedisRunBrokerStore:
         self,
         run_id: str,
         event_type: str,
-        payload: dict[str, Any] | None = None,
+        payload: dict[str, Any] | LineEvent | None = None,
     ) -> BrokerEvent:
         if not redis_client:
             raise RuntimeError("Redis is not available for run broker events")
@@ -468,7 +512,7 @@ def _store():
     return _memory_store
 
 
-def publish_run_event(run_id: str, event_type: str, payload: dict[str, Any] | None = None) -> BrokerEvent:
+def publish_run_event(run_id: str, event_type: str, payload: dict[str, Any] | LineEvent | None = None) -> BrokerEvent:
     from services import metrics as app_metrics  # noqa: PLC0415
 
     try:
@@ -517,6 +561,7 @@ def stream_run_events(run_id: str, after_id: str = "0-0") -> Iterator[str]:
 
     app_metrics.record_broker_subscriber_delta(1)
     current_id = _normalize_resume_event_id(after_id)
+    yield _schema_sse()
     if not _is_beginning_event_id(current_id):
         log.debug("BROKER_STREAM_REATTACHED", extra={"run_id": run_id, "after_id": current_id})
     block_seconds = max(1.0, float(CFG.get("run_broker_subscriber_block_seconds", 15) or 15))

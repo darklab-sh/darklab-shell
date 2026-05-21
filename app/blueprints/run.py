@@ -74,6 +74,7 @@ from services.runs.output_model import (
     line_event_from_legacy,
     to_legacy_entry,
     to_legacy_output_event,
+    to_wire,
 )
 from services.storage.body_store import inline_threshold_bytes, maybe_store_text_body
 from services.atlas.materializer import materialize_run_entities
@@ -364,10 +365,7 @@ def _capture_add_line_with_signals(
 
 def _broker_output_payload(event_type, text: str = "", *, cls: str = "", metadata=None, event: LineEvent | None = None):
     payload_event = event or line_event_from_legacy(text, cls)
-    payload = {"text": payload_event.text}
-    payload_cls = legacy_cls_for_event(payload_event)
-    if payload_cls:
-        payload["cls"] = payload_cls
+    payload = to_wire(payload_event)
     if isinstance(metadata, dict):
         if isinstance(metadata.get("signals"), list):
             payload["signals"] = metadata["signals"]

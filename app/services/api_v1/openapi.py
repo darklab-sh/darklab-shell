@@ -1140,17 +1140,31 @@ OPENAPI_SPEC: dict = {
             "RunStreamEvent": {
                 "type": "object",
                 "additionalProperties": True,
-                "description": "Broker event object. Idle streams may emit type=heartbeat events.",
+                "description": (
+                    "Broker event object. Streams start with a schema row "
+                    "({type=schema,event=schema,v=1,kind=line_event}); output and notice rows use the "
+                    "versioned line-event payload while preserving type and legacy cls for older clients. "
+                    "Idle streams may emit type=heartbeat events."
+                ),
                 "properties": {
                     "type": {"type": "string"},
+                    "event": {"type": "string"},
+                    "v": {"type": "integer"},
+                    "kind": {"type": "string"},
+                    "role": {"type": "string"},
+                    "cls": {"type": "string"},
                     "event_id": {"type": "string"},
                     "text": {"type": "string"},
                     "code": {"type": "integer"},
+                    "signals": {"type": "array", "items": {"type": "string"}},
                 },
             },
             "NdjsonStream": {
                 "type": "string",
-                "description": "Newline-delimited RunStreamEvent objects, including heartbeat rows during idle periods.",
+                "description": (
+                    "Newline-delimited RunStreamEvent objects. The first row is the line-event schema row; "
+                    "output rows include v=1 plus kind/role metadata, and idle streams may include heartbeat rows."
+                ),
             },
             "RunCancelResponse": {
                 "type": "object",
