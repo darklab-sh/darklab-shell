@@ -83,6 +83,7 @@ from services.runs.output_store import (
     load_full_output_entries,
     load_full_output_events,
     load_full_output_lines,
+    load_run_output_events_for_run,
 )
 from services.atlas.materializer import materialize_run_entities
 from services.workspace.files import (
@@ -8797,6 +8798,27 @@ class TestRunOutputCapture:
         assert artifact_rel_path is not None
         assert load_full_output_lines(artifact_rel_path) == ["1234"]
 
+    def test_full_output_artifact_cap_does_not_reopen_and_overwrite_prefix(self):
+        capture = RunOutputCapture(
+            "test-run-output-cap-reopen",
+            preview_limit=10,
+            persist_full_output=True,
+            full_output_max_bytes=220,
+        )
+        capture.add_event(line_event_from_legacy("preserved prefix"))
+        capture.add_event(line_event_from_legacy("x" * 200))
+        capture.add_event(line_event_from_legacy("after cap"))
+        capture.finalize()
+
+        assert capture.full_output_available is True
+        assert capture.full_output_truncated is True
+        artifact_rel_path = capture.artifact_rel_path
+        assert artifact_rel_path is not None
+        assert load_full_output_lines(artifact_rel_path) == ["preserved prefix"]
+        rows = self._artifact_rows(artifact_rel_path)
+        assert rows[0]["run_id"] == "test-run-output-cap-reopen"
+        assert [row["text"] for row in rows[1:]] == ["preserved prefix"]
+
     def test_full_output_artifact_loads_legacy_plain_text_rows(self):
         artifact_rel_path = "test-run-output-legacy.txt.gz"
         path = os.path.join(RUN_OUTPUT_DIR, artifact_rel_path)
@@ -8849,6 +8871,43 @@ class TestRunOutputCapture:
         assert len(events) == 1
         assert events[0].text == "enveloped"
         assert events[0].kind == LineKind.notice
+
+    def test_full_output_artifact_unknown_values_log_once_per_load(self):
+        artifact_rel_path = "test-run-output-unknown-values.txt.gz"
+        path = os.path.join(RUN_OUTPUT_DIR, artifact_rel_path)
+        os.makedirs(RUN_OUTPUT_DIR, exist_ok=True)
+        with gzip.open(path, "wt", encoding="utf-8") as f:
+            f.write(json.dumps({"v": 1, "created": "2026-05-21T00:00:00Z", "run_id": "test-run-output-unknown-values"}) + "\n")
+            for text in ("first", "second"):
+                f.write(json.dumps({
+                    "v": 1,
+                    "text": text,
+                    "cls": "",
+                    "kind": "future-kind",
+                    "role": "future-role",
+                    "signals": ["future-signal"],
+                }) + "\n")
+
+        with mock.patch("services.runs.output_store.log.warning") as warning:
+            result = load_run_output_events_for_run({
+                "id": "test-run-output-unknown-values",
+                "session_id": "test-session",
+                "full_output_available": True,
+                "full_output_truncated": False,
+                "rel_path": artifact_rel_path,
+            })
+
+        assert [event.text for event in result.events] == ["first", "second"]
+        unknown_calls = [
+            call.kwargs["extra"]
+            for call in warning.call_args_list
+            if call.args == ("LINE_EVENT_UNKNOWN_VALUE",)
+        ]
+        assert sorted((extra["family"], extra["value"]) for extra in unknown_calls) == [
+            ("kind", "future-kind"),
+            ("role", "future-role"),
+            ("signal", "future-signal"),
+        ]
 
     def test_empty_full_output_capture_does_not_create_artifact_file(self):
         capture = RunOutputCapture(

@@ -465,14 +465,18 @@ function _outputEntityValue(entity) {
 }
 
 function _outputEntityRangeCandidates(text, entity) {
+  const source = String(text || '');
   const value = String(entity && entity.value || '').trim();
   const canonical = _outputEntityValue(entity);
   const candidates = [];
   if (Number.isInteger(entity && entity.start) && Number.isInteger(entity && entity.end)) {
-    candidates.push({ start: entity.start, end: entity.end });
+    const rangedText = source.slice(entity.start, entity.end);
+    if ([value, canonical].filter(Boolean).includes(rangedText)) {
+      candidates.push({ start: entity.start, end: entity.end });
+    }
   }
   [value, canonical].filter(Boolean).forEach(needle => {
-    const index = String(text || '').indexOf(needle);
+    const index = source.indexOf(needle);
     if (index >= 0) candidates.push({ start: index, end: index + needle.length });
   });
   return candidates;
@@ -558,11 +562,17 @@ function _focusOutputEntityLine(token) {
 }
 
 let _outputEntityMenu = null;
+let _outputEntityMenuOpener = null;
 
-function _closeOutputEntityMenu() {
+function _closeOutputEntityMenu(options = {}) {
+  const opener = _outputEntityMenuOpener;
   if (_outputEntityMenu) {
     _outputEntityMenu.remove();
     _outputEntityMenu = null;
+  }
+  _outputEntityMenuOpener = null;
+  if (options.restoreFocus && opener && document.contains(opener) && typeof opener.focus === 'function') {
+    opener.focus({ preventScroll: true });
   }
 }
 
@@ -581,6 +591,7 @@ function _showOutputEntityMenu(token, x, y) {
   const menu = document.createElement('div');
   menu.className = 'atlas-output-entity-menu save-menu dropdown-surface';
   menu.setAttribute('role', 'menu');
+  menu.setAttribute('tabindex', '-1');
   menu.append(
     _outputEntityMenuButton('Open in Atlas', 'open-atlas'),
     _outputEntityMenuButton('Edit labels/notes', 'edit-metadata'),
@@ -608,6 +619,26 @@ function _showOutputEntityMenu(token, x, y) {
     if (action === 'see-run') _focusOutputEntityLine(token);
     _closeOutputEntityMenu();
   });
+  menu.addEventListener('keydown', (event) => {
+    const items = Array.from(menu.querySelectorAll('[data-output-entity-action]'));
+    if (!items.length) return;
+    const currentIndex = Math.max(0, items.indexOf(document.activeElement));
+    let nextIndex = currentIndex;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      _closeOutputEntityMenu({ restoreFocus: true });
+      return;
+    }
+    if (event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % items.length;
+    else if (event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + items.length) % items.length;
+    else if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = items.length - 1;
+    else return;
+    event.preventDefault();
+    event.stopPropagation();
+    items[nextIndex].focus({ preventScroll: true });
+  });
   document.body.appendChild(menu);
   const rect = menu.getBoundingClientRect();
   const left = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
@@ -615,6 +646,9 @@ function _showOutputEntityMenu(token, x, y) {
   menu.style.left = `${left}px`;
   menu.style.top = `${top}px`;
   _outputEntityMenu = menu;
+  _outputEntityMenuOpener = token;
+  const firstItem = menu.querySelector('[data-output-entity-action]');
+  if (firstItem) firstItem.focus({ preventScroll: true });
 }
 
 let _outputEntityLongPressTimer = null;
@@ -652,7 +686,7 @@ function _bindOutputEntityTokenEvents() {
     document.addEventListener(name, () => clearTimeout(_outputEntityLongPressTimer), { passive: true });
   });
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') _closeOutputEntityMenu();
+    if (event.key === 'Escape') _closeOutputEntityMenu({ restoreFocus: true });
   });
 }
 
@@ -703,11 +737,30 @@ function _runOutputModel() {
   return null;
 }
 
-function _fallbackLineEventFromWire(payload) {
-  const item = payload && typeof payload === 'object' ? payload : {};
-  const legacyCls = String(item.cls || '');
-  const kind = legacyCls === 'notice' ? 'notice' : (legacyCls === 'warn' || legacyCls === 'warning' ? 'warn' : (legacyCls === 'error' ? 'error' : 'info'));
-  const roleValues = new Set([
+let _runOutputModelMissingReported = false;
+
+function _reportMissingRunOutputModel() {
+  if (_runOutputModelMissingReported) return;
+  _runOutputModelMissingReported = true;
+  if (typeof logClientError === 'function') {
+    logClientError('run output model missing', new Error('DarklabRunOutputModel is not loaded'));
+  }
+}
+
+function _fallbackLineEventKind(payload) {
+  const kind = String(payload && payload.kind || '').trim();
+  if (['info', 'notice', 'warn', 'error'].includes(kind)) return kind;
+  const classes = String(payload && payload.cls || '').split(/\s+/).filter(Boolean);
+  if (classes.includes('notice') || classes.includes('builtin-note') || classes.includes('welcome-output')) return 'notice';
+  if (classes.includes('warn') || classes.includes('warning')) return 'warn';
+  if (classes.includes('error')) return 'error';
+  return 'info';
+}
+
+function _fallbackLineEventRole(payload) {
+  const role = String(payload && payload.role || '').trim();
+  if ([
+    'body',
     'prompt-echo',
     'section-header',
     'kv',
@@ -719,16 +772,54 @@ function _fallbackLineEventFromWire(payload) {
     'denied',
     'exit-ok',
     'exit-fail',
-  ]);
-  const role = roleValues.has(legacyCls) ? legacyCls : 'body';
+  ].includes(role)) return role;
+  const classes = String(payload && payload.cls || '').split(/\s+/).filter(Boolean);
+  if (classes.includes('prompt-echo') || classes.includes('cmd')) return 'prompt-echo';
+  if (classes.includes('builtin-section')) return 'section-header';
+  if (classes.includes('builtin-kv')) return 'kv';
+  if (classes.includes('builtin-help-row') || classes.includes('builtin-faq-q') || classes.includes('builtin-faq-a')) return 'help-row';
+  if (classes.includes('pty-marker')) return 'pty-marker';
+  if (classes.includes('progress')) return 'progress';
+  if (classes.includes('status-line')) return 'status-line';
+  if (classes.includes('builtin-success')) return 'success';
+  if (classes.includes('denied')) return 'denied';
+  if (classes.includes('exit-ok')) return 'exit-ok';
+  if (classes.includes('exit-fail')) return 'exit-fail';
+  return 'body';
+}
+
+function _fallbackLineEventLegacyClass(event) {
+  const cls = String(event && (event.legacy_cls || event.cls) || '').trim();
+  if (cls) return cls;
+  const role = String(event && event.role || 'body');
+  if (role === 'prompt-echo') return 'prompt-echo';
+  if (role === 'section-header') return 'builtin-section';
+  if (role === 'kv') return 'builtin-kv';
+  if (role === 'help-row') return 'builtin-help-row';
+  if (role === 'pty-marker') return 'pty-marker';
+  if (role === 'progress') return 'progress';
+  if (role === 'status-line') return 'status-line';
+  if (role === 'success') return 'builtin-success';
+  if (['denied', 'exit-ok', 'exit-fail'].includes(role)) return role;
+  const kind = String(event && event.kind || 'info');
+  if (kind === 'notice') return 'notice';
+  if (kind === 'warn') return 'warn';
+  if (kind === 'error') return 'error';
+  return '';
+}
+
+function _lineEventModelStub(payload) {
+  const item = payload && typeof payload === 'object' ? payload : {};
+  _reportMissingRunOutputModel();
+  const cls = String(item.cls || '');
   return {
     text: String(item.text || ''),
-    kind: String(item.kind || kind),
-    role: String(item.role || role),
-    legacy_cls: legacyCls,
+    kind: _fallbackLineEventKind(item),
+    role: _fallbackLineEventRole(item),
+    legacy_cls: cls,
     ts_clock: String(item.tsC || item.ts_clock || ''),
     ts_elapsed: String(item.tsE || item.ts_elapsed || ''),
-    signals: Array.isArray(item.signals) ? item.signals.map(signal => String(signal || '')).filter(Boolean) : [],
+    signals: _normalizeOutputSignals(item.signals),
     line_index: Number.isInteger(item.line_index) ? item.line_index : null,
     line_number: Number.isInteger(item.line_number) ? item.line_number : undefined,
     command_root: String(item.command_root || ''),
@@ -746,7 +837,7 @@ function _lineEventFromWire(payload) {
     }
     return event;
   }
-  return _fallbackLineEventFromWire(payload);
+  return _lineEventModelStub(payload);
 }
 
 function _lineEventLegacyPayload(event) {
@@ -754,9 +845,10 @@ function _lineEventLegacyPayload(event) {
   if (model && typeof model.toLegacyWireLineEvent === 'function') {
     return model.toLegacyWireLineEvent(event || {});
   }
+  _reportMissingRunOutputModel();
   return {
     text: String(event && event.text || ''),
-    cls: String(event && (event.legacy_cls || event.role !== 'body' && event.role || event.kind !== 'info' && event.kind) || ''),
+    cls: _fallbackLineEventLegacyClass(event),
     tsC: String(event && (event.ts_clock || event.tsC) || ''),
     tsE: String(event && (event.ts_elapsed || event.tsE) || ''),
   };

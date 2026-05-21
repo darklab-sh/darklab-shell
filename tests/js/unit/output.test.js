@@ -35,6 +35,7 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {}, AnsiUpCtor = null } 
     _setLnMode,
     buildPromptLabel,
     currentPromptWorkspacePath,
+    _showOutputEntityMenu,
     _getTabs: () => tabs,
   }`,
     'setTabs(tabs); setActiveTabId(activeTabId);',
@@ -365,6 +366,74 @@ describe('appendLine', () => {
       summaries: 0,
     })
     expect(_getTabs()[0]._outputSignalCountsValid).toBe(true)
+  })
+
+  it('falls back to value matching when ANSI makes entity offsets stale', () => {
+    class StripAnsiUp {
+      constructor() {
+        this.use_classes = false
+      }
+
+      ansi_to_html(text) {
+        return String(text || '').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
+      }
+    }
+    const { appendLine } = loadOutputFns({ AnsiUpCtor: StripAnsiUp })
+
+    appendLine('\x1b[31mip.darklab.sh\x1b[0m 443/tcp open https', '', 'tab-1', {
+      entities: [{
+        type: 'domain',
+        value: 'ip.darklab.sh',
+        canonical_value: 'ip.darklab.sh',
+        start: 0,
+        end: 'ip.darklab.sh'.length,
+      }],
+    })
+
+    const token = document.querySelector('.atlas-entity-token')
+    expect(token?.dataset.atlasEntityValue).toBe('ip.darklab.sh')
+    expect(token?.textContent).toBe('ip.darklab.sh')
+    expect(token?.textContent).not.toContain('\x1b')
+  })
+
+  it('supports keyboard navigation and outside-click close in the entity context menu', () => {
+    const { appendLine, _showOutputEntityMenu } = loadOutputFns()
+
+    appendLine('scan ip.darklab.sh', '', 'tab-1', {
+      entities: [{
+        type: 'domain',
+        value: 'ip.darklab.sh',
+        canonical_value: 'ip.darklab.sh',
+        start: 5,
+        end: 18,
+      }],
+    })
+
+    const token = document.querySelector('.atlas-entity-token')
+    token?.focus()
+    _showOutputEntityMenu(token, 32, 32)
+
+    const menu = document.querySelector('.atlas-output-entity-menu')
+    const items = Array.from(menu?.querySelectorAll('[data-output-entity-action]') || [])
+    expect(menu).not.toBeNull()
+    expect(items).toHaveLength(6)
+    expect(document.activeElement?.dataset.outputEntityAction).toBe('open-atlas')
+
+    items[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    expect(document.activeElement?.dataset.outputEntityAction).toBe('edit-metadata')
+
+    items[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+    expect(document.activeElement?.dataset.outputEntityAction).toBe('see-run')
+
+    items[5].dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(document.querySelector('.atlas-output-entity-menu')).toBeNull()
+    expect(document.activeElement?.dataset.atlasEntityValue).toBe('ip.darklab.sh')
+
+    _showOutputEntityMenu(token, 32, 32)
+    expect(document.querySelector('.atlas-output-entity-menu')).not.toBeNull()
+
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(document.querySelector('.atlas-output-entity-menu')).toBeNull()
   })
 
   it('keeps cached signal counts in sync when old lines are trimmed', () => {

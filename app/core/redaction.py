@@ -6,11 +6,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
+import hashlib
+import logging
 import re
 
 from services.runs.output_model import LineEntity, LineEvent, LineKind, from_wire, line_event_from_legacy, to_legacy_wire
 
 
+log = logging.getLogger("shell")
 _ALLOWED_FLAGS = {"i", "m"}
 REDACTED_ENTITY_SENTINEL = "<redacted>"
 
@@ -70,11 +73,16 @@ def normalize_redaction_rules(raw_rules):
         if not isinstance(flags, str):
             flags = ""
         flags = "".join(ch for ch in flags.lower() if ch in _ALLOWED_FLAGS)
+        label = item.get("label", "")
         try:
             re.compile(pattern, _python_re_flags(flags))
-        except re.error:
+        except re.error as exc:
+            log.warning("SHARE_REDACTION_RULE_INVALID", extra={
+                "label": label.strip() if isinstance(label, str) else "",
+                "pattern_hash": _pattern_hash(pattern),
+                "error": str(exc),
+            })
             continue
-        label = item.get("label", "")
         normalized.append({
             "label": label.strip() if isinstance(label, str) else "",
             "pattern": pattern,
@@ -93,19 +101,32 @@ def _python_re_flags(flags: str) -> int:
     return compiled
 
 
+def _pattern_hash(pattern: object) -> str:
+    return hashlib.sha256(str(pattern or "").encode("utf-8", errors="replace")).hexdigest()[:12]
+
+
 BUILTIN_SHARE_REDACTION_RULES = normalize_redaction_rules(_RAW_BUILTIN_SHARE_REDACTION_RULES)
 RAW_ONLY_INTEL_PLACEHOLDER = "Intel data omitted from share"
 
 
 def line_events_from_entries(entries: Sequence[LineEvent | Mapping[str, object] | str] | None) -> list[LineEvent]:
     events: list[LineEvent] = []
+    seen_unknown: set[tuple[str, str]] = set()
+
+    def collect_unknown(family: str, value: str) -> None:
+        key = (family, value)
+        if key in seen_unknown:
+            return
+        seen_unknown.add(key)
+        log.warning("LINE_EVENT_UNKNOWN_VALUE", extra={"source": "redaction", "family": family, "value": value})
+
     for item in entries or ():
         if isinstance(item, LineEvent):
             events.append(item)
         elif isinstance(item, str):
             events.append(line_event_from_legacy(item))
         elif isinstance(item, Mapping) and isinstance(item.get("text"), str):
-            events.append(from_wire(item))
+            events.append(from_wire(item, collect_unknown))
     return events
 
 
@@ -173,7 +194,12 @@ def apply_redaction_rules(text, rules):
                 value,
                 flags=_python_re_flags(str(rule.get("flags", ""))),
             )
-        except re.error:
+        except re.error as exc:
+            log.warning("SHARE_REDACTION_RULE_FAILED", extra={
+                "label": str(rule.get("label") or ""),
+                "pattern_hash": _pattern_hash(rule.get("pattern")),
+                "error": str(exc),
+            })
             continue
     return value
 

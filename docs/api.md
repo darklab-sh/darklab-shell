@@ -327,7 +327,44 @@ curl -N -H "Authorization: Bearer $DARKLAB_TOKEN" \
   "$DARKLAB_API_URL/api/v1/runs/$RUN_ID/stream?format=ndjson"
 ```
 
-SSE streams send `: heartbeat` comments during idle periods so proxies and clients do not treat a quiet scan as a dead connection. NDJSON framing uses `\n` line endings and emits one broker event object per line; during the same idle periods it emits `{"type":"heartbeat"}` rows. Each broker event includes `event_id` when the replay layer provides one, so scripts can resume with the last seen id. Reattach supports both `Last-Event-ID` and `?after=`, with `?after=` taking priority so CLI retries can be explicit. Streams end when the broker emits a terminal event such as `exit`, `killed`, or `error`. If the API layer catches a stream error while adapting to NDJSON, it writes one final `{"event":"error","code":"stream_error","message":"..."}` line before closing.
+Streams start with a schema event, then send replayed or live broker events. In NDJSON, the first row looks like this:
+
+```json
+{"type":"schema","event":"schema","v":1,"kind":"line_event"}
+```
+
+Output and notice rows keep the older `type` and `text` fields, and also carry the structured line-event fields used by the browser:
+
+```json
+{
+  "type": "output",
+  "event": "output",
+  "v": 1,
+  "text": "darklab.sh has address 104.21.4.35",
+  "cls": "",
+  "kind": "info",
+  "role": "body",
+  "tsC": "12:00:04",
+  "tsE": "+1.2s",
+  "signals": ["findings"],
+  "line_index": 3,
+  "command_root": "host",
+  "target": "darklab.sh",
+  "entities": [
+    {
+      "type": "domain",
+      "value": "darklab.sh",
+      "canonical_value": "darklab.sh",
+      "confidence": "high"
+    }
+  ],
+  "event_id": "1710000000000-0"
+}
+```
+
+`kind` describes severity-like meaning (`info`, `notice`, `warn`, `error`), while `role` describes display purpose such as body text, prompt echo, section header, key/value row, PTY marker, progress, status, success, denied, or exit status. `signals`, `line_index`, `command_root`, `target`, and `entities` are optional metadata; scripts that only need text can keep reading `type` and `text` and ignore unknown fields.
+
+SSE streams send the same payloads as `event: schema`, `event: output`, and terminal event frames. They also send `: heartbeat` comments during idle periods so proxies and clients do not treat a quiet scan as a dead connection. NDJSON framing uses `\n` line endings and emits one broker event object per line; during the same idle periods it emits `{"type":"heartbeat"}` rows. Each broker event includes `event_id` when the replay layer provides one, so scripts can resume with the last seen id. Reattach supports both `Last-Event-ID` and `?after=`, with `?after=` taking priority so CLI retries can be explicit. Streams end when the broker emits a terminal event such as `exit`, `killed`, or `error`. If the API layer catches a stream error while adapting to NDJSON, it writes one final `{"event":"error","code":"stream_error","message":"..."}` line before closing.
 
 ---
 

@@ -28,6 +28,7 @@ import services.secrets.vault as secrets_vault
 import services.workspace.files as shell_workspace
 from config import PROJECT_README
 from core.database import db_connect
+from services.runs.output_model import line_event_from_legacy, to_wire
 from services.runs.output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
 from services.projects.contracts import ProjectWorkspaceQuotaExceeded
 
@@ -4038,6 +4039,77 @@ class TestHistoryIsolation:
             with db_connect() as conn:
                 conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
                 conn.commit()
+
+    def test_public_run_permalink_omits_full_artifact_intel_output_for_non_owner(self):
+        client = get_client()
+        run_id = f"intel-full-run-{uuid.uuid4()}"
+        artifact_rel_path = f"{run_id}.txt.gz"
+        artifact_path = Path(RUN_OUTPUT_DIR) / artifact_rel_path
+        full_events = [
+            line_event_from_legacy("Shodan", command_root="intel"),
+            line_event_from_legacy("ports: 53, 443", command_root="intel"),
+            line_event_from_legacy("[process exited with code 0]", "exit-ok"),
+        ]
+
+        try:
+            ensure_run_output_dir()
+            with gzip.open(artifact_path, "wt", encoding="utf-8") as handle:
+                handle.write(json.dumps({"v": 1, "created": "2026-05-21T00:00:00Z", "run_id": run_id}) + "\n")
+                for event in full_events:
+                    handle.write(json.dumps(to_wire(event), separators=(",", ":")) + "\n")
+
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, command, started, finished, exit_code, output_preview, "
+                    "output_line_count, full_output_available, full_output_truncated) "
+                    "VALUES (?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, 1, 0)",
+                    (
+                        run_id,
+                        "owner-session",
+                        "intel ip 8.8.8.8",
+                        0,
+                        json.dumps([{"text": "preview only", "cls": ""}]),
+                        len(full_events),
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO run_output_artifacts "
+                    "(run_id, rel_path, compression, byte_size, line_count, truncated, created) "
+                    "VALUES (?, ?, 'gzip', ?, ?, 0, datetime('now'))",
+                    (run_id, artifact_rel_path, artifact_path.stat().st_size, len(full_events)),
+                )
+                conn.commit()
+
+            owner_resp = client.get(f"/history/{run_id}?json", headers={"X-Session-ID": "owner-session"})
+            owner_data = json.loads(owner_resp.data)
+            assert [entry["text"] for entry in owner_data["output_entries"]] == [
+                "Shodan",
+                "ports: 53, 443",
+                "[process exited with code 0]",
+            ]
+
+            public_json_resp = client.get(f"/history/{run_id}?json", headers={"X-Session-ID": "other-session"})
+            public_json = json.loads(public_json_resp.data)
+            assert public_json_resp.status_code == 200
+            assert [entry["text"] for entry in public_json["output_entries"]] == [
+                "Intel data omitted from share",
+                "[process exited with code 0]",
+            ]
+            assert "ports: 53, 443" not in json.dumps(public_json)
+
+            public_html = client.get(f"/history/{run_id}", headers={"X-Session-ID": "other-session"}).get_data(as_text=True)
+            assert "Intel data omitted from share" in public_html
+            assert "ports: 53, 443" not in public_html
+        finally:
+            with db_connect() as conn:
+                conn.execute("DELETE FROM run_output_artifacts WHERE run_id = ?", (run_id,))
+                conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+                conn.commit()
+            try:
+                artifact_path.unlink()
+            except FileNotFoundError:
+                pass
 
 
 # ── /share ────────────────────────────────────────────────────────────────────

@@ -132,7 +132,7 @@ Full run output artifacts live under `data_dir/run-output` as gzip-compressed JS
 {"v":1,"created":"2026-05-21T00:00:00Z","run_id":"<run-id>"}
 ```
 
-Every following line is one versioned output event. The event keeps the legacy `text`, `cls`, `tsC`, and `tsE` fields for compatibility, and also includes typed `kind` and `role` fields so newer code can tell semantic output (`warn`, `error`, `notice`) apart from display roles such as prompt echoes, PTY markers, and built-in key/value rows.
+Every following line is one versioned output event. The event keeps the legacy `text`, `cls`, `tsC`, and `tsE` fields for compatibility, and also includes typed `kind` and `role` fields so newer code can tell semantic output (`warn`, `error`, `notice`) apart from display roles such as prompt echoes, PTY markers, and built-in key/value rows. Rows can also carry optional `signals`, `line_index`, `command_root`, `target`, and `entities` metadata; [ARCHITECTURE.md](../ARCHITECTURE.md#run-output-model) describes the model in more detail.
 
 Older artifacts did not have the header and may contain either legacy JSON rows or plain text rows. darklab_shell does not rewrite those files in place. Readers detect the shape when they open the artifact: headered files skip the first line, headerless JSON rows are upgraded through the compatibility parser, and plain text rows are treated as normal body output.
 

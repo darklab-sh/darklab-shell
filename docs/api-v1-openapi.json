@@ -1835,6 +1835,33 @@
         ],
         "type": "object"
       },
+      "RunStreamEntity": {
+        "additionalProperties": true,
+        "properties": {
+          "canonical_value": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "string"
+          },
+          "end": {
+            "type": "integer"
+          },
+          "source_line": {
+            "type": "integer"
+          },
+          "start": {
+            "type": "integer"
+          },
+          "type": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "RunStreamEvent": {
         "additionalProperties": true,
         "description": "Broker event object. Streams start with a schema row ({type=schema,event=schema,v=1,kind=line_event}); output and notice rows use the versioned line-event payload while preserving type and legacy cls for older clients. Idle streams may emit type=heartbeat events.",
@@ -1845,6 +1872,15 @@
           "code": {
             "type": "integer"
           },
+          "command_root": {
+            "type": "string"
+          },
+          "entities": {
+            "items": {
+              "$ref": "#/components/schemas/RunStreamEntity"
+            },
+            "type": "array"
+          },
           "event": {
             "type": "string"
           },
@@ -1853,6 +1889,10 @@
           },
           "kind": {
             "type": "string"
+          },
+          "line_index": {
+            "nullable": true,
+            "type": "integer"
           },
           "role": {
             "type": "string"
@@ -1863,7 +1903,16 @@
             },
             "type": "array"
           },
+          "target": {
+            "type": "string"
+          },
           "text": {
+            "type": "string"
+          },
+          "tsC": {
+            "type": "string"
+          },
+          "tsE": {
             "type": "string"
           },
           "type": {

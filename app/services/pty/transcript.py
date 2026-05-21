@@ -28,9 +28,17 @@ def is_transient_pty_line(text: str) -> bool:
     return any(pattern.search(value) for pattern in _PTY_TRANSIENT_LINE_PATTERNS)
 
 
+def _entry_role(entry: dict[str, object]) -> LineRole:
+    return line_event_from_legacy(str(entry.get("text", "")), entry.get("cls", "")).role
+
+
+def _is_pty_marker_entry(entry: dict[str, object]) -> bool:
+    return _entry_role(entry) == LineRole.pty_marker
+
+
 def split_pty_entries(entries: list[dict[str, object]]) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     marker_index = next(
-        (index for index, entry in enumerate(entries) if entry.get("cls") == LineRole.pty_marker.value),
+        (index for index, entry in enumerate(entries) if _is_pty_marker_entry(entry)),
         -1,
     )
     if marker_index < 0:
@@ -41,7 +49,7 @@ def split_pty_entries(entries: list[dict[str, object]]) -> tuple[list[dict[str, 
 def filter_transient_pty_entries(entries: list[dict[str, object]]) -> list[dict[str, object]]:
     return [
         entry for entry in entries
-        if entry.get("cls") != LineRole.pty_marker.value and not is_transient_pty_line(str(entry.get("text", "")))
+        if not _is_pty_marker_entry(entry) and not is_transient_pty_line(str(entry.get("text", "")))
     ]
 
 

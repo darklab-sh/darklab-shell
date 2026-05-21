@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { fromDomScripts } from './helpers/extract.js'
 
@@ -6,6 +7,7 @@ const model = fromDomScripts(
   { window: {} },
   'window.DarklabRunOutputModel',
 );
+const legacyClassRows = JSON.parse(readFileSync('tests/py/fixtures/run_output_legacy_cls.json', 'utf8'));
 
 describe('run output model', () => {
   it('round trips v1 payloads losslessly', () => {
@@ -151,5 +153,18 @@ describe('run output model', () => {
     expect(model.LINE_KIND_VALUES).toEqual(['info', 'notice', 'warn', 'error']);
     expect(model.LINE_SIGNAL_VALUES).toEqual(['findings', 'warnings', 'errors', 'summaries']);
     expect(model.LINE_ROLE_VALUES).toContain('prompt-echo');
+  });
+
+  it('matches the shared legacy class fixture', () => {
+    legacyClassRows.forEach(row => {
+      const event = model.fromWireLineEvent({
+        text: 'sample',
+        cls: row.cls,
+        tsC: '',
+        tsE: '',
+      });
+      expect(event.kind).toBe(row.kind);
+      expect(event.role).toBe(row.role);
+    });
   });
 });

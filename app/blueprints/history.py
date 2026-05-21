@@ -49,7 +49,7 @@ from services.projects.contracts import (
 from core.redaction import line_entries_from_events, omit_raw_only_line_entries, redact_line_entries
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, builtin_command_roots_for_storage
 from services.runs.output_model import LineKind, line_event_from_legacy, to_legacy_entry
-from services.runs.output_store import load_full_output_entries
+from services.runs.output_store import load_run_output_entries_for_run, preview_output_entries_from_run
 from services.scheduler.service import schedule_ids_by_run
 from services.storage.body_store import inline_threshold_bytes, load_text_body, maybe_store_text_body, stored_body_pointer
 from services import metrics as app_metrics
@@ -707,7 +707,7 @@ def _history_insights(conn, session_id: str, *, days: int | None = None) -> dict
 # ── Preview output helpers ────────────────────────────────────────────────────
 
 def _preview_output_entries_from_run(run):
-    return run_comparison.preview_output_entries_from_run(run)
+    return preview_output_entries_from_run(run)
 
 
 def _preview_output_from_run(run):
@@ -1607,10 +1607,16 @@ def get_run(run_id):
     run["full_output_available"] = bool(run.get("full_output_available"))
     run["full_output_truncated"] = bool(run.get("full_output_truncated"))
     preview_requested = request.args.get("preview") == "1"
-    is_full_view = (not preview_requested) and run["full_output_available"] and bool(run.get("rel_path"))
+    output_result = load_run_output_entries_for_run(
+        run,
+        prefer_full=not preview_requested,
+        log_event="HISTORY_FULL_OUTPUT_LOAD_FAILED",
+    )
+    is_full_view = output_result.source == "full"
+    run["full_output_fallback"] = output_result.fallback
+    run["output_entries"] = output_result.entries
+    run["output"] = [entry["text"] for entry in run["output_entries"]]
     if is_full_view:
-        run["output_entries"] = load_full_output_entries(run["rel_path"])
-        run["output"] = [entry["text"] for entry in run["output_entries"]]
         if run["full_output_truncated"]:
             truncated_mb = CFG.get("full_output_max_mb", 0)
             run["output"].append(
@@ -1620,9 +1626,6 @@ def get_run(run_id):
                 f"[full output truncated after {truncated_mb} MB]",
                 kind=LineKind.notice,
             )))
-    else:
-        run["output_entries"] = _preview_output_entries_from_run(run)
-        run["output"] = _preview_output_from_run(run)
     with db_connect() as conn:
         artifacts_by_run = _run_file_artifacts_by_run(conn, [run_id])
         metadata_counts_by_run = _run_metadata_counts_by_run(conn, [run_id])

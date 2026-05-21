@@ -39,6 +39,7 @@ from services.commands.registry import (
 from config import CFG, SCANNER_PREFIX
 from core.database import DB_BACKEND, db_connect
 from core.database_backend import DatabaseBackend, dialect_for_backend
+from core.redaction import REDACTED_ENTITY_SENTINEL
 from extensions import limiter
 from services.commands.builtins import (
     execute_builtin_command,
@@ -72,7 +73,6 @@ from services.runs.output_model import (
     from_wire,
     legacy_cls_for_event,
     line_event_from_legacy,
-    to_legacy_entry,
     to_legacy_output_event,
     to_wire,
 )
@@ -363,21 +363,9 @@ def _capture_event_with_signals(
     return metadata, captured_event
 
 
-def _broker_output_payload(event_type, text: str = "", *, cls: str = "", metadata=None, event: LineEvent | None = None):
+def _broker_output_payload(_event_type, text: str = "", *, cls: str = "", event: LineEvent | None = None):
     payload_event = event or line_event_from_legacy(text, cls)
-    payload = to_wire(payload_event)
-    if isinstance(metadata, dict):
-        if isinstance(metadata.get("signals"), list):
-            payload["signals"] = metadata["signals"]
-        if isinstance(metadata.get("line_index"), int):
-            payload["line_index"] = metadata["line_index"]
-        if isinstance(metadata.get("command_root"), str):
-            payload["command_root"] = metadata["command_root"]
-        if isinstance(metadata.get("target"), str):
-            payload["target"] = metadata["target"]
-        if isinstance(metadata.get("entities"), list):
-            payload["entities"] = metadata["entities"]
-    return payload
+    return to_wire(payload_event)
 
 
 _SEARCH_ENTITY_MAX_BYTES = 4096
@@ -415,7 +403,7 @@ def _search_text_from_events(events: Sequence[LineEvent]) -> str:
     for event in events:
         for entity in event.entities:
             canonical_value = entity.canonical_value.strip()
-            if not canonical_value or canonical_value == "<redacted>":
+            if not canonical_value or canonical_value == REDACTED_ENTITY_SENTINEL:
                 continue
             key = (entity.type.strip(), canonical_value)
             if not key[0] or key in seen_entities:
@@ -856,19 +844,23 @@ def _client_side_run_command_allowed(command: str) -> bool:
 
 def _normalize_client_side_run_lines(lines):
     if not isinstance(lines, list):
-        return []
-    max_lines = int(CFG.get("max_output_lines", 0) or 0)
-    source_lines = lines if max_lines <= 0 else lines[:max_lines]
-    normalized = []
-    for item in source_lines:
+        return [], False, 0
+    capture = RunOutputCapture(
+        run_id="client-side-run-preview",
+        preview_limit=CFG["max_output_lines"],
+        persist_full_output=False,
+        full_output_max_bytes=0,
+        preview_max_bytes=CFG.get("output_preview_max_bytes", 0),
+    )
+    for item in lines:
         if isinstance(item, dict):
             text = str(item.get("text", ""))
             legacy_class = str(item.get("cls", ""))
         else:
             text = str(item)
             legacy_class = ""
-        normalized.append(to_legacy_entry(line_event_from_legacy(text, legacy_class)))
-    return normalized
+        capture.add_event(line_event_from_legacy(text, legacy_class))
+    return list(capture.preview_lines), capture.preview_truncated, capture.output_line_count
 
 
 @run_bp.route("/run/client", methods=["POST"])
@@ -892,12 +884,27 @@ def save_client_side_run():
     except (TypeError, ValueError):
         return jsonify({"error": "exit_code must be an integer"}), 400
 
-    raw_lines = data.get("lines", [])
-    raw_line_count = len(raw_lines) if isinstance(raw_lines, list) else 0
-    lines = _normalize_client_side_run_lines(raw_lines)
-    preview_truncated = int(raw_line_count > len(lines))
     session_id = get_session_id()
     client_ip = get_client_ip()
+    raw_lines = data.get("lines", [])
+    raw_line_count = len(raw_lines) if isinstance(raw_lines, list) else 0
+    if not isinstance(raw_lines, list):
+        log.warning("CLIENT_RUN_OUTPUT_INVALID", extra={
+            "session": get_log_session_id(session_id),
+            "ip": client_ip,
+            "cmd": command,
+            "payload_type": type(raw_lines).__name__,
+        })
+    lines, preview_truncated, output_line_count = _normalize_client_side_run_lines(raw_lines)
+    if isinstance(raw_lines, list) and preview_truncated:
+        log.warning("CLIENT_RUN_OUTPUT_TRUNCATED", extra={
+            "session": get_log_session_id(session_id),
+            "ip": client_ip,
+            "cmd": command,
+            "raw_line_count": raw_line_count,
+            "stored_line_count": len(lines),
+            "limit": CFG["max_output_lines"],
+        })
     run_id = str(uuid.uuid4())
     started = datetime.now(timezone.utc)
     finished = datetime.now(timezone.utc)
@@ -935,8 +942,8 @@ def save_client_side_run():
             finished=finished.isoformat(),
             exit_code=exit_code,
             output_preview=json.dumps(lines),
-            preview_truncated=preview_truncated,
-            output_line_count=raw_line_count,
+            preview_truncated=int(preview_truncated),
+            output_line_count=output_line_count,
             full_output_available=False,
             full_output_truncated=False,
             output_search_text=stored_output_search_text,
@@ -948,12 +955,12 @@ def save_client_side_run():
         "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
         "exit_code": exit_code, "elapsed": elapsed, "cmd": command,
         "cmd_type": "client-builtin",
-        "output_line_count": raw_line_count,
+        "output_line_count": output_line_count,
         "full_output_truncated": False,
         "full_output_available": False,
         "artifact_count": 0,
     })
-    return jsonify({"ok": True, "run_id": run_id, "output_line_count": raw_line_count})
+    return jsonify({"ok": True, "run_id": run_id, "output_line_count": output_line_count})
 
 
 class _SyntheticPostFilterStageProcessor:
@@ -1572,7 +1579,7 @@ def _publish_broker_captured_line(
         ts_clock=line_dt.strftime("%H:%M:%S"),
         ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
     )
-    metadata, captured_event = _capture_event_with_signals(
+    _metadata, captured_event = _capture_event_with_signals(
         capture,
         signal_classifier,
         event=base_event,
@@ -1580,7 +1587,7 @@ def _publish_broker_captured_line(
     publish_run_event(
         run_id,
         event_type,
-        _broker_output_payload(event_type, metadata=metadata, event=captured_event),
+        _broker_output_payload(event_type, event=captured_event),
     )
 
 
@@ -1630,6 +1637,10 @@ def _brokered_synthetic_run(
             "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
             "exit_code": exit_code, "elapsed": elapsed, "cmd": original_command,
             "cmd_type": cmd_type,
+            "output_line_count": capture.output_line_count,
+            "preview_truncated": capture.preview_truncated,
+            "full_output_available": capture.full_output_available,
+            "full_output_truncated": capture.full_output_truncated,
         })
         publish_run_event(run_id, "exit", {
             "code": exit_code,
@@ -1715,7 +1726,12 @@ def _brokered_real_run_worker(
                     try:
                         _terminate_process_group(proc)
                     except (ProcessLookupError, subprocess.TimeoutExpired, OSError):
-                        pass
+                        log.warning("CMD_TIMEOUT_TERMINATE_FAILED", exc_info=True, extra={
+                            "run_id": run_id,
+                            "session": get_log_session_id(session_id),
+                            "ip": client_ip,
+                            "cmd": original_command,
+                        })
                     timeout_msg = _timeout_notice(command_timeout)
                     log.warning("CMD_TIMEOUT", extra={
                         "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,

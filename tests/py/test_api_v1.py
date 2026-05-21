@@ -448,6 +448,16 @@ def test_api_v1_ndjson_stream_adapts_sse_heartbeat_comments():
     assert list(api_blueprint._ndjson_from_sse_chunks([": heartbeat\n\n"])) == ['{"type":"heartbeat"}\n']
 
 
+def test_api_v1_ndjson_stream_preserves_sse_event_name():
+    import blueprints.api_v1 as api_blueprint
+
+    chunks = ['id: 7-0\nevent: output\ndata: {"type":"output","text":"hello"}\n\n']
+
+    assert list(api_blueprint._ndjson_from_sse_chunks(chunks)) == [
+        '{"type":"output","text":"hello","event":"output","event_id":"7-0"}\n',
+    ]
+
+
 def test_api_v1_run_start_reports_broker_unavailable(monkeypatch):
     import blueprints.api_v1 as api_blueprint
 
@@ -1584,6 +1594,7 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "RunOutput",
         "RunPage",
         "RunStartRequest",
+        "RunStreamEntity",
         "RunStarted",
         "Schedule",
         "ScheduleCreateRequest",
@@ -1614,6 +1625,25 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert spec["paths"]["/runs/{run_id}/stream"]["get"]["responses"]["200"]["content"]["application/x-ndjson"]["schema"] == {
         "$ref": "#/components/schemas/NdjsonStream"
     }
+    stream_schema = schemas["RunStreamEvent"]
+    assert {
+        "tsC",
+        "tsE",
+        "line_index",
+        "command_root",
+        "target",
+        "entities",
+    }.issubset(stream_schema["properties"])
+    assert stream_schema["properties"]["entities"]["items"] == {"$ref": "#/components/schemas/RunStreamEntity"}
+    assert {
+        "type",
+        "value",
+        "canonical_value",
+        "confidence",
+        "source_line",
+        "start",
+        "end",
+    }.issubset(schemas["RunStreamEntity"]["properties"])
     assert schemas["ProjectFindingPage"]["properties"]["findings"]["items"] == {"$ref": "#/components/schemas/ProjectFinding"}
     assert schemas["ProjectRunPage"]["properties"]["runs"]["items"] == {"$ref": "#/components/schemas/ProjectRun"}
     assert schemas["ProjectEntityPage"]["properties"]["entities"]["items"] == {"$ref": "#/components/schemas/ProjectEntity"}

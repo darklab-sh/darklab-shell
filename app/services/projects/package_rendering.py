@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import logging
 import re
 from pathlib import PurePosixPath
 
@@ -24,6 +25,7 @@ from services.runs.output_model import LineKind, line_event_from_legacy, to_lega
 from services.runs.output_store import load_full_output_entries
 
 
+log = logging.getLogger("shell")
 _PACKAGE_JINJA = Environment(
     autoescape=select_autoescape(default=True, default_for_string=True),
     trim_blocks=True,
@@ -332,7 +334,12 @@ def _package_run_output_entries(run, *, cfg=None, include_companion=False):
     if run.get("full_output_available") and run.get("rel_path"):
         try:
             entries = load_full_output_entries(str(run["rel_path"]))
-        except (OSError, gzip.BadGzipFile, EOFError, ValueError):
+        except (OSError, gzip.BadGzipFile, EOFError, ValueError) as exc:
+            log.warning("PACKAGE_FULL_OUTPUT_PREVIEW_FALLBACK", extra={
+                "run_id": str(run.get("id") or ""),
+                "rel_path": str(run.get("rel_path") or ""),
+                "error": str(exc),
+            })
             entries = _package_preview_output_entries(run)
         if run.get("full_output_truncated"):
             entries.append(to_legacy_entry(line_event_from_legacy(
@@ -350,6 +357,12 @@ def _package_run_output_entries(run, *, cfg=None, include_companion=False):
     max_lines = _cfg_int("max_output_lines", 5000, cfg=cfg) or 5000
     if len(entries) > max_lines:
         hidden = len(entries) - max_lines
+        log.warning("PACKAGE_TRANSCRIPT_CAPPED", extra={
+            "run_id": str(run.get("id") or ""),
+            "max_lines": max_lines,
+            "hidden_lines": hidden,
+            "include_companion": include_companion,
+        })
         companion_entries = list(entries)
         capped_entries: list[dict[str, object]] = list(entries[:max_lines])
         cap_notice = to_legacy_entry(line_event_from_legacy(

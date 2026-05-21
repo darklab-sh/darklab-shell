@@ -246,6 +246,12 @@ def line_event_from_legacy(
 
 
 def from_wire(payload: Mapping[str, object], unknown_collector: UnknownCollector | None = None) -> LineEvent:
+    """Decode a wire payload, falling back to legacy-safe defaults.
+
+    Unknown kind, role, and signal values fall back to info/body/dropped. Callers
+    that need telemetry should pass ``unknown_collector`` and throttle warnings
+    at the artifact-load or stream level.
+    """
     cls_value = payload.get("cls", "")
     kind = _enum_from_wire(LineKind, payload.get("kind"), LineKind.from_legacy_cls(cls_value), "kind", unknown_collector)
     role = _enum_from_wire(LineRole, payload.get("role"), LineRole.from_legacy_cls(cls_value), "role", unknown_collector)
@@ -269,6 +275,14 @@ def event_search_text(event: LineEvent) -> str:
 
 
 def legacy_cls_for_event(event: LineEvent) -> str:
+    """Return the compatibility class string for legacy readers.
+
+    Events decoded from older payloads keep their original ``cls`` so
+    round-trips preserve compatibility. New producers should leave
+    ``legacy_cls`` empty and let this function choose the canonical class.
+    If kind and role are both non-default, the legacy class prefers role;
+    the explicit ``kind`` field carries severity.
+    """
     if event.legacy_cls:
         return event.legacy_cls
     if event.role != LineRole.body:
@@ -281,6 +295,8 @@ def _legacy_payload(event: LineEvent, *, include_timestamps: bool = True) -> dic
         "text": event.text,
         "cls": legacy_cls_for_event(event),
     }
+    # Route and storage compatibility paths keep timestamp keys even when a
+    # line has no timestamp, matching the old RunOutputCapture payload shape.
     if include_timestamps or event.ts_clock:
         payload["tsC"] = event.ts_clock
     if include_timestamps or event.ts_elapsed:
@@ -347,7 +363,7 @@ def _coerce_role(value: LineRole | str | None, legacy_cls: str) -> LineRole:
 
 
 def _signals_from_wire(value: object, unknown_collector: UnknownCollector | None) -> tuple[LineSignal, ...]:
-    if not isinstance(value, Sequence) or isinstance(value, str):
+    if not isinstance(value, (list, tuple)):
         return ()
     signals: list[LineSignal] = []
     for item in value:
@@ -403,6 +419,7 @@ __all__ = [
     "LineKind",
     "LineRole",
     "LineSignal",
+    "UnknownCollector",
     "event_search_text",
     "from_wire",
     "legacy_cls_for_event",

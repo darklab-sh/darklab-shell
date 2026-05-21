@@ -68,7 +68,7 @@ from services.runs.broker import (
     stream_run_events,
 )
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL
-from services.runs.output_store import load_full_output_entries
+from services.runs.output_store import load_run_output_entries_for_run
 from services.scheduler.commands import ScheduleCommandValidationError, validate_schedule_command
 from services.scheduler.cron import ScheduleCronError, next_fire
 from services.scheduler.dispatch import fire_schedule
@@ -104,7 +104,6 @@ from services.workspace.files import WorkspaceError, open_workspace_file_for_dow
 from blueprints.history import (  # noqa: PLC0415
     _history_offloaded_search_run_ids,
     _normalize_history_filter_text,
-    _preview_output_entries_from_run,
     _run_atlas_counts_by_run,
     _run_file_artifacts_by_run,
     _run_metadata_counts_by_run,
@@ -656,18 +655,14 @@ def _load_run_detail(session_id: str, run_id: str) -> dict[str, Any] | None:
 
 
 def _run_output_entries(run: dict[str, Any], *, full: bool = True) -> list[dict[str, Any]]:
-    use_full = full and bool(run.get("full_output_available")) and bool(run.get("rel_path"))
-    if use_full:
-        try:
-            return load_full_output_entries(str(run.get("rel_path") or ""))
-        except Exception as exc:
-            log.warning("API_FULL_OUTPUT_LOAD_FAILED", extra={
-                "run_id": str(run.get("id") or ""),
-                "session": get_log_session_id(str(run.get("session_id") or "")),
-                "rel_path": str(run.get("rel_path") or ""),
-                "error": str(exc),
-            })
-    return _preview_output_entries_from_run(run)
+    result = load_run_output_entries_for_run(
+        run,
+        prefer_full=full,
+        log_event="API_FULL_OUTPUT_LOAD_FAILED",
+    )
+    run["_output_source"] = result.source
+    run["_output_fallback"] = result.fallback
+    return result.entries
 
 
 def _parse_output_range(value: object) -> tuple[int, int] | None:
@@ -751,9 +746,12 @@ def _ndjson_from_sse_chunks(chunks: Iterable[str]):
                     continue
                 data_lines = []
                 event_id = ""
+                event_type = ""
                 for line in lines:
                     if line.startswith("id:"):
                         event_id = line[3:].strip()
+                    if line.startswith("event:"):
+                        event_type = line[6:].strip()
                     if line.startswith("data:"):
                         data_lines.append(line[5:].strip())
                 if not data_lines:
@@ -764,8 +762,11 @@ def _ndjson_from_sse_chunks(chunks: Iterable[str]):
                 except json.JSONDecodeError:
                     yield data + "\n"
                     continue
-                if event_id and isinstance(payload, dict):
-                    payload.setdefault("event_id", event_id)
+                if isinstance(payload, dict):
+                    if event_type:
+                        payload.setdefault("event", event_type)
+                    if event_id:
+                        payload.setdefault("event_id", event_id)
                 yield json.dumps(payload, separators=(",", ":")) + "\n"
     except Exception as exc:
         yield json.dumps({
@@ -953,7 +954,7 @@ def api_history_run_output(run_id):
     if str(request.args.get("format") or "text").lower() == "json":
         payload = {
             "run_id": run_id,
-            "preview": not bool(run.get("full_output_available") and run.get("rel_path")),
+            "preview": run.get("_output_source") != "full",
             "full_output_available": bool(run.get("full_output_available")),
             "truncated": bool(run.get("preview_truncated") or run.get("full_output_truncated")),
             "line_count": len(all_lines),

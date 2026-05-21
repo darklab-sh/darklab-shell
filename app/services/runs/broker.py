@@ -32,6 +32,7 @@ REPLAY_TRIM_NOTICE = "[live replay starts here; earlier output was trimmed due t
 LINE_BOUNDED_REPLAY_TYPES = {"output", "notice"}
 LINE_EVENT_TYPES = {"output", "notice"}
 REDIS_STREAM_DISCONNECT_ERRORS = (RedisConnectionError, RedisTimeoutError)
+BROKER_RESERVED_PAYLOAD_KEYS = {"type", "event", "created_at", "event_id"}
 SCHEMA_EVENT_PAYLOAD = {
     "type": "schema",
     "event": "schema",
@@ -58,12 +59,25 @@ def _line_event_payload(event_type: str, payload: dict[str, Any] | LineEvent | N
     if event_type == "notice" and not base.get("kind") and not base.get("cls"):
         event = line_event_from_legacy(base.get("text", ""), kind=LineKind.notice)
     else:
-        event = from_wire(base)
+        event = from_wire(base, _unknown_line_event_collector(str(base.get("run_id") or "")))
     data = to_wire(event)
     for key, value in base.items():
-        if key not in data and key not in {"type", "event", "created_at", "event_id"}:
+        if key not in data and key not in BROKER_RESERVED_PAYLOAD_KEYS:
             data[key] = value
     return data
+
+
+def _unknown_line_event_collector(run_id: str):
+    seen: set[tuple[str, str]] = set()
+
+    def collect(family: str, value: str) -> None:
+        key = (family, value)
+        if key in seen:
+            return
+        seen.add(key)
+        log.warning("LINE_EVENT_UNKNOWN_VALUE", extra={"run_id": run_id, "family": family, "value": value})
+
+    return collect
 
 
 def _event_payload(event_type: str, payload: dict[str, Any] | LineEvent | None = None) -> dict[str, Any]:
@@ -296,6 +310,13 @@ class _MemoryRunBrokerStore:
             notice = _make_trim_notice_event()
             events.insert(0, notice)
             self._bytes[run_id] += _event_size(notice)
+            log.warning("BROKER_REPLAY_TRIMMED", extra={
+                "run_id": run_id,
+                "mode": broker_mode(),
+                "max_events": _max_replay_events(),
+                "max_bytes": _max_replay_bytes(),
+                "remaining_events": len(events),
+            })
 
     def snapshot(self) -> dict[str, int]:
         """Diagnostic snapshot of in-memory broker state. Read-only — does
@@ -362,7 +383,7 @@ class _RedisRunBrokerStore:
             event_id = _coerce_text(event_id)
             if not _is_after(event_id, after_id or "0-0"):
                 continue
-            payload = _decode_payload(fields)
+            payload = _decode_payload(fields, run_id=run_id, event_id=event_id)
             if payload is not None:
                 events.append(BrokerEvent(event_id, payload))
         return events
@@ -387,7 +408,7 @@ class _RedisRunBrokerStore:
         events: list[BrokerEvent] = []
         for _key, stream_rows in rows or []:
             for event_id, fields in stream_rows:
-                payload = _decode_payload(fields)
+                payload = _decode_payload(fields, run_id=run_id, event_id=_coerce_text(event_id))
                 if payload is not None:
                     events.append(BrokerEvent(_coerce_text(event_id), payload))
         return events
@@ -408,7 +429,7 @@ class _RedisRunBrokerStore:
         )
         events: list[BrokerEvent] = []
         for event_id, fields in reversed(rows or []):
-            payload = _decode_payload(fields)
+            payload = _decode_payload(fields, run_id=run_id, event_id=_coerce_text(event_id))
             if payload is not None:
                 events.append(BrokerEvent(_coerce_text(event_id), payload))
         bounded = _bounded_replay_events(events)
@@ -417,12 +438,24 @@ class _RedisRunBrokerStore:
         except (TypeError, ValueError, AttributeError):
             stream_length = len(rows or [])
         if stream_length > len(rows or []):
+            log.warning("BROKER_REPLAY_TRIMMED", extra={
+                "run_id": run_id,
+                "mode": broker_mode(),
+                "max_events": _max_replay_events(),
+                "max_bytes": _max_replay_bytes(),
+                "remaining_events": len(bounded),
+            })
             return _prepend_trim_notice(bounded)
         return bounded
 
 
-def _decode_payload(fields: object) -> dict[str, Any] | None:
+def _decode_payload(fields: object, *, run_id: str = "", event_id: str = "") -> dict[str, Any] | None:
     if not isinstance(fields, dict):
+        log.warning("BROKER_PAYLOAD_DECODE_FAILED", extra={
+            "run_id": run_id,
+            "event_id": event_id,
+            "reason": "invalid_fields",
+        })
         return None
     raw = fields.get("payload")
     if raw is None:
@@ -430,12 +463,30 @@ def _decode_payload(fields: object) -> dict[str, Any] | None:
     if isinstance(raw, bytes):
         raw = raw.decode("utf-8", errors="replace")
     if not isinstance(raw, str):
+        log.warning("BROKER_PAYLOAD_DECODE_FAILED", extra={
+            "run_id": run_id,
+            "event_id": event_id,
+            "reason": "missing_payload",
+        })
         return None
     try:
         payload = json.loads(raw)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
+        log.warning("BROKER_PAYLOAD_DECODE_FAILED", extra={
+            "run_id": run_id,
+            "event_id": event_id,
+            "reason": "json_decode",
+            "error": str(exc),
+        })
         return None
-    return payload if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        log.warning("BROKER_PAYLOAD_DECODE_FAILED", extra={
+            "run_id": run_id,
+            "event_id": event_id,
+            "reason": "invalid_payload",
+        })
+        return None
+    return payload
 
 
 def _active_ttl() -> int:
@@ -471,8 +522,17 @@ def _trim_redis_stream(key: str) -> None:
     try:
         redis_client.xtrim(key, maxlen=_redis_stream_maxlen(), approximate=True)
     except AttributeError:
+        log.warning("BROKER_REDIS_TRIM_UNAVAILABLE", extra={
+            "key": key,
+            "reason": "missing_xtrim",
+        })
         return
     except TypeError:
+        log.debug("BROKER_REDIS_TRIM_RETRY", extra={
+            "key": key,
+            "maxlen": _redis_stream_maxlen(),
+            "reason": "signature",
+        })
         redis_client.xtrim(key, _redis_stream_maxlen(), approximate=True)
 
 

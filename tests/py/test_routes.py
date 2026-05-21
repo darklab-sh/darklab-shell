@@ -7654,6 +7654,42 @@ class TestRunRoute:
             assert delete_resp.status_code == 200
             assert not os.path.exists(body_path)
 
+    def test_client_side_run_applies_preview_byte_cap(self):
+        client = get_client()
+        session = "client-run-preview-cap-" + uuid.uuid4().hex[:8]
+        huge_line = "Current theme: " + ("x" * 1000)
+        with mock.patch.dict("blueprints.run.CFG", {"max_output_lines": 50, "output_preview_max_bytes": 140}):
+            resp = client.post(
+                "/run/client",
+                headers={"X-Session-ID": session},
+                json={
+                    "command": "theme current",
+                    "exit_code": 0,
+                    "lines": [{"text": huge_line, "cls": "builtin-section"}],
+                },
+            )
+        try:
+            data = json.loads(resp.data)
+            with db_connect() as conn:
+                row = conn.execute(
+                    "SELECT output_preview, preview_truncated, output_line_count FROM runs WHERE id = ?",
+                    (data["run_id"],),
+                ).fetchone()
+            preview = json.loads(row["output_preview"])
+
+            assert resp.status_code == 200
+            assert data["output_line_count"] == 1
+            assert row["output_line_count"] == 1
+            assert row["preview_truncated"] == 1
+            assert len(preview) == 1
+            assert preview[0]["text"].endswith("[preview line truncated]")
+            assert huge_line not in preview[0]["text"]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.commit()
+            conn.close()
+
     def test_client_side_run_persists_tour_builtin(self):
         client = get_client()
         session = "client-tour-" + uuid.uuid4().hex[:8]
@@ -8969,6 +9005,80 @@ class TestHistoryRoute:
         }
         assert diff["hunks"][1]["left"]["lines"][0]["role"] == "body"
         assert diff["hunks"][1]["right"]["lines"][0]["role"] == "section-header"
+
+    def test_compare_full_output_falls_back_to_preview_when_artifact_is_missing(self):
+        events, source, partial = run_comparison.compare_full_output_events({
+            "id": "cmp-missing-artifact",
+            "session_id": "test-session",
+            "output_preview": json.dumps([{"text": "preview fallback", "cls": ""}]),
+            "preview_truncated": False,
+            "full_output_available": True,
+            "full_output_truncated": False,
+            "rel_path": "missing-compare-artifact.txt.gz",
+        })
+
+        assert [event.text for event in events] == ["preview fallback"]
+        assert source == "preview"
+        assert partial is True
+
+    def test_compare_route_falls_back_to_preview_when_full_artifact_is_corrupt(self):
+        from services.runs.output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
+
+        client = get_client()
+        session = "compare-corrupt-artifact-" + uuid.uuid4().hex[:8]
+        left_id = "cmp-corrupt-left"
+        right_id = "cmp-corrupt-right"
+        rel_path = f"{left_id}.txt.gz"
+        artifact_path = Path(RUN_OUTPUT_DIR) / rel_path
+        try:
+            ensure_run_output_dir()
+            artifact_path.write_bytes(b"not a gzip transcript")
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+                "output_preview, output_line_count, full_output_available, full_output_truncated) "
+                "VALUES (?, ?, 'nmap darklab.sh', datetime('now'), datetime('now'), 0, ?, 1, ?, 0)",
+                [
+                    (left_id, session, json.dumps([{"text": "left preview", "cls": "", "line_index": 0}]), 1),
+                    (right_id, session, json.dumps([{"text": "right preview", "cls": "", "line_index": 0}]), 0),
+                ],
+            )
+            conn.execute(
+                "INSERT INTO run_output_artifacts (run_id, rel_path, compression, byte_size, line_count, truncated, created) "
+                "VALUES (?, ?, 'gzip', ?, 1, 0, datetime('now'))",
+                (left_id, rel_path, artifact_path.stat().st_size),
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get(
+                f"/history/compare?left={left_id}&right={right_id}",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+
+            assert resp.status_code == 200
+            assert data["left"]["output_source"]["source"] == "preview"
+            assert data["left"]["output_source"]["partial"] is True
+            assert data["right"]["output_source"]["source"] == "preview"
+            hunk_texts = [
+                line["text"]
+                for hunk in data["hunks"]
+                for side in ("left", "right")
+                for line in hunk.get(side, {}).get("lines", [])
+            ]
+            assert "left preview" in hunk_texts
+            assert "right preview" in hunk_texts
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM run_output_artifacts WHERE run_id = ?", (left_id,))
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.commit()
+            conn.close()
+            try:
+                artifact_path.unlink()
+            except FileNotFoundError:
+                pass
 
     def test_hunk_line_diff_handles_uneven_replace_pairing(self):
         entries = lambda values: [  # noqa: E731 - compact test fixture builder
@@ -10627,6 +10737,30 @@ class TestRunPermalinkRoute:
             )
             assert data["command"] == "man curl"
             assert data["output"] == ["full line 1", "full line 2"]
+        finally:
+            self._delete_run(run_id)
+
+    def test_json_view_falls_back_to_preview_when_full_output_artifact_is_missing(self):
+        run_id = "permalink-json-full-missing-test-run"
+        self._insert_run(
+            run_id,
+            "man curl",
+            ["preview fallback"],
+            full_output_available=1,
+            full_output_lines=["full line 1", "full line 2"],
+        )
+        from services.runs.output_store import RUN_OUTPUT_DIR
+        os.unlink(Path(RUN_OUTPUT_DIR) / f"{run_id}.txt.gz")
+        try:
+            resp = get_client().get(
+                f"/history/{run_id}?json",
+                headers={"X-Session-ID": "test-session"},
+            )
+            data = json.loads(resp.data)
+            assert resp.status_code == 200
+            assert data["output"] == ["preview fallback"]
+            assert data["full_output_fallback"] is True
+            assert data["preview_notice"] is None
         finally:
             self._delete_run(run_id)
 

@@ -1,6 +1,5 @@
 """Shared run comparison helpers for history and project responses."""
 
-import json
 import re
 from collections import Counter
 from collections.abc import Sequence
@@ -13,8 +12,8 @@ from core.output_signals import (
     extract_target,
     strip_ansi_codes,
 )
-from services.runs.output_model import LineEvent, from_wire, line_event_from_legacy, to_legacy_entry
-from services.runs.output_store import load_full_output_entries, load_full_output_events
+from services.runs.output_model import LineEvent
+from services.runs.output_store import load_run_output_events_for_run
 
 MAX_COMPARE_ITEMS_PER_SIDE = 5000
 COMPARE_MAX_LINES = 20_000
@@ -262,44 +261,16 @@ def run_candidate_payload(row, source):
     return payload
 
 
-def preview_output_entries_from_run(run):
-    return [to_legacy_entry(event) for event in preview_output_events_from_run(run)]
-
-
-def preview_output_events_from_run(run):
-    raw = run.get("output_preview")
-    if raw is None:
-        raw = run.get("output")
-    loaded = json.loads(raw) if raw else []
-    if loaded and isinstance(loaded[0], str):
-        return [line_event_from_legacy(line) for line in loaded]
-    events = []
-    for item in loaded:
-        if isinstance(item, dict) and isinstance(item.get("text"), str):
-            events.append(from_wire(item))
-        elif isinstance(item, str):
-            events.append(line_event_from_legacy(item))
-    return events
-
-
-def compare_full_output_entries(run):
-    if run.get("full_output_available") and run.get("rel_path"):
-        return load_full_output_entries(run["rel_path"]), "full", bool(run.get("full_output_truncated"))
-    return preview_output_entries_from_run(run), "preview", bool(run.get("preview_truncated"))
-
-
 def compare_full_output_events(run):
-    if run.get("full_output_available") and run.get("rel_path"):
-        return load_full_output_events(run["rel_path"]), "full", bool(run.get("full_output_truncated"))
-    return preview_output_events_from_run(run), "preview", bool(run.get("preview_truncated"))
+    result = load_run_output_events_for_run(run, log_event="COMPARE_FULL_OUTPUT_LOAD_FAILED")
+    return result.events, result.source, result.partial
 
 
-def is_compare_chrome_line(entry, text):
-    cls = str(entry.get("cls", "")) if isinstance(entry, dict) else ""
+def is_compare_chrome_line(event: LineEvent, text):
     stripped = str(text or "").strip()
     if not stripped:
         return True
-    if cls == "prompt-echo":
+    if event.role.value == "prompt-echo":
         return True
     if re.match(r"^\[(?:process exited with code|history\s+—\s+exit)\b", stripped, re.I):
         return True
@@ -318,9 +289,8 @@ def compare_entries_for_diff(run):
     byte_count = 0
     truncated_by_limit = False
     for event in events:
-        entry = to_legacy_entry(event)
         text = event.text.rstrip("\n")
-        if is_compare_chrome_line(entry, text):
+        if is_compare_chrome_line(event, text):
             continue
         encoded_len = len(text.encode("utf-8", errors="replace"))
         if len(compared) >= COMPARE_MAX_LINES or byte_count + encoded_len > COMPARE_MAX_BYTES:

@@ -14,7 +14,6 @@ For the architectural rationale, tradeoffs, and implementation-history notes beh
 - [HTTP Route Inventory](#http-route-inventory)
 - [Frontend](#frontend)
 - [Back-end Architecture](#back-end-architecture)
-- [Run Output Model](#run-output-model)
 - [Run Lifecycle](#run-lifecycle)
 - [Secrets and Vault](#secrets-and-vault)
 - [Intel and Provider Integrations](#intel-and-provider-integrations)
@@ -824,7 +823,7 @@ This boundary view answers a different question than the dependency graph above:
 - Scanner subprocesses remain an out-of-process boundary rather than an in-worker extension of the Flask app.
 - Config and theme YAML files are filesystem-backed dependencies that shape both backend behavior and frontend presentation but do not become a general runtime datastore.
 
-## Run Output Model
+### Run Output Model
 
 Run output moves through the app as `LineEvent` data. The model keeps the user-visible `text` stable while splitting line meaning into two fields:
 
@@ -1497,6 +1496,7 @@ The current event inventory is:
 | DEBUG | `API_RUN_STREAM_ATTACHED` | API run stream routes | ip, session, run_id, after_id, format |
 | DEBUG | `BROKER_STREAM_CLIENT_GONE` | `stream_run_events` | run_id, reason |
 | DEBUG | `BROKER_STREAM_REATTACHED` | `stream_run_events` | run_id, after_id |
+| DEBUG | `BROKER_REDIS_TRIM_RETRY` | broker Redis replay trimming | key, maxlen, reason |
 | DEBUG | `ADVISORY_LOCK_ACQUIRED` | Postgres migration runner | namespace, lock_id |
 | DEBUG | `PTY_METRIC_WRITE_FAILED` | PTY service metrics writes | run_id, metric, error |
 | DEBUG | `DIAG_REDIS_SCAN_KEY_FAILED` | `/diag` Redis probes | stage, error |
@@ -1509,6 +1509,8 @@ The current event inventory is:
 | INFO | `CMD_REWRITE` | `run_command` | ip, original, rewritten |
 | INFO | `RUN_START` | `run_command` | ip, run_id, session, pid, cmd, cmd_type |
 | INFO | `RUN_END` | run finalization | ip, run_id, session, exit_code, elapsed, cmd, cmd_type, output_line_count, artifact_count, finding_count, atlas_entity_count, full_output_truncated |
+| INFO | `RUN_OUTPUT_ARTIFACT_OPENED` | full-output artifact capture | run_id, rel_path, format_version |
+| INFO | `RUN_OUTPUT_ARTIFACT_FINALIZED` | full-output artifact capture | run_id, rel_path, artifact_bytes, lines, truncated, available |
 | INFO | `PTY_SESSION_STARTED` | interactive PTY service | ip, run_id, session, pid, cmd, rows, cols, allow_input |
 | INFO | `PTY_SESSION_ENDED` | interactive PTY service | ip, run_id, session, exit_code, elapsed, cmd |
 | INFO | `PTY_OWNERSHIP_DISPLACED` | interactive PTY ownership claim | run_id, session, owner_client_id, owner_tab_id, displaced_client_id, displaced_tab_id |
@@ -1629,6 +1631,18 @@ The current event inventory is:
 | WARN | `UNTRUSTED_PROXY` | `get_client_ip` | ip, proxy_ip, forwarded_for, path |
 | WARN | `RATE_LIMIT` | `errorhandler(429)` | ip, path, limit, scope |
 | WARN | `CMD_TIMEOUT` | `generate()` | ip, run_id, session, timeout, cmd |
+| WARN | `CMD_TIMEOUT_TERMINATE_FAILED` | brokered run timeout cleanup | ip, run_id, session, cmd (+ traceback) |
+| WARN | `CLIENT_RUN_OUTPUT_INVALID` | client-side run persistence | ip, session, cmd, payload_type |
+| WARN | `CLIENT_RUN_OUTPUT_TRUNCATED` | client-side run persistence | ip, session, cmd, raw_line_count, stored_line_count, limit |
+| WARN | `RUN_OUTPUT_ARTIFACT_TRUNCATED` | full-output artifact capture | run_id, rel_path, artifact_bytes, limit, reason |
+| WARN | `RUN_OUTPUT_ARTIFACT_PARSE_FALLBACK` | full-output artifact loading | rel_path, row_index, reason, error |
+| WARN | `BROKER_REPLAY_TRIMMED` | broker replay storage | run_id, mode, max_events, max_bytes, remaining_events |
+| WARN | `BROKER_PAYLOAD_DECODE_FAILED` | broker Redis stream decode | run_id, event_id, reason, error |
+| WARN | `BROKER_REDIS_TRIM_UNAVAILABLE` | broker Redis replay trimming | key, reason |
+| WARN | `PACKAGE_FULL_OUTPUT_PREVIEW_FALLBACK` | evidence package transcript rendering | run_id, rel_path, error |
+| WARN | `PACKAGE_TRANSCRIPT_CAPPED` | evidence package transcript rendering | run_id, max_lines, hidden_lines, include_companion |
+| WARN | `SHARE_REDACTION_RULE_INVALID` | share/export redaction config | label, pattern_hash, error |
+| WARN | `SHARE_REDACTION_RULE_FAILED` | share/export redaction application | label, pattern_hash, error |
 | WARN | `KILL_FAILED` | `kill_command` | ip, run_id, pid, error |
 | WARN | `HEALTH_DEGRADED` | `health()` | db, redis |
 | ERROR | `RUN_SPAWN_ERROR` | `run_command` | ip, session, cmd (+ traceback) |
@@ -1745,12 +1759,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,155
-- docs/inventory meta-tests: 32
-- `pytest`: 1713 (1681 behavior + 32 meta)
-- `vitest`: 1226
+- behavior tests: 3,170
+- docs/inventory meta-tests: 33
+- `pytest`: 1722 (1689 behavior + 33 meta)
+- `vitest`: 1229
 - `playwright`: 252
-- total: 3,191
+- total: 3,203
 
 ### Testing Architecture
 

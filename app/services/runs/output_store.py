@@ -10,22 +10,43 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import gzip
 import json
+import logging
 import os
 
 from config import resolve_data_dir
-from services.runs.output_model import LineEvent, from_wire, line_event_from_legacy, to_legacy_wire, to_wire
+from core.helpers import get_log_session_id
+from services.runs.output_model import LineEvent, UnknownCollector, from_wire, line_event_from_legacy, to_legacy_wire, to_wire
 
 DATA_DIR = resolve_data_dir()
 RUN_OUTPUT_DIR = os.path.join(DATA_DIR, "run-output")
+# Artifact wrapper version. This is separate from LINE_EVENT_SCHEMA_VERSION:
+# artifacts can change their envelope without changing per-line event fields.
 RUN_OUTPUT_ARTIFACT_FORMAT_VERSION = 1
+log = logging.getLogger("shell")
 
 
 def ensure_run_output_dir():
     os.makedirs(RUN_OUTPUT_DIR, exist_ok=True)
+
+
+@dataclass(frozen=True)
+class RunOutputLoadResult:
+    events: list[LineEvent]
+    source: str
+    truncated: bool
+    fallback: bool = False
+
+    @property
+    def entries(self) -> list[dict[str, object]]:
+        return [to_legacy_wire(event) for event in self.events]
+
+    @property
+    def partial(self) -> bool:
+        return self.truncated or self.fallback
 
 
 class RunOutputCapture:
@@ -114,11 +135,13 @@ class RunOutputCapture:
     def _artifact_header(self) -> dict[str, object]:
         return {
             "v": RUN_OUTPUT_ARTIFACT_FORMAT_VERSION,
-            "created": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            "created": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "run_id": self.run_id,
         }
 
     def _ensure_artifact_file(self) -> bool:
+        if self.full_output_truncated:
+            return False
         if not self.persist_full_output or self._artifact_file:
             return bool(self._artifact_file)
         if not self.artifact_rel_path:
@@ -127,12 +150,24 @@ class RunOutputCapture:
         header_bytes = self._jsonl_bytes(header)
         if self.full_output_max_bytes and header_bytes >= self.full_output_max_bytes:
             self.full_output_truncated = True
+            log.warning("RUN_OUTPUT_ARTIFACT_TRUNCATED", extra={
+                "run_id": self.run_id,
+                "rel_path": self.artifact_rel_path,
+                "artifact_bytes": self.full_output_bytes,
+                "limit": self.full_output_max_bytes,
+                "reason": "header_limit",
+            })
             return False
         ensure_run_output_dir()
         artifact_path = get_artifact_path(self.artifact_rel_path)
         self._artifact_file = gzip.open(artifact_path, "wt", encoding="utf-8")
         self._artifact_file.write(json.dumps(header, separators=(",", ":")) + "\n")
         self.full_output_bytes += header_bytes
+        log.info("RUN_OUTPUT_ARTIFACT_OPENED", extra={
+            "run_id": self.run_id,
+            "rel_path": self.artifact_rel_path,
+            "format_version": RUN_OUTPUT_ARTIFACT_FORMAT_VERSION,
+        })
         return True
 
     @staticmethod
@@ -177,6 +212,13 @@ class RunOutputCapture:
         encoded = (serialized + "\n").encode("utf-8")
         if self.full_output_max_bytes and self.full_output_bytes + len(encoded) > self.full_output_max_bytes:
             self.full_output_truncated = True
+            log.warning("RUN_OUTPUT_ARTIFACT_TRUNCATED", extra={
+                "run_id": self.run_id,
+                "rel_path": self.artifact_rel_path,
+                "artifact_bytes": self.full_output_bytes,
+                "limit": self.full_output_max_bytes,
+                "reason": "line_limit",
+            })
             self.close()
             return
 
@@ -191,9 +233,20 @@ class RunOutputCapture:
 
     def finalize(self):
         self.close()
+        finalized_rel_path = self.artifact_rel_path
+        if not self.persist_full_output and not finalized_rel_path:
+            return
         if not self.full_output_available and self.artifact_rel_path:
             delete_artifact_file(self.artifact_rel_path)
             self.artifact_rel_path = None
+        log.info("RUN_OUTPUT_ARTIFACT_FINALIZED", extra={
+            "run_id": self.run_id,
+            "rel_path": finalized_rel_path,
+            "artifact_bytes": self.full_output_bytes,
+            "lines": self.output_line_count,
+            "truncated": self.full_output_truncated,
+            "available": self.full_output_available,
+        })
 
 
 def get_artifact_path(rel_path: str) -> str:
@@ -213,25 +266,42 @@ def load_full_output_lines(rel_path: str) -> list[str]:
     return [event.text for event in load_full_output_events(rel_path)]
 
 
-def load_full_output_events(rel_path: str) -> list[LineEvent]:
+def load_full_output_events(rel_path: str, unknown_collector: UnknownCollector | None = None) -> list[LineEvent]:
+    raw_rows: list[str] = []
     with gzip.open(get_artifact_path(rel_path), "rt", encoding="utf-8") as f:
-        rows = f.read().splitlines()
-
-    events: list[LineEvent] = []
-    for index, row in enumerate(rows):
-        try:
-            item = json.loads(row)
-        except json.JSONDecodeError:
-            return [line_event_from_legacy(line) for line in rows]
-        if index == 0 and _is_artifact_header(item):
-            continue
-        if not isinstance(item, dict) or not isinstance(item.get("text"), str):
-            return [line_event_from_legacy(line) for line in rows]
-        events.append(from_wire(item))
+        events: list[LineEvent] = []
+        for index, raw_row in enumerate(f):
+            row = raw_row.rstrip("\r\n")
+            raw_rows.append(row)
+            try:
+                item = json.loads(row)
+            except json.JSONDecodeError as exc:
+                log.warning("RUN_OUTPUT_ARTIFACT_PARSE_FALLBACK", extra={
+                    "rel_path": rel_path,
+                    "row_index": index,
+                    "reason": "json_decode",
+                    "error": str(exc),
+                })
+                raw_rows.extend(rest.rstrip("\r\n") for rest in f)
+                return [line_event_from_legacy(line) for line in raw_rows]
+            if index == 0 and _is_artifact_header(item):
+                continue
+            if not isinstance(item, dict) or not isinstance(item.get("text"), str):
+                log.warning("RUN_OUTPUT_ARTIFACT_PARSE_FALLBACK", extra={
+                    "rel_path": rel_path,
+                    "row_index": index,
+                    "reason": "invalid_row",
+                    "error": type(item).__name__,
+                })
+                raw_rows.extend(rest.rstrip("\r\n") for rest in f)
+                return [line_event_from_legacy(line) for line in raw_rows]
+            events.append(from_wire(item, unknown_collector))
     return events
 
 
 def _is_artifact_header(item: object) -> bool:
+    # A text field disambiguates line-event rows that may carry incidental
+    # header-shaped metadata from the artifact wrapper header.
     return (
         isinstance(item, dict)
         and item.get("v") == RUN_OUTPUT_ARTIFACT_FORMAT_VERSION
@@ -243,3 +313,81 @@ def _is_artifact_header(item: object) -> bool:
 
 def load_full_output_entries(rel_path: str) -> list[dict[str, object]]:
     return [to_legacy_wire(event) for event in load_full_output_events(rel_path)]
+
+
+def preview_output_events_from_run(
+    run: Mapping[str, object],
+    unknown_collector: UnknownCollector | None = None,
+) -> list[LineEvent]:
+    raw = run.get("output_preview")
+    if raw is None:
+        raw = run.get("output")
+    loaded = json.loads(str(raw)) if raw else []
+    if loaded and isinstance(loaded[0], str):
+        return [line_event_from_legacy(line) for line in loaded]
+    events: list[LineEvent] = []
+    for item in loaded:
+        if isinstance(item, dict) and isinstance(item.get("text"), str):
+            events.append(from_wire(item, unknown_collector))
+        elif isinstance(item, str):
+            events.append(line_event_from_legacy(item))
+    return events
+
+
+def preview_output_entries_from_run(run: Mapping[str, object]) -> list[dict[str, object]]:
+    return [to_legacy_wire(event) for event in preview_output_events_from_run(run)]
+
+
+def load_run_output_events_for_run(
+    run: Mapping[str, object],
+    *,
+    prefer_full: bool = True,
+    log_event: str = "FULL_OUTPUT_LOAD_FAILED",
+) -> RunOutputLoadResult:
+    unknown_collector = _unknown_line_event_collector({
+        "run_id": str(run.get("id") or ""),
+        "session": get_log_session_id(str(run.get("session_id") or "")),
+    })
+    if prefer_full and run.get("full_output_available") and run.get("rel_path"):
+        rel_path = str(run.get("rel_path") or "")
+        try:
+            return RunOutputLoadResult(
+                events=load_full_output_events(rel_path, unknown_collector),
+                source="full",
+                truncated=bool(run.get("full_output_truncated")),
+            )
+        except (OSError, EOFError, UnicodeError, json.JSONDecodeError) as exc:
+            log.warning(log_event, extra={
+                "run_id": str(run.get("id") or ""),
+                "session": get_log_session_id(str(run.get("session_id") or "")),
+                "rel_path": rel_path,
+                "reason": type(exc).__name__,
+            })
+    return RunOutputLoadResult(
+        events=preview_output_events_from_run(run, unknown_collector),
+        source="preview",
+        truncated=bool(run.get("preview_truncated")),
+        fallback=bool(prefer_full and run.get("full_output_available") and run.get("rel_path")),
+    )
+
+
+def load_run_output_entries_for_run(
+    run: Mapping[str, object],
+    *,
+    prefer_full: bool = True,
+    log_event: str = "FULL_OUTPUT_LOAD_FAILED",
+) -> RunOutputLoadResult:
+    return load_run_output_events_for_run(run, prefer_full=prefer_full, log_event=log_event)
+
+
+def _unknown_line_event_collector(base_extra: Mapping[str, object]) -> UnknownCollector:
+    seen: set[tuple[str, str]] = set()
+
+    def collect(family: str, value: str) -> None:
+        key = (family, value)
+        if key in seen:
+            return
+        seen.add(key)
+        log.warning("LINE_EVENT_UNKNOWN_VALUE", extra={**base_extra, "family": family, "value": value})
+
+    return collect

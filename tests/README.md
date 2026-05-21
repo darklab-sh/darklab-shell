@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,155
-- docs/inventory meta-tests: 32
-- `pytest`: 1713 (1681 behavior + 32 meta)
-- `vitest`: 1226
+- behavior tests: 3,170
+- docs/inventory meta-tests: 33
+- `pytest`: 1722 (1689 behavior + 33 meta)
+- `vitest`: 1229
 - `playwright`: 252
-- total: 3,191
+- total: 3,203
 
 This document is organized in two parts:
 
@@ -380,6 +380,7 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `test_api_v1_run_start_uses_broker_and_streams_ndjson` | Verifies API run start returns stream links and NDJSON stream adaptation follows broker events. |
 | `test_api_v1_sse_stream_emits_idle_heartbeat` | Verifies brokered SSE streams emit heartbeat comments during idle periods. |
 | `test_api_v1_ndjson_stream_adapts_sse_heartbeat_comments` | Verifies NDJSON stream adaptation preserves idle SSE heartbeats as heartbeat rows. |
+| `test_api_v1_ndjson_stream_preserves_sse_event_name` | Verifies NDJSON stream adaptation carries SSE event names into rows when the payload does not already include one. |
 | `test_api_v1_run_start_reports_broker_unavailable` | Verifies run start returns `503 broker_unavailable` and `Retry-After` when the broker is unavailable. |
 | `test_api_v1_run_start_rejects_archived_project_link` | Verifies API-started runs reject explicit links to archived projects before starting execution. |
 | `test_api_v1_run_start_rejects_invalid_body_and_unknown_project` | Verifies API run start rejects non-object JSON bodies and unknown project ids with stable error codes. |
@@ -759,9 +760,11 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunOutputCapture.test_add_event_preserves_legacy_output_shape` | Verifies typed run-output events still write the legacy preview and artifact shape. |
 | `TestRunOutputCapture.test_legacy_event_factory_matches_typed_add_event_bytes` | Verifies legacy line-event factory output and typed `add_event` output write matching event rows after the artifact header. |
 | `TestRunOutputCapture.test_full_output_artifact_respects_byte_cap` | Checks that full output artifact respects byte cap. |
+| `TestRunOutputCapture.test_full_output_artifact_cap_does_not_reopen_and_overwrite_prefix` | Verifies capped full-output artifacts keep the preserved prefix when later lines arrive after the byte cap is hit. |
 | `TestRunOutputCapture.test_full_output_artifact_loads_legacy_plain_text_rows` | Checks that full output artifact loads legacy plain text rows. |
 | `TestRunOutputCapture.test_full_output_artifact_loads_headerless_legacy_json_rows` | Verifies headerless legacy JSON artifacts still decode through the line-event compatibility path. |
 | `TestRunOutputCapture.test_full_output_artifact_loads_enveloped_wire_rows` | Verifies headered v1 artifact files skip the header and decode versioned line-event rows. |
+| `TestRunOutputCapture.test_full_output_artifact_unknown_values_log_once_per_load` | Verifies full-output artifact loading logs each unknown line-event kind, role, or signal once per load. |
 | `TestRunOutputCapture.test_empty_full_output_capture_does_not_create_artifact_file` | Verifies empty persisted-output captures do not create gzip artifact files. |
 | `TestRunOutputCapture.test_search_text_from_events_includes_deduped_capped_entities` | Verifies run-output search text includes deduped entity canonical values while skipping oversized and redacted values. |
 | `TestRunOutputCapture.test_missing_hints_file_returns_empty_list` | Checks that missing hints file returns empty list. |
@@ -1493,6 +1496,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestRunRoute.test_non_json_body_handled` | Checks that non JSON body handled. |
 | `TestRunRoute.test_client_side_run_persists_terminal_native_builtin` | Verifies that browser-owned built-in output is persisted as a server-backed history run. |
 | `TestRunRoute.test_client_side_run_can_offload_search_text_and_delete_it_with_run` | Verifies oversized run search text can be offloaded and cleaned up when the run is deleted. |
+| `TestRunRoute.test_client_side_run_applies_preview_byte_cap` | Verifies that browser-owned run persistence applies the same preview byte cap as server-owned run output. |
 | `TestRunRoute.test_client_side_run_persists_tour_builtin` | Verifies that the terminal tour can persist its client-side transcript as a normal history run. |
 | `TestRunRoute.test_client_side_run_does_not_link_to_active_project` | Verifies browser-owned built-in persistence saves history without linking administrative runs to the active project. |
 | `TestRunRoute.test_client_side_run_rejects_non_client_builtin_root` | Verifies that `/run/client` only accepts allowlisted browser-owned built-in roots. |
@@ -1525,6 +1529,8 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestHistoryRoute.test_compare_candidates_rank_exact_command_before_same_target` | Verifies that run comparison candidates prefer exact command matches before same-target and same-command-only matches. |
 | `TestHistoryRoute.test_hunk_line_diff_handles_insert_delete_and_equal_context` | Verifies that run comparison hunks cover insertions, modified lines, and folded equal context. |
 | `TestHistoryRoute.test_compare_line_events_reports_structural_changes_by_line_index` | Verifies structured run-output comparison reports same-line kind/role changes without treating them as text-only equality. |
+| `TestHistoryRoute.test_compare_full_output_falls_back_to_preview_when_artifact_is_missing` | Verifies run comparison falls back to saved preview output when a referenced full-output artifact is unavailable. |
+| `TestHistoryRoute.test_compare_route_falls_back_to_preview_when_full_artifact_is_corrupt` | Verifies the compare route returns a preview-backed diff instead of failing when a full-output artifact is corrupt. |
 | `TestHistoryRoute.test_hunk_line_diff_handles_uneven_replace_pairing` | Verifies that uneven replace hunks pair similar lines while preserving left-only rows. |
 | `TestHistoryRoute.test_hunk_line_diff_keeps_unrelated_and_long_replace_lines_unpaired` | Verifies that unrelated replace blocks and very long lines stay in unpaired buckets. |
 | `TestHistoryRoute.test_replace_pairing_uses_quick_ratio_before_full_ratio` | Verifies replace pairing skips expensive full similarity checks when cheap quick-ratio filtering already rejects a candidate. |
@@ -1582,6 +1588,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestRunPermalinkRoute.test_json_view_returns_command` | Checks that JSON view returns command. |
 | `TestRunPermalinkRoute.test_json_view_is_a_bearer_permalink_across_sessions` | Verifies that a copied run permalink URL is an implicit bearer link and can render JSON without the original session identity. |
 | `TestRunPermalinkRoute.test_json_view_returns_full_output_when_artifact_exists` | Checks that JSON view returns full output when artifact exists. |
+| `TestRunPermalinkRoute.test_json_view_falls_back_to_preview_when_full_output_artifact_is_missing` | Verifies JSON run views fall back to preview output when a referenced full-output artifact is unavailable. |
 | `TestRunPermalinkRoute.test_json_preview_view_returns_preview_when_requested` | Checks that JSON preview view returns preview when requested. |
 | `TestRunPermalinkRoute.test_html_content_type` | Checks HTML content type handling. |
 | `TestRunPermalinkRoute.test_permalink_uses_full_output_when_available` | Checks that permalink uses full output when available. |
@@ -1731,6 +1738,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestHistoryIsolation.test_history_only_returns_runs_for_current_session` | Checks that history only returns runs for current session. |
 | `TestHistoryIsolation.test_delete_run_only_deletes_for_matching_session` | Checks that delete run only deletes for matching session. |
 | `TestHistoryIsolation.test_public_run_permalink_omits_intel_output_for_non_owner` | Verifies that public non-owner run permalink JSON omits app-native intel response bodies. |
+| `TestHistoryIsolation.test_public_run_permalink_omits_full_artifact_intel_output_for_non_owner` | Verifies public non-owner run permalink JSON and HTML omit app-native intel response bodies loaded from full-output artifacts. |
 | `TestShareRoundTrip.test_share_json_roundtrip_preserves_structured_content` | Checks that share JSON roundtrip preserves structured content. |
 | `TestShareRoundTrip.test_share_omits_intel_output_even_when_raw_requested` | Verifies that raw snapshot sharing omits app-native intel response bodies from JSON and HTML. |
 
@@ -1754,6 +1762,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | Test | Description |
 | --- | --- |
 | `test_python_and_js_line_event_enum_values_match` | Verifies Python and browser line-event enum value lists stay in sync. |
+| `test_python_legacy_class_fixture_matches_line_event_decoder` | Verifies Python legacy `cls` decoding matches the shared fixture used by browser parity tests. |
 
 #### `test_schedules.py`
 
@@ -2556,6 +2565,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `preserves absolute line numbers when line-number mode is enabled later` | Verifies that enabling line numbers after output trimming uses stored absolute line numbers for retained rows. |
 | `adds timestamp dataset fields` | Verifies that adds timestamp dataset fields. |
 | `stores server-provided signal metadata on DOM lines and rawLines` | Verifies that streamed backend signal metadata is attached to rendered output rows and retained in tab rawLines. |
+| `falls back to value matching when ANSI makes entity offsets stale` | Verifies entity-token rendering does not trust stale start/end offsets after ANSI stripping changes visible text positions. |
+| `supports keyboard navigation and outside-click close in the entity context menu` | Verifies the output entity context menu focuses its first action, supports arrow-key movement, returns focus to the token on Escape, and closes on outside click. |
 | `keeps cached signal counts in sync when old lines are trimmed` | Verifies that per-tab signal counts decrement when max-line trimming removes old signal rows. |
 | `uses +0.0s for lines without a true elapsed runtime` | Verifies that synthetic or untimed lines surface `+0.0s` instead of a blank elapsed prefix. |
 | `toggles the line-number body class and button labels` | Verifies that toggles the line-number body class and button labels. |
@@ -2663,6 +2674,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `reports unknown values and falls back safely` | Verifies browser decoding reports unknown kind, role, and signal values while rendering through safe fallbacks. |
 | `keeps role cls compatibility when both axes are non-default` | Verifies browser compatibility `cls` uses the role string when kind and role are both non-default. |
 | `exports enum value lists for Python parity tests` | Verifies the browser model exposes enum value lists for cross-language parity checks. |
+| `matches the shared legacy class fixture` | Verifies browser legacy-class decoding stays aligned with the shared Python fixture. |
 
 #### `runner.test.js`
 

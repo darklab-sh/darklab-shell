@@ -8,13 +8,13 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from core.redaction import REDACTED_ENTITY_SENTINEL
 from services.atlas.recalculation import recalculate_atlas_entities
 from services.intel.canonical import CanonicalizationError, canonical_entity, entity_signature
 from services.intel.schema import ENTITY_TYPES
 
 
 ATLAS_ENTITY_TYPES = frozenset(ENTITY_TYPES)
-REDACTED_ENTITY_SENTINEL = "<redacted>"
 
 
 def atlas_entity_id(session_id: str, entity_type: str, canonical_value: str) -> str:
