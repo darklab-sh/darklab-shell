@@ -69,9 +69,15 @@ from services.history.permalinks import (
     _prompt_echo_text,
 )
 from core.output_signals import OutputSignalClassifier, classify_line, command_root, extract_entities, extract_target
-from core.redaction import RAW_ONLY_INTEL_PLACEHOLDER, omit_raw_only_line_entries
+from core.redaction import RAW_ONLY_INTEL_PLACEHOLDER, line_entries_from_events, omit_raw_only_line_entries
 from services.runs.output_model import LineEvent, LineKind, LineSignal
-from services.runs.output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_entries, load_full_output_lines
+from services.runs.output_store import (
+    RunOutputCapture,
+    RUN_OUTPUT_DIR,
+    load_full_output_entries,
+    load_full_output_events,
+    load_full_output_lines,
+)
 from services.atlas.materializer import materialize_run_entities
 from services.workspace.files import (
     InvalidWorkspacePath, WorkspaceDisabled, WorkspacePermissionDenied, WorkspaceQuotaExceeded,
@@ -7829,10 +7835,10 @@ class TestRawOnlyRedaction:
         lines = [
             {"text": "Shodan", "cls": "", "command_root": "intel", "tsC": "10:00:01", "tsE": "+0.1s"},
             {"text": "ports: 80, 443", "cls": "", "command_root": "intel", "tsC": "10:00:02", "tsE": "+0.2s"},
-            {"text": "[process exited with code 0]", "cls": "exit-ok"},
+            {"text": "[process exited with code 0]", "cls": "exit-ok", "tsC": "", "tsE": ""},
         ]
 
-        omitted = omit_raw_only_line_entries(lines)
+        omitted = line_entries_from_events(omit_raw_only_line_entries(lines))
 
         assert omitted == [
             {
@@ -7843,7 +7849,7 @@ class TestRawOnlyRedaction:
                 "tsC": "10:00:01",
                 "tsE": "+0.1s",
             },
-            {"text": "[process exited with code 0]", "cls": "exit-ok"},
+            {"text": "[process exited with code 0]", "cls": "exit-ok", "tsC": "", "tsE": ""},
         ]
 
     def test_preserves_non_intel_entries(self):
@@ -7852,7 +7858,10 @@ class TestRawOnlyRedaction:
             "plain legacy line",
         ]
 
-        assert omit_raw_only_line_entries(lines) == lines
+        assert line_entries_from_events(omit_raw_only_line_entries(lines)) == [
+            {"text": "host darklab.sh has address 104.21.4.35", "cls": "", "tsC": "", "tsE": "", "command_root": "host"},
+            {"text": "plain legacy line", "cls": "", "tsC": "", "tsE": ""},
+        ]
 
 
 # ── _format_retention ─────────────────────────────────────────────────────────
@@ -8659,6 +8668,14 @@ class TestRunOutputCapture:
         assert list(capture.preview_lines) == expected
         assert capture.artifact_rel_path is not None
         assert load_full_output_entries(capture.artifact_rel_path) == expected
+        events = load_full_output_events(capture.artifact_rel_path)
+        assert len(events) == 1
+        assert events[0].text == "443/tcp open https"
+        assert events[0].signals == (LineSignal.findings,)
+        assert events[0].line_index == 0
+        assert events[0].command_root == "nmap"
+        assert events[0].target == "ip.darklab.sh"
+        assert events[0].entities[0].canonical_value == "ip.darklab.sh"
 
     def test_add_event_preserves_legacy_output_shape(self):
         capture = RunOutputCapture("test-run-output-event", preview_limit=5, persist_full_output=True, full_output_max_bytes=0)
@@ -8741,6 +8758,7 @@ class TestRunOutputCapture:
             {"text": "legacy one", "cls": "", "tsC": "", "tsE": ""},
             {"text": "legacy two", "cls": "", "tsC": "", "tsE": ""},
         ]
+        assert [event.text for event in load_full_output_events(artifact_rel_path)] == ["legacy one", "legacy two"]
 
     def test_missing_hints_file_returns_empty_list(self):
         with mock.patch("services.commands.registry.APP_HINTS_FILE", "/nonexistent/app_hints.txt"):

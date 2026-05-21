@@ -4,9 +4,11 @@ Shared redaction helpers for export/share surfaces.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
 import re
 
-from services.runs.output_model import LineKind, line_event_from_legacy, to_legacy_entry
+from services.runs.output_model import LineEntity, LineEvent, LineKind, from_wire, line_event_from_legacy, to_legacy_wire
 
 
 _ALLOWED_FLAGS = {"i", "m"}
@@ -94,44 +96,68 @@ BUILTIN_SHARE_REDACTION_RULES = normalize_redaction_rules(_RAW_BUILTIN_SHARE_RED
 RAW_ONLY_INTEL_PLACEHOLDER = "Intel data omitted from share"
 
 
-def _is_intel_output_entry(item) -> bool:
-    return isinstance(item, dict) and str(item.get("command_root", "")).strip().lower() == "intel"
-
-
-def _raw_only_placeholder_entry(source: dict | None = None) -> dict[str, object]:
-    source = source or {}
-    entry = to_legacy_entry(
-        line_event_from_legacy(RAW_ONLY_INTEL_PLACEHOLDER, kind=LineKind.notice),
-        include_timestamps=False,
-    )
-    entry.update({
-        "raw_only": True,
-        "command_root": "intel",
-    })
-    if isinstance(source.get("tsC"), str):
-        entry["tsC"] = source["tsC"]
-    if isinstance(source.get("tsE"), str):
-        entry["tsE"] = source["tsE"]
-    if isinstance(source.get("line_number"), int):
-        entry["line_number"] = source["line_number"]
-    return entry
-
-
-def omit_raw_only_line_entries(entries):
-    """Replace share/export-only-sensitive transcript groups with placeholders."""
-    omitted = []
-    in_intel_group = False
+def line_events_from_entries(entries: Sequence[LineEvent | Mapping[str, object] | str] | None) -> list[LineEvent]:
+    events: list[LineEvent] = []
     for item in entries or ():
-        if _is_intel_output_entry(item):
+        if isinstance(item, LineEvent):
+            events.append(item)
+        elif isinstance(item, str):
+            events.append(line_event_from_legacy(item))
+        elif isinstance(item, Mapping) and isinstance(item.get("text"), str):
+            events.append(from_wire(item))
+    return events
+
+
+def line_entries_from_events(
+    events: Sequence[LineEvent],
+    *,
+    compact: bool = False,
+    preserve_plain_strings: bool = False,
+) -> list[dict[str, object] | str]:
+    entries: list[dict[str, object] | str] = []
+    for event in events:
+        entry = to_legacy_wire(event)
+        if compact:
+            if entry.get("tsC") == "":
+                entry.pop("tsC", None)
+            if entry.get("tsE") == "":
+                entry.pop("tsE", None)
+        if event.text == RAW_ONLY_INTEL_PLACEHOLDER and event.command_root == "intel":
+            entry["raw_only"] = True
+        if preserve_plain_strings and set(entry) == {"text", "cls"} and entry["cls"] == "":
+            entries.append(str(entry["text"]))
+            continue
+        entries.append(entry)
+    return entries
+
+
+def _is_intel_output_event(event: LineEvent) -> bool:
+    return event.command_root.strip().lower() == "intel"
+
+
+def _raw_only_placeholder_event(source: LineEvent | None = None) -> LineEvent:
+    source = source or line_event_from_legacy("")
+    return line_event_from_legacy(
+        RAW_ONLY_INTEL_PLACEHOLDER,
+        kind=LineKind.notice,
+        ts_clock=source.ts_clock,
+        ts_elapsed=source.ts_elapsed,
+        command_root="intel",
+    )
+
+
+def omit_raw_only_line_entries(entries: Sequence[LineEvent | Mapping[str, object] | str] | None) -> list[LineEvent]:
+    """Replace share/export-only-sensitive transcript groups with placeholders."""
+    omitted: list[LineEvent] = []
+    in_intel_group = False
+    for event in line_events_from_entries(entries):
+        if _is_intel_output_event(event):
             if not in_intel_group:
-                omitted.append(_raw_only_placeholder_entry(item))
+                omitted.append(_raw_only_placeholder_event(event))
                 in_intel_group = True
             continue
         in_intel_group = False
-        if isinstance(item, str):
-            omitted.append(item)
-        elif isinstance(item, dict):
-            omitted.append(dict(item))
+        omitted.append(event)
     return omitted
 
 
@@ -151,16 +177,22 @@ def apply_redaction_rules(text, rules):
     return value
 
 
-def redact_line_entries(entries, rules):
-    """Redact the text field of share/export line entries."""
-    redacted = []
-    for item in entries or ():
-        if isinstance(item, str):
-            redacted.append(apply_redaction_rules(item, rules))
-            continue
-        if not isinstance(item, dict) or not isinstance(item.get("text"), str):
-            continue
-        cloned = dict(item)
-        cloned["text"] = apply_redaction_rules(item["text"], rules)
-        redacted.append(cloned)
+def _redact_entity(entity: LineEntity, rules) -> LineEntity:
+    return replace(
+        entity,
+        value=apply_redaction_rules(entity.value, rules),
+        canonical_value=apply_redaction_rules(entity.canonical_value, rules),
+    )
+
+
+def redact_line_entries(entries: Sequence[LineEvent | Mapping[str, object] | str] | None, rules) -> list[LineEvent]:
+    """Redact share/export line events."""
+    redacted: list[LineEvent] = []
+    for event in line_events_from_entries(entries):
+        redacted.append(replace(
+            event,
+            text=apply_redaction_rules(event.text, rules),
+            target=apply_redaction_rules(event.target, rules) if event.target else "",
+            entities=tuple(_redact_entity(entity, rules) for entity in event.entities),
+        ))
     return redacted

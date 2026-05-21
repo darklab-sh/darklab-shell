@@ -4004,7 +4004,11 @@ class TestShareRoundTrip:
             ],
         }
 
-        resp = client.post("/share", json=payload, headers={"X-Session-ID": "share-session"})
+        resp = client.post(
+            "/share",
+            json={**payload, "apply_redaction": False},
+            headers={"X-Session-ID": "share-session"},
+        )
         assert resp.status_code == 200
         created = json.loads(resp.data)
         assert "id" in created

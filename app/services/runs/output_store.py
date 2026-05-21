@@ -16,7 +16,7 @@ import json
 import os
 
 from config import resolve_data_dir
-from services.runs.output_model import LineEvent, line_event_from_legacy, to_legacy_wire
+from services.runs.output_model import LineEvent, from_wire, line_event_from_legacy, to_legacy_wire
 
 DATA_DIR = resolve_data_dir()
 RUN_OUTPUT_DIR = os.path.join(DATA_DIR, "run-output")
@@ -207,40 +207,24 @@ def delete_artifact_file(rel_path: str | None):
 
 
 def load_full_output_lines(rel_path: str) -> list[str]:
-    return [str(entry.get("text", "")) for entry in load_full_output_entries(rel_path)]
+    return [event.text for event in load_full_output_events(rel_path)]
 
 
-def load_full_output_entries(rel_path: str) -> list[dict[str, object]]:
+def load_full_output_events(rel_path: str) -> list[LineEvent]:
     with gzip.open(get_artifact_path(rel_path), "rt", encoding="utf-8") as f:
         rows = f.read().splitlines()
 
-    parsed: list[dict[str, object]] = []
+    events: list[LineEvent] = []
     for row in rows:
         try:
             item = json.loads(row)
         except json.JSONDecodeError:
-            return [{"text": line, "cls": "", "tsC": "", "tsE": ""} for line in rows]
+            return [line_event_from_legacy(line) for line in rows]
         if not isinstance(item, dict) or not isinstance(item.get("text"), str):
-            return [{"text": line, "cls": "", "tsC": "", "tsE": ""} for line in rows]
-        entry: dict[str, object] = {
-            "text": item["text"],
-            "cls": str(item.get("cls", "")),
-            "tsC": str(item.get("tsC", "")),
-            "tsE": str(item.get("tsE", "")),
-        }
-        if isinstance(item.get("signals"), list):
-            entry["signals"] = [str(signal) for signal in item["signals"] if str(signal)]
-        if isinstance(item.get("line_index"), int):
-            entry["line_index"] = item["line_index"]
-        if isinstance(item.get("command_root"), str):
-            entry["command_root"] = item["command_root"]
-        if isinstance(item.get("target"), str):
-            entry["target"] = item["target"]
-        if isinstance(item.get("entities"), list):
-            entities = RunOutputCapture._normalize_entities([
-                entity for entity in item["entities"] if isinstance(entity, dict)
-            ])
-            if entities:
-                entry["entities"] = entities
-        parsed.append(entry)
-    return parsed
+            return [line_event_from_legacy(line) for line in rows]
+        events.append(from_wire(item))
+    return events
+
+
+def load_full_output_entries(rel_path: str) -> list[dict[str, object]]:
+    return [to_legacy_wire(event) for event in load_full_output_events(rel_path)]

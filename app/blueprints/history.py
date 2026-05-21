@@ -46,7 +46,7 @@ from services.projects.contracts import (
     MAX_ENTITY_ID_LEN,
     ProjectWorkspaceError,
 )
-from core.redaction import omit_raw_only_line_entries, redact_line_entries
+from core.redaction import line_entries_from_events, omit_raw_only_line_entries, redact_line_entries
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, builtin_command_roots_for_storage
 from services.runs.output_model import LineKind, line_event_from_legacy, to_legacy_entry
 from services.runs.output_store import load_full_output_entries
@@ -1633,7 +1633,7 @@ def get_run(run_id):
         notes_by_run = _run_notes_by_run(conn, [run_id]) if include_private_metadata else {}
         scheduled_by_run = schedule_ids_by_run(conn, [run_id]) if include_private_metadata else {}
     if not include_private_metadata:
-        run["output_entries"] = omit_raw_only_line_entries(run["output_entries"])
+        run["output_entries"] = line_entries_from_events(omit_raw_only_line_entries(run["output_entries"]))
         run["output"] = [
             str(entry.get("text", "")) if isinstance(entry, dict) else str(entry)
             for entry in run["output_entries"]
@@ -1918,9 +1918,10 @@ def save_share():
         if "cls" in item and not isinstance(item["cls"], str):
             return jsonify({"error": "Content objects must use string cls values"}), 400
     label = label.strip()
-    content = omit_raw_only_line_entries(content)
+    content_events = omit_raw_only_line_entries(content)
     if CFG.get("share_redaction_enabled") and apply_redaction:
-        content = redact_line_entries(content, _config.get_share_redaction_rules(CFG))
+        content_events = redact_line_entries(content_events, _config.get_share_redaction_rules(CFG))
+    content = line_entries_from_events(content_events, compact=True, preserve_plain_strings=True)
     share_id = str(uuid.uuid4())
     created  = datetime.now(timezone.utc).isoformat()
     content_json = json.dumps(content)

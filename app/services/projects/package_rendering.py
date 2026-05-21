@@ -11,7 +11,7 @@ from pathlib import PurePosixPath
 
 from jinja2 import Environment, select_autoescape
 
-from core.redaction import redact_line_entries
+from core.redaction import line_entries_from_events, redact_line_entries
 from services.history.permalinks import _font_face_css, _format_duration, _permalink_context
 from services.projects.contracts import ProjectWorkspaceError
 from services.projects.models import entity_note_body as _entity_note_body
@@ -366,7 +366,7 @@ def _package_run_output_entries(run, *, cfg=None, include_companion=False):
 
 
 def _package_run_text_bytes(entries, redaction_rules=None):
-    entries = redact_line_entries(entries, redaction_rules) if redaction_rules else entries
+    entries = line_entries_from_events(redact_line_entries(entries, redaction_rules)) if redaction_rules else entries
     lines = []
     for entry in entries:
         if isinstance(entry, dict):
@@ -492,7 +492,7 @@ def _render_package_run_html(
     transcript_text_path="",
     redaction_rules=None,
 ):
-    entries = redact_line_entries(entries, redaction_rules) if redaction_rules else entries
+    entries = line_entries_from_events(redact_line_entries(entries, redaction_rules)) if redaction_rules else entries
     run = _redact_package_run(run, redaction_rules)
     command = str(run.get("command") or "")
     started = str(run.get("started") or "")
