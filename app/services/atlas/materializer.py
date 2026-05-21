@@ -14,6 +14,7 @@ from services.intel.schema import ENTITY_TYPES
 
 
 ATLAS_ENTITY_TYPES = frozenset(ENTITY_TYPES)
+REDACTED_ENTITY_SENTINEL = "<redacted>"
 
 
 def atlas_entity_id(session_id: str, entity_type: str, canonical_value: str) -> str:
@@ -37,7 +38,7 @@ def canonicalize_entity_record(entity: Mapping[str, Any]) -> tuple[str, str] | N
     if entity_type not in ATLAS_ENTITY_TYPES:
         return None
     raw_value = str(entity.get("canonical_value") or entity.get("value") or "").strip()
-    if not raw_value:
+    if not raw_value or raw_value == REDACTED_ENTITY_SENTINEL:
         return None
     try:
         if entity_type == "hash" and ":" in raw_value:

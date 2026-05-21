@@ -171,6 +171,53 @@ describe('history compare split renderer', () => {
     expect(document.querySelectorAll('.history-compare-line-delta')).toHaveLength(2)
   })
 
+  it('marks structural kind and role changes on compare rows', () => {
+    const { _renderHistoryComparison } = loadCompareHelpers()
+    _renderHistoryComparison(compareData({
+      hunks: [{
+        op: 'replace',
+        left: {
+          start: 0,
+          end: 1,
+          lines: [{ text: 'same text', line_index: 0, kind: 'info', role: 'body' }],
+        },
+        right: {
+          start: 0,
+          end: 1,
+          lines: [{ text: 'same text', line_index: 0, kind: 'info', role: 'section-header' }],
+        },
+        changed_pairs: [{
+          left_index: 0,
+          right_index: 0,
+          structural_change: true,
+          structural: {
+            left: { kind: 'info', role: 'body' },
+            right: { kind: 'info', role: 'section-header' },
+          },
+          segments: {
+            left: [{ text: 'same text' }],
+            right: [{ text: 'same text' }],
+          },
+        }],
+        left_unpaired: [],
+        right_unpaired: [],
+      }],
+      totals: {
+        left_total_lines: 1,
+        right_total_lines: 1,
+        equal_line_count: 0,
+        changed_line_count: 1,
+        added_line_count: 0,
+        removed_line_count: 0,
+      },
+    }))
+
+    const rows = [...document.querySelectorAll('.history-compare-row.is-structural-change')]
+    expect(rows).toHaveLength(2)
+    expect(rows[0].dataset.compareRole).toBe('body')
+    expect(rows[1].dataset.compareRole).toBe('section-header')
+  })
+
   it('resolves hidden auto mode from viewport and keeps modal view overrides local', () => {
     const { _renderHistoryComparison, applyCompareViewModePreference } = loadCompareHelpers({
       mobileMode: true,

@@ -3,6 +3,7 @@
 import json
 import re
 from collections import Counter
+from collections.abc import Sequence
 from datetime import datetime
 from difflib import SequenceMatcher
 
@@ -12,8 +13,8 @@ from core.output_signals import (
     extract_target,
     strip_ansi_codes,
 )
-from services.runs.output_model import line_event_from_legacy, to_legacy_entry
-from services.runs.output_store import load_full_output_entries
+from services.runs.output_model import LineEvent, from_wire, line_event_from_legacy, to_legacy_entry
+from services.runs.output_store import load_full_output_entries, load_full_output_events
 
 MAX_COMPARE_ITEMS_PER_SIDE = 5000
 COMPARE_MAX_LINES = 20_000
@@ -262,46 +263,35 @@ def run_candidate_payload(row, source):
 
 
 def preview_output_entries_from_run(run):
+    return [to_legacy_entry(event) for event in preview_output_events_from_run(run)]
+
+
+def preview_output_events_from_run(run):
     raw = run.get("output_preview")
     if raw is None:
         raw = run.get("output")
     loaded = json.loads(raw) if raw else []
     if loaded and isinstance(loaded[0], str):
-        return [to_legacy_entry(line_event_from_legacy(line)) for line in loaded]
-    entries = []
+        return [line_event_from_legacy(line) for line in loaded]
+    events = []
     for item in loaded:
         if isinstance(item, dict) and isinstance(item.get("text"), str):
-            entry = to_legacy_entry(
-                line_event_from_legacy(
-                    item["text"],
-                    item.get("cls", ""),
-                    ts_clock=item.get("tsC", ""),
-                    ts_elapsed=item.get("tsE", ""),
-                    signals=item.get("signals") if isinstance(item.get("signals"), list) else None,
-                    line_index=item.get("line_index"),
-                    command_root=item.get("command_root", ""),
-                    target=item.get("target", ""),
-                    entities=item.get("entities") if isinstance(item.get("entities"), list) else None,
-                )
-            )
-            if isinstance(item.get("signals"), list):
-                entry["signals"] = [str(signal) for signal in item["signals"] if str(signal)]
-            if isinstance(item.get("line_index"), int):
-                entry["line_index"] = item["line_index"]
-            if isinstance(item.get("command_root"), str):
-                entry["command_root"] = item["command_root"]
-            if isinstance(item.get("target"), str):
-                entry["target"] = item["target"]
-            entries.append(entry)
+            events.append(from_wire(item))
         elif isinstance(item, str):
-            entries.append(to_legacy_entry(line_event_from_legacy(item)))
-    return entries
+            events.append(line_event_from_legacy(item))
+    return events
 
 
 def compare_full_output_entries(run):
     if run.get("full_output_available") and run.get("rel_path"):
         return load_full_output_entries(run["rel_path"]), "full", bool(run.get("full_output_truncated"))
     return preview_output_entries_from_run(run), "preview", bool(run.get("preview_truncated"))
+
+
+def compare_full_output_events(run):
+    if run.get("full_output_available") and run.get("rel_path"):
+        return load_full_output_events(run["rel_path"]), "full", bool(run.get("full_output_truncated"))
+    return preview_output_events_from_run(run), "preview", bool(run.get("preview_truncated"))
 
 
 def is_compare_chrome_line(entry, text):
@@ -323,23 +313,27 @@ def line_entry_text(entry):
 
 
 def compare_entries_for_diff(run):
-    entries, source, partial = compare_full_output_entries(run)
+    events, source, partial = compare_full_output_events(run)
     compared = []
     byte_count = 0
     truncated_by_limit = False
-    for entry in entries:
-        text = line_entry_text(entry).rstrip("\n")
+    for event in events:
+        entry = to_legacy_entry(event)
+        text = event.text.rstrip("\n")
         if is_compare_chrome_line(entry, text):
             continue
         encoded_len = len(text.encode("utf-8", errors="replace"))
         if len(compared) >= COMPARE_MAX_LINES or byte_count + encoded_len > COMPARE_MAX_BYTES:
             truncated_by_limit = True
             break
-        compared.append({
+        item = {
             "text": text,
-            "line_index": entry.get("line_index") if isinstance(entry, dict) else None,
-            "signals": entry.get("signals", []) if isinstance(entry, dict) else [],
-        })
+            "line_index": event.line_index,
+            "signals": [signal.value for signal in event.signals],
+            "kind": event.kind.value,
+            "role": event.role.value,
+        }
+        compared.append(item)
         byte_count += encoded_len
     return compared, {
         "source": source,
@@ -370,14 +364,66 @@ def finding_count_for_entries(run, entries):
 
 
 def compare_line_payload(entry):
-    return {
+    payload = {
         "text": str(entry.get("text") or ""),
         "line_index": entry.get("line_index"),
     }
+    for key in ("kind", "role"):
+        if entry.get(key):
+            payload[key] = entry[key]
+    return payload
 
 
 def compare_line_payloads(entries, start, end):
     return [compare_line_payload(entry) for entry in entries[start:end]]
+
+
+def _all_compare_entries_have_line_indexes(left_entries, right_entries):
+    entries = [*left_entries, *right_entries]
+    return bool(entries) and all(
+        isinstance(entry.get("line_index"), int) and not isinstance(entry.get("line_index"), bool)
+        for entry in entries
+    )
+
+
+def compare_line_sequence_key(entry, *, use_line_index):
+    text = str(entry.get("text") or "")
+    if not use_line_index:
+        return text
+    return (
+        entry.get("line_index"),
+        text,
+        str(entry.get("kind") or ""),
+        str(entry.get("role") or ""),
+    )
+
+
+def compare_line_structural_changed(left_line, right_line):
+    return any(
+        str(left_line.get(key) or "") != str(right_line.get(key) or "")
+        for key in ("kind", "role")
+    )
+
+
+def compare_line_structural_payload(line):
+    return {
+        key: str(line.get(key) or "")
+        for key in ("kind", "role")
+        if line.get(key)
+    }
+
+
+def compare_line_events(left: Sequence[LineEvent], right: Sequence[LineEvent]):
+    def _entry(event: LineEvent):
+        return {
+            "text": event.text,
+            "line_index": event.line_index,
+            "signals": [signal.value for signal in event.signals],
+            "kind": event.kind.value,
+            "role": event.role.value,
+        }
+
+    return hunk_line_diff([_entry(event) for event in left], [_entry(event) for event in right])
 
 
 def changed_line_segments(left_text, right_text):
@@ -464,12 +510,19 @@ def compare_replace_hunk(left_entries, right_entries, left_start, left_end, righ
         right_text = str(right_lines[0].get("text") or "")
         if max(len(left_text), len(right_text)) <= COMPARE_LINE_DISPLAY_TRUNCATE:
             left_segments, right_segments = changed_line_segments(left_text, right_text)
-            hunk["changed_pairs"].append({
+            pair = {
                 "left_index": 0,
                 "right_index": 0,
                 "similarity": round(SequenceMatcher(None, left_text, right_text, autojunk=False).ratio(), 3),
                 "segments": {"left": left_segments, "right": right_segments},
-            })
+            }
+            if compare_line_structural_changed(left_lines[0], right_lines[0]):
+                pair["structural_change"] = True
+                pair["structural"] = {
+                    "left": compare_line_structural_payload(left_lines[0]),
+                    "right": compare_line_structural_payload(right_lines[0]),
+                }
+            hunk["changed_pairs"].append(pair)
             return hunk
 
     for left_index, left_line in enumerate(left_lines):
@@ -495,12 +548,19 @@ def compare_replace_hunk(left_entries, right_entries, left_start, left_end, righ
         unmatched_right.remove(right_index)
         right_text = str(right_lines[right_index].get("text") or "")
         left_segments, right_segments = changed_line_segments(left_text, right_text)
-        hunk["changed_pairs"].append({
+        pair = {
             "left_index": left_index,
             "right_index": right_index,
             "similarity": round(similarity, 3),
             "segments": {"left": left_segments, "right": right_segments},
-        })
+        }
+        if compare_line_structural_changed(left_line, right_lines[right_index]):
+            pair["structural_change"] = True
+            pair["structural"] = {
+                "left": compare_line_structural_payload(left_line),
+                "right": compare_line_structural_payload(right_lines[right_index]),
+            }
+        hunk["changed_pairs"].append(pair)
 
     hunk["right_unpaired"] = sorted(unmatched_right)
     hunk["changed_pairs"].sort(key=lambda item: item["left_index"])
@@ -603,9 +663,10 @@ def hunk_line_diff(
     max_hunks=COMPARE_MAX_HUNKS,
     inline_context=COMPARE_INLINE_EQUAL_CONTEXT,
 ):
-    left_texts = [str(entry.get("text") or "") for entry in left_entries]
-    right_texts = [str(entry.get("text") or "") for entry in right_entries]
-    matcher = SequenceMatcher(None, left_texts, right_texts, autojunk=False)
+    use_line_index = _all_compare_entries_have_line_indexes(left_entries, right_entries)
+    left_match_keys = [compare_line_sequence_key(entry, use_line_index=use_line_index) for entry in left_entries]
+    right_match_keys = [compare_line_sequence_key(entry, use_line_index=use_line_index) for entry in right_entries]
+    matcher = SequenceMatcher(None, left_match_keys, right_match_keys, autojunk=False)
     hunks = []
     totals = {
         "left_total_lines": len(left_entries),

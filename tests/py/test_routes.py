@@ -35,6 +35,7 @@ import services.secrets.vault as secrets_vault
 from services.commands.builtins import execute_builtin_command
 from core.database import DB_PATH, db_connect, db_init
 from core.database_backend import quote_sqlite_identifier
+from services.runs.output_model import LineEvent, LineRole
 from services.projects.findings import record_run_findings
 from services.atlas.materializer import materialize_run_entities
 from services.workspace.files import resolve_workspace_path
@@ -8942,6 +8943,32 @@ class TestHistoryRoute:
         assert [item["text"] for item in equal_hunk["context"]["leading"]["left"]] == ["a", "b"]
         assert [item["text"] for item in equal_hunk["context"]["trailing"]["right"]] == ["d", "e"]
         assert equal_hunk["context"]["omitted"] == 1
+
+    def test_compare_line_events_reports_structural_changes_by_line_index(self):
+        diff = run_comparison.compare_line_events(
+            [
+                LineEvent(text="same", line_index=0),
+                LineEvent(text="service open", line_index=1),
+            ],
+            [
+                LineEvent(text="same", line_index=0),
+                LineEvent(text="service open", role=LineRole.section_header, line_index=1),
+                LineEvent(text="extra", line_index=2),
+            ],
+        )
+
+        assert [hunk["op"] for hunk in diff["hunks"]] == ["equal", "replace"]
+        assert diff["totals"]["equal_line_count"] == 1
+        assert diff["totals"]["changed_line_count"] == 1
+        assert diff["totals"]["added_line_count"] == 1
+        pair = diff["hunks"][1]["changed_pairs"][0]
+        assert pair["structural_change"] is True
+        assert pair["structural"] == {
+            "left": {"kind": "info", "role": "body"},
+            "right": {"kind": "info", "role": "section-header"},
+        }
+        assert diff["hunks"][1]["left"]["lines"][0]["role"] == "body"
+        assert diff["hunks"][1]["right"]["lines"][0]["role"] == "section-header"
 
     def test_hunk_line_diff_handles_uneven_replace_pairing(self):
         entries = lambda values: [  # noqa: E731 - compact test fixture builder

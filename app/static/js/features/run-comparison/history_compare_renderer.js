@@ -76,6 +76,8 @@ function _renderHistoryComparePaneRow(line, {
   row.className = `history-compare-row${rowClass ? ` ${rowClass}` : ''}`;
   if (side) row.dataset.side = side;
   if (Number.isFinite(compareLineIndex)) row.dataset.compareLineIndex = String(compareLineIndex);
+  if (line && line.kind) row.dataset.compareKind = String(line.kind);
+  if (line && line.role) row.dataset.compareRole = String(line.role);
   const mark = document.createElement('span');
   mark.className = `history-compare-line-mark${signClass ? ` ${signClass}` : ''}`;
   mark.textContent = sideLabel;
@@ -526,7 +528,7 @@ function _appendHistoryCompareReplaceHunk(leftPane, rightPane, hunk, data, ancho
         _renderHistoryComparePaneRow(leftLine, {
           sideLabel: 'A',
           signClass: 'history-compare-line-removed',
-          rowClass: 'is-replace',
+          rowClass: `is-replace${pair.structural_change ? ' is-structural-change' : ''}`,
           segments: segments.left,
           limits,
           side: 'a',
@@ -536,7 +538,7 @@ function _appendHistoryCompareReplaceHunk(leftPane, rightPane, hunk, data, ancho
         _renderHistoryComparePaneRow(rightLine, {
           sideLabel: 'B',
           signClass: 'history-compare-line-added',
-          rowClass: 'is-replace',
+          rowClass: `is-replace${pair.structural_change ? ' is-structural-change' : ''}`,
           segments: segments.right,
           limits,
           side: 'b',

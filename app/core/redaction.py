@@ -12,6 +12,7 @@ from services.runs.output_model import LineEntity, LineEvent, LineKind, from_wir
 
 
 _ALLOWED_FLAGS = {"i", "m"}
+REDACTED_ENTITY_SENTINEL = "<redacted>"
 
 
 # These built-ins are intentionally conservative and share-focused. They are
@@ -178,10 +179,13 @@ def apply_redaction_rules(text, rules):
 
 
 def _redact_entity(entity: LineEntity, rules) -> LineEntity:
+    canonical_value = apply_redaction_rules(entity.canonical_value, rules)
+    if canonical_value != entity.canonical_value:
+        canonical_value = REDACTED_ENTITY_SENTINEL
     return replace(
         entity,
         value=apply_redaction_rules(entity.value, rules),
-        canonical_value=apply_redaction_rules(entity.canonical_value, rules),
+        canonical_value=canonical_value,
     )
 
 

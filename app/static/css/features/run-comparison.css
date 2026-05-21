@@ -647,6 +647,12 @@
 
 
 
+.history-compare-row.is-structural-change {
+  box-shadow: inset 2px 0 0 var(--amber);
+}
+
+
+
 .history-compare-row-spacer {
   color: transparent;
   user-select: none;

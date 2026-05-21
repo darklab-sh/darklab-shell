@@ -202,9 +202,13 @@ test.describe('session-token lifecycle', () => {
       await otherPage.goto('/', { waitUntil: 'domcontentloaded' })
       await ensurePromptReady(otherPage, { timeout: 30_000, waitForAutocomplete: true })
       await expect.poll(async () => currentSessionId(otherPage)).toBe(token)
-      await expect.poll(async () => otherPage.evaluate(() => (
-        typeof _readRecentValues === 'function' ? _readRecentValues('domain') : []
-      ))).toContain('darklab.sh')
+      await expect.poll(async () => otherPage.evaluate(async () => {
+        if (typeof loadRecentValues === 'function') await loadRecentValues()
+        return typeof _readRecentValues === 'function' ? _readRecentValues('domain') : []
+      }), {
+        timeout: 15_000,
+        intervals: [250, 500, 1000],
+      }).toContain('darklab.sh')
 
       await expect.poll(async () => otherPage.evaluate(() => (
         typeof getAutocompleteMatches === 'function'

@@ -24,10 +24,10 @@ Current totals:
 
 - behavior tests: 3,155
 - docs/inventory meta-tests: 32
-- `pytest`: 1711 (1679 behavior + 32 meta)
-- `vitest`: 1224
+- `pytest`: 1713 (1681 behavior + 32 meta)
+- `vitest`: 1225
 - `playwright`: 252
-- total: 3,187
+- total: 3,190
 
 This document is organized in two parts:
 
@@ -696,6 +696,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPtyTerminalCapture.test_terminal_history_line_limit_is_bounded` | Verifies that PTY capture history uses a sensible default, floor, and ceiling around `max_output_lines`. |
 | `TestRawOnlyRedaction.test_omits_intel_line_groups_with_placeholder` | Verifies that raw-only intel output groups are replaced by one share/export placeholder. |
 | `TestRawOnlyRedaction.test_preserves_non_intel_entries` | Verifies that non-intel lines are not changed by raw-only omission. |
+| `TestRawOnlyRedaction.test_redacts_matching_entity_canonical_value_to_sentinel` | Verifies share/export redaction replaces matching entity canonical values with the redaction sentinel. |
 | `TestFormatRetention.test_zero_returns_unlimited` | Checks zero returns unlimited handling. |
 | `TestFormatRetention.test_365_returns_one_year` | Checks that 365 returns one year. |
 | `TestFormatRetention.test_730_returns_two_years` | Checks that 730 returns two years. |
@@ -1523,6 +1524,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestHistoryRoute.test_active_history_returns_running_runs_for_this_session` | Checks that `/history/active` returns the current session's in-flight run metadata. |
 | `TestHistoryRoute.test_compare_candidates_rank_exact_command_before_same_target` | Verifies that run comparison candidates prefer exact command matches before same-target and same-command-only matches. |
 | `TestHistoryRoute.test_hunk_line_diff_handles_insert_delete_and_equal_context` | Verifies that run comparison hunks cover insertions, modified lines, and folded equal context. |
+| `TestHistoryRoute.test_compare_line_events_reports_structural_changes_by_line_index` | Verifies structured run-output comparison reports same-line kind/role changes without treating them as text-only equality. |
 | `TestHistoryRoute.test_hunk_line_diff_handles_uneven_replace_pairing` | Verifies that uneven replace hunks pair similar lines while preserving left-only rows. |
 | `TestHistoryRoute.test_hunk_line_diff_keeps_unrelated_and_long_replace_lines_unpaired` | Verifies that unrelated replace blocks and very long lines stay in unpaired buckets. |
 | `TestHistoryRoute.test_replace_pairing_uses_quick_ratio_before_full_ratio` | Verifies replace pairing skips expensive full similarity checks when cheap quick-ratio filtering already rejects a candidate. |
@@ -2484,6 +2486,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | Test | Description |
 | --- | --- |
 | `renders hunk counts and split-pane rows for equal, replace, insert, and delete hunks` | Verifies that the run comparison renderer maps the hunk model into paired split-pane rows and count badges. |
+| `marks structural kind and role changes on compare rows` | Verifies that structural compare changes expose row metadata and a visible structural-change class. |
 | `resolves hidden auto mode from viewport and keeps modal view overrides local` | Verifies that the compare-modal view selector resolves hidden auto mode from the viewport, keeps modal-only overrides local, and can restore the saved default without changing it. |
 | `renders a fetched comparison in mobile mode with the real select enhancer` | Verifies that the fetched compare renderer can open the mobile unified view with the app-native select enhancer without falling into the generic failure toast. |
 | `surfaces backend compare errors instead of only the generic failure toast` | Verifies that failed compare responses include the backend validation message in the toast instead of collapsing every failure into the same generic copy. |

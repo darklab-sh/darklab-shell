@@ -69,8 +69,14 @@ from services.history.permalinks import (
     _prompt_echo_text,
 )
 from core.output_signals import OutputSignalClassifier, classify_line, command_root, extract_entities, extract_target
-from core.redaction import RAW_ONLY_INTEL_PLACEHOLDER, line_entries_from_events, omit_raw_only_line_entries
-from services.runs.output_model import LineEvent, LineKind, LineRole, LineSignal, from_wire
+from core.redaction import (
+    RAW_ONLY_INTEL_PLACEHOLDER,
+    REDACTED_ENTITY_SENTINEL,
+    line_entries_from_events,
+    omit_raw_only_line_entries,
+    redact_line_entries,
+)
+from services.runs.output_model import LineEntity, LineEvent, LineKind, LineRole, LineSignal, from_wire
 from services.runs.output_store import (
     RunOutputCapture,
     RUN_OUTPUT_DIR,
@@ -7863,6 +7869,31 @@ class TestRawOnlyRedaction:
             {"text": "plain legacy line", "cls": "", "tsC": "", "tsE": ""},
         ]
 
+    def test_redacts_matching_entity_canonical_value_to_sentinel(self):
+        event = LineEvent(
+            text="host darklab.sh has address 192.0.2.10",
+            target="192.0.2.10",
+            entities=(
+                LineEntity(
+                    type="ip",
+                    value="192.0.2.10",
+                    canonical_value="192.0.2.10",
+                    confidence="high",
+                ),
+            ),
+        )
+        redacted = redact_line_entries([event], [{
+            "pattern": r"\b192\.0\.2\.10\b",
+            "replacement": "[ip-redacted]",
+            "flags": "",
+        }])
+
+        assert len(redacted) == 1
+        assert redacted[0].text == "host darklab.sh has address [ip-redacted]"
+        assert redacted[0].target == "[ip-redacted]"
+        assert redacted[0].entities[0].value == "[ip-redacted]"
+        assert redacted[0].entities[0].canonical_value == REDACTED_ENTITY_SENTINEL
+
 
 # ── _format_retention ─────────────────────────────────────────────────────────
 
@@ -9695,6 +9726,7 @@ class TestDatabaseInit:
                                 "value": "HTTPS://Example.com:443/path/#frag",
                                 "canonical_value": "https://example.com/path",
                             },
+                            {"type": "domain", "value": "<redacted>", "canonical_value": REDACTED_ENTITY_SENTINEL},
                         ],
                     }
                 ],
