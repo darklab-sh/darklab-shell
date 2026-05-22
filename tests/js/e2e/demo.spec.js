@@ -16,7 +16,7 @@
 import { existsSync, mkdirSync, writeFileSync, rmSync } from 'fs'
 import { dirname, join } from 'path'
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady } from './helpers.js'
+import { ensurePromptReady, openRailAction } from './helpers.js'
 import { buildVisualHistoryPayload } from './visual_history_fixture.js'
 import { assertVisualFlowGuardrails } from './visual_guardrails.js'
 import {
@@ -733,9 +733,9 @@ test('demo', async ({ page }) => {
   // Reset scrollTop on open so stale position never carries over. The browse
   // intentionally leaves time for the viewer to read the picker as a new scene.
 
-  await page.locator('.rail-nav [data-action="theme"]').hover()
+  await page.locator('#rail-more-btn').hover()
   await page.waitForTimeout(800)
-  await page.locator('.rail-nav [data-action="theme"]').click()
+  await openRailAction(page, 'theme')
   await page.locator('#theme-overlay').waitFor({ state: 'visible' })
   await page.locator('.theme-body').evaluate((el) => {
     el.scrollTop = 0

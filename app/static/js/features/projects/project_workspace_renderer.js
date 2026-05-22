@@ -60,8 +60,6 @@
         ctx.workspaceTab() === 'findings'
         || ['runs', 'artifacts'].includes(ctx.workspaceTab())
         || ctx.projectPackageWizardActive(projectId)
-        || ctx.projectTargetFilterActive(projectId, summary)
-        || !ctx.projectFindingsLoaded(projectId)
       ) {
         if (!(ctx.workspaceTab() === 'findings' && findingFiltersActive)) {
           ctx.loadProjectFindings(projectId).catch(() => {});

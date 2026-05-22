@@ -89,6 +89,7 @@
       if (!ctx.projectWorkspaceOverlay || !ctx.projectWorkspaceBody) return;
       ctx.closeMajorOverlays?.();
       ctx.blurVisibleComposerInputIfMobile?.();
+      ctx.setProjectWorkspaceTab?.('details');
       showOverlay();
       ctx.markInteractionSurfaceReady?.('projects', ctx.projectWorkspaceOverlay, ctx.projectWorkspaceModal);
       await ctx.refreshProjectWorkspace?.();

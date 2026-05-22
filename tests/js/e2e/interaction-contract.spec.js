@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady } from './helpers.js'
+import { ensurePromptReady, openRailAction } from './helpers.js'
 
 // Assertions for the shared interaction contract exercised against real
 // mounted UI rather than helper fixtures. Each helper has its own unit
@@ -64,7 +64,7 @@ test.describe('UI interaction contract — disclosures', () => {
   })
 
   test('FAQ question disclosure keeps aria-expanded in sync with the .faq-open class', async ({ page }) => {
-    await page.locator('.rail-nav [data-action="faq"]').click()
+    await openRailAction(page, 'faq')
     await expect(page.locator('#faq-overlay')).toHaveClass(/\bopen\b/)
 
     // Scope to the FAQ modal — the share-redaction modal reuses the

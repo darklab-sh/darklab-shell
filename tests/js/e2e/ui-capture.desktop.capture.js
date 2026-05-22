@@ -3,6 +3,7 @@ import { test, expect } from '@playwright/test'
 import {
   createShareSnapshot,
   clickHistoryRunMenuAction,
+  openRailAction,
   openHistory,
   openHistoryWithEntries,
   runCommand,
@@ -460,7 +461,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
-      await page.locator('.rail-nav [data-action="options"]').click()
+      await openRailAction(page, 'options')
       await expect(page.locator('#options-modal')).toBeVisible()
     },
   },
@@ -470,7 +471,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
-      await page.locator('.rail-nav [data-action="options"]').click()
+      await openRailAction(page, 'options')
       await expect(page.locator('#options-modal')).toBeVisible()
       await expect(page.locator('#options-session-token-clear-btn')).toBeVisible()
       await page.locator('#options-session-token-clear-btn').click()
@@ -486,7 +487,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
-      await page.locator('.rail-nav [data-action="theme"]').click()
+      await openRailAction(page, 'theme')
       await expect(page.locator('#theme-modal')).toBeVisible()
     },
   },
@@ -496,7 +497,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
-      await page.locator('.rail-nav [data-action="faq"]').click()
+      await openRailAction(page, 'faq')
       await expect(page.locator('#faq-modal')).toBeVisible()
     },
   },

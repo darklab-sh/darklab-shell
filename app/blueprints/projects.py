@@ -509,8 +509,17 @@ def projects_links_delete(project_id):
 @projects_bp.route("/projects/<project_id>/targets")
 def projects_targets_list(project_id):
     session_id = get_session_id()
-    targets = list_project_targets(session_id, project_id)
-    return _project_json_or_404(targets, key="targets")
+    auto_discovered = str(request.args.get("auto_discovered") or "").strip().lower() in {"1", "true", "yes", "on"}
+    targets = list_project_targets(
+        session_id,
+        project_id,
+        target_type=request.args.get("type") or "",
+        query=request.args.get("q") or "",
+        auto_discovered=auto_discovered,
+        limit=_parse_int(request.args.get("limit"), 50, minimum=1, maximum=100),
+        offset=_parse_int(request.args.get("offset"), 0, minimum=0, maximum=100000),
+    )
+    return _project_json_or_404(targets)
 
 
 @projects_bp.route("/projects/<project_id>/targets", methods=["POST"])

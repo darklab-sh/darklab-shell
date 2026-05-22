@@ -58,11 +58,17 @@ def _project_rows(session_id: str, *, include_archived: bool = False) -> list[di
 
 
 def _project_target_rows(session_id: str, project_id: str) -> list[dict[str, object]]:
-    return [
-        cast(dict[str, object], target)
-        for target in (list_project_targets(session_id, project_id) or [])
-        if target
-    ]
+    rows: list[dict[str, object]] = []
+    offset = 0
+    while True:
+        page = list_project_targets(session_id, project_id, limit=200, offset=offset)
+        if not isinstance(page, dict):
+            return rows
+        targets = [cast(dict[str, object], target) for target in page.get("targets", []) if target]
+        rows.extend(targets)
+        offset += len(targets)
+        if not targets or offset >= int(page.get("total") or len(rows)):
+            return rows
 
 
 def _resolve_project_ref(

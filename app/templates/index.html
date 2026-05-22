@@ -306,20 +306,26 @@
     </div>
 
     <nav class="rail-nav" id="rail-nav">
-      <button class="rail-nav-item nav-item" data-action="options" type="button" title="Display and preference options (Alt+,)"><span class="rail-nav-glyph">≡</span><span class="rail-nav-label">options</span></button>
+      <button class="rail-nav-item nav-item" data-action="atlas" type="button" title="Session Entity Atlas (Alt+A)"><span class="rail-nav-glyph">◎</span><span class="rail-nav-label">atlas</span></button>
       <button class="rail-nav-item nav-item" data-action="projects" type="button" title="Project workspaces"><span class="rail-nav-glyph">◇</span><span class="rail-nav-label">projects</span></button>
       <button class="rail-nav-item nav-item" data-action="history" type="button" title="Run history (Alt+H)"><span class="rail-nav-glyph">⧖</span><span class="rail-nav-label">history</span></button>
-      <button class="rail-nav-item nav-item" data-action="atlas" type="button" title="Session Entity Atlas (Alt+A)"><span class="rail-nav-glyph">◎</span><span class="rail-nav-label">atlas</span></button>
-      <button class="rail-nav-item nav-item" data-action="status-monitor" type="button" title="Status Monitor (Alt+M)"><span class="rail-nav-glyph">◉</span><span class="rail-nav-label">status</span></button>
-      <button class="rail-nav-item nav-item" data-action="command-registry" type="button" title="Command Registry"><span class="rail-nav-glyph">⌘</span><span class="rail-nav-label">commands</span></button>
-      <button class="rail-nav-item nav-item" data-action="schedules" type="button" title="Scheduled commands"><span class="rail-nav-glyph">↻</span><span class="rail-nav-label">schedules</span></button>
-      <button class="rail-nav-item nav-item" data-action="watchers" type="button" title="Change-detection watchers"><span class="rail-nav-glyph">◌</span><span class="rail-nav-label">watchers</span></button>
       {% if workspace_enabled %}
       <button class="rail-nav-item nav-item" data-action="workspace" type="button" title="Session files (Alt+Shift+F)"><span class="rail-nav-glyph">▣</span><span class="rail-nav-label">files</span></button>
       {% endif %}
-      <button class="rail-nav-item nav-item" data-action="theme" type="button" title="Theme selector (Alt+Shift+T)"><span class="rail-nav-glyph">◑</span><span class="rail-nav-label">theme</span></button>
-      <button class="rail-nav-item nav-item" data-action="faq" type="button" title="FAQ (Alt+/)"><span class="rail-nav-glyph">?</span><span class="rail-nav-label">FAQ</span></button>
-      <a class="rail-nav-item nav-item{% if not frontend_config.diag_enabled %} u-hidden{% endif %}" data-action="diag" id="rail-diag-btn" href="/diag" target="_blank" rel="noopener noreferrer" title="Operator diagnostics"><span class="rail-nav-glyph">⊕</span><span class="rail-nav-label">diag</span></a>
+      <button class="rail-nav-item nav-item rail-more-trigger" data-action="rail-more" id="rail-more-btn" type="button" title="More tools" aria-haspopup="menu" aria-expanded="false" aria-controls="rail-more-menu"><span class="rail-nav-glyph">⋯</span><span class="rail-nav-label">more</span></button>
+      <div class="rail-more-menu dropdown-surface u-hidden" id="rail-more-menu" role="menu" aria-label="More rail tools">
+        <button class="rail-nav-item nav-item rail-more-item" data-action="options" type="button" role="menuitem" title="Display and preference options (Alt+,)"><span class="rail-nav-glyph">≡</span><span class="rail-nav-label">options</span></button>
+        <span class="rail-more-separator" role="separator" aria-hidden="true"></span>
+        <button class="rail-nav-item nav-item rail-more-item" data-action="schedules" type="button" role="menuitem" title="Scheduled commands"><span class="rail-nav-glyph">↻</span><span class="rail-nav-label">schedules</span></button>
+        <button class="rail-nav-item nav-item rail-more-item" data-action="watchers" type="button" role="menuitem" title="Change-detection watchers"><span class="rail-nav-glyph">◌</span><span class="rail-nav-label">watchers</span></button>
+        <span class="rail-more-separator" role="separator" aria-hidden="true"></span>
+        <button class="rail-nav-item nav-item rail-more-item" data-action="status-monitor" type="button" role="menuitem" title="Status Monitor (Alt+M)"><span class="rail-nav-glyph">◉</span><span class="rail-nav-label">status</span></button>
+        <button class="rail-nav-item nav-item rail-more-item" data-action="command-registry" type="button" role="menuitem" title="Command Registry"><span class="rail-nav-glyph">⌘</span><span class="rail-nav-label">commands</span></button>
+        <button class="rail-nav-item nav-item rail-more-item" data-action="faq" type="button" role="menuitem" title="FAQ (Alt+/)"><span class="rail-nav-glyph">?</span><span class="rail-nav-label">FAQ</span></button>
+        <span class="rail-more-separator" role="separator" aria-hidden="true"></span>
+        <button class="rail-nav-item nav-item rail-more-item" data-action="theme" type="button" role="menuitem" title="Theme selector (Alt+Shift+T)"><span class="rail-nav-glyph">◑</span><span class="rail-nav-label">theme</span></button>
+        <a class="rail-nav-item nav-item rail-more-item{% if not frontend_config.diag_enabled %} u-hidden{% endif %}" data-action="diag" id="rail-diag-btn" href="/diag" target="_blank" rel="noopener noreferrer" role="menuitem" title="Operator diagnostics"><span class="rail-nav-glyph">⊕</span><span class="rail-nav-label">diag</span></a>
+      </div>
       <a class="rail-nav-version" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
     </nav>
 

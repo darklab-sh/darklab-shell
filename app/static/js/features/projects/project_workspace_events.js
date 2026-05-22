@@ -68,6 +68,12 @@
           pageAttr: 'data-project-artifacts-page',
           positionAttr: 'data-project-artifacts-pager-position',
         },
+        {
+          pageDataset: 'projectTargetsPage',
+          positionDataset: 'projectTargetsPagerPosition',
+          pageAttr: 'data-project-targets-page',
+          positionAttr: 'data-project-targets-pager-position',
+        },
       ];
       return configs.find(config => button?.dataset?.[config.pageDataset]) || null;
     }
@@ -468,6 +474,19 @@
         ));
         return;
       }
+      const targetPageBtn = event.target.closest?.('[data-project-targets-page]');
+      if (targetPageBtn) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (targetPageBtn.disabled) return;
+        const projectId = String(targetPageBtn.dataset.projectId || selectedProjectId() || '');
+        const page = ctx.projectTargetPage?.(projectId) || { limit: 50, offset: 0 };
+        const nextOffset = projectPageOffset(page, targetPageBtn.dataset.projectTargetsPage);
+        await runProjectPager(targetPageBtn, () => (
+          ctx.loadProjectTargetPage?.(projectId, { offset: nextOffset, skipFinalRender: true })
+        ));
+        return;
+      }
       const targetFilterClear = event.target.closest?.('[data-project-target-filter-clear]');
       if (targetFilterClear) {
         event.preventDefault();
@@ -597,6 +616,10 @@
         }
         ctx.setProjectWorkspaceMessage('');
         ctx.renderProjectExplorer();
+        if (nextTab !== 'details') {
+          await ctx.ensureProjectSummary?.(selectedProjectId());
+          ctx.renderProjectExplorer();
+        }
         return;
       }
       const entityTabBtn = event.target.closest?.('[data-project-entity-tab]');
@@ -711,8 +734,10 @@
           ctx.closeProjectTargetEditor();
           ctx.setProjectWorkspaceMessage('');
           ctx.renderProjectWorkspace();
-          await ctx.ensureProjectSummary?.(projectId);
-          ctx.renderProjectWorkspace();
+          if (ctx.workspaceTab?.() !== 'details') {
+            await ctx.ensureProjectSummary?.(projectId);
+            ctx.renderProjectWorkspace();
+          }
           return;
         } else if (action === 'use') {
           await ctx.projectWorkspaceRequest('/projects/active', {
@@ -893,7 +918,8 @@
           return;
         } else if (action === 'edit-target') {
           const targetId = String(btn.dataset.targetId || '');
-          const target = ctx.projectTargetItems(ctx.projectSummary?.(projectId)).find(item => String(item.id || '') === targetId);
+          const target = ctx.projectTargetById?.(projectId, targetId)
+            || ctx.projectTargetItems(ctx.projectSummary?.(projectId)).find(item => String(item.id || '') === targetId);
           if (!target) throw new Error('Target is missing its details.');
           ctx.setProjectWorkspaceMessage('');
           ctx.openProjectTargetEditor(projectId, target);
@@ -928,7 +954,10 @@
             method: 'DELETE',
           });
           ctx.clearEditingTargetIf(targetId);
-          await ctx.refreshProjectWorkspace();
+          ctx.removeCachedProjectTarget?.(projectId, targetId);
+          await ctx.loadProjectTargetPage?.(projectId, { skipFinalRender: true });
+          ctx.renderProjectExplorer?.();
+          if (mobileView() === 'detail') ctx.renderProjectMobileDetail?.();
           ctx.loadProjectAutocompleteTargets?.();
           ctx.setProjectWorkspaceMessage('Target removed.');
           return;
@@ -936,11 +965,20 @@
           const targetId = String(btn.dataset.targetId || '');
           if (!projectId || !targetId) throw new Error('Target is missing its identifier.');
           const reviewState = action === 'confirm-target' ? 'confirmed' : 'dismissed';
-          await ctx.projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/targets/${encodeURIComponent(targetId)}`, {
+          const resp = await ctx.projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/targets/${encodeURIComponent(targetId)}`, {
             method: 'PUT',
             body: JSON.stringify({ review_state: reviewState }),
           });
-          await ctx.refreshProjectWorkspace();
+          const data = await resp.json().catch(() => ({}));
+          if (reviewState === 'dismissed') {
+            ctx.removeCachedProjectTarget?.(projectId, targetId);
+          } else {
+            const target = data && data.target && typeof data.target === 'object'
+              ? data.target
+              : { review_state: reviewState, status: reviewState };
+            ctx.updateCachedProjectTarget?.(projectId, targetId, target);
+          }
+          ctx.renderProjectExplorer?.();
           ctx.loadProjectAutocompleteTargets?.();
           ctx.setProjectWorkspaceMessage(reviewState === 'confirmed' ? 'Target confirmed.' : 'Target dismissed.');
           return;

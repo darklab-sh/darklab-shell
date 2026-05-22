@@ -26,6 +26,8 @@
   const railWorkflowsHeader = document.getElementById('rail-workflows-header');
   const railWorkflowsCount = document.getElementById('rail-workflows-count');
   const railNav           = document.getElementById('rail-nav');
+  const railMoreBtn       = document.getElementById('rail-more-btn');
+  const railMoreMenu      = document.getElementById('rail-more-menu');
 
   const hud               = document.getElementById('hud');
   const hudLastExitEl     = document.getElementById('hud-last-exit');
@@ -363,12 +365,41 @@
   // ── Nav menu ─────────────────────────────────────────────────────
   // The visible rail is the desktop source of truth. Route clicks directly
   // into the shared action layer.
+  function closeRailMoreMenu() {
+    if (!railMoreBtn || !railMoreMenu) return;
+    railMoreBtn.setAttribute('aria-expanded', 'false');
+    railMoreMenu.classList.add('u-hidden');
+  }
+
+  function openRailMoreMenu() {
+    if (!railMoreBtn || !railMoreMenu) return;
+    railMoreBtn.setAttribute('aria-expanded', 'true');
+    railMoreMenu.classList.remove('u-hidden');
+    railMoreMenu.querySelector('[data-action]:not(.u-hidden)')?.focus?.();
+  }
+
+  function toggleRailMoreMenu() {
+    if (railMoreBtn?.getAttribute('aria-expanded') === 'true') {
+      closeRailMoreMenu();
+    } else {
+      openRailMoreMenu();
+    }
+  }
+
   railNav?.addEventListener('click', e => {
     const item = e.target.closest?.('[data-action]');
     if (!item) return;
     const action = item.dataset.action;
-    if (action === 'diag') return; // native <a> navigation
+    if (action === 'diag') {
+      closeRailMoreMenu();
+      return; // native <a> navigation
+    }
     e.preventDefault();
+    if (action === 'rail-more') {
+      toggleRailMoreMenu();
+      return;
+    }
+    closeRailMoreMenu();
     if (action === 'history' && typeof global.toggleHistoryPanelSurface === 'function') {
       global.toggleHistoryPanelSurface();
       return;
@@ -411,6 +442,20 @@
     }
     if (action === 'faq' && typeof global.openFaq === 'function') {
       global.openFaq();
+    }
+  });
+
+  document.addEventListener('click', event => {
+    if (!railMoreMenu || railMoreMenu.classList.contains('u-hidden')) return;
+    const target = event.target;
+    if (target instanceof Node && railNav?.contains(target)) return;
+    closeRailMoreMenu();
+  });
+
+  railNav?.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      closeRailMoreMenu();
+      railMoreBtn?.focus?.();
     }
   });
 
@@ -1122,6 +1167,7 @@
     const factory = global.DarklabProjectDetails && global.DarklabProjectDetails.createProjectDetailsController;
     if (typeof factory !== 'function') throw new Error('DarklabProjectDetails is unavailable');
     projectDetailsController = factory({
+      apiFetch,
       entityMetadataClient: EntityMetadataClient,
       projectNotesForm,
       projectNotesInput,
@@ -1145,7 +1191,10 @@
       projectMetaRow: _projectMetaRow,
       formatDate: _formatProjectDate,
       makeProjectButton: _makeProjectButton,
+      bindProjectRuntimePressable: _bindProjectRuntimePressable,
+      emptyProjectPanel: _emptyProjectPanel,
       renderProjectTargets: _renderProjectTargets,
+      projectResponseError: _projectResponseError,
       syncEntityLabels: _syncEntityLabels,
       projectWorkspaceRequest: _projectWorkspaceRequest,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
@@ -1372,6 +1421,11 @@
       syncEntityLabels: _syncEntityLabels,
       syncEntityNote: _syncEntityNote,
       refreshProjectWorkspace,
+      renderProjectExplorer: _renderProjectExplorer,
+      renderProjectWorkspace: _renderProjectWorkspace,
+      invalidateProjectTargetPage: projectId => _projectDetailsController().invalidateTargetPage(projectId),
+      loadProjectTargetPage: (projectId, options) => _projectDetailsController().loadTargetPage(projectId, options),
+      renderProjectMobileDetail: _renderProjectMobileDetail,
       loadProjectAutocompleteTargets: () => {
         if (typeof loadProjectAutocompleteTargets === 'function') {
           loadProjectAutocompleteTargets().catch(() => {});
@@ -1584,6 +1638,7 @@
       syncEntityNote: _syncEntityNote,
       refreshProjectWorkspace,
       invalidateProjectFindings: _invalidateProjectFindings,
+      invalidateProjectTargetPage: projectId => _projectDetailsController().invalidateTargetPage(projectId),
       loadProjectFindings: _loadProjectFindings,
       renderProjectExplorer: _renderProjectExplorer,
       setProjectWorkspaceMessage: _setProjectWorkspaceMessage,
@@ -1615,6 +1670,7 @@
       setProjectSummaries: projectWorkspaceState.setSummaries,
       projectWorkspaceLoading: projectWorkspaceState.loading,
       setProjectWorkspaceLoading: projectWorkspaceState.setLoading,
+      workspaceTab: projectWorkspaceState.tab,
       activeProject: _activeProject,
       loadActiveProjectContext,
       invalidateProjectFindings: _invalidateProjectFindings,
@@ -1675,6 +1731,7 @@
       },
       loadProjectFilteredFindings: _loadProjectFilteredFindings,
       loadProjectFindings: _loadProjectFindings,
+      loadProjectTargetPage: (projectId, options) => _projectDetailsController().loadTargetPage(projectId, options),
       mobileView: () => _projectMobileShellController().currentView(),
       openProjectEntityEditor: _openProjectEntityEditor,
       openProjectEntityInAtlas: _openProjectEntityInAtlas,
@@ -1709,6 +1766,10 @@
       projectRunItems: _projectRunItems,
       projectSummary: _projectSummary,
       projectTargetFilterSet: _projectTargetFilterSet,
+      projectTargetPage: projectId => _projectDetailsController().targetPage(projectId),
+      projectTargetById: (projectId, targetId) => _projectDetailsController().targetById(projectId, targetId),
+      removeCachedProjectTarget: (projectId, targetId) => _projectDetailsController().removeCachedTarget(projectId, targetId),
+      updateCachedProjectTarget: (projectId, targetId, updates) => _projectDetailsController().updateCachedTarget(projectId, targetId, updates),
       projectTargetItems: _projectTargetItems,
       projectWorkspaceModal,
       projectWorkspaceRequest: _projectWorkspaceRequest,

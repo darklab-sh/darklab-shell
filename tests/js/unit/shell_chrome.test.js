@@ -11,6 +11,7 @@ const PROJECT_TARGET_VALIDATION_SRC = readFileSync(
   resolve(REPO_ROOT, 'app/static/js/features/projects/project_target_validation.js'),
   'utf8',
 )
+const PROJECTS_CSS = readFileSync(resolve(REPO_ROOT, 'app/static/css/features/projects.css'), 'utf8')
 const PROJECT_ACTIVE_CONTEXT_SRC = readFileSync(
   resolve(REPO_ROOT, 'app/static/js/features/projects/project_active_context.js'),
   'utf8',
@@ -193,6 +194,10 @@ function loadShellChrome({
         </section>
       </div>
       <nav id="rail-nav">
+        <button id="rail-more-btn" class="rail-nav-item nav-item" data-action="rail-more" type="button" aria-expanded="false" aria-controls="rail-more-menu"></button>
+        <div id="rail-more-menu" class="u-hidden">
+          <button class="rail-nav-item nav-item" data-action="status-monitor" type="button"></button>
+        </div>
         <button class="rail-nav-item nav-item" data-action="projects" type="button"><span class="rail-nav-glyph">◇</span></button>
       </nav>
     </aside>
@@ -504,11 +509,13 @@ describe('shell chrome rail sections', () => {
     const openStatusMonitor = vi.fn(() => Promise.resolve(true))
     const shell = loadShellChrome({ openStatusMonitor })
     const nav = document.getElementById('rail-nav')
-    nav.innerHTML = '<button data-action="status-monitor" type="button"></button>'
 
+    nav.querySelector('[data-action="rail-more"]').click()
+    expect(nav.querySelector('#rail-more-menu').classList.contains('u-hidden')).toBe(false)
     nav.querySelector('[data-action="status-monitor"]').click()
 
     expect(shell.openStatusMonitor).toHaveBeenCalledWith({ source: 'rail' })
+    expect(nav.querySelector('#rail-more-menu').classList.contains('u-hidden')).toBe(true)
   })
 
   it('keeps the default split when workflows is closed and reopened before resizing', async () => {
@@ -593,12 +600,22 @@ describe('shell chrome HUD status', () => {
 })
 
 describe('shell chrome project workspace', () => {
+  it('keeps inactive project list pagination visually hidden', () => {
+    expect(PROJECTS_CSS).toMatch(/\.project-workspace-pagination\.u-hidden\s*\{\s*display:\s*none;/)
+  })
+
   it('labels only the current active project in the project list', async () => {
     let activeProjectId = 'project-1'
     const projects = [
       { id: 'project-3', name: 'zulu.test', status: 'active' },
       { id: 'project-2', name: 'example.net', status: 'active' },
-      { id: 'project-1', name: 'darklab.sh', status: 'active' },
+      {
+        id: 'project-1',
+        name: 'darklab.sh',
+        status: 'active',
+        counts: { runs: 0, findings: 3, artifacts: 0, packages: 0, targets: 0, notes: 0 },
+        finding_summary: { review_states: { new: 2 }, severities: { high: 1, info: 2 } },
+      },
       {
         id: 'project-4',
         name: 'alpha.test',
@@ -678,6 +695,159 @@ describe('shell chrome project workspace', () => {
     expect(rowText('project-1')).not.toContain('active')
     expect(rowText('project-2')).toContain('active')
     expect(orderedProjectIds()).toEqual(['project-2', 'project-4', 'project-1', 'project-3'])
+  })
+
+  it('pages and filters the project Details targets browser', async () => {
+    const projects = [{ id: 'project-1', name: 'Target Browser', status: 'active' }]
+    const targetPages = {
+      'type=domain': {
+        targets: [{ id: 'target-1', type: 'domain', value: 'darklab.sh', review_state: 'confirmed' }],
+        total: 2,
+        limit: 1,
+        offset: 0,
+        counts_by_type: { domain: 2, ip: 1, url: 1 },
+      },
+      'type=domain&offset=1': {
+        targets: [{ id: 'target-2', type: 'domain', value: 'api.darklab.sh', review_state: 'confirmed' }],
+        total: 2,
+        limit: 1,
+        offset: 1,
+        counts_by_type: { domain: 2, ip: 1, url: 1 },
+      },
+      'q=login': {
+        targets: [{ id: 'target-3', type: 'url', value: 'https://darklab.sh/login', review_state: 'confirmed' }],
+        total: 1,
+        limit: 50,
+        offset: 0,
+        counts_by_type: { url: 1 },
+      },
+      auto: {
+        targets: [{ id: 'target-4', type: 'ip', value: '192.0.2.10', review_state: 'pending' }],
+        total: 1,
+        limit: 50,
+        offset: 0,
+        counts_by_type: { ip: 1 },
+      },
+    }
+    let projectListFetches = 0
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ project: projects[0] }) })
+      }
+      if (String(url).startsWith('/projects?include_archived=1')) {
+        projectListFetches += 1
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ projects }) })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project: projects[0],
+            counts: { runs: 0, entities: 4, findings: 0, artifacts: 0, packages: 0, targets: 4, notes: 0 },
+            entity_counts: { domain: 40, ip: 30, url: 20 },
+            runs: [],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      if (String(url).startsWith('/projects/project-1/targets?')) {
+        const params = new URL(url, 'http://localhost').searchParams
+        let page = {
+          targets: [
+            { id: 'target-1', type: 'domain', value: 'darklab.sh', review_state: 'confirmed' },
+            { id: 'target-4', type: 'ip', value: '192.0.2.10', review_state: 'pending' },
+          ],
+          total: 4,
+          limit: Number(params.get('limit') || 50),
+          offset: Number(params.get('offset') || 0),
+          counts_by_type: { domain: 2, ip: 1, url: 1 },
+        }
+        if (params.get('auto_discovered') === '1') page = targetPages.auto
+        else if (params.get('type') === 'domain' && params.get('offset') === '1') page = targetPages['type=domain&offset=1']
+        else if (params.get('type') === 'domain') page = targetPages['type=domain']
+        else if (params.get('q') === 'login') page = targetPages['q=login']
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(page) })
+      }
+      if (url === '/projects/project-1/targets/target-4') {
+        if (options?.method === 'DELETE') {
+          targetPages.auto = {
+            targets: [],
+            total: 0,
+            limit: 50,
+            offset: 0,
+            counts_by_type: {},
+          }
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            target: { id: 'target-4', type: 'ip', value: '192.0.2.10', review_state: 'confirmed' },
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const showConfirm = vi.fn(() => Promise.resolve('remove'))
+    const shell = loadShellChrome({ apiFetch, showConfirm })
+
+    await shell.openProjectWorkspace()
+    document.querySelector('[data-project-tab="details"]')?.click()
+    await tick()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets?limit=50&offset=0', { cache: 'no-store' })
+    expect(document.querySelector('.project-target-row')?.textContent).toContain('darklab.sh')
+    const targetAllCount = () => (
+      document.querySelector('.project-target-type-tab[data-project-target-type=""] .project-target-type-tab-count')?.textContent
+    )
+    document.querySelector('[data-project-tab="runs"]').click()
+    await tick()
+    await tick()
+    document.querySelector('[data-project-tab="details"]').click()
+    await tick()
+    expect(targetAllCount()).toBe('4')
+
+    const projectListFetchesBeforeTargetPage = projectListFetches
+    document.querySelector('[data-project-target-type="domain"]').click()
+    expect(targetAllCount()).toBe('4')
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets?limit=50&offset=0&type=domain', { cache: 'no-store' })
+    expect(document.querySelector('.project-target-pagination.project-workspace-pagination')?.textContent).toContain('1-1 of 2 targets')
+    expect(document.querySelectorAll('.project-target-pagination.project-workspace-pagination')).toHaveLength(2)
+    document.querySelector('.project-target-pagination .btn:last-child').click()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets?limit=50&offset=1&type=domain', { cache: 'no-store' })
+    expect(projectListFetches).toBe(projectListFetchesBeforeTargetPage)
+    expect(document.querySelector('.project-target-row')?.textContent).toContain('api.darklab.sh')
+
+    const search = document.querySelector('.project-target-search')
+    search.value = 'login'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise(resolve => setTimeout(resolve, 300))
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets?limit=50&offset=0&type=domain&q=login', { cache: 'no-store' })
+
+    document.querySelector('[data-project-target-type=""]').click()
+    await tick()
+    document.querySelector('.project-target-auto-toggle input').click()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets?limit=50&offset=0&q=login&auto_discovered=1', { cache: 'no-store' })
+    const projectListFetchesBeforeConfirm = projectListFetches
+    document.querySelector('[data-project-action="confirm-target"][data-target-id="target-4"]').click()
+    await tick()
+    await tick()
+    expect(projectListFetches).toBe(projectListFetchesBeforeConfirm)
+    expect(document.querySelector('.project-target-row')?.textContent).toContain('192.0.2.10')
+    expect(document.querySelector('[data-project-action="confirm-target"][data-target-id="target-4"]')).toBeNull()
+
+    const projectListFetchesBeforeDelete = projectListFetches
+    document.querySelector('[data-project-action="delete-target"][data-target-id="target-4"]').click()
+    await tick()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets/target-4', expect.objectContaining({ method: 'DELETE' }))
+    expect(projectListFetches).toBe(projectListFetchesBeforeDelete)
   })
 
   it('renders the mobile project list with active-first rows and collapsed archived projects', async () => {
@@ -904,6 +1074,22 @@ describe('shell chrome project workspace', () => {
             targets: [],
             artifacts: [],
             packages: [],
+          }),
+        })
+      }
+      if (String(url).startsWith('/projects/project-1/targets?')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            targets: targetStates.map(target => ({
+              ...target,
+              labels: labelObjects('target', target.id),
+              note: noteObject('target', target.id),
+            })),
+            total: targetStates.length,
+            limit: 50,
+            offset: 0,
+            counts_by_type: { domain: 2, ip: 1 },
           }),
         })
       }
@@ -2327,6 +2513,22 @@ describe('shell chrome project workspace', () => {
           }),
         })
       }
+      if (String(url).startsWith('/projects/project-1/targets?')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            targets: targetStates.map(target => ({
+              ...target,
+              labels: labelObjects('target', target.id),
+              note: noteObject('target', target.id),
+            })),
+            total: targetStates.length,
+            limit: 50,
+            offset: 0,
+            counts_by_type: { domain: 1, host: 1, ip: 1 },
+          }),
+        })
+      }
       if (url === '/projects/project-1/targets/target-1' && options.method === 'PUT') {
         targetStates = targetStates.map(target => (
           target.id === 'target-1' ? { ...target, ...JSON.parse(options.body) } : target
@@ -2691,6 +2893,8 @@ describe('shell chrome project workspace', () => {
     document.dispatchEvent(new CustomEvent('app:project-target-discovered', { detail: { project_id: 'project-1', count: 2 } }))
     expect(document.querySelector('[data-action="projects"]')?.classList.contains('has-project-target-discovery')).toBe(true)
     await shell.openProjectWorkspace()
+    await tick()
+    await tick()
     expect(document.querySelector('.project-target-row')?.textContent).toContain('Primary domain')
     expect(document.querySelector('.project-explorer-meta-row')?.classList.contains('panel-row')).toBe(true)
     expect(Array.from(document.querySelectorAll('.project-explorer-section-heading'))
@@ -2820,6 +3024,8 @@ describe('shell chrome project workspace', () => {
     document.getElementById('project-target-value').value = 'darklab.io'
     document.getElementById('project-target-label').value = 'Updated target'
     document.getElementById('project-target-notes').value = 'Retest scope'
+    const projectFetchesBeforeTargetEdit = apiFetch.mock.calls
+      .filter(([url]) => String(url).startsWith('/projects?include_archived=1')).length
     document.getElementById('project-target-create-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await tick()
     await tick()
@@ -2843,6 +3049,8 @@ describe('shell chrome project workspace', () => {
       method: 'PUT',
       body: JSON.stringify({ body: 'Retest scope' }),
     }))
+    expect(apiFetch.mock.calls
+      .filter(([url]) => String(url).startsWith('/projects?include_archived=1')).length).toBe(projectFetchesBeforeTargetEdit)
     expect(document.querySelector('.project-target-row')?.textContent).toContain('darklab.io')
     expect(shell.showToast).toHaveBeenCalledWith('Target updated.', 'success')
     expect(document.getElementById('project-workspace-message').classList.contains('u-hidden')).toBe(true)
@@ -3631,6 +3839,8 @@ describe('shell chrome project workspace', () => {
     await shell.openProjectWorkspace()
     document.querySelector('[data-project-tab="details"]').click()
     await tick()
+    const projectFetchesBeforeTargetDelete = apiFetch.mock.calls
+      .filter(([url]) => String(url).startsWith('/projects?include_archived=1')).length
     document.querySelector('[data-project-action="delete-target"]').click()
     await tick()
     await tick()
@@ -3643,6 +3853,9 @@ describe('shell chrome project workspace', () => {
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets/target-1', expect.objectContaining({
       method: 'DELETE',
     }))
+    expect(apiFetch.mock.calls
+      .filter(([url]) => String(url).startsWith('/projects?include_archived=1')).length)
+      .toBe(projectFetchesBeforeTargetDelete)
     expect(document.querySelector('[data-project-action="edit-target"][data-target-id="target-1"]')).toBeNull()
     expect(document.querySelector('.project-target-row')?.textContent).toContain('api.darklab.sh')
     setTimeoutSpy.mockRestore()
@@ -3820,7 +4033,7 @@ describe('shell chrome project workspace', () => {
       vi.useRealTimers()
     }
 
-    expect(apiFetch.mock.calls.filter(([url]) => url === '/projects/project-1/summary').length).toBeGreaterThan(1)
+    expect(apiFetch.mock.calls.filter(([url]) => String(url).startsWith('/projects?include_archived=1')).length).toBeGreaterThan(1)
     expect(document.getElementById('project-workspace-body').textContent).toContain('Updated Project')
   })
 })

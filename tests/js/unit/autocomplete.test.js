@@ -1438,7 +1438,7 @@ describe('autocomplete helpers', () => {
           json: () => Promise.resolve({ project: { id: 'prj_abc123' } }),
         })
       }
-      if (url === '/projects/prj_abc123/targets') {
+      if (url === '/projects/prj_abc123/targets?limit=200') {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
@@ -1476,7 +1476,7 @@ describe('autocomplete helpers', () => {
     for (let i = 0; i < 8; i += 1) await Promise.resolve()
 
     expect(apiFetch).toHaveBeenCalledWith('/projects/active', { cache: 'no-store' })
-    expect(apiFetch).toHaveBeenCalledWith('/projects/prj_abc123/targets', { cache: 'no-store' })
+    expect(apiFetch).toHaveBeenCalledWith('/projects/prj_abc123/targets?limit=200', { cache: 'no-store' })
     expect(_readProjectTargets()).toEqual([
       { type: 'domain', value: 'new-target.example.com', label: 'CLI add' },
     ])

@@ -489,6 +489,115 @@ def _project_entity_rows_to_items(conn, session_id, rows):
     return entities
 
 
+def _project_finding_scope_sql():
+    return (
+        "SELECT fo.finding_id AS finding_id, "
+        "COALESCE(NULLIF(f.status, ''), 'new') AS review_state, "
+        "COALESCE(NULLIF(f.severity, ''), 'info') AS severity "
+        "FROM project_links l "
+        "JOIN runs r ON r.id = l.entity_id "
+        "JOIN findings_occurrences fo ON fo.run_id = r.id "
+        "JOIN findings f ON f.id = fo.finding_id AND f.session_id = ? "
+        "AND COALESCE(f.suppressed, FALSE) = FALSE "
+        "WHERE l.project_id = ? AND l.entity_type = 'run' "
+        "AND r.session_id = ? AND r.run_kind = ? "
+        "UNION "
+        "SELECT f.id AS finding_id, "
+        "COALESCE(NULLIF(f.status, ''), 'new') AS review_state, "
+        "COALESCE(NULLIF(f.severity, ''), 'info') AS severity "
+        "FROM project_links l "
+        "JOIN runs r ON r.id = l.entity_id "
+        "JOIN findings f ON f.session_id = ? "
+        "AND COALESCE(f.suppressed, FALSE) = FALSE "
+        "AND (f.run_id = r.id OR f.first_run_id = r.id OR f.last_run_id = r.id) "
+        "WHERE l.project_id = ? AND l.entity_type = 'run' "
+        "AND r.session_id = ? AND r.run_kind = ? "
+        "UNION "
+        "SELECT f.id AS finding_id, "
+        "COALESCE(NULLIF(f.status, ''), 'new') AS review_state, "
+        "COALESCE(NULLIF(f.severity, ''), 'info') AS severity "
+        "FROM project_links l "
+        "JOIN entities e ON e.id = l.entity_id "
+        "JOIN findings f ON f.entity_id = e.id AND f.session_id = ? "
+        "AND COALESCE(f.suppressed, FALSE) = FALSE "
+        "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' "
+        "AND e.session_id = ? AND COALESCE(e.suppressed, FALSE) = FALSE"
+    )
+
+
+def _project_finding_scope_params(session_id, project_id):
+    return (
+        session_id,
+        project_id,
+        session_id,
+        RUN_KIND_EXTERNAL,
+        session_id,
+        project_id,
+        session_id,
+        RUN_KIND_EXTERNAL,
+        session_id,
+        project_id,
+        session_id,
+    )
+
+
+def _project_finding_metadata_count(conn, session_id, project_id, table):
+    scope_sql = _project_finding_scope_sql()
+    row = conn.execute(
+        f"SELECT COUNT(DISTINCT m.id) AS count FROM {table} m "  # nosec
+        "JOIN (SELECT DISTINCT finding_id FROM ("
+        + scope_sql
+        + ")) project_findings ON project_findings.finding_id = m.entity_id "
+        "WHERE m.session_id = ? AND m.entity_type = 'finding'",
+        (*_project_finding_scope_params(session_id, project_id), session_id),
+    ).fetchone()
+    return int(row["count"] or 0) if row else 0
+
+
+def _project_finding_summary_rows(conn, session_id, project_id):
+    return conn.execute(
+        """
+        WITH project_findings AS (
+            SELECT fo.finding_id AS finding_id,
+                   COALESCE(NULLIF(f.status, ''), 'new') AS review_state,
+                   COALESCE(NULLIF(f.severity, ''), 'info') AS severity
+            FROM project_links l
+            JOIN runs r ON r.id = l.entity_id
+            JOIN findings_occurrences fo ON fo.run_id = r.id
+            JOIN findings f ON f.id = fo.finding_id AND f.session_id = ?
+            AND COALESCE(f.suppressed, FALSE) = FALSE
+            WHERE l.project_id = ? AND l.entity_type = 'run'
+            AND r.session_id = ? AND r.run_kind = ?
+            UNION
+            SELECT f.id AS finding_id,
+                   COALESCE(NULLIF(f.status, ''), 'new') AS review_state,
+                   COALESCE(NULLIF(f.severity, ''), 'info') AS severity
+            FROM project_links l
+            JOIN runs r ON r.id = l.entity_id
+            JOIN findings f ON f.session_id = ?
+            AND COALESCE(f.suppressed, FALSE) = FALSE
+            AND (f.run_id = r.id OR f.first_run_id = r.id OR f.last_run_id = r.id)
+            WHERE l.project_id = ? AND l.entity_type = 'run'
+            AND r.session_id = ? AND r.run_kind = ?
+            UNION
+            SELECT f.id AS finding_id,
+                   COALESCE(NULLIF(f.status, ''), 'new') AS review_state,
+                   COALESCE(NULLIF(f.severity, ''), 'info') AS severity
+            FROM project_links l
+            JOIN entities e ON e.id = l.entity_id
+            JOIN findings f ON f.entity_id = e.id AND f.session_id = ?
+            AND COALESCE(f.suppressed, FALSE) = FALSE
+            WHERE l.project_id = ? AND l.entity_type = 'atlas_entity'
+            AND e.session_id = ? AND COALESCE(e.suppressed, FALSE) = FALSE
+        )
+        SELECT review_state, severity, COUNT(DISTINCT finding_id) AS count
+        FROM project_findings
+        GROUP BY review_state, severity
+        """,
+        _project_finding_scope_params(session_id, project_id),
+    ).fetchall()
+
+
 def _project_artifact_rows_to_items(session_id, conn, rows):
     artifact_ids = [str(row["id"] or "") for row in rows if row["id"]]
     artifact_labels = _entity_labels_by_id(conn, session_id, "run_file_artifact", artifact_ids)
@@ -538,8 +647,8 @@ def get_project_summary(session_id, project_id):
         ).fetchall()
         link_rows = [*run_link_rows, *atlas_link_rows]
         target_rows = conn.execute(
-            _project_atlas_entity_select_sql(target_only=True),
-            (project_id, session_id),
+            _project_atlas_entity_select_sql(target_only=True) + " LIMIT ?",
+            (project_id, session_id, 200),
         ).fetchall()
         run_ids = [row["entity_id"] for row in run_link_rows if row["entity_type"] == "run"]
         entity_id_rows = conn.execute(
@@ -551,8 +660,21 @@ def get_project_summary(session_id, project_id):
         ).fetchall()
         entity_ids = [row["id"] for row in entity_id_rows]
         entity_counts_by_type = _project_entity_counts_by_type(conn, session_id, project_id)
+        target_count_rows = conn.execute(
+            "SELECT l.review_state, COUNT(*) AS count "
+            "FROM project_links l JOIN entities e ON e.id = l.entity_id "
+            "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' "
+            "AND e.session_id = ? AND COALESCE(e.suppressed, FALSE) = FALSE "
+            "AND e.type IN ('domain', 'ip', 'url') "
+            "GROUP BY l.review_state",
+            (project_id, session_id),
+        ).fetchall()
+        target_counts_by_review = {
+            str(row["review_state"] or "confirmed"): int(row["count"] or 0)
+            for row in target_count_rows
+        }
         artifact_id_rows = []
-        finding_rows = []
+        finding_count = 0
         finding_summary = _empty_project_finding_summary()
         run_rows = []
         if run_ids:
@@ -575,44 +697,16 @@ def get_project_summary(session_id, project_id):
                 f"FROM run_file_artifacts WHERE run_id IN ({placeholders}) ",  # nosec
                 run_ids,
             ).fetchall()
-        if run_ids or entity_ids:
-            finding_clauses = []
-            finding_params = [session_id]
-            if run_ids:
-                run_placeholders = ",".join("?" for _ in run_ids)
-                finding_clauses.append(
-                    "EXISTS ("
-                    "SELECT 1 FROM findings_occurrences fo "
-                    "WHERE fo.finding_id = f.id "
-                    f"AND fo.run_id IN ({run_placeholders})"  # nosec
-                    ") "
-                    f"OR f.run_id IN ({run_placeholders}) "  # nosec
-                    f"OR f.first_run_id IN ({run_placeholders}) "  # nosec
-                    f"OR f.last_run_id IN ({run_placeholders})"  # nosec
-                )
-                finding_params.extend([*run_ids, *run_ids, *run_ids, *run_ids])
-            if entity_ids:
-                entity_placeholders = ",".join("?" for _ in entity_ids)
-                finding_clauses.append(f"f.entity_id IN ({entity_placeholders})")  # nosec
-                finding_params.extend(entity_ids)
-            finding_rows = conn.execute(
-                "SELECT DISTINCT f.id, "
-                "COALESCE(NULLIF(f.status, ''), 'new') AS review_state, "
-                "COALESCE(NULLIF(f.severity, ''), 'info') AS severity "
-                "FROM findings f WHERE f.session_id = ? "
-                "AND COALESCE(f.suppressed, FALSE) = FALSE AND ("  # nosec
-                + " OR ".join(finding_clauses)
-                + ")",
-                finding_params,
-            ).fetchall()
+        finding_rows = _project_finding_summary_rows(conn, session_id, project_id)
         artifact_ids = [row["id"] for row in artifact_id_rows]
-        finding_ids = [row["id"] for row in finding_rows]
         for row in finding_rows:
+            count = int(row["count"] or 0)
+            finding_count += count
             _add_finding_summary_count(
                 finding_summary,
                 review_state=row["review_state"],
                 severity=row["severity"],
-                count=1,
+                count=count,
             )
         target_ids = [row["id"] for row in target_rows]
         package_rows = conn.execute(
@@ -626,7 +720,7 @@ def get_project_summary(session_id, project_id):
             _count_entity_metadata_for_ids(conn, "entity_labels", "project", [project_id])
             + _count_entity_metadata_for_ids(conn, "entity_labels", "run", run_ids)
             + _count_entity_metadata_for_ids(conn, "entity_labels", "run_file_artifact", artifact_ids)
-            + _count_entity_metadata_for_ids(conn, "entity_labels", "finding", finding_ids)
+            + _project_finding_metadata_count(conn, session_id, project_id, "entity_labels")
             + _count_entity_metadata_for_ids(conn, "entity_labels", "atlas_entity", entity_ids)
             + _count_entity_metadata_for_ids(conn, "entity_labels", "target", target_ids)
             + _count_entity_metadata_for_ids(conn, "entity_labels", "package", package_ids)
@@ -635,7 +729,7 @@ def get_project_summary(session_id, project_id):
             _count_entity_metadata_for_ids(conn, "entity_notes", "project", [project_id])
             + _count_entity_metadata_for_ids(conn, "entity_notes", "run", run_ids)
             + _count_entity_metadata_for_ids(conn, "entity_notes", "run_file_artifact", artifact_ids)
-            + _count_entity_metadata_for_ids(conn, "entity_notes", "finding", finding_ids)
+            + _project_finding_metadata_count(conn, session_id, project_id, "entity_notes")
             + _count_entity_metadata_for_ids(conn, "entity_notes", "atlas_entity", entity_ids)
             + _count_entity_metadata_for_ids(conn, "entity_notes", "target", target_ids)
             + _count_entity_metadata_for_ids(conn, "entity_notes", "package", package_ids)
@@ -652,8 +746,8 @@ def get_project_summary(session_id, project_id):
             "labels": target_labels.get(item_id, []),
             "note": target_notes.get(item_id),
         })
-    confirmed_target_count = sum(1 for target in targets if target and target.get("review_state") == "confirmed")
-    pending_target_count = sum(1 for target in targets if target and target.get("review_state") == "pending")
+    pending_target_count = target_counts_by_review.get("pending", 0)
+    confirmed_target_count = sum(count for state, count in target_counts_by_review.items() if state != "pending")
     runs = run_items
     packages = list_evidence_packages(session_id, project_id) or []
     return {
@@ -671,7 +765,7 @@ def get_project_summary(session_id, project_id):
             "targets": confirmed_target_count,
             "pending_targets": pending_target_count,
             "artifacts": len(artifact_ids),
-            "findings": len(finding_ids),
+            "findings": finding_count,
             "labels": label_count,
             "notes": note_count,
             "packages": len(package_ids),

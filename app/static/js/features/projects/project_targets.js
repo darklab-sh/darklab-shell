@@ -159,7 +159,9 @@
         await ctx.syncEntityNote('target', savedTargetId, metadata.noteBody);
         ctx.setLastTargetType(payload.type || ctx.getLastTargetType());
         closeEditor();
-        await ctx.refreshProjectWorkspace();
+        await ctx.loadProjectTargetPage?.(projectId, { skipFinalRender: true });
+        ctx.renderProjectExplorer?.();
+        ctx.renderProjectMobileDetail?.();
         ctx.loadProjectAutocompleteTargets?.();
         ctx.setProjectWorkspaceMessage(targetId ? 'Target updated.' : 'Target added to selected project.');
       } catch (err) {

@@ -30,7 +30,9 @@ from services.projects.metadata import _attach_target_metadata
 from services.projects.models import row_to_target as _row_to_target
 from services.projects.queries import _project_atlas_entity_select_sql
 from services.projects.utils import (
+    normalize_page_window as _normalize_page_window,
     now as _now,
+    page_payload as _page_payload,
     quota_exceeded as _quota_exceeded,
     raise_quota as _raise_quota,
     trim_text as _trim_text,
@@ -39,6 +41,7 @@ from services.workspace.files import WorkspaceError, read_workspace_text_file
 
 
 PROJECT_TARGET_SOURCE_DETAIL_FLAG = "project_target"
+PROJECT_TARGET_ENTITY_TYPES = {"domain", "ip", "url"}
 
 _URL_RE = re.compile(r"https?://[^\s<>'\"`]+", re.I)
 _DOMAIN_RE = re.compile(
@@ -351,7 +354,39 @@ def infer_project_target_payload(data):
     raise ProjectWorkspaceError("could not infer a project target from the supplied text")
 
 
-def list_project_targets(session_id, project_id):
+def _normalized_target_entity_type(target_type):
+    normalized = _trim_text(target_type, 32).lower()
+    if normalized == "host":
+        return "domain"
+    return normalized if normalized in PROJECT_TARGET_ENTITY_TYPES else ""
+
+
+def _target_query_filters(*, target_type="", query="", auto_discovered=False):
+    extra_where = []
+    params = []
+    normalized_type = _normalized_target_entity_type(target_type)
+    search = _trim_text(query, MAX_TARGET_VALUE_LEN).lower()
+    if search:
+        extra_where.append("AND LOWER(e.canonical_value) LIKE ?")
+        params.append(f"%{search}%")
+    if auto_discovered:
+        extra_where.append("AND l.source IN ('auto_command', 'auto_input_file')")
+    return normalized_type, " ".join(extra_where), params
+
+
+def _project_target_page_payload(targets, total, limit, offset, counts_by_type=None):
+    return _page_payload(
+        "targets",
+        targets,
+        total,
+        limit,
+        offset,
+        extra={"counts_by_type": counts_by_type if isinstance(counts_by_type, dict) else {}},
+    )
+
+
+def list_project_targets(session_id, project_id, *, target_type="", query="", auto_discovered=False, limit=50, offset=0):
+    safe_limit, safe_offset = _normalize_page_window(limit, offset)
     with db_connect() as conn:
         project = conn.execute(
             "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
@@ -359,13 +394,38 @@ def list_project_targets(session_id, project_id):
         ).fetchone()
         if not project:
             return None
+        normalized_type, extra_where, filter_params = _target_query_filters(
+            target_type=target_type,
+            query=query,
+            auto_discovered=auto_discovered,
+        )
+        search = _trim_text(query, MAX_TARGET_VALUE_LEN).lower()
+        search_like = f"%{search}%"
+        auto_filter_enabled = 1 if auto_discovered else 0
+        counts_rows = conn.execute(
+            "SELECT e.type, COUNT(*) AS count "
+            "FROM project_links l JOIN entities e ON e.id = l.entity_id "
+            "WHERE l.project_id = ? AND l.entity_type = 'atlas_entity' "
+            "AND e.session_id = ? AND COALESCE(e.suppressed, FALSE) = FALSE "
+            "AND e.type IN ('domain', 'ip', 'url') "
+            "AND (? = '' OR LOWER(e.canonical_value) LIKE ?) "
+            "AND (? = 0 OR l.source IN ('auto_command', 'auto_input_file')) "
+            "GROUP BY e.type",
+            (project_id, session_id, search, search_like, auto_filter_enabled),
+        ).fetchall()
+        counts_by_type = {str(row["type"] or ""): int(row["count"] or 0) for row in counts_rows}
+        total = int(counts_by_type.get(normalized_type, 0)) if normalized_type else sum(counts_by_type.values())
+        params = [project_id, session_id]
+        if normalized_type:
+            params.append(normalized_type)
         rows = conn.execute(
-            _project_atlas_entity_select_sql(target_only=True),
-            (project_id, session_id),
+            _project_atlas_entity_select_sql(target_only=True, entity_type=normalized_type, extra_where=extra_where)
+            + " LIMIT ? OFFSET ?",
+            (*params, *filter_params, safe_limit, safe_offset),
         ).fetchall()
         targets = [_row_to_target(row) for row in rows]
         _attach_target_metadata(conn, session_id, targets)
-    return targets
+    return _project_target_page_payload(targets, total, safe_limit, safe_offset, counts_by_type)
 
 
 def add_project_target(session_id, project_id, data):

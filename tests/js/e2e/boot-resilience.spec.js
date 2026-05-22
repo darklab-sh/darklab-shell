@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { openRailAction } from './helpers.js'
 
 test.describe('boot resilience', () => {
   test.beforeEach(async ({ page }) => {
@@ -15,7 +16,7 @@ test.describe('boot resilience', () => {
   }) => {
     await expect(page.locator('.rail-wordmark-title')).toHaveText(/darklab_shell/)
 
-    await page.locator('.rail-nav [data-action="theme"]').click()
+    await openRailAction(page, 'theme')
     await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
     await expect(page.locator('#theme-select .theme-card-active')).toBeVisible()
     await page.locator('.theme-close').click()
@@ -23,7 +24,7 @@ test.describe('boot resilience', () => {
     await page.locator('#search-toggle-btn').click()
     await expect(page.locator('#search-bar')).toBeVisible()
 
-    await page.locator('.rail-nav [data-action="faq"]').click()
+    await openRailAction(page, 'faq')
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
   })
 

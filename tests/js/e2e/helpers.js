@@ -5,6 +5,7 @@
 import { spawnSync } from 'child_process'
 import { existsSync, readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
+import { expect } from '@playwright/test'
 
 // Use the RFC 2544 benchmarking range so the test suite never accidentally
 // collides with a real routable address when synthesizing client IPs.
@@ -419,6 +420,18 @@ export async function waitForHistoryRuns(page, minRuns) {
   )
 
   return page.evaluate(() => window.__e2eLastHistoryRuns || [])
+}
+
+export async function openRailAction(page, action) {
+  const primary = page.locator(`.rail-nav > [data-action="${action}"]`)
+  if (await primary.isVisible().catch(() => false)) {
+    await primary.click()
+    return
+  }
+  const more = page.locator('#rail-more-btn')
+  await more.click()
+  await expect(page.locator('#rail-more-menu')).toBeVisible()
+  await page.locator(`#rail-more-menu [data-action="${action}"]`).click()
 }
 
 /**

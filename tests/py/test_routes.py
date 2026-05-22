@@ -910,6 +910,53 @@ class TestProjectRoutes:
         assert target["type"] == "ip"
         assert target["value"] == "192.0.2.10"
 
+    def test_project_targets_list_supports_pagination_type_search_and_auto_filter(self):
+        client = get_client()
+        session_id = self._session_id("project-target-page")
+        project = self._create_project(client, session_id)
+        targets = []
+        for payload in (
+            {"type": "domain", "value": "darklab.sh"},
+            {"type": "domain", "value": "example.org"},
+            {"type": "ip", "value": "192.0.2.10"},
+            {"type": "url", "value": "https://darklab.sh/login"},
+        ):
+            resp = client.post(
+                f"/projects/{project['id']}/targets",
+                json=payload,
+                headers={"X-Session-ID": session_id},
+            )
+            assert resp.status_code == 201
+            targets.append(json.loads(resp.data)["target"])
+        with db_connect() as conn:
+            conn.execute(
+                "UPDATE project_links SET source = 'auto_command', review_state = 'pending' "
+                "WHERE project_id = ? AND entity_type = 'atlas_entity' AND entity_id = ?",
+                (project["id"], targets[2]["id"]),
+            )
+            conn.commit()
+
+        domain_page = json.loads(client.get(
+            f"/projects/{project['id']}/targets?type=domain&limit=1",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        search_page = json.loads(client.get(
+            f"/projects/{project['id']}/targets?q=login",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        auto_page = json.loads(client.get(
+            f"/projects/{project['id']}/targets?auto_discovered=1",
+            headers={"X-Session-ID": session_id},
+        ).data)
+
+        assert domain_page["total"] == 2
+        assert domain_page["limit"] == 1
+        assert len(domain_page["targets"]) == 1
+        assert domain_page["counts_by_type"] == {"domain": 2, "ip": 1, "url": 1}
+        assert [item["value"] for item in search_page["targets"]] == ["https://darklab.sh/login"]
+        assert [item["id"] for item in auto_page["targets"]] == [targets[2]["id"]]
+        assert auto_page["targets"][0]["review_state"] == "pending"
+
     def test_builtin_runs_do_not_record_findings_even_with_legacy_project_link(self):
         client = get_client()
         session_id = self._session_id("builtin-findings")

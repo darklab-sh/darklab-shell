@@ -244,7 +244,7 @@ function loadProjectAutocompleteTargets() {
       const project = data && data.project && typeof data.project === 'object' ? data.project : null;
       const projectId = project && project.id ? String(project.id) : '';
       if (!projectId) return setProjectAutocompleteTargets([]);
-      return apiFetch(`/projects/${encodeURIComponent(projectId)}/targets`, { cache: 'no-store' })
+      return apiFetch(`/projects/${encodeURIComponent(projectId)}/targets?limit=200`, { cache: 'no-store' })
         .then(resp => (resp && resp.ok && typeof resp.json === 'function' ? resp.json() : { targets: [] }))
         .then(targetData => setProjectAutocompleteTargets(targetData && targetData.targets));
     })

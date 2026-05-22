@@ -21,9 +21,13 @@
 
     function summaryFromListRow(project) {
       const counts = project && project.counts && typeof project.counts === 'object' ? project.counts : {};
+      const findingSummary = project && project.finding_summary && typeof project.finding_summary === 'object'
+        ? project.finding_summary
+        : { review_states: {}, severities: {} };
       return {
         project,
         counts,
+        finding_summary: findingSummary,
         links: [],
         targets: [],
         entities: [],
@@ -144,7 +148,9 @@
         ctx.invalidateProjectEntities?.();
         ctx.invalidateProjectArtifacts?.();
         ensureSelectedProject();
-        await ensureProjectSummary();
+        if (ctx.workspaceTab?.() !== 'details') {
+          await ensureProjectSummary();
+        }
         ctx.setProjectWorkspaceMessage('');
       } catch (err) {
         ctx.setProjectRows([]);

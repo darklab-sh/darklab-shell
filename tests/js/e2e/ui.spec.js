@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import {
   ensurePromptReady,
+  openRailAction,
   runCommand,
   waitForHistoryRuns,
   browserSessionId,
@@ -165,13 +166,13 @@ test.describe('theme selector', () => {
   })
 
   test('clicking the theme button opens the theme selector', async ({ page }) => {
-    await page.locator('.rail-nav [data-action="theme"]').click()
+    await openRailAction(page, 'theme')
     await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
     await expect(page.locator('#theme-select .theme-card-active')).toBeVisible()
   })
 
   test('selecting a theme applies it from the selector', async ({ page }) => {
-    await page.locator('.rail-nav [data-action="theme"]').click()
+    await openRailAction(page, 'theme')
     const optionLabels = await page
       .locator('#theme-select .theme-card-label')
       .evaluateAll((labels) => labels.map((label) => label.textContent))
@@ -234,12 +235,12 @@ test.describe('FAQ modal', () => {
 
   test('FAQ button opens the overlay', async ({ page }) => {
     await expect(page.locator('#faq-overlay')).not.toHaveClass(/open/)
-    await page.locator('.rail-nav [data-action="faq"]').click()
+    await openRailAction(page, 'faq')
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
   })
 
   test('close button inside the FAQ modal closes it', async ({ page }) => {
-    await page.locator('.rail-nav [data-action="faq"]').click()
+    await openRailAction(page, 'faq')
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
 
     await page.locator('.faq-close').click()
@@ -247,7 +248,7 @@ test.describe('FAQ modal', () => {
   })
 
   test('clicking the overlay backdrop closes the FAQ modal', async ({ page }) => {
-    await page.locator('.rail-nav [data-action="faq"]').click()
+    await openRailAction(page, 'faq')
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
 
     // Click on the overlay element itself (outside the modal content box)
@@ -256,7 +257,7 @@ test.describe('FAQ modal', () => {
   })
 
   test('renders backend-driven FAQ content and command registry pointer', async ({ page }) => {
-    await page.locator('.rail-nav [data-action="faq"]').click()
+    await openRailAction(page, 'faq')
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
 
     await expect(page.locator('.faq-q')).toContainText([
@@ -277,7 +278,7 @@ test.describe('FAQ modal', () => {
     await expect(page.locator('#faq-overlay')).not.toHaveClass(/open/)
     await expect(page.locator('#cmd')).toBeFocused()
 
-    await page.locator('.rail-nav [data-action="faq"]').click()
+    await openRailAction(page, 'faq')
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
 
     // The allowed-commands section is inside a collapsed accordion — expand it first
@@ -298,9 +299,11 @@ test.describe('Status Monitor', () => {
   })
 
   test('desktop rail opens the idle Status Monitor modal', async ({ page }) => {
-    await expect(page.locator('.rail-nav [data-action="status-monitor"] .rail-nav-label')).toHaveText('status')
+    await page.locator('#rail-more-btn').click()
+    await expect(page.locator('#rail-more-menu [data-action="status-monitor"] .rail-nav-label')).toHaveText('status')
+    await page.keyboard.press('Escape')
 
-    await page.locator('.rail-nav [data-action="status-monitor"]').click()
+    await openRailAction(page, 'status-monitor')
 
     await expect(page.locator('#status-monitor')).toBeVisible()
     await expect(page.locator('#status-monitor')).toHaveClass(/\bstatus-monitor-modal\b/)
@@ -322,7 +325,7 @@ test.describe('Status Monitor', () => {
       return response.request().method() === 'GET' && url.pathname === path
     }))
 
-    await page.locator('.rail-nav [data-action="status-monitor"]').click()
+    await openRailAction(page, 'status-monitor')
     await expect(page.locator('#status-monitor')).toBeVisible()
 
     const observed = await Promise.all(responses)
@@ -361,7 +364,7 @@ test.describe('Status Monitor', () => {
       })
     })
 
-    await page.locator('.rail-nav [data-action="status-monitor"]').click()
+    await openRailAction(page, 'status-monitor')
     await expect(page.locator('#status-monitor')).toBeVisible()
 
     const showcase = page.locator('.status-monitor-showcase')
@@ -400,7 +403,7 @@ test.describe('Status Monitor', () => {
       const url = new URL(response.url())
       return url.pathname === '/history/insights'
     })
-    await page.locator('.rail-nav [data-action="status-monitor"]').click()
+    await openRailAction(page, 'status-monitor')
     await expect(page.locator('#status-monitor')).toBeVisible()
     expect((await insightsResponse).ok()).toBe(true)
 
@@ -416,7 +419,7 @@ test.describe('Status Monitor', () => {
     await page.locator('#history-close').click()
     await expect(page.locator('#history-panel')).not.toHaveClass(/\bopen\b/)
 
-    await page.locator('.rail-nav [data-action="status-monitor"]').click()
+    await openRailAction(page, 'status-monitor')
     await expect(page.locator('#status-monitor')).toBeVisible()
     await page.locator('#status-monitor .status-monitor-star-node[aria-label^="ping "]').first().click()
 
@@ -1254,12 +1257,12 @@ test.describe('options modal', () => {
   test('persists theme, timestamps, line number, and HUD clock preferences across reload', async ({
     page,
   }) => {
-    await page.locator('.rail-nav [data-action="theme"]').click()
+    await openRailAction(page, 'theme')
     await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
     await page.locator('#theme-select [data-theme-name="apricot_sand"]').click()
     await page.locator('.theme-close').click()
 
-    await page.locator('.rail-nav [data-action="options"]').click()
+    await openRailAction(page, 'options')
     await expect(page.locator('#options-overlay')).toHaveClass(/open/)
     await page.locator('#options-ts-select').selectOption('elapsed')
     await page.locator('#options-ln-toggle').check()
@@ -1295,7 +1298,7 @@ test.describe('options modal', () => {
   })
 
   test('persists the selected Options tab and keeps secrets out of preferences', async ({ page }) => {
-    await page.locator('.rail-nav [data-action="options"]').click()
+    await openRailAction(page, 'options')
     await expect(page.locator('#options-overlay')).toHaveClass(/open/)
 
     await page.locator('[data-options-tab="secrets"]').click()
@@ -1304,7 +1307,7 @@ test.describe('options modal', () => {
     await page.locator('.options-close').click()
     await expect(page.locator('#options-overlay')).not.toHaveClass(/open/)
 
-    await page.locator('.rail-nav [data-action="options"]').click()
+    await openRailAction(page, 'options')
     await expect(page.locator('[data-options-tab="secrets"]')).toHaveAttribute('aria-selected', 'true')
     await expect(page.locator('#options-panel-secrets')).toBeVisible()
 
@@ -1324,7 +1327,7 @@ test.describe('options modal', () => {
     await expect(page.locator('#options-panel-preferences')).not.toContainText('SHODAN_API_KEY')
 
     await page.locator('.options-close').click()
-    await page.locator('.rail-nav [data-action="options"]').click()
+    await openRailAction(page, 'options')
     await expect(page.locator('[data-options-tab="secrets"]')).toHaveAttribute('aria-selected', 'true')
     await expect(page.locator('#options-secrets-list')).toContainText('SHODAN_API_KEY')
   })
