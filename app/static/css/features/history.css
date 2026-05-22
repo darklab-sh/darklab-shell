@@ -140,7 +140,10 @@ body #history-panel { background: var(--theme-chrome-bg); }
   padding: 6px 10px;
 }
 #history-exit-filter,
-#history-date-filter {
+#history-date-filter,
+#history-signal-filter,
+#history-kind-filter,
+#history-entity-type-filter {
   flex: 1 1 112px;
 }
 .history-filter-toggle {

@@ -31,10 +31,9 @@ Part 4 — ARCHITECTURE.md HTTP route inventory:
   grouped by feature rather than app registration order, so this check enforces
   coverage only, not ordering.
 
-Part 5 — release-draft docs:
-  Temporary release-branch merge-request and release-note drafts live under
-  docs/release-drafts/ while a version branch is active. If that directory
-  exists, the docs must carry the convention and the draft set must be paired.
+Part 5 — temporary release draft files:
+  Version branches can carry paired draft artifacts while the release is being
+  prepared, but official docs must not link to those transient files.
 
 Part 6 — operator configuration docs:
   Operator-facing defaults from app/config.py's load_config() defaults must
@@ -62,7 +61,7 @@ _REPO_ROOT = _HERE.parent.parent
 _CONTRIBUTING = _REPO_ROOT / "CONTRIBUTING.md"
 _ARCHITECTURE = _REPO_ROOT / "ARCHITECTURE.md"
 _CONFIGURATION = _REPO_ROOT / "CONFIGURATION.md"
-_DOCS_STANDARDS = _REPO_ROOT / "DOCS_STANDARDS.md"
+_DOC_STANDARDS = _REPO_ROOT / "DOC_STANDARDS.md"
 _README = _REPO_ROOT / "README.md"
 _CONFIG_PY = _REPO_ROOT / "app" / "config.py"
 _DEFAULT_CONFIG_YAML = _REPO_ROOT / "app" / "conf" / "config.yaml"
@@ -782,6 +781,8 @@ class TestDocumentedCombinedTotals:
 # parent directory below).
 _PROJECT_STRUCTURE_EXCLUSIONS = frozenset({
     "app/blueprints/__init__.py",     # empty package marker
+    "docs/release-drafts/v2.0-merge-request.md",   # temporary branch artifact
+    "docs/release-drafts/v2.0-release-notes.md",   # temporary branch artifact
 })
 
 # Directories whose individual files are intentionally collapsed into a
@@ -1057,19 +1058,29 @@ class TestArchitectureRouteInventory:
 # ── Part 5: release-draft docs ───────────────────────────────────────────────
 
 class TestReleaseDraftDocs:
-    """Release branches keep temporary MR/release-note drafts in-repo so
-    release messaging stays visible in normal review."""
+    """Release branches can keep temporary MR/release-note drafts in-repo
+    without making them part of the official documentation map."""
 
-    def test_release_draft_convention_is_documented_when_drafts_exist(self):
+    def test_temporary_branch_artifacts_stay_out_of_official_docs(self):
         if not _RELEASE_DRAFTS_DIR.exists():
             pytest.skip("No release draft directory in this checkout")
 
-        docs_text = _DOCS_STANDARDS.read_text()
-        contributing_text = _CONTRIBUTING.read_text()
-        assert "docs/release-drafts/" in docs_text
-        assert "docs/release-drafts/" in contributing_text
-        assert "remove" in docs_text.lower()
-        assert "remove" in contributing_text.lower()
+        official_docs = [
+            _README,
+            _CONTRIBUTING,
+            _DOC_STANDARDS,
+            _TESTS_README,
+            _ARCHITECTURE,
+            _CONFIGURATION,
+            _REPO_ROOT / "FEATURES.md",
+            _REPO_ROOT / "THEME.md",
+        ]
+        offenders = [
+            _markdown_path_for(path)
+            for path in official_docs
+            if "docs/release-drafts/" in path.read_text()
+        ]
+        assert not offenders, "Official docs must not reference temporary release draft files: " + ", ".join(offenders)
 
     def test_release_drafts_are_paired_by_version(self):
         if not _RELEASE_DRAFTS_DIR.exists():

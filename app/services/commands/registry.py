@@ -9,6 +9,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 import html
 import ipaddress
+import logging
 import os
 import re
 import shlex
@@ -45,6 +46,8 @@ from services.workspace.files import (
     read_workspace_text_file,
     resolve_workspace_path,
 )
+
+log = logging.getLogger("shell")
 
 _HERE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _CONF = os.path.join(_HERE, "conf")
@@ -545,8 +548,8 @@ def _load_yaml_list_with_local(path):
     if os.path.exists(local_path):
         try:
             items.extend(_load_yaml_list(local_path))
-        except yaml.YAMLError:
-            pass
+        except yaml.YAMLError as exc:
+            log.warning("COMMAND_REGISTRY_LOCAL_OVERLAY_INVALID", extra={"path": local_path, "error": str(exc)})
     return items
 
 

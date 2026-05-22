@@ -272,8 +272,39 @@ class TestSecretsRoutes:
                     headers={"X-Session-ID": "../bad"},
                     json={"name": "SHODAN_API_KEY", "value": "secret"},
                 )
+                guarded_writes = [
+                    client.post("/projects", headers={"X-Session-ID": "../bad"}, json={"name": "Invalid"}),
+                    client.post(
+                        "/session/preferences",
+                        headers={"X-Session-ID": "../bad"},
+                        json={"preferences": {"pref_timestamps": True}},
+                    ),
+                    client.post(
+                        "/session/recent-values",
+                        headers={"X-Session-ID": "../bad"},
+                        json={"values": [{"kind": "domain", "value": "darklab.sh"}]},
+                    ),
+                    client.post(
+                        "/session/starred",
+                        headers={"X-Session-ID": "../bad"},
+                        json={"command": "nmap darklab.sh"},
+                    ),
+                    client.post(
+                        "/share",
+                        headers={"X-Session-ID": "../bad"},
+                        json={"run_id": "run-missing"},
+                    ),
+                    client.post(
+                        "/history/bulk-delete",
+                        headers={"X-Session-ID": "../bad"},
+                        json={"run_ids": ["run-missing"]},
+                    ),
+                ]
             assert created.status_code == 401
             assert created.get_json()["error"] == "session_required"
+            for response in guarded_writes:
+                assert response.status_code == 401
+                assert response.get_json()["error"] == "session_required"
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -595,6 +626,73 @@ class TestNotificationChannelRoutes:
                     "last_error": "webhook rejected the test",
                 }
             ]
+        finally:
+            for patcher in reversed(patchers):
+                patcher.stop()
+
+    def test_notification_event_audit_route_lists_session_channel_deliveries(self, monkeypatch, tmp_path):
+        client, patchers = self._notification_client(monkeypatch, tmp_path)
+        try:
+            session_id = "tok_notification_delivery_audit"
+            created = self._create_webhook_channel(client, session_id)
+            channel_id = created.get_json()["channel"]["id"]
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO notification_events "
+                    "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
+                    "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "nte_browser_delivery",
+                        session_id,
+                        channel_id,
+                        "run_complete",
+                        json.dumps({"trigger": "run_complete", "message": "done"}),
+                        "sent",
+                        1,
+                        "",
+                        "2026-05-22T07:10:00+00:00",
+                        "",
+                        "run_browser_delivery",
+                        "2026-05-22T07:09:59+00:00",
+                        "",
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO notification_events "
+                    "(id, session_token, channel_id, trigger, payload_json, status, attempts, "
+                    "next_attempt_at, last_attempt_at, last_error, run_id, created, dead_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "nte_other_delivery",
+                        "tok_other_notification_owner",
+                        channel_id,
+                        "run_complete",
+                        json.dumps({"trigger": "run_complete"}),
+                        "sent",
+                        1,
+                        "",
+                        "",
+                        "",
+                        "",
+                        "2026-05-22T07:08:00+00:00",
+                        "",
+                    ),
+                )
+                conn.commit()
+
+            resp = client.get(
+                f"/session/notification-events?channel_id={channel_id}&limit=5",
+                headers={"X-Session-ID": session_id},
+            )
+
+            assert resp.status_code == 200
+            payload = resp.get_json()
+            assert payload["total"] == 1
+            assert payload["events"][0]["id"] == "nte_browser_delivery"
+            assert payload["events"][0]["channel_id"] == channel_id
+            assert payload["events"][0]["status"] == "sent"
+            assert payload["events"][0]["payload"]["message"] == "done"
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -5425,6 +5523,48 @@ class TestAtlasRoutes:
         searched_run_options = json.loads(searched_runs_resp.data)["runs"]
         assert [item["id"] for item in searched_run_options] == [second_run_id]
 
+    def test_summary_can_filter_by_project(self):
+        client = get_client()
+        session_id = self._session_id()
+        _, alpha_recorded = self._seed_domain_finding_run(session_id, "alpha.darklab.sh")
+        _, beta_recorded = self._seed_domain_finding_run(session_id, "beta.darklab.sh")
+        alpha_entity_id = next(item["id"] for item in alpha_recorded if item["type"] == "domain")
+        beta_entity_id = next(item["id"] for item in beta_recorded if item["type"] == "domain")
+        project_id = "prj-" + uuid.uuid4().hex
+        other_project_id = "prj-" + uuid.uuid4().hex
+        timestamp = "2026-05-14T00:00:03+00:00"
+        with db_connect() as conn:
+            for current_project_id, slug in (
+                (project_id, "atlas-summary-" + uuid.uuid4().hex[:8]),
+                (other_project_id, "atlas-summary-" + uuid.uuid4().hex[:8]),
+            ):
+                conn.execute(
+                    "INSERT INTO projects (id, session_id, name, slug, created, updated) "
+                    "VALUES (?, ?, 'Atlas Project', ?, ?, ?)",
+                    (current_project_id, session_id, slug, timestamp, timestamp),
+                )
+            for current_project_id, entity_id in (
+                (project_id, alpha_entity_id),
+                (other_project_id, beta_entity_id),
+            ):
+                conn.execute(
+                    "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                    "VALUES (?, ?, 'atlas_entity', ?, 'manual', ?)",
+                    ("plink-" + uuid.uuid4().hex, current_project_id, entity_id, timestamp),
+                )
+            conn.commit()
+
+        all_resp = client.get("/atlas", headers={"X-Session-ID": session_id})
+        project_resp = client.get(f"/atlas?project_id={quote(project_id)}", headers={"X-Session-ID": session_id})
+
+        assert all_resp.status_code == 200
+        assert project_resp.status_code == 200
+        assert json.loads(all_resp.data)["counts"]["domain"] == 2
+        assert json.loads(all_resp.data)["findings"] == 2
+        project_data = json.loads(project_resp.data)
+        assert project_data["counts"]["domain"] == 1
+        assert project_data["findings"] == 1
+
     def test_entity_list_batches_metadata_for_current_page(self):
         from services.atlas.lookup import list_entities
 
@@ -7393,7 +7533,7 @@ class TestRunRoute:
              mock.patch("blueprints.run.pid_register") as pid_register, \
              mock.patch("blueprints.run.active_run_register") as active_register, \
              mock.patch("blueprints.run.publish_run_event") as publish, \
-             mock.patch("blueprints.run.threading", mock.Mock(Thread=_CapturedThread)), \
+             mock.patch("services.runs.start.threading", mock.Mock(Thread=_CapturedThread)), \
              mock.patch("blueprints.run.uuid.uuid4", return_value="run-real"):
             resp = client.post(
                 "/runs",

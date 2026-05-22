@@ -1379,7 +1379,7 @@ def test_darklab_cli_notify_commands_use_secret_file_and_event_reader(monkeypatc
     events_output = capsys.readouterr().out
     assert "CREATED" in events_output
     assert "nte_cli" in events_output
-    assert cli_main.main(["notify", "delete", "ntc_cli"]) == 0
+    assert cli_main.main(["notify", "delete", "ntc_cli", "--format", "json"]) == 0
     assert json.loads(capsys.readouterr().out)["removed"] is True
 
     assert [call[1] for call in calls] == [
@@ -1503,7 +1503,7 @@ def test_darklab_cli_schedule_commands_manage_api_schedules(monkeypatch, capsys)
     assert "fire: fired" in capsys.readouterr().out
     assert cli_main.main(["schedule", "fires", "sch_cli", "--limit", "5"]) == 0
     assert "dispatch pending run integration" in capsys.readouterr().out
-    assert cli_main.main(["schedule", "delete", "sch_cli"]) == 0
+    assert cli_main.main(["schedule", "delete", "sch_cli", "--format", "json"]) == 0
     assert json.loads(capsys.readouterr().out)["removed"] is True
 
     assert [call[1] for call in calls] == [
@@ -1610,6 +1610,13 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
     assert "wtr_cli" in capsys.readouterr().out
     assert cli_main.main(["watch", "create", "--first-run", "--every", "hourly", "--", "nmap", "darklab.sh"]) == 0
     assert "wtr_cli" in capsys.readouterr().out
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["darklab", "watch", "create", "--first-run", "--every", "hourly", "--", "nmap", "darklab.sh"],
+    )
+    assert cli_main.main() == 0
+    assert "wtr_cli" in capsys.readouterr().out
     assert cli_main.main(["watch", "create", "run_base", "--every", "hourly", "--"]) == 1
     assert "needs a command after --" in capsys.readouterr().err
     assert cli_main.main(["watch", "list", "--limit", "10"]) == 0
@@ -1628,10 +1635,11 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
     assert "textual" in capsys.readouterr().out
     assert cli_main.main(["watch", "accept", "wtr_cli", "--run-id", "run_fire"]) == 0
     assert "run_fire" in capsys.readouterr().out
-    assert cli_main.main(["watch", "delete", "wtr_cli"]) == 0
+    assert cli_main.main(["watch", "delete", "wtr_cli", "--format", "json"]) == 0
     assert json.loads(capsys.readouterr().out)["removed"] is True
 
     assert [call[1] for call in calls] == [
+        "/watchers",
         "/watchers",
         "/watchers",
         "/watchers",
@@ -1801,6 +1809,8 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert {"q", "context", "project_id", "since", "until", "limit", "offset"}.issubset(history_search_params)
     assert history_search_params["q"]["required"] is True
     assert schemas["HistorySearchPage"]["properties"]["matches"]["items"] == {"$ref": "#/components/schemas/HistorySearchMatch"}
+    atlas_summary_params = {param["name"] for param in spec["paths"]["/atlas"]["get"]["parameters"]}
+    assert {"project_id", "run_id", "orphan_filter", "suppression_filter"}.issubset(atlas_summary_params)
     atlas_entity_params = {param["name"] for param in spec["paths"]["/atlas/entities"]["get"]["parameters"]}
     assert {"entity_type", "q", "project_id", "run_id", "orphan_filter", "suppression_filter", "limit", "offset"}.issubset(
         atlas_entity_params
@@ -2146,6 +2156,10 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
                 return {"run": {"id": "run_wait", "status": "succeeded", "exit_code": 0, "command": "echo linked"}}
             if path == "/projects/prj_cli/runs":
                 return {"runs": [{"id": "run_cli", "started": "2026-05-19T00:00:00+00:00", "exit_code": 0, "command": "echo ok"}]}
+            if path == "/runs/run_cli/projects/prj_cli" and method == "POST":
+                return {"ok": True, "link": {"project_id": "prj_cli", "entity_id": "run_cli", "entity_type": "run"}}
+            if path == "/runs/run_cli/projects/prj_cli" and method == "DELETE":
+                return {"ok": True}
             if path == "/projects/prj_cli/entities":
                 assert params == {"limit": 50, "offset": 0, "entity_type": "domain"}
                 return {"entities": [{"id": "ent_cli", "type": "domain", "value": "darklab.sh"}]}
@@ -2226,6 +2240,10 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert '"event_id":"2-0"' in tail_output
     assert cli_main.main(["project-runs", "prj_cli"]) == 0
     assert "run_cli" in capsys.readouterr().out
+    assert cli_main.main(["project-link", "run_cli", "prj_cli", "--format", "json"]) == 0
+    assert json.loads(capsys.readouterr().out)["link"]["entity_id"] == "run_cli"
+    assert cli_main.main(["project-unlink", "run_cli", "prj_cli", "--format", "json"]) == 0
+    assert json.loads(capsys.readouterr().out)["ok"] is True
     assert cli_main.main(["project-entities", "prj_cli", "--entity-type", "domain"]) == 0
     assert "darklab.sh" in capsys.readouterr().out
     assert cli_main.main(["atlas", "summary"]) == 0
@@ -2235,11 +2253,15 @@ def test_darklab_cli_entrypoint_smoke_covers_readers_streams_and_errors(monkeypa
     assert cli_main.main(["atlas", "entities", "--entity-type", "domain"]) == 0
     assert "darklab.sh" in capsys.readouterr().out
     assert cli_main.main(["atlas", "entity", "ent_cli"]) == 0
-    assert "ent_cli" in capsys.readouterr().out
+    entity_output = capsys.readouterr().out
+    assert "OCCURRENCES" in entity_output
+    assert "ent_cli" in entity_output
     assert cli_main.main(["atlas", "findings"]) == 0
     assert "Open port" in capsys.readouterr().out
     assert cli_main.main(["atlas", "finding", "fnd_cli"]) == 0
-    assert "fnd_cli" in capsys.readouterr().out
+    finding_output = capsys.readouterr().out
+    assert "SEVERITY" in finding_output
+    assert "fnd_cli" in finding_output
     assert cli_main.main(["project", "missing"]) == 1
     assert "not_found: missing" in capsys.readouterr().err
 

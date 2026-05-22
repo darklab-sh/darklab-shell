@@ -5,11 +5,14 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import logging
 import os
 import re
 from typing import Any
 
 from config import resolve_data_dir
+
+log = logging.getLogger("shell")
 
 DATA_DIR = resolve_data_dir()
 BODY_STORE_DIR = os.path.join(DATA_DIR, "body-store")
@@ -136,8 +139,16 @@ def load_text_body(value: str | dict[str, Any] | None, *, fallback_to_preview: b
     try:
         with gzip.open(_body_path(str(pointer["rel_path"])), "rt", encoding="utf-8") as handle:
             body = handle.read()
-    except OSError:
+    except OSError as exc:
         if fallback_to_preview:
+            log.warning(
+                "BODY_STORE_LOAD_FALLBACK",
+                extra={
+                    "rel_path": pointer.get("rel_path"),
+                    "kind": pointer.get("kind"),
+                    "error": str(exc),
+                },
+            )
             return str(pointer.get("preview") or "")
         raise
     digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
@@ -153,4 +164,7 @@ def delete_text_body(value: str | dict[str, Any] | None) -> None:
     try:
         os.remove(_body_path(str(pointer["rel_path"])))
     except FileNotFoundError:
-        pass
+        log.debug(
+            "BODY_STORE_DELETE_MISS",
+            extra={"rel_path": pointer.get("rel_path"), "kind": pointer.get("kind")},
+        )

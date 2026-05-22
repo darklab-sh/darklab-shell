@@ -10,6 +10,10 @@ let _historyFilters = {
   type: 'all',
   q: '',
   commandRoot: '',
+  signal: 'all',
+  kind: 'all',
+  entity: '',
+  entityType: 'all',
   exitCode: 'all',
   dateRange: 'all',
   projectId: 'all',
@@ -58,6 +62,17 @@ let _historyCompareRowPairSequence = 0;
 let _historyCompareUnitSequence = 0;
 let _historyCompareRowHeightFrame = null;
 let _historyCompareRowResizeObserver = null;
+const _historyTextFilterKeys = new Set(['q', 'commandRoot', 'entity']);
+const _historyRunOnlyFilterKeys = new Set([
+  'commandRoot',
+  'signal',
+  'kind',
+  'entity',
+  'entityType',
+  'exitCode',
+  'starredOnly',
+]);
+const _historyStructuredFilterKeys = new Set(['signal', 'kind', 'entity', 'entityType']);
 
 function _historyCompareCoreCall(name, ...args) {
   const helper = _historyCompareCore && _historyCompareCore[name];
@@ -153,6 +168,20 @@ function _normalizeHistoryFilterValue(value) {
   return _historyCore.normalizeFilterValue(value);
 }
 
+function _historyDefaultFilterValue(key) {
+  return _historyTextFilterKeys.has(key) ? '' : 'all';
+}
+
+function _historyRunOnlyFilterIsActive(key, filters = _historyFilters) {
+  if (!_historyRunOnlyFilterKeys.has(key)) return false;
+  if (key === 'starredOnly') return !!filters.starredOnly;
+  return _normalizeHistoryFilterValue(filters[key]) !== _historyDefaultFilterValue(key);
+}
+
+function _historyHasActiveRunOnlyFilters(filters = _historyFilters) {
+  return [..._historyRunOnlyFilterKeys].some(key => _historyRunOnlyFilterIsActive(key, filters));
+}
+
 function _syncHistoryFilterControls() {
   if (typeof historySearchInput !== 'undefined' && historySearchInput) historySearchInput.value = _historyFilters.q;
   if (typeof historyMobileFiltersToggle !== 'undefined' && historyMobileFiltersToggle) {
@@ -171,16 +200,31 @@ function _syncHistoryFilterControls() {
   }
   if (typeof historyTypeFilter !== 'undefined' && historyTypeFilter) historyTypeFilter.value = _historyFilters.type;
   if (typeof historyRootInput !== 'undefined' && historyRootInput) historyRootInput.value = _historyFilters.commandRoot;
+  if (typeof historySignalFilter !== 'undefined' && historySignalFilter) historySignalFilter.value = _historyFilters.signal;
+  if (typeof historyKindFilter !== 'undefined' && historyKindFilter) historyKindFilter.value = _historyFilters.kind;
+  if (typeof historyEntityInput !== 'undefined' && historyEntityInput) historyEntityInput.value = _historyFilters.entity;
+  if (typeof historyEntityTypeFilter !== 'undefined' && historyEntityTypeFilter) {
+    historyEntityTypeFilter.value = _historyFilters.entityType;
+  }
   if (typeof historyExitFilter !== 'undefined' && historyExitFilter) historyExitFilter.value = _historyFilters.exitCode;
   if (typeof historyDateFilter !== 'undefined' && historyDateFilter) historyDateFilter.value = _historyFilters.dateRange;
   _syncHistoryProjectFilterOptions();
   if (typeof historyStarredToggle !== 'undefined' && historyStarredToggle) historyStarredToggle.checked = !!_historyFilters.starredOnly;
   const runOnlyEnabled = _historyFilters.type !== 'snapshots';
   if (typeof historyRootInput !== 'undefined' && historyRootInput) historyRootInput.disabled = !runOnlyEnabled;
+  if (typeof historySignalFilter !== 'undefined' && historySignalFilter) historySignalFilter.disabled = !runOnlyEnabled;
+  if (typeof historyKindFilter !== 'undefined' && historyKindFilter) historyKindFilter.disabled = !runOnlyEnabled;
+  if (typeof historyEntityInput !== 'undefined' && historyEntityInput) historyEntityInput.disabled = !runOnlyEnabled;
+  if (typeof historyEntityTypeFilter !== 'undefined' && historyEntityTypeFilter) {
+    historyEntityTypeFilter.disabled = !runOnlyEnabled;
+  }
   if (typeof historyExitFilter !== 'undefined' && historyExitFilter) historyExitFilter.disabled = !runOnlyEnabled;
   if (typeof historyStarredToggle !== 'undefined' && historyStarredToggle) historyStarredToggle.disabled = !runOnlyEnabled;
   if (typeof syncAppSelect === 'function') {
     if (typeof historyTypeFilter !== 'undefined') syncAppSelect(historyTypeFilter);
+    if (typeof historySignalFilter !== 'undefined') syncAppSelect(historySignalFilter);
+    if (typeof historyKindFilter !== 'undefined') syncAppSelect(historyKindFilter);
+    if (typeof historyEntityTypeFilter !== 'undefined') syncAppSelect(historyEntityTypeFilter);
     if (typeof historyExitFilter !== 'undefined') syncAppSelect(historyExitFilter);
     if (typeof historyDateFilter !== 'undefined') syncAppSelect(historyDateFilter);
     if (typeof historyProjectFilter !== 'undefined') syncAppSelect(historyProjectFilter);
@@ -418,7 +462,7 @@ function _renderHistoryActiveFilters() {
     removeBtn.addEventListener('click', e => {
       e.preventDefault();
       e.stopPropagation();
-      const resetValue = item.key === 'starredOnly' ? false : (item.key === 'q' || item.key === 'commandRoot' ? '' : 'all');
+      const resetValue = item.key === 'starredOnly' ? false : _historyDefaultFilterValue(item.key);
       _setHistoryFilter(item.key, resetValue);
     });
     chip.appendChild(removeBtn);
@@ -1095,8 +1139,11 @@ function _scheduleHistoryPanelRefresh() {
 
 function _setHistoryFilter(key, value, { debounce = false } = {}) {
   if (key === 'starredOnly') _historyFilters.starredOnly = !!value;
-  else _historyFilters[key] = _normalizeHistoryFilterValue(value) || (key === 'q' || key === 'commandRoot' ? '' : 'all');
+  else _historyFilters[key] = _normalizeHistoryFilterValue(value) || _historyDefaultFilterValue(key);
   if (key === 'type' && _historyFilters.type === 'snapshots') _historyResetRunOnlyFilters();
+  if (_historyStructuredFilterKeys.has(key) && _historyRunOnlyFilterIsActive(key) && _historyFilters.type === 'all') {
+    _historyFilters.type = 'runs';
+  }
   _historyPaging.page = 1;
   _historyClearSelection({ render: false });
   if (debounce) _scheduleHistoryPanelRefresh();
@@ -1114,19 +1161,22 @@ function openHistoryWithFilters(filters = {}) {
   };
   if (Object.prototype.hasOwnProperty.call(filters, 'commandRoot')) {
     nextFilters.commandRoot = _normalizeHistoryFilterValue(filters.commandRoot);
-    if (nextFilters.commandRoot && (!filters.type || filters.type === 'all')) {
-      nextFilters.type = 'runs';
-    }
   }
   _historyFilters = {
     type: _normalizeHistoryFilterValue(nextFilters.type) || 'all',
     q: _normalizeHistoryFilterValue(nextFilters.q),
     commandRoot: _normalizeHistoryFilterValue(nextFilters.commandRoot),
+    signal: _normalizeHistoryFilterValue(nextFilters.signal) || 'all',
+    kind: _normalizeHistoryFilterValue(nextFilters.kind) || 'all',
+    entity: _normalizeHistoryFilterValue(nextFilters.entity),
+    entityType: _normalizeHistoryFilterValue(nextFilters.entityType) || 'all',
     exitCode: _normalizeHistoryFilterValue(nextFilters.exitCode) || 'all',
     dateRange: _normalizeHistoryFilterValue(nextFilters.dateRange) || 'all',
     projectId: _normalizeHistoryFilterValue(nextFilters.projectId) || 'all',
     starredOnly: !!nextFilters.starredOnly,
   };
+  if (_historyFilters.type === 'snapshots') _historyResetRunOnlyFilters();
+  else if (_historyFilters.type === 'all' && _historyHasActiveRunOnlyFilters()) _historyFilters.type = 'runs';
   _historyPaging.page = 1;
   _historyClearSelection({ render: false });
   _syncHistoryFilterControls();
@@ -1146,6 +1196,10 @@ function clearHistoryFilters() {
     type: 'all',
     q: '',
     commandRoot: '',
+    signal: 'all',
+    kind: 'all',
+    entity: '',
+    entityType: 'all',
     exitCode: 'all',
     dateRange: 'all',
     projectId: 'all',
@@ -1720,6 +1774,30 @@ if (typeof historyTypeFilter !== 'undefined' && historyTypeFilter) {
 if (typeof historyExitFilter !== 'undefined' && historyExitFilter) {
   historyExitFilter.addEventListener('change', e => {
     _setHistoryFilter('exitCode', e.target.value);
+  });
+}
+
+if (typeof historySignalFilter !== 'undefined' && historySignalFilter) {
+  historySignalFilter.addEventListener('change', e => {
+    _setHistoryFilter('signal', e.target.value);
+  });
+}
+
+if (typeof historyKindFilter !== 'undefined' && historyKindFilter) {
+  historyKindFilter.addEventListener('change', e => {
+    _setHistoryFilter('kind', e.target.value);
+  });
+}
+
+if (typeof historyEntityInput !== 'undefined' && historyEntityInput) {
+  historyEntityInput.addEventListener('input', e => {
+    _setHistoryFilter('entity', e.target.value, { debounce: true });
+  });
+}
+
+if (typeof historyEntityTypeFilter !== 'undefined' && historyEntityTypeFilter) {
+  historyEntityTypeFilter.addEventListener('change', e => {
+    _setHistoryFilter('entityType', e.target.value);
   });
 }
 

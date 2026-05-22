@@ -245,6 +245,7 @@ def atlas_index():
             conn,
             session_id,
             run_id=request.args.get("run_id") or "",
+            project_id=request.args.get("project_id") or "",
             orphan_filter=request.args.get("orphan_filter") or "hide",
             suppression_filter=request.args.get("suppression_filter") or "hide",
         ))

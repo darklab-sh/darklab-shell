@@ -8,9 +8,6 @@
     const ctx = context || {};
     let notesSaveTimer = null;
     let notesSaveSeq = 0;
-    let notesSavedDelayTimer = null;
-    let notesSavedHideTimer = null;
-    let labelsSavedHideTimer = null;
 
     function labelChips(project) {
       return ctx.entityLabelValues(project).map(label => ({ label, kind: 'label' }));
@@ -54,9 +51,6 @@
       const hasProject = !!(project && project.id);
       const showingDetails = ctx.projectWorkspaceTab() === 'details';
       const nextProjectId = hasProject ? String(project.id || '') : '';
-      if (!showingDetails || String(ctx.projectLabelsInput?.dataset.projectId || '') !== nextProjectId) {
-        hideLabelsSavedIndicator();
-      }
       if (ctx.projectNotesForm) ctx.projectNotesForm.classList.toggle('u-hidden', !hasProject || !showingDetails);
       if (ctx.projectLabelsForm) ctx.projectLabelsForm.classList.toggle('u-hidden', !hasProject || !showingDetails);
       if (ctx.projectLabelsInput && document.activeElement !== ctx.projectLabelsInput) {
@@ -83,57 +77,22 @@
       syncForms();
     }
 
-    function setNotesSavedIndicator(visible) {
-      if (!ctx.projectNotesSaveStatus) return;
-      ctx.projectNotesSaveStatus.classList.toggle('u-hidden', !visible);
-    }
-
     function hideNotesSavedIndicator() {
-      if (notesSavedDelayTimer) {
-        clearTimeout(notesSavedDelayTimer);
-        notesSavedDelayTimer = null;
-      }
-      if (notesSavedHideTimer) {
-        clearTimeout(notesSavedHideTimer);
-        notesSavedHideTimer = null;
-      }
-      setNotesSavedIndicator(false);
+      return undefined;
     }
 
     function showNotesSavedIndicator() {
-      hideNotesSavedIndicator();
-      notesSavedDelayTimer = setTimeout(() => {
-        notesSavedDelayTimer = null;
-        setNotesSavedIndicator(true);
-        notesSavedHideTimer = setTimeout(() => {
-          notesSavedHideTimer = null;
-          setNotesSavedIndicator(false);
-        }, ctx.fieldSavedIndicatorVisibleMs);
-      }, ctx.fieldSavedIndicatorDelayMs);
-    }
-
-    function setLabelsSavedIndicator(visible) {
-      if (!ctx.projectLabelsSaveStatus) return;
-      ctx.projectLabelsSaveStatus.classList.toggle('u-hidden', !visible);
+      ctx.setProjectWorkspaceMessage?.('Project notes saved.');
     }
 
     function hideLabelsSavedIndicator() {
-      if (labelsSavedHideTimer) {
-        clearTimeout(labelsSavedHideTimer);
-        labelsSavedHideTimer = null;
-      }
-      setLabelsSavedIndicator(false);
+      return undefined;
     }
 
     function showLabelsSavedIndicator(projectId) {
       const normalizedProjectId = String(projectId || '');
-      hideLabelsSavedIndicator();
       if (normalizedProjectId && String(ctx.projectLabelsInput?.dataset.projectId || '') !== normalizedProjectId) return;
-      setLabelsSavedIndicator(true);
-      labelsSavedHideTimer = setTimeout(() => {
-        labelsSavedHideTimer = null;
-        setLabelsSavedIndicator(false);
-      }, ctx.projectLabelsSavedVisibleMs);
+      ctx.setProjectWorkspaceMessage?.('Project labels saved.');
     }
 
     function cacheNotes(projectId, notes, updatedProject = null) {
@@ -284,7 +243,6 @@
       const labelsTitle = document.createElement('h3');
       labelsTitle.textContent = 'Labels';
       labelsHeading.appendChild(labelsTitle);
-      if (ctx.projectLabelsSaveStatus) labelsHeading.appendChild(ctx.projectLabelsSaveStatus);
       labelsSection.appendChild(labelsHeading);
       if (ctx.projectLabelsForm) labelsSection.appendChild(ctx.projectLabelsForm);
       container.appendChild(labelsSection);
@@ -319,10 +277,8 @@
       appendMobileLabelChips,
       syncForms,
       syncNotesForm,
-      setNotesSavedIndicator,
       hideNotesSavedIndicator,
       showNotesSavedIndicator,
-      setLabelsSavedIndicator,
       hideLabelsSavedIndicator,
       showLabelsSavedIndicator,
       cacheNotes,

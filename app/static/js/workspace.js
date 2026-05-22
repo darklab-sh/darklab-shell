@@ -1034,7 +1034,7 @@ async function refreshWorkspaceFilesFromButton() {
     _workspaceFiles = [];
     if (workspaceFileList) workspaceFileList.textContent = '';
     if (workspaceSummary) workspaceSummary.textContent = 'Unavailable';
-    setWorkspaceMessage(_workspaceErrorMessage(err, 'Unable to refresh files'), 'error');
+    _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to refresh files'), 'error');
   } finally {
     workspaceRefreshBtn.disabled = false;
     workspaceRefreshBtn.setAttribute('aria-label', 'Refresh files');
@@ -1062,7 +1062,7 @@ async function saveWorkspaceFile(path, text, metadata = null) {
   }
   hideWorkspaceEditor();
   hideWorkspaceViewer();
-  setWorkspaceMessage(`Saved ${savedPath}`);
+  _showWorkspaceToast(`Saved ${savedPath}`, 'success');
   return data;
 }
 
@@ -1078,7 +1078,7 @@ async function createWorkspaceDirectory(path) {
   renderWorkspaceFiles(data.workspace || {});
   hideWorkspaceEditor();
   hideWorkspaceViewer();
-  setWorkspaceMessage(`Created folder ${data.directory?.path || normalized}`);
+  _showWorkspaceToast(`Created folder ${data.directory?.path || normalized}`, 'success');
   return data;
 }
 
@@ -1086,7 +1086,7 @@ async function promptWorkspaceFolderName() {
   const current = _normalizeWorkspaceDir(_workspaceCurrentDir);
   const promptDefault = current ? `${current}/` : '';
   if (typeof showConfirm !== 'function') {
-    setWorkspaceMessage('Unable to open folder prompt', 'error');
+    _showWorkspaceToast('Unable to open folder prompt', 'error');
     return null;
   }
 
@@ -1164,7 +1164,7 @@ async function promptWorkspaceFolderName() {
 async function promptWorkspaceMove(sourcePath, { kind = 'file' } = {}) {
   const source = String(sourcePath || '').trim();
   if (!source || typeof showConfirm !== 'function') {
-    setWorkspaceMessage('Unable to open move prompt', 'error');
+    _showWorkspaceToast('Unable to open move prompt', 'error');
     return null;
   }
 
@@ -1240,7 +1240,7 @@ async function deleteWorkspacePath(path) {
   hideWorkspaceViewer();
   const deleted = data.deleted || {};
   const kind = deleted.kind === 'directory' ? 'folder' : 'file';
-  setWorkspaceMessage(`Deleted ${kind} ${path}`);
+  _showWorkspaceToast(`Deleted ${kind} ${path}`, 'success');
   return data;
 }
 
@@ -1254,7 +1254,7 @@ async function moveWorkspacePath(source, destination) {
   renderWorkspaceFiles(data.workspace || {});
   hideWorkspaceViewer();
   const moved = data.moved || {};
-  setWorkspaceMessage(`Moved ${moved.source || source} to ${moved.destination || destination || 'Files'}`);
+  _showWorkspaceToast(`Moved ${moved.source || source} to ${moved.destination || destination || 'Files'}`, 'success');
   return data;
 }
 
@@ -1288,7 +1288,7 @@ async function openWorkspace() {
     _workspaceFiles = [];
     if (workspaceFileList) workspaceFileList.textContent = '';
     if (workspaceSummary) workspaceSummary.textContent = 'Unavailable';
-    setWorkspaceMessage(_workspaceErrorMessage(err, 'Unable to load files'), 'error');
+    _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to load files'), 'error');
   }
   if (typeof markInteractionSurfaceReady === 'function') {
     markInteractionSurfaceReady('workspace', workspaceOverlay, workspaceModal);
@@ -1472,7 +1472,7 @@ workspaceEditor?.addEventListener('submit', async (event) => {
       },
     );
   } catch (err) {
-    setWorkspaceMessage(_workspaceErrorMessage(err, 'Unable to save session file'), 'error');
+    _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to save session file'), 'error');
   }
 });
 workspaceFileList?.addEventListener('click', event => {

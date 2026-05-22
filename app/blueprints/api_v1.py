@@ -7,7 +7,6 @@ import logging
 import os
 import signal
 import subprocess
-import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Iterable
@@ -36,6 +35,13 @@ from services.atlas.lookup import (
     list_source_runs as list_atlas_source_runs,
 )
 from services.history.search import run_search_clause
+from services.history.run_metadata import (
+    history_offloaded_search_run_ids as _history_offloaded_search_run_ids,
+    normalize_history_filter_text as _normalize_history_filter_text,
+    run_atlas_counts_by_run as _run_atlas_counts_by_run,
+    run_file_artifacts_by_run as _run_file_artifacts_by_run,
+    run_metadata_counts_by_run as _run_metadata_counts_by_run,
+)
 from services.notifications.channels_store import (
     NotificationChannelError,
     create_notification_channel,
@@ -70,6 +76,11 @@ from services.runs.broker import (
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL
 from services.runs.output_model import LineEvent, to_wire
 from services.runs.output_store import load_run_output_events_for_run
+from services.runs.start import (
+    RunStartHandlers,
+    RunStartRejected,
+    start_brokered_run as _start_brokered_run_service,
+)
 from services.runs.structured_filters import (
     StructuredOutputFilters,
     entity_run_exists_clause,
@@ -112,13 +123,6 @@ from services.watchers.service import (
 )
 from services.workspace.files import WorkspaceError, open_workspace_file_for_download
 
-from blueprints.history import (  # noqa: PLC0415
-    _history_offloaded_search_run_ids,
-    _normalize_history_filter_text,
-    _run_atlas_counts_by_run,
-    _run_file_artifacts_by_run,
-    _run_metadata_counts_by_run,
-)
 from blueprints.run import (  # noqa: PLC0415
     KILL_BIN,
     SUDO_BIN,
@@ -149,6 +153,25 @@ def _api_route_limit() -> str:
 
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 limiter.limit(_api_route_limit)(api_v1_bp)
+
+
+def _api_run_start_handlers() -> RunStartHandlers:
+    return RunStartHandlers(
+        resolves_exact_special_builtin_command=resolves_exact_special_builtin_command,
+        execute_builtin_command=execute_builtin_command,
+        history_safe_command_for_storage=_history_safe_command_for_storage,
+        brokered_synthetic_run=_brokered_synthetic_run,
+        prepare_command_input=_prepare_command_input,
+        resolve_builtin_command=resolve_builtin_command,
+        filter_builtin_command_events=_filter_builtin_command_events,
+        prepare_real_command=_prepare_real_command,
+        runtime_missing_command_message=runtime_missing_command_message,
+        start_real_command_process=_start_real_command_process,
+        publish_run_event=publish_run_event,
+        brokered_real_run_worker=_brokered_real_run_worker,
+        workspace_notice_lines=_workspace_notice_lines,
+        workspace_artifacts_from_validation=_workspace_artifacts_from_validation,
+    )
 
 
 def _api_json_error(code: str, message: str, status: int):
@@ -956,6 +979,7 @@ def api_atlas_summary():
             conn,
             _require_session_id(),
             run_id=request.args.get("run_id") or "",
+            project_id=request.args.get("project_id") or "",
             orphan_filter=request.args.get("orphan_filter") or "hide",
             suppression_filter=request.args.get("suppression_filter") or "hide",
         ))
@@ -1753,147 +1777,32 @@ def api_runs_start():
     owner_tab_id = ""
     workspace_cwd = _workspace_cwd_value(data.get("workspace_cwd", ""))
 
-    if resolves_exact_special_builtin_command(original_command):
-        if link_project_id:
-            return _api_json_error(
-                "project_link_not_supported",
-                "Project links only support external command runs.",
-                409,
-            )
-        events, exit_code = execute_builtin_command(original_command, session_id, tab_id=owner_tab_id)
-        run_id = _brokered_synthetic_run(
-            _history_safe_command_for_storage(original_command),
-            session_id,
-            client_ip,
-            events,
-            exit_code,
-            owner_tab_id=owner_tab_id,
-        )
-        log.info("API_RUN_STARTED", extra={
-            "ip": client_ip,
-            "session": get_log_session_id(session_id),
-            "run_id": run_id,
-            "cmd": original_command,
-            "cmd_type": "builtin",
-            "project_id": link_project_id,
-        })
-        return jsonify(_run_started_payload(run_id, status=_status_for_exit_code(exit_code))), 202
-
     try:
-        prepared_input = _prepare_command_input(original_command, session_id, client_ip)
+        started = _start_brokered_run_service(
+            original_command=original_command,
+            session_id=session_id,
+            client_ip=client_ip,
+            handlers=_api_run_start_handlers(),
+            owner_tab_id=owner_tab_id,
+            workspace_cwd=workspace_cwd,
+            link_project_id=link_project_id,
+            thread_name_prefix="api-run-broker",
+        )
+    except RunStartRejected as exc:
+        return _api_json_error(exc.code, exc.message, exc.status_code)
     except _RunPreparationError as exc:
         return _api_json_error("command_rejected", str(exc), exc.status_code)
-
-    if resolve_builtin_command(prepared_input.execution_command):
-        if link_project_id:
-            return _api_json_error(
-                "project_link_not_supported",
-                "Project links only support external command runs.",
-                409,
-            )
-        events, exit_code = execute_builtin_command(prepared_input.execution_command, session_id, tab_id=owner_tab_id)
-        run_id = _brokered_synthetic_run(
-            _history_safe_command_for_storage(original_command),
-            session_id,
-            client_ip,
-            _filter_builtin_command_events(events, prepared_input.variable_notice, prepared_input.postfilter),
-            exit_code,
-            owner_tab_id=owner_tab_id,
-        )
-        log.info("API_RUN_STARTED", extra={
-            "ip": client_ip,
-            "session": get_log_session_id(session_id),
-            "run_id": run_id,
-            "cmd": original_command,
-            "cmd_type": "builtin",
-            "project_id": link_project_id,
-        })
-        return jsonify(_run_started_payload(run_id, status=_status_for_exit_code(exit_code))), 202
-
-    try:
-        prepared_real = _prepare_real_command(
-            original_command,
-            prepared_input.execution_command,
-            session_id,
-            client_ip,
-            workspace_cwd,
-        )
-    except _RunPreparationError as exc:
-        return _api_json_error("command_rejected", str(exc), exc.status_code)
-
-    if prepared_real.missing_runtime:
-        if link_project_id:
-            return _api_json_error(
-                "project_link_not_supported",
-                "Project links only support completed external command runs.",
-                409,
-            )
-        run_id = _brokered_synthetic_run(
-            original_command,
-            session_id,
-            client_ip,
-            [{"type": "output", "text": runtime_missing_command_message(prepared_real.missing_runtime)}],
-            127,
-            cmd_type="missing",
-            owner_tab_id=owner_tab_id,
-        )
-        log.info("API_RUN_STARTED", extra={
-            "ip": client_ip,
-            "session": get_log_session_id(session_id),
-            "run_id": run_id,
-            "cmd": original_command,
-            "cmd_type": "missing",
-            "project_id": link_project_id,
-        })
-        return jsonify(_run_started_payload(run_id, status="failed")), 202
-
-    try:
-        started = _start_real_command_process(original_command, session_id, client_ip, prepared_real)
     except _RunSpawnError as exc:
         return _api_json_error("spawn_failed", str(exc), 500)
-
-    publish_run_event(started.run_id, "started", {"run_id": started.run_id, "started": started.run_started})
-    threading.Thread(
-        target=_brokered_real_run_worker,
-        kwargs={
-            "run_id": started.run_id,
-            "proc": started.proc,
-            "session_id": session_id,
-            "client_ip": client_ip,
-            "original_command": original_command,
-            "run_started": started.run_started,
-            "capture": started.capture,
-            "signal_classifier": started.signal_classifier,
-            "postfilter": prepared_input.postfilter,
-            "workspace_path_filter": started.workspace_path_filter,
-            "variable_notice": prepared_input.variable_notice,
-            "rewrite_notice": prepared_real.rewrite_notice,
-            "workspace_notices": _workspace_notice_lines(prepared_real.validation),
-            "workspace_artifacts": _workspace_artifacts_from_validation(prepared_real.validation, session_id),
-            "owner_tab_id": owner_tab_id,
-            "link_project_id": link_project_id,
-        },
-        name=f"api-run-broker-{started.run_id[:8]}",
-        daemon=True,
-    ).start()
     log.info("API_RUN_STARTED", extra={
         "ip": client_ip,
         "session": get_log_session_id(session_id),
         "run_id": started.run_id,
         "cmd": original_command,
-        "cmd_type": "real",
+        "cmd_type": started.cmd_type,
         "project_id": link_project_id,
     })
-    return jsonify(_run_started_payload(started.run_id)), 202
-
-
-def _status_for_exit_code(exit_code: object) -> str:
-    if not isinstance(exit_code, (int, str, bytes, bytearray)):
-        return "complete"
-    try:
-        return "succeeded" if int(exit_code) == 0 else "failed"
-    except (TypeError, ValueError):
-        return "complete"
+    return jsonify(_run_started_payload(started.run_id, status=started.status)), 202
 
 
 def _run_started_payload(run_id: str, *, status: str = "running") -> dict[str, str]:

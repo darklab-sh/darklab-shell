@@ -10,12 +10,19 @@ var DarklabHistoryCore = (function (global) {
 
   function hasActiveServerFilters(filters) {
     const state = filters || {};
+    const type = state.type || 'all';
+    const exitCode = state.exitCode || 'all';
+    const dateRange = state.dateRange || 'all';
     return Boolean(
-      state.type !== 'all'
+      type !== 'all'
       || state.q
       || state.commandRoot
-      || state.exitCode !== 'all'
-      || state.dateRange !== 'all'
+      || (state.signal && state.signal !== 'all')
+      || (state.kind && state.kind !== 'all')
+      || state.entity
+      || (state.entityType && state.entityType !== 'all')
+      || exitCode !== 'all'
+      || dateRange !== 'all'
       || (state.projectId && state.projectId !== 'all')
     );
   }
@@ -28,6 +35,10 @@ var DarklabHistoryCore = (function (global) {
     return {
       ...(filters || {}),
       commandRoot: '',
+      signal: 'all',
+      kind: 'all',
+      entity: '',
+      entityType: 'all',
       exitCode: 'all',
       starredOnly: false,
     };
@@ -72,14 +83,23 @@ var DarklabHistoryCore = (function (global) {
   function activeFilterItems(filters) {
     const state = filters || {};
     const items = [];
-    if (state.type !== 'all') items.push({ key: 'type', label: `type: ${labelForType(state.type)}` });
+    const type = state.type || 'all';
+    const exitCode = state.exitCode || 'all';
+    const dateRange = state.dateRange || 'all';
+    if (type !== 'all') items.push({ key: 'type', label: `type: ${labelForType(type)}` });
     if (state.q) items.push({ key: 'q', label: `search: ${state.q}` });
     if (state.commandRoot) items.push({ key: 'commandRoot', label: `command: ${state.commandRoot}` });
-    if (state.exitCode === '0') items.push({ key: 'exitCode', label: 'exit: 0' });
-    else if (state.exitCode === 'nonzero') items.push({ key: 'exitCode', label: 'exit: failed' });
-    else if (state.exitCode === '-15') items.push({ key: 'exitCode', label: 'exit: terminated' });
-    else if (state.exitCode === 'incomplete') items.push({ key: 'exitCode', label: 'exit: incomplete' });
-    if (state.dateRange !== 'all') items.push({ key: 'dateRange', label: `date: ${state.dateRange}` });
+    if (state.signal && state.signal !== 'all') items.push({ key: 'signal', label: `signal: ${state.signal}` });
+    if (state.kind && state.kind !== 'all') items.push({ key: 'kind', label: `kind: ${state.kind}` });
+    if (state.entity) items.push({ key: 'entity', label: `entity: ${state.entity}` });
+    if (state.entityType && state.entityType !== 'all') {
+      items.push({ key: 'entityType', label: `entity_type: ${state.entityType}` });
+    }
+    if (exitCode === '0') items.push({ key: 'exitCode', label: 'exit: 0' });
+    else if (exitCode === 'nonzero') items.push({ key: 'exitCode', label: 'exit: failed' });
+    else if (exitCode === '-15') items.push({ key: 'exitCode', label: 'exit: terminated' });
+    else if (exitCode === 'incomplete') items.push({ key: 'exitCode', label: 'exit: incomplete' });
+    if (dateRange !== 'all') items.push({ key: 'dateRange', label: `date: ${dateRange}` });
     if (state.projectId && state.projectId !== 'all') {
       items.push({ key: 'projectId', label: `project: ${state.projectLabel || state.projectId}` });
     }
@@ -91,14 +111,21 @@ var DarklabHistoryCore = (function (global) {
     const state = filters || {};
     const pageState = paging || {};
     const params = new URLSearchParams();
+    const type = state.type || 'all';
+    const exitCode = state.exitCode || 'all';
+    const dateRange = state.dateRange || 'all';
     params.set('page', String(pageState.page || 1));
     params.set('page_size', String(pageState.pageSize || 1));
     params.set('include_total', '1');
-    if (state.type !== 'all') params.set('type', state.type);
+    if (type !== 'all') params.set('type', type);
     if (state.q) params.set('q', state.q);
     if (state.commandRoot) params.set('command_root', state.commandRoot);
-    if (state.exitCode !== 'all') params.set('exit_code', state.exitCode);
-    if (state.dateRange !== 'all') params.set('date_range', state.dateRange);
+    if (state.signal && state.signal !== 'all') params.set('signal', state.signal);
+    if (state.kind && state.kind !== 'all') params.set('kind', state.kind);
+    if (state.entity) params.set('entity', state.entity);
+    if (state.entityType && state.entityType !== 'all') params.set('entity_type', state.entityType);
+    if (exitCode !== 'all') params.set('exit_code', exitCode);
+    if (dateRange !== 'all') params.set('date_range', dateRange);
     if (state.projectId && state.projectId !== 'all') params.set('project_id', state.projectId);
     if (state.starredOnly) params.set('starred_only', '1');
     const query = params.toString();

@@ -4,18 +4,29 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 import socket
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from services.notifications import notification_cfg
 from services.notifications.models import ChannelResult
 
+log = logging.getLogger("shell")
+
 DEFAULT_TIMEOUT_SECONDS = 8.0
 DEFAULT_TEST_TIMEOUT_SECONDS = 4.0
 _LOCALHOST_NAMES = {"localhost", "localhost.localdomain"}
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_NO_REDIRECT_OPENER = build_opener(_NoRedirectHandler)
 
 
 def timeout_seconds(config: dict[str, Any], *, test_send: bool = False) -> float:
@@ -143,6 +154,8 @@ def _post(
     content_type: str,
     test_send: bool = False,
 ) -> ChannelResult:
+    timeout = timeout_seconds(config, test_send=test_send)
+    parsed_url = urlparse(url)
     request = Request(
         url,
         data=body,
@@ -153,14 +166,32 @@ def _post(
         },
         method="POST",
     )
+    log.debug(
+        "NOTIFICATION_HTTP_REQUEST",
+        extra={"label": label, "host": parsed_url.netloc, "timeout": timeout, "test_send": test_send},
+    )
     try:
-        with urlopen(request, timeout=timeout_seconds(config, test_send=test_send)) as response:  # nosec B310
+        with _open_http_request(request, timeout=timeout) as response:
             status = int(getattr(response, "status", response.getcode()))
     except HTTPError as exc:
+        log.debug("NOTIFICATION_HTTP_RESPONSE", extra={"label": label, "status": int(exc.code), "test_send": test_send})
         return result_for_http_status(exc.code, label=label)
     except (TimeoutError, socket.timeout, URLError) as exc:
+        log.warning(
+            "NOTIFICATION_HTTP_NETWORK_ERROR",
+            extra={"label": label, "host": parsed_url.netloc, "error": network_error_message(exc, label=label)},
+        )
         return ChannelResult.retry(network_error_message(exc, label=label))
+    log.debug("NOTIFICATION_HTTP_RESPONSE", extra={"label": label, "status": status, "test_send": test_send})
     return result_for_http_status(status, label=label)
+
+
+def _open_http_request(request: Request, *, timeout: float):
+    return urlopen(request, timeout=timeout)
+
+
+def urlopen(request: Request, *, timeout: float):
+    return _NO_REDIRECT_OPENER.open(request, timeout=timeout)  # nosec B310
 
 
 def network_error_message(exc: BaseException, *, label: str) -> str:

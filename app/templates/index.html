@@ -574,6 +574,29 @@
           <input id="history-root-input" class="form-control form-control-compact" type="text" placeholder="command name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Filter by command name">
           <div id="history-root-dropdown" class="ac-dropdown dropdown-surface history-root-dropdown nice-scroll u-hidden"></div>
         </div>
+        <select id="history-signal-filter" class="form-select form-control-compact" aria-label="Filter by output signal">
+          <option value="all">signal: all</option>
+          <option value="findings">signal: findings</option>
+          <option value="warnings">signal: warnings</option>
+          <option value="errors">signal: errors</option>
+          <option value="summaries">signal: summaries</option>
+        </select>
+        <select id="history-kind-filter" class="form-select form-control-compact" aria-label="Filter by output kind">
+          <option value="all">kind: all</option>
+          <option value="error">kind: error</option>
+          <option value="warn">kind: warn</option>
+          <option value="notice">kind: notice</option>
+          <option value="info">kind: info</option>
+        </select>
+        <input id="history-entity-input" class="form-control form-control-compact" type="text" placeholder="entity value" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Filter by output entity value">
+        <select id="history-entity-type-filter" class="form-select form-control-compact" aria-label="Filter by output entity type">
+          <option value="all">entity_type: all</option>
+          <option value="domain">entity_type: domain</option>
+          <option value="ip">entity_type: ip</option>
+          <option value="url">entity_type: url</option>
+          <option value="hash">entity_type: hash</option>
+          <option value="cve">entity_type: cve</option>
+        </select>
         <select id="history-exit-filter" class="form-select form-control-compact" aria-label="Filter by exit code">
           <option value="all">exit: all</option>
           <option value="0">exit: 0</option>
@@ -890,12 +913,10 @@
     </div>
     <form id="project-notes-form" class="project-notes-form u-hidden">
       <textarea id="project-notes-input" class="form-control form-control-compact project-notes-input" maxlength="20000" rows="3" placeholder="Notes for selected project" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Selected project notes"></textarea>
-      <div id="project-notes-save-status" class="field-save-status u-hidden" role="status" aria-live="polite">saved</div>
     </form>
     <form id="project-labels-form" class="project-labels-form u-hidden">
       <input id="project-labels-input" class="form-control form-control-compact" type="text" maxlength="512" placeholder="important, retest" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Selected project labels">
       <button type="submit" class="btn btn-secondary btn-compact" id="project-labels-save-btn">Save labels</button>
-      <div id="project-labels-save-status" class="field-save-status u-hidden" role="status" aria-live="polite">saved</div>
     </form>
   </div>
   <div id="project-target-editor-overlay" class="modal-overlay mobile-sheet-overlay project-target-editor-overlay u-hidden" aria-hidden="true">
@@ -1097,7 +1118,6 @@
         <div class="faq-item">
           <div class="faq-q options-field-heading">
             <span>Prompt Name</span>
-            <span id="options-prompt-username-saved" class="field-save-status u-hidden" role="status" aria-live="polite">saved</span>
           </div>
           <div class="faq-a form-fieldset">
             <input id="options-prompt-username-input" class="form-control" type="text" maxlength="32" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Prompt name" placeholder="Use server default" data-bwignore="true" data-1p-ignore="true" data-lpignore="true">

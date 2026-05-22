@@ -127,7 +127,8 @@
 .schedules-detail-header,
 .schedules-section-header,
 .schedules-detail-actions,
-.schedules-pager {
+.schedules-pager,
+.schedules-fire-actions {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -135,7 +136,8 @@
 
 .schedules-section-header,
 .schedules-detail-actions,
-.schedules-pager {
+.schedules-pager,
+.schedules-fire-actions {
   flex-wrap: wrap;
 }
 
@@ -283,6 +285,10 @@
   gap: 4px 12px;
   align-items: center;
   padding: 12px;
+}
+
+.schedules-fire-actions {
+  justify-content: flex-end;
 }
 
 .schedules-fire-main {

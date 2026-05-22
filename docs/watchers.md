@@ -72,11 +72,11 @@ Accepting a baseline is useful when a change is expected. For example, if a new 
 
 ## Fire audit
 
-Every watcher fire writes an audit row, even when there is no diff. Empty checks use `diff_kind='none'`, which makes it clear the watcher is still running. The browser fire audit summarizes the actual diff counts in each row, such as added/removed findings or changed ports, and each row can expand to show the bounded added, removed, and changed items stored with that fire.
+Every watcher fire writes an audit row, even when there is no diff. Empty checks use `diff_kind='none'`, which makes it clear the watcher is still running. The browser fire audit summarizes the actual diff counts in each row, such as added/removed findings or changed ports, and each row can expand to show the bounded added, removed, and changed items stored with that fire. Rows with both a baseline and completed run also include **Compare**, which opens the run comparison view with the baseline on the left and the fire run on the right.
 
 Useful places to inspect fire history:
 
-- **Watchers** modal — recent fire rows and run handoffs
+- **Watchers** modal — recent fire rows, baseline comparisons, and run handoffs
 - `watch info <watcher_id>` in the terminal shell
 - `darklab watch fires <watcher_id>`
 - `/api/v1/watchers/<watcher_id>/fires`
@@ -182,7 +182,7 @@ List and fire-audit routes use the normal `limit`, `offset`, and `has_more` enve
 - [CONTRIBUTING.md](../CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
 - [CONTRIBUTORS.md](../CONTRIBUTORS.md) - contributor and acknowledgement notes
 - [DECISIONS.md](../DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
-- [DOCS_STANDARDS.md](../DOCS_STANDARDS.md) - documentation structure, templates, and review rules
+- [DOC_STANDARDS.md](../DOC_STANDARDS.md) - documentation structure, templates, and review rules
 - [FEATURES.md](../FEATURES.md) - full per-feature reference
 - [README.md](../README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring

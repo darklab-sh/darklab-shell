@@ -2,7 +2,7 @@
 
 This guide is for developers and contributors working on darklab_shell locally. It covers setup, tests, lint/security checks, and the expected Git/GitLab merge request flow.
 
-For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite inventory and focused test commands, use [tests/README.md](tests/README.md). For doc structure and preferred writing templates, use [DOCS_STANDARDS.md](DOCS_STANDARDS.md).
+For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite inventory and focused test commands, use [tests/README.md](tests/README.md). For doc structure and preferred writing templates, use [DOC_STANDARDS.md](DOC_STANDARDS.md).
 
 ---
 
@@ -131,10 +131,6 @@ Keep branches focused. If the work changes product behavior, tests, and docs, in
 
 Commit messages should describe the intent of the change, not just what files were touched. Lead with the affected area when it helps narrow scope — for example, `fix(mobile): restore scroll position on tab switch` or `feat(autocomplete): add positional hints for nmap`. Keep the subject line under 72 characters.
 
-Release branches may carry temporary merge-request and release-note drafts under `docs/release-drafts/`. Keep those drafts updated with user-facing features, fixes, risks, and validation as the branch changes so release bookkeeping is visible in normal review. Remove the draft directory before merging back to `main` unless the project intentionally wants to keep that release's draft files.
-
----
-
 ## Release Branch Merge Checklist
 
 Before merging a version branch back to `main`:
@@ -144,7 +140,6 @@ Before merging a version branch back to `main`:
 - Ensure the PROJECT_README variable in [app/config.py](app/config.py) is accurate and not branch-specific.
 - If the version bump changes tracked browser dependencies, regenerate and verify committed vendor assets with `npm run vendor:sync` and `npm run vendor:check`.
 - Ensure the matching [CHANGELOG.md](CHANGELOG.md) version section is marked released with the release date instead of `Unreleased`.
-- Ensure `docs/release-drafts/` draft files are removed from git unless the project intentionally keeps that release's draft artifacts.
 - Ensure all project docs are up to date with the released version section from [CHANGELOG.md](CHANGELOG.md), including README, FEATURES, ARCHITECTURE, CONTRIBUTING, tests docs, external-command notes, and any decision docs touched by the release.
 - Ensure generated screenshots, demo media, smoke fixtures, vendor files, and docs inventories are refreshed when the release changed those surfaces.
 - Ensure all test suites, linting, and audit tools are passing locally, or document the exact narrower validation used and why it is sufficient.
@@ -176,8 +171,8 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **1728 pytest + 1234 Vitest + 252 Playwright = 3,214 tests**.
-That total includes 3,180 behavior tests plus 33 docs/inventory meta-tests.
+Current totals: **1736 pytest + 1237 Vitest + 252 Playwright = 3,225 tests**.
+That total includes 3,190 behavior tests plus 33 docs/inventory meta-tests.
 
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration
@@ -386,7 +381,7 @@ Keep the summary factual. Do not bury risk or incomplete validation.
 - [CONFIGURATION.md](CONFIGURATION.md) - operator config reference for `app/conf/`, `.env`, Compose, storage, and production tuning
 - [CONTRIBUTORS.md](CONTRIBUTORS.md) - contributor and acknowledgement notes
 - [DECISIONS.md](DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
-- [DOCS_STANDARDS.md](DOCS_STANDARDS.md) - documentation structure, templates, and review rules
+- [DOC_STANDARDS.md](DOC_STANDARDS.md) - documentation structure, templates, and review rules
 - [FEATURES.md](FEATURES.md) - full per-feature reference
 - [README.md](README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring

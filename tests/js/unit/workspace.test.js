@@ -177,7 +177,7 @@ describe('workspace UI helpers', () => {
       },
     }))
     expect(apiFetch).toHaveBeenCalledWith('/workspace/files?path=reports', { method: 'DELETE' })
-    expect(document.getElementById('workspace-message').textContent).toBe('Deleted folder reports')
+    expect(globals.showToast).toHaveBeenCalledWith('Deleted folder reports', 'success')
   })
 
   it('moves files from the row action through the app-native prompt', async () => {
@@ -207,7 +207,7 @@ describe('workspace UI helpers', () => {
       expect(opts.body.text).toBe('Move file targets.txt?')
       return (await opts.actions.find(action => action.id === 'move').onActivate()) ? 'move' : null
     })
-    const { renderWorkspaceFiles } = setupWorkspace(apiFetch, { showConfirm })
+    const { renderWorkspaceFiles, globals } = setupWorkspace(apiFetch, { showConfirm })
 
     renderWorkspaceFiles({
       directories: [{ path: 'reports' }],
@@ -223,7 +223,7 @@ describe('workspace UI helpers', () => {
       method: 'POST',
       body: JSON.stringify({ source: 'targets.txt', destination: 'reports' }),
     }))
-    expect(document.getElementById('workspace-message').textContent).toBe('Moved targets.txt to reports/targets.txt')
+    expect(globals.showToast).toHaveBeenCalledWith('Moved targets.txt to reports/targets.txt', 'success')
     expect(document.querySelector('.workspace-file-name').textContent).toBe('reports')
   })
 
@@ -1157,7 +1157,7 @@ describe('workspace UI helpers', () => {
         limits: { quota_bytes: 1024, max_files: 10 },
       },
     })))
-    const { saveWorkspaceFile } = setupWorkspace(apiFetch)
+    const { saveWorkspaceFile, globals } = setupWorkspace(apiFetch)
 
     await saveWorkspaceFile('targets.txt', 'darklab.sh\n')
 
@@ -1165,7 +1165,7 @@ describe('workspace UI helpers', () => {
       method: 'POST',
       body: JSON.stringify({ path: 'targets.txt', text: 'darklab.sh\n' }),
     }))
-    expect(document.getElementById('workspace-message').textContent).toBe('Saved targets.txt')
+    expect(globals.showToast).toHaveBeenCalledWith('Saved targets.txt', 'success')
   })
 
   it('creates folders through the workspace directory route', async () => {
@@ -1178,7 +1178,7 @@ describe('workspace UI helpers', () => {
         limits: { quota_bytes: 1024, max_files: 10 },
       },
     })))
-    const { createWorkspaceDirectory } = setupWorkspace(apiFetch)
+    const { createWorkspaceDirectory, globals } = setupWorkspace(apiFetch)
 
     await createWorkspaceDirectory('reports')
 
@@ -1186,7 +1186,7 @@ describe('workspace UI helpers', () => {
       method: 'POST',
       body: JSON.stringify({ path: 'reports' }),
     }))
-    expect(document.getElementById('workspace-message').textContent).toBe('Created folder reports')
+    expect(globals.showToast).toHaveBeenCalledWith('Created folder reports', 'success')
     expect(document.querySelector('#workspace-breadcrumbs').textContent).toContain('reports')
     expect(document.querySelector('.workspace-empty').textContent).toBe('This folder is empty.')
   })

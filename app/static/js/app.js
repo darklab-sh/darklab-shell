@@ -10,44 +10,14 @@ const _defaultMobilePromptLabel = (() => {
   return String(mobileComposerRow.querySelector('.mobile-prompt-label')?.textContent || '$');
 })();
 let _composerPromptMode = null;
-let promptUsernameSavedDelayTimer = null;
-let promptUsernameSavedHideTimer = null;
 let _tourOpenedRecordedThisSession = false;
-const FIELD_SAVED_INDICATOR_DELAY_MS = 200;
-const FIELD_SAVED_INDICATOR_VISIBLE_MS = 1600;
-
-function _setFieldSavedIndicator(el, visible) {
-  if (!el) return;
-  el.classList.toggle('u-hidden', !visible);
-}
-
-function _clearPromptUsernameSavedTimers() {
-  if (promptUsernameSavedDelayTimer) {
-    clearTimeout(promptUsernameSavedDelayTimer);
-    promptUsernameSavedDelayTimer = null;
-  }
-  if (promptUsernameSavedHideTimer) {
-    clearTimeout(promptUsernameSavedHideTimer);
-    promptUsernameSavedHideTimer = null;
-  }
-}
 
 function hidePromptUsernameSavedIndicator() {
-  _clearPromptUsernameSavedTimers();
-  _setFieldSavedIndicator(optionsPromptUsernameSaved, false);
+  return undefined;
 }
 
 function showPromptUsernameSavedIndicator() {
-  _clearPromptUsernameSavedTimers();
-  _setFieldSavedIndicator(optionsPromptUsernameSaved, false);
-  promptUsernameSavedDelayTimer = setTimeout(() => {
-    promptUsernameSavedDelayTimer = null;
-    _setFieldSavedIndicator(optionsPromptUsernameSaved, true);
-    promptUsernameSavedHideTimer = setTimeout(() => {
-      promptUsernameSavedHideTimer = null;
-      _setFieldSavedIndicator(optionsPromptUsernameSaved, false);
-    }, FIELD_SAVED_INDICATOR_VISIBLE_MS);
-  }, FIELD_SAVED_INDICATOR_DELAY_MS);
+  if (typeof showToast === 'function') showToast('Prompt name saved', 'success');
 }
 
 function _compactMobileComposerPath(path = '/') {

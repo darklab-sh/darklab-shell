@@ -186,6 +186,15 @@ def enqueue(
             dispatch_due_events(conn=active_conn, event_ids=queued_ids)
         if owns_conn:
             active_conn.commit()
+    log.info(
+        "NOTIFICATION_ENQUEUED",
+        extra={
+            "trigger": normalized_trigger,
+            "queued": len(queued_ids),
+            "run_id": run_id or str(event_payload.get("run_id") or ""),
+            "session": get_log_session_id(session_token),
+        },
+    )
     return queued_ids
 
 
@@ -295,6 +304,11 @@ def _mark_failed(conn, event: NotificationEvent, result: ChannelResult, now: str
                 "trigger": event.trigger,
                 "session": get_log_session_id(event.session_token),
                 "attempts": attempts,
+                "next_attempt_at": next_attempt,
+                "retryable": result.retryable,
+                "age_expired": age_expired,
+                "max_attempts": _max_attempts(),
+                "error": result.error[:200],
             },
         )
         return
@@ -312,6 +326,10 @@ def _mark_failed(conn, event: NotificationEvent, result: ChannelResult, now: str
             "trigger": event.trigger,
             "session": get_log_session_id(event.session_token),
             "attempts": attempts,
+            "retryable": result.retryable,
+            "age_expired": age_expired,
+            "max_attempts": _max_attempts(),
+            "error": result.error[:200],
         },
     )
 
@@ -374,6 +392,16 @@ def _dispatch_event(conn, row: Any, *, now: str) -> bool:
     try:
         result = channel_cls(channel).send(event.payload)
     except Exception as exc:  # noqa: BLE001
+        log.error(
+            "NOTIFICATION_CHANNEL_SEND_EXCEPTION",
+            exc_info=True,
+            extra={
+                "event_id": event.id,
+                "channel_id": event.channel_id,
+                "kind": channel.kind,
+                "trigger": event.trigger,
+            },
+        )
         result = ChannelResult.retry(str(exc))
     if result.ok:
         _mark_sent(conn, event, now)

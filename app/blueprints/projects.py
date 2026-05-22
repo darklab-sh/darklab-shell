@@ -96,6 +96,13 @@ log = logging.getLogger("shell")
 projects_bp = Blueprint("projects", __name__)
 
 
+@projects_bp.before_request
+def _require_project_write_session():
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and not get_session_id():
+        return jsonify({"error": "session_required"}), 401
+    return None
+
+
 def _project_write_limit():
     return f"{CFG['rate_limit_per_minute']} per minute; {CFG['rate_limit_per_second']} per second"
 

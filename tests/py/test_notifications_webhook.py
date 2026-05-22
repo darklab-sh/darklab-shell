@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import json
 from email.message import Message
+from http.client import HTTPMessage
+from io import BytesIO
 import socket
 from urllib.error import HTTPError
+from urllib.request import Request
 
 import pytest
 
 import config
+from services.notifications.channels import _http as notification_http
 from services.notifications.channels.webhook import WebhookChannel
 from services.notifications.models import ChannelResult, NotificationChannel
 from services.notifications.payloads import build_run_complete_payload
@@ -44,8 +48,10 @@ def _channel(*, secrets=None, config=None) -> NotificationChannel:
     )
 
 
-def _http_error(status: int) -> HTTPError:
+def _http_error(status: int, *, location: str = "") -> HTTPError:
     headers: Message = Message()
+    if location:
+        headers["Location"] = location
     return HTTPError(
         "https://example.invalid/webhook",
         status,
@@ -80,7 +86,7 @@ def test_webhook_channel_posts_json_payload(monkeypatch):
         return FakeResponse(204)
 
     monkeypatch.setattr("services.notifications.channels.webhook.get_channel_secret", fake_get_secret)
-    monkeypatch.setattr("services.notifications.channels._http.urlopen", fake_urlopen)
+    monkeypatch.setattr("services.notifications.channels._http._open_http_request", fake_urlopen)
 
     result = WebhookChannel(_channel(config={"timeout_seconds": 4})).send({"trigger": "test", "ok": True})
 
@@ -101,7 +107,7 @@ def test_webhook_channel_uses_short_timeout_for_test_send(monkeypatch):
         return FakeResponse(204)
 
     monkeypatch.setattr("services.notifications.channels.webhook.get_channel_secret", lambda *_: "https://example.invalid/hook")
-    monkeypatch.setattr("services.notifications.channels._http.urlopen", fake_urlopen)
+    monkeypatch.setattr("services.notifications.channels._http._open_http_request", fake_urlopen)
     monkeypatch.setitem(
         config.CFG,
         "notifications",
@@ -124,7 +130,7 @@ def test_webhook_channel_retries_5xx_then_succeeds(monkeypatch):
         return FakeResponse(200)
 
     monkeypatch.setattr("services.notifications.channels.webhook.get_channel_secret", lambda *_: "https://example.invalid")
-    monkeypatch.setattr("services.notifications.channels._http.urlopen", fake_urlopen)
+    monkeypatch.setattr("services.notifications.channels._http._open_http_request", fake_urlopen)
 
     channel = WebhookChannel(_channel())
     first = channel.send({"trigger": "test"})
@@ -136,10 +142,41 @@ def test_webhook_channel_retries_5xx_then_succeeds(monkeypatch):
     assert second == ChannelResult.success()
 
 
+@pytest.mark.parametrize("location", ["http://127.0.0.1/hook", "/local-redirect"])
+def test_notification_http_redirect_handler_refuses_redirects(location):
+    assert notification_http._NoRedirectHandler().redirect_request(  # noqa: SLF001
+        Request("https://example.invalid/webhook"),
+        BytesIO(),
+        302,
+        "Found",
+        HTTPMessage(),
+        location,
+    ) is None
+
+
+@pytest.mark.parametrize("location", ["http://127.0.0.1/hook", "/local-redirect"])
+def test_webhook_channel_does_not_follow_redirects(monkeypatch, location):
+    captured_urls = []
+
+    def fake_open(request, timeout):
+        captured_urls.append(request.full_url)
+        raise _http_error(302, location=location)
+
+    monkeypatch.setattr("services.notifications.channels.webhook.get_channel_secret", lambda *_: "https://example.invalid")
+    monkeypatch.setattr("services.notifications.channels._http._open_http_request", fake_open)
+
+    result = WebhookChannel(_channel()).send({"trigger": "test"})
+
+    assert result.ok is False
+    assert result.retryable is True
+    assert "302" in result.error
+    assert captured_urls == ["https://example.invalid"]
+
+
 def test_webhook_channel_treats_4xx_as_terminal(monkeypatch):
     monkeypatch.setattr("services.notifications.channels.webhook.get_channel_secret", lambda *_: "https://example.invalid")
     monkeypatch.setattr(
-        "services.notifications.channels._http.urlopen",
+        "services.notifications.channels._http._open_http_request",
         lambda *_args, **_kwargs: _raise(_http_error(400)),
     )
 
@@ -160,7 +197,7 @@ def test_webhook_channel_rejects_malformed_urls(monkeypatch, bad_url):
         return FakeResponse(200)
 
     monkeypatch.setattr("services.notifications.channels.webhook.get_channel_secret", lambda *_: bad_url)
-    monkeypatch.setattr("services.notifications.channels._http.urlopen", fake_urlopen)
+    monkeypatch.setattr("services.notifications.channels._http._open_http_request", fake_urlopen)
 
     result = WebhookChannel(_channel()).send({"trigger": "test"})
 
@@ -192,7 +229,7 @@ def test_webhook_channel_rejects_private_and_local_urls(monkeypatch, blocked_url
 
     monkeypatch.setitem(config.CFG, "notifications", {"http_private_host_allowlist": []})
     monkeypatch.setattr("services.notifications.channels.webhook.get_channel_secret", lambda *_: blocked_url)
-    monkeypatch.setattr("services.notifications.channels._http.urlopen", fake_urlopen)
+    monkeypatch.setattr("services.notifications.channels._http._open_http_request", fake_urlopen)
 
     result = WebhookChannel(_channel()).send({"trigger": "test"})
 
@@ -226,7 +263,7 @@ def test_webhook_channel_allows_explicit_private_host_allowlist(monkeypatch):
 
     monkeypatch.setitem(config.CFG, "notifications", {"http_private_host_allowlist": ["10.0.0.5"]})
     monkeypatch.setattr("services.notifications.channels.webhook.get_channel_secret", lambda *_: "http://10.0.0.5/hook")
-    monkeypatch.setattr("services.notifications.channels._http.urlopen", fake_urlopen)
+    monkeypatch.setattr("services.notifications.channels._http._open_http_request", fake_urlopen)
 
     result = WebhookChannel(_channel()).send({"trigger": "test"})
 
@@ -237,7 +274,7 @@ def test_webhook_channel_allows_explicit_private_host_allowlist(monkeypatch):
 def test_webhook_channel_retries_timeout(monkeypatch):
     monkeypatch.setattr("services.notifications.channels.webhook.get_channel_secret", lambda *_: "https://example.invalid")
     monkeypatch.setattr(
-        "services.notifications.channels._http.urlopen",
+        "services.notifications.channels._http._open_http_request",
         lambda *_args, **_kwargs: _raise(socket.timeout("timed out")),
     )
 

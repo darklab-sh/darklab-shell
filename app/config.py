@@ -5,14 +5,18 @@ Imported by database, process, permalinks, and app modules.
 
 import os
 import pwd
+import logging
 from pathlib import Path
 import yaml
 from core.redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
 
+log = logging.getLogger("shell")
+CONFIG_LOAD_WARNINGS: list[dict[str, str]] = []
+
 APP_VERSION = "2.0"
 PROJECT_NAME = "darklab_shell"
 
-PROJECT_README = "https://gitlab.com/darklab.sh/darklab_shell/-/tree/v2.0?ref_type=heads#darklab_shell"
+PROJECT_README = "https://gitlab.com/darklab.sh/darklab_shell#darklab_shell"
 APP_CONF_DIR = os.environ.get("APP_CONF_DIR", "")
 DEFAULT_PROMPT_IDENTITY = "anon@darklab.sh"
 
@@ -42,7 +46,10 @@ def _load_yaml_config(path):
 def _load_yaml_config_optional(path):
     try:
         return _load_yaml_config(path)
-    except yaml.YAMLError:
+    except yaml.YAMLError as exc:
+        payload = {"path": str(path), "error": str(exc)}
+        CONFIG_LOAD_WARNINGS.append(payload)
+        log.warning("CONFIG_LOCAL_LOAD_FAILED", extra=payload)
         return {}
 
 

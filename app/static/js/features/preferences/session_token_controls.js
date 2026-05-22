@@ -35,6 +35,13 @@ function _optionsTokenShowMsg(msg, isError = false) {
   el.classList.toggle('is-error', isError);
 }
 
+function _optionsTokenToast(message, tone = 'success') {
+  const text = String(message || '').trim();
+  if (!text) return;
+  if (typeof showToast === 'function') showToast(text, tone);
+  else _optionsTokenShowMsg(text, tone === 'error');
+}
+
 async function _waitForMigrateChoice(msg) {
   if (typeof showConfirm !== 'function') return false;
   return await showConfirm({
@@ -145,7 +152,7 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
     const resp = await apiFetch('/session/token/generate');
     if (!resp.ok) {
       const d = await resp.json().catch(() => ({}));
-      _optionsTokenShowMsg(`Failed to generate token — ${d.error || resp.status}`, true);
+      _optionsTokenToast(`Failed to generate token — ${d.error || resp.status}`, 'error');
       return;
     }
     const { session_token: newToken } = await resp.json();
@@ -185,11 +192,11 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
         }).catch(() => null);
         if (!migrateResp?.ok) {
           const d = await migrateResp?.json().catch(() => ({})) ?? {};
-          _optionsTokenShowMsg(`Migration failed — ${d.error || 'network error'}. Token not activated.`, true);
+          _optionsTokenToast(`Migration failed — ${d.error || 'network error'}. Token not activated.`, 'error');
           return;
         }
         const migrateData = await migrateResp.json().catch(() => ({}));
-        _optionsTokenShowMsg(_optionsMigrationResultText(migrateData));
+        _optionsTokenToast(_optionsMigrationResultText(migrateData));
       }
     }
 
@@ -205,7 +212,7 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
       .then(() => showToast('New token copied to clipboard'))
       .catch(() => {});
   } catch (err) {
-    _optionsTokenShowMsg(`Error: ${err.message || 'network error'}`, true);
+    _optionsTokenToast(`Error: ${err.message || 'network error'}`, 'error');
   } finally {
     _optionsTokenSetBusy(false);
   }
@@ -344,11 +351,11 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
         }).catch(() => null);
         if (!migrateResp?.ok) {
           const d = await migrateResp?.json().catch(() => ({})) ?? {};
-          _optionsTokenShowMsg(`Migration failed — ${d.error || 'network error'}. Token not activated.`, true);
+          _optionsTokenToast(`Migration failed — ${d.error || 'network error'}. Token not activated.`, 'error');
           return;
         }
         const migrateData = await migrateResp.json().catch(() => ({}));
-        _optionsTokenShowMsg(_optionsMigrationResultText(migrateData));
+        _optionsTokenToast(_optionsMigrationResultText(migrateData));
       }
     }
 
@@ -362,7 +369,7 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
     if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
     showToast('Session token applied');
   } catch (err) {
-    _optionsTokenShowMsg(`Error: ${err.message || 'network error'}`, true);
+    _optionsTokenToast(`Error: ${err.message || 'network error'}`, 'error');
   } finally {
     _optionsTokenSetBusy(false);
   }
@@ -376,7 +383,7 @@ document.getElementById('options-session-token-rotate-btn')?.addEventListener('c
     const genResp = await apiFetch('/session/token/generate');
     if (!genResp.ok) {
       const d = await genResp.json().catch(() => ({}));
-      _optionsTokenShowMsg(`Failed to generate token — ${d.error || genResp.status}`, true);
+      _optionsTokenToast(`Failed to generate token — ${d.error || genResp.status}`, 'error');
       return;
     }
     const { session_token: newToken } = await genResp.json();
@@ -389,10 +396,10 @@ document.getElementById('options-session-token-rotate-btn')?.addEventListener('c
     });
     const migrateData = await migrateResp.json().catch(() => ({}));
     if (!migrateResp.ok || !migrateData.ok) {
-      _optionsTokenShowMsg(`Migration failed — token not rotated: ${migrateData.error || migrateResp.status}`, true);
+      _optionsTokenToast(`Migration failed — token not rotated: ${migrateData.error || migrateResp.status}`, 'error');
       return;
     }
-    _optionsTokenShowMsg(_optionsMigrationResultText(migrateData));
+    _optionsTokenToast(_optionsMigrationResultText(migrateData));
 
     localStorage.setItem('session_token', newToken);
     updateSessionId(newToken);
@@ -406,7 +413,7 @@ document.getElementById('options-session-token-rotate-btn')?.addEventListener('c
       .then(() => showToast('New token copied to clipboard'))
       .catch(() => showToast('Token rotated'));
   } catch (err) {
-    _optionsTokenShowMsg(`Error: ${err.message || 'network error'}`, true);
+    _optionsTokenToast(`Error: ${err.message || 'network error'}`, 'error');
   } finally {
     _optionsTokenSetBusy(false);
   }

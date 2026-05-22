@@ -143,7 +143,7 @@ describe('notification channel preferences panel', () => {
     expect(msg.textContent).toBe('')
   })
 
-  it('renders channel actions and routes test, mute, and delete requests', async () => {
+  it('renders channel actions and routes test, deliveries, mute, and delete requests', async () => {
     let channels = [{
       id: 'ntc_chat',
       kind: 'telegram',
@@ -154,12 +154,53 @@ describe('notification channel preferences panel', () => {
       secret_fields: [{ name: 'bot_token', configured: true }],
     }]
     let testFails = false
+    let deliveries = [
+      {
+        id: 'nte_existing',
+        channel_id: 'ntc_chat',
+        trigger: 'watcher_error',
+        status: 'dead',
+        attempts: 3,
+        created: '2026-05-22T07:00:00+00:00',
+        last_attempt_at: '2026-05-22T07:01:00+00:00',
+        next_attempt_at: '',
+        last_error: 'provider rejected message',
+        run_id: 'run_existing_delivery',
+      },
+    ]
     const apiFetch = vi.fn(async (url, options = {}) => {
       if (url === '/session/notification-channels') return jsonResponse({ channels })
+      if (url === '/session/notification-events?channel_id=ntc_chat&limit=5') {
+        return jsonResponse({ events: deliveries, total: deliveries.length, limit: 5, offset: 0, has_more: false })
+      }
       if (url === '/session/notification-channels/ntc_chat/test') {
         if (testFails) {
+          deliveries = [{
+            id: 'nte_test_2',
+            channel_id: 'ntc_chat',
+            trigger: 'test',
+            status: 'retry_wait',
+            attempts: 1,
+            created: '2026-05-22T07:11:00+00:00',
+            last_attempt_at: '2026-05-22T07:11:00+00:00',
+            next_attempt_at: '2026-05-22T07:12:00+00:00',
+            last_error: 'timeout',
+            run_id: '',
+          }, ...deliveries]
           return jsonResponse({ queued: 1, events: [{ event_id: 'nte_test_2', status: 'retry_wait', last_error: 'timeout' }] })
         }
+        deliveries = [{
+          id: 'nte_test',
+          channel_id: 'ntc_chat',
+          trigger: 'test',
+          status: 'sent',
+          attempts: 1,
+          created: '2026-05-22T07:10:00+00:00',
+          last_attempt_at: '2026-05-22T07:10:00+00:00',
+          next_attempt_at: '',
+          last_error: '',
+          run_id: '',
+        }, ...deliveries]
         return jsonResponse({ queued: 1, events: [{ event_id: 'nte_test', status: 'sent', last_error: '' }] })
       }
       if (url === '/session/notification-channels/ntc_chat' && options.method === 'PATCH') {
@@ -194,17 +235,24 @@ describe('notification channel preferences panel', () => {
     expect(list.textContent).toContain('Ops chat')
     expect(list.textContent).toContain('run complete, watcher error · chat 12345')
 
-    const buttons = Array.from(list.querySelectorAll('button'))
-    buttons.find(button => button.textContent === 'Test').click()
+    Array.from(list.querySelectorAll('button')).find(button => button.textContent === 'Deliveries').click()
+    await vi.waitFor(() => expect(list.textContent).toContain('Recent deliveries'))
+    expect(list.textContent).toContain('watcher error')
+    await vi.waitFor(() => expect(list.textContent).toContain('provider rejected message'))
+    expect(apiFetch).toHaveBeenCalledWith('/session/notification-events?channel_id=ntc_chat&limit=5')
+
+    Array.from(list.querySelectorAll('button')).find(button => button.textContent === 'Test').click()
     await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Test notification delivered.', 'success'))
     expect(msg.textContent).toBe('')
+    await vi.waitFor(() => expect(list.textContent).toContain('sent'))
 
     testFails = true
-    buttons.find(button => button.textContent === 'Test').click()
+    Array.from(list.querySelectorAll('button')).find(button => button.textContent === 'Test').click()
     await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Test notification failed: timeout', 'error'))
     expect(msg.textContent).toBe('')
+    await vi.waitFor(() => expect(list.textContent).toContain('retry wait'))
 
-    buttons.find(button => button.textContent === 'Edit').click()
+    Array.from(list.querySelectorAll('button')).find(button => button.textContent === 'Edit').click()
     await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Notification channel updated.', 'success'))
     expect(list.textContent).toContain('Ops chat edited')
     expect(msg.textContent).toBe('')

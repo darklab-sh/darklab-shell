@@ -11,9 +11,12 @@ import atexit
 from dataclasses import dataclass
 from enum import Enum
 import json
+import logging
 import sqlite3
 import time
 from typing import Any, Iterable
+
+log = logging.getLogger("shell")
 
 
 class DatabaseBackend(str, Enum):
@@ -230,8 +233,16 @@ _POSTGRES_TRANSIENT_SQLSTATES = frozenset({
     "40001",  # serialization failure
     "40P01",  # deadlock detected
     "53300",  # too many connections
+    "57P01",  # admin shutdown
+    "57P02",  # crash shutdown
     "57P03",  # cannot connect now
 })
+_POSTGRES_TRANSIENT_MESSAGE_FRAGMENTS = (
+    "connection is lost",
+    "connection is closed",
+    "server closed the connection unexpectedly",
+    "terminating connection due to administrator command",
+)
 
 
 def postgres_jsonb_param(value: Any) -> Any:
@@ -332,8 +343,17 @@ def get_postgres_pool(cfg: dict[str, Any]) -> Any:
             open=True,
         )
     except Exception as exc:
+        log.error(
+            "POSTGRES_POOL_OPEN_FAILED",
+            exc_info=True,
+            extra={"pool_min": min_size, "pool_max": max_size, "jit_enabled": jit_enabled},
+        )
         raise PostgresConnectionError(f"Could not open Postgres pool: {exc}") from exc
     _POSTGRES_POOL_CONFIG = pool_config
+    log.info(
+        "POSTGRES_POOL_OPENED",
+        extra={"pool_min": min_size, "pool_max": max_size, "jit_enabled": jit_enabled},
+    )
     return _POSTGRES_POOL
 
 
@@ -344,6 +364,7 @@ def close_postgres_pool() -> None:
     _POSTGRES_POOL_CONFIG = None
     if pool is not None:
         pool.close()
+        log.info("POSTGRES_POOL_CLOSED")
 
 
 def connect_postgres(cfg: dict[str, Any]) -> Any:
@@ -360,7 +381,36 @@ def _is_read_only_sql(sql: str) -> bool:
 
 def _is_transient_postgres_error(exc: BaseException) -> bool:
     sqlstate = str(getattr(exc, "sqlstate", "") or "")
-    return sqlstate in _POSTGRES_TRANSIENT_SQLSTATES
+    if sqlstate in _POSTGRES_TRANSIENT_SQLSTATES:
+        return True
+    message = str(exc).lower()
+    return any(fragment in message for fragment in _POSTGRES_TRANSIENT_MESSAGE_FRAGMENTS)
+
+
+def _rollback_after_transient(connection: Any, original_exc: BaseException) -> bool:
+    try:
+        connection.rollback()
+        return True
+    except Exception as rollback_exc:  # noqa: BLE001
+        if _is_transient_postgres_error(rollback_exc):
+            raise original_exc from rollback_exc
+        raise
+
+
+def _log_postgres_read_retry(exc: BaseException, operation: str) -> None:
+    log.warning(
+        "POSTGRES_READ_RETRY",
+        extra={
+            "sqlstate": str(getattr(exc, "sqlstate", "") or ""),
+            "operation": operation,
+            "retry_delay_ms": 50,
+        },
+    )
+
+
+def is_transient_postgres_error(exc: BaseException) -> bool:
+    """Return True for Postgres errors that are safe for workers to retry."""
+    return _is_transient_postgres_error(exc)
 
 
 class PostgresSqliteCompatCursor:
@@ -377,7 +427,8 @@ class PostgresSqliteCompatCursor:
         except Exception as exc:
             if not _is_read_only_sql(sql) or not _is_transient_postgres_error(exc):
                 raise
-            self._connection.rollback()
+            _rollback_after_transient(self._connection, exc)
+            _log_postgres_read_retry(exc, "cursor.execute")
             time.sleep(0.05)
             return self._cursor.execute(converted, tuple(params))
 
@@ -416,6 +467,7 @@ class PostgresSqliteCompatConnection:
 
     def __init__(self, connection: Any):
         self._connection = connection
+        self.database_backend = DatabaseBackend.POSTGRES
 
     def execute(self, sql: str, params: Iterable[Any] = ()) -> Any:
         converted = convert_positional_placeholders(str(sql), POSTGRES_DIALECT.placeholder)
@@ -425,7 +477,8 @@ class PostgresSqliteCompatConnection:
         except Exception as exc:
             if not _is_read_only_sql(sql) or not _is_transient_postgres_error(exc):
                 raise
-            self._connection.rollback()
+            _rollback_after_transient(self._connection, exc)
+            _log_postgres_read_retry(exc, "connection.execute")
             time.sleep(0.05)
             return self._connection.execute(converted, params_tuple)
 

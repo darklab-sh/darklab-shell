@@ -41,6 +41,13 @@ function _optionsSecretsShowMsg(message, isError = false) {
   el.classList.toggle('is-error', Boolean(isError));
 }
 
+function _optionsSecretsToast(message, tone = 'success') {
+  const text = String(message || '').trim();
+  if (!text) return;
+  if (typeof showToast === 'function') showToast(text, tone);
+  else _optionsSecretsShowMsg(text, tone === 'error');
+}
+
 function _optionsSecretsSetBusy(busy) {
   _optionsSecretsLoading = Boolean(busy);
   ['options-provider-status-btn', 'options-secret-new-btn', 'options-secrets-refresh-btn'].forEach((id) => {
@@ -211,7 +218,7 @@ function _optionsSecretLink(name, secret = null) {
     closeProviderStatusModal({ refocus: false });
     const editorOptions = secret ? { secret } : { name };
     openSecretEditor(editorOptions).catch((err) => {
-      _optionsSecretsShowMsg(err.message || 'Unable to open secret editor', true);
+      _optionsSecretsToast(err.message || 'Unable to open secret editor', 'error');
     });
   });
   return btn;
@@ -363,7 +370,7 @@ async function openProviderStatusModal() {
     _providerStatusModalEl()?.querySelector('.provider-status-close')?.focus({ preventScroll: true });
     return true;
   } catch (err) {
-    _optionsSecretsShowMsg(`Failed to load provider status — ${err.message || 'network error'}`, true);
+    _optionsSecretsToast(`Failed to load provider status — ${err.message || 'network error'}`, 'error');
     return null;
   }
 }
@@ -434,7 +441,7 @@ function _renderOptionsSecrets(secrets = []) {
     edit.textContent = 'Edit';
     edit.addEventListener('click', () => {
       openSecretEditor({ secret }).catch((err) => {
-        _optionsSecretsShowMsg(err.message || 'Unable to edit secret', true);
+        _optionsSecretsToast(err.message || 'Unable to edit secret', 'error');
       });
     });
     actions.appendChild(edit);
@@ -445,7 +452,7 @@ function _renderOptionsSecrets(secrets = []) {
     del.textContent = 'Delete';
     del.addEventListener('click', () => {
       deleteOptionsSecret(String(secret?.name || '')).catch((err) => {
-        _optionsSecretsShowMsg(err.message || 'Unable to delete secret', true);
+        _optionsSecretsToast(err.message || 'Unable to delete secret', 'error');
       });
     });
     actions.appendChild(del);
@@ -469,7 +476,7 @@ async function refreshOptionsSecrets({ force = false } = {}) {
     _optionsSecretsLoaded = true;
   } catch (err) {
     _renderOptionsSecrets([]);
-    _optionsSecretsShowMsg(`Failed to load secrets — ${err.message || 'network error'}`, true);
+    _optionsSecretsToast(`Failed to load secrets — ${err.message || 'network error'}`, 'error');
   } finally {
     _optionsSecretsSetBusy(false);
   }
@@ -652,15 +659,14 @@ async function openSecretEditor({ secret = null, name = '', source = 'options' }
         if (resp && resp.ok === false) throw new Error(data.message || data.error || `HTTP ${resp.status}`);
         invalidateOptionsSecrets();
         await refreshOptionsSecrets({ force: true });
-        _optionsSecretsShowMsg(
+        _optionsSecretsToast(
           isCustom && !isExisting
             ? `${normalizedName} saved. It is not currently used unless a command declares that consumer env.`
             : (isExisting ? `${normalizedName} replaced.` : `${normalizedName} saved.`),
         );
         return true;
       } catch (error) {
-        err.textContent = `Save failed — ${error.message || 'network error'}`;
-        err.style.display = '';
+        _optionsSecretsToast(`Save failed — ${error.message || 'network error'}`, 'error');
         return false;
       }
     },
@@ -680,7 +686,7 @@ async function openSecretEditor({ secret = null, name = '', source = 'options' }
   });
 
   if (choice !== 'save' && source === 'terminal') {
-    _optionsSecretsShowMsg('Secret entry canceled.');
+    _optionsSecretsToast('Secret entry canceled.');
   }
   return choice;
 }
@@ -712,7 +718,7 @@ async function deleteOptionsSecret(name) {
   }
   invalidateOptionsSecrets();
   await refreshOptionsSecrets({ force: true });
-  _optionsSecretsShowMsg(`${normalizedName} deleted.`);
+  _optionsSecretsToast(`${normalizedName} deleted.`);
   return true;
 }
 
@@ -749,16 +755,16 @@ async function handleSecretCommand(cmd, tabId = null) {
 }
 
 document.getElementById('options-secret-new-btn')?.addEventListener('click', () => {
-  openSecretEditor().catch((err) => _optionsSecretsShowMsg(err.message || 'Unable to add secret', true));
+  openSecretEditor().catch((err) => _optionsSecretsToast(err.message || 'Unable to add secret', 'error'));
 });
 
 document.getElementById('options-provider-status-btn')?.addEventListener('click', () => {
-  openProviderStatusModal().catch((err) => _optionsSecretsShowMsg(err.message || 'Unable to load providers', true));
+  openProviderStatusModal().catch((err) => _optionsSecretsToast(err.message || 'Unable to load providers', 'error'));
 });
 
 document.getElementById('options-secrets-refresh-btn')?.addEventListener('click', () => {
   refreshOptionsSecrets({ force: true }).catch((err) => {
-    _optionsSecretsShowMsg(err.message || 'Unable to refresh secrets', true);
+    _optionsSecretsToast(err.message || 'Unable to refresh secrets', 'error');
   });
 });
 

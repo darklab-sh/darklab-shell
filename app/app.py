@@ -16,8 +16,10 @@ from flask import Flask, jsonify, request
 # Logging must be configured before other local imports — process.py
 # connects to Redis at module import time and emits log calls then.
 from config import (  # noqa: F401 — re-exported for test compatibility
+    APP_CONF_DIR,
     APP_VERSION,
     CFG,
+    CONFIG_LOAD_WARNINGS,
     DARK_THEME,
     SCANNER_PREFIX,
     THEME_REGISTRY,
@@ -29,6 +31,26 @@ from core.logging_setup import configure_logging
 configure_logging(CFG)
 
 log = logging.getLogger("shell")
+
+
+def _log_loaded_config() -> None:
+    for warning in CONFIG_LOAD_WARNINGS:
+        log.warning("CONFIG_LOCAL_LOAD_FAILED", extra=dict(warning))
+    conf_dir = Path(APP_CONF_DIR) if APP_CONF_DIR else Path(__file__).resolve().parent / "conf"
+    log.info(
+        "CONFIG_LOADED",
+        extra={
+            "conf_dir": str(conf_dir),
+            "local_overlay": (conf_dir / "config.local.yaml").exists(),
+            "database_backend": str(CFG.get("database_backend") or ""),
+            "workspace_enabled": bool(CFG.get("workspace_enabled")),
+            "log_level": str(CFG.get("log_level") or ""),
+            "log_format": str(CFG.get("log_format") or ""),
+        },
+    )
+
+
+_log_loaded_config()
 
 
 def _init_metrics_environment():

@@ -34,6 +34,22 @@ log = logging.getLogger("shell")
 
 session_bp = Blueprint("session", __name__)
 
+_SESSION_WRITE_AUTH_EXEMPT_PATHS = {
+    "/session/token/generate",
+    "/session/token/info",
+    "/session/token/revoke",
+    "/session/token/verify",
+    "/session/migrate",
+}
+
+
+@session_bp.before_request
+def _require_session_write_session():
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.path not in _SESSION_WRITE_AUTH_EXEMPT_PATHS:
+        if not get_session_id():
+            return jsonify({"error": "session_required"}), 401
+    return None
+
 _SESSION_PREFERENCE_KEYS = {
     "pref_active_project_id",
     "pref_project_auto_link_external_runs",

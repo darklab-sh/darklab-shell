@@ -16,6 +16,11 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Future interactive PTY enhancements](#future-interactive-pty-enhancements)
 - [Research](#research)
 - [Ideas](#ideas)
+  - [Audit log surface](#audit-log-surface)
+  - [Workflows v2 — playbooks with parameters](#workflows-v2--playbooks-with-parameters)
+  - [Multi-operator / team mode](#multi-operator--team-mode)
+  - [Run replay / scrubbable event stream](#run-replay--scrubbable-event-stream)
+  - [AI-assisted output summary and next-command suggestion](#ai-assisted-output-summary-and-next-command-suggestion)
   - [Tool-specific guidance](#tool-specific-guidance)
   - [Command catalog future-state](#command-catalog-future-state)
   - [Command outcome summaries](#command-outcome-summaries)
@@ -47,6 +52,7 @@ Now that per-line `kind`, `role`, `signals`, `entities`, and `line_index` flow e
 - **Diagnostics page classifier inspector.** `/diag` could grow a per-line inspector — paste a line, see how `OutputSignalClassifier` would assign `kind`/`role`/`signals`/`entities`. Useful for debugging classifier regressions without staging a real run.
 - **Classifier drift report.** Add a developer-only report that samples recent stored lines by `kind`/`role`/`signals` and highlights unknown or low-value buckets. This would make classifier regressions visible before they show up as noisy findings, watchers, or exports.
 - **PTY scrollback findings.** `app/services/pty/transcript.py:60` already has a `scrollback_findings` mode; filtering out `role=prompt-echo`/`pty-marker` would tighten its false-positive rate.
+- **Ctrl+R findings search discoverability.** Find a clearer way to surface findings-output search from reverse search without making normal command-history recall feel surprising.
 
 **Explicitly out of scope (for now)**
 
@@ -61,38 +67,18 @@ No known issues are currently tracked.
 
 ## Technical Debt
 
-- **Promote shared run/history API helpers out of browser blueprints.**
-  - `app/blueprints/api_v1.py` intentionally reuses private helpers from `blueprints.run` and `blueprints.history` to keep v1 behavior aligned with the browser path.
-  - Once the API surface settles, move the shared run-start, stream, history-output, and history-count pieces into service modules so browser routes and `/api/v1` routes both depend on stable service boundaries instead of private route helpers.
-
-- **Migrate inline modal action-result text to `showToast` for consistency.**
-  - The Atlas overlay, Workflows modal, Run Comparison, tab exports, permalink, and the Session Token copy/apply/clear/rotate paths already toast every action result via `showToast(message, tone)`. The Options → Notifications panel was migrated in a recent fix using a local `_toast()` helper that routes through `showToast` and falls back to the inline message bar only when the global is missing — that's the model the surfaces below should adopt.
-  - Pattern A — `field-save-status` inline "saved" badges. Small `<span role="status" aria-live="polite">saved</span>` flashed next to an input. Replace with a one-shot toast on save.
-    - Options → Prompt name: `#options-prompt-username-saved` (`app/templates/index.html:1041`); driven by `showPromptUsernameSavedIndicator` / `hidePromptUsernameSavedIndicator` in `app/static/js/features/preferences/preferences.js:483, 491, 493, 497`.
-    - Run Details → Project notes editor: `#project-notes-save-status` (`app/templates/index.html:834`).
-    - Run Details → Project labels editor: `#project-labels-save-status` (`app/templates/index.html:839`).
-  - Pattern B — persistent in-modal message bars. One shared element holds the latest action result until overwritten or dismissed. Migrate success paths to `showToast`; keep the bar only for long-running progress (e.g., package archive build polling).
-    - Options → Secrets panel (`app/static/js/features/preferences/secrets_panel.js`).
-      - Element: `#options-secrets-msg`; helper: `_optionsSecretsShowMsg(message, isError)` at line 36-39.
-      - Success strings to migrate: `` `${normalizedName} saved.` ``, `` `${normalizedName} replaced.` ``, `` `${normalizedName} deleted.` `` (lines 655-657, 715), `'Secret entry canceled.'` (line 683).
-      - Error strings to migrate: `'Unable to open secret editor'`, `'Unable to edit secret'`, `'Unable to delete secret'`, `'Save failed — …'`, `'Failed to load secrets — …'`, `'Failed to load provider status — …'` (lines 214, 366, 437, 448, 472, 661).
-    - Options → Session Token controls (`app/static/js/features/preferences/session_token_controls.js`).
-      - Element: `#options-session-token-msg`; helper at lines 31-33. Copy/apply/clear/rotate already toast (lines 112, 363, 406, 407, 417); the gap is the validation/error paths (`'Invalid token — expected tok_… or a UUID'` line 268, rotate-verify error line 295) plus the masked-token display at line 8.
-      - The token-display field at line 8 is current-state, not an action result — leave it inline.
-    - Projects modal — the biggest offender (~60 call sites). Element rendered by `app/static/js/features/projects/project_workspace_shell.js:38-60` (`project-workspace-message` + `project-workspace-message-text` plus a `[data-project-message-dismiss]` close button so the bar persists until clicked); helper `setProjectWorkspaceMessage(text, {error, toast})` called across `app/static/js/features/projects/*.js`. Note: `project_workspace_shell.js:29-31` already imports `showToast`, so the surface is wired up.
-      - Success strings to migrate: `'Target added to selected project.'` / `'Target updated.'` (`project_targets.js:164`), `` `${n} entities added to project.` `` (`project_entities.js:931`), `'Package created.'` (`project_packages.js:1183`), `'Project deleted.'` (`project_workspace_events.js:752`), `'Findings deleted.'` (`project_workspace_events.js:886`), `'Target removed.'` (`project_workspace_events.js:933`), `'Run removed from project.'` (`project_workspace_events.js:994`), `'Package deleted.'` (`project_workspace_events.js:1066`), `` `${kind} metadata saved.` `` (`project_entity_editor.js:80`), `` `${removedCount} unavailable ${noun} removed; …` `` (`project_packages.js:1168`).
-      - Error strings to migrate: `'Could not save target.'` (`project_targets.js:166`), `'Could not load project runs.'` (`project_runs.js:59`), `'Package action failed.'` (`project_packages.js:1548`), plus the rest under the existing `error: true` paths.
-      - Keep inline only: long-running status that updates while polling, e.g., `` `Preparing package archive: ${packageJobMessage(current)}` `` (`project_packages.js:1238`). Toast would flash repeatedly.
-    - Workspace / Files modal (`app/static/js/workspace.js`).
-      - Element: `workspaceMessage`; helper `setWorkspaceMessage(message, tone)` at lines 65-70. There is already a `_showWorkspaceToast` fallback (lines 72-77) that prefers `showToast` when available — but the success paths bypass it and call `setWorkspaceMessage` directly.
-      - Success strings to migrate to `showToast`: `` `Saved ${savedPath}` `` (line 1065), `` `Created folder ${path}` `` (line 1081), `` `Deleted ${kind} ${path}` `` (line 1243), `` `Moved ${source} to ${destination}` `` (line 1257).
-      - Error strings: route through `_showWorkspaceToast` (already toast-aware) instead of `setWorkspaceMessage(..., 'error')` at lines 1037, 1089, 1167, 1291, 1475.
-  - Out of scope (leave inline). Editor-local validation that fails in place inside the editor card body — `editor.error.textContent = …` in `notification_channels.js:364`, custom-secret editor `err.textContent = …` at `secrets_panel.js:619, 627, 637`, session-token apply/rotate error nodes at `session_token_controls.js:268, 295`. These are field-contextual errors, not transient action results.
-  - Acceptance criteria when the migration lands:
-    - Every success path in Patterns A and B routes through `showToast` (or a local `_toast()` helper that wraps it).
-    - Pattern A's three `field-save-status` spans can be removed from the templates (no consumers left).
-    - The Projects modal's `setProjectWorkspaceMessage` becomes either deleted (if no caller needs it after migration) or restricted to the long-running polling case in `project_packages.js:1238`.
-    - The Workspace modal's `setWorkspaceMessage` is reduced to load-error/empty-state messaging; success paths use `showToast`.
+- **Shared schedule/watcher route helpers.**
+  - Browser and API routes for schedules and watchers both handle create/update normalization, pause/resume semantics, run-now calls, fire-audit paging, and error mapping. Extract thin command/query helpers so the browser and API envelopes can stay different at the edge without duplicating route glue.
+- **Status Monitor constellation color helpers.**
+  - Move constellation severity colors onto semantic theme tokens and compose shared helpers for repeated `--star-hue` / `--star-saturation` style strings. The domain category palette can stay distinct, but error and warning tones should follow the app-wide color contract.
+- **Watcher CLI command parsing cleanup.**
+  - Replace the `darklab watch create` argv preprocessor with the same `argparse.REMAINDER` shape used by `darklab schedule create`, then validate the optional command override inside dispatch. This keeps command-tail parsing consistent across the paired features.
+- **Notification channel secret-field contract.**
+  - Expose notification channel secret fields from one server-owned registry or API contract so the CLI does not maintain a second per-channel secret-field map.
+- **History max-output-kind summary query.**
+  - Use the `run_output_summary` table for history-row max kind display instead of walking each row's loaded output entries.
+- **Watcher CLI detail view parity.**
+  - Promote the schedule detail-section printer into a shared CLI helper and use it for `darklab watch info` so schedules and watchers have matching detail views.
 
 ---
 
@@ -161,6 +147,32 @@ No research items are currently tracked.
 ## Ideas
 
 These are product ideas and possible enhancements, not committed TODOs or planned work.
+
+### Audit log surface
+- Add a queryable audit table for consequential actions such as delete, share, redaction toggle, secret create/replace, project link, suppression, and evidence package build.
+- Add an audit viewer on `/diag` or inside Options so operators can inspect what happened without reconstructing it from structured logs after the fact.
+- Many engagement contracts require this kind of operator-visible trail, so this would make compliance and post-engagement review easier.
+
+### Workflows v2 — playbooks with parameters
+- Evolve workflows from saved command lists into reusable runbooks.
+- Add typed parameters such as target, port set, and wordlist reference, then prompt for those values at execute time.
+- Add conditional next-step behavior based on exit code.
+- Let each step capture selected output into named variables that later steps can consume.
+
+### Multi-operator / team mode
+- Explore team-scoped sessions for shared Atlas data, projects, secrets, intel results, and operator workflows.
+- Add operator, lead, and viewer roles plus presence indicators so shared work is visible without collapsing everything into one session token.
+- This is a large v2.5/v3.0-scale direction, but it is worth tracking now because current feature choices can either leave room for team scoping or make it harder later.
+
+### Run replay / scrubbable event stream
+- Turn completed runs into replayable structured event logs, building on the Structured Output Model.
+- Support a scrub timeline, bookmarks, per-line comments, and command-by-command playback.
+- Keep replay integrated with findings, Atlas entities, summaries, and run comparison rather than treating it as a separate asciinema-style recording.
+
+### AI-assisted output summary and next-command suggestion
+- Research an optional assistant layer that uses recent run output plus project context to summarize what happened and suggest likely next commands.
+- Keep it self-hosted-LLM-friendly because security operators often care about where output and target context are sent.
+- Use the Structured Output Model as the substrate so summaries can reason over findings, entities, command roots, projects, and prior run context instead of raw transcript text alone.
 
 ### Tool-specific guidance
 - Add lightweight inline notes for tools with non-obvious web-shell behavior like `mtr`, `nmap`, `naabu`, or `nuclei`.

@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,180
+- behavior tests: 3,190
 - docs/inventory meta-tests: 33
-- `pytest`: 1728 (1695 behavior + 33 meta)
-- `vitest`: 1234
+- `pytest`: 1736 (1703 behavior + 33 meta)
+- `vitest`: 1237
 - `playwright`: 252
-- total: 3,214
+- total: 3,225
 
 This document is organized in two parts:
 
@@ -453,6 +453,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseBackend.test_postgres_backend_exposes_dialect_and_pool_settings` | Verifies the Postgres backend exposes dialect helpers, pool settings, and the SQLite-route guard. |
 | `TestDatabaseBackend.test_postgres_pool_uses_psycopg_pool_lazily` | Verifies the Postgres pool is imported lazily, cached by pool settings, and closed cleanly. |
 | `TestDatabaseBackend.test_postgres_compat_connection_converts_app_placeholders` | Verifies the Postgres app-query compatibility wrapper converts SQLite-style placeholders for connection, cursor, and batch execution. |
+| `TestDatabaseBackend.test_postgres_compat_connection_preserves_transient_error_when_rollback_is_lost` | Verifies a lost connection during transient-error rollback does not hide the original retryable Postgres shutdown error. |
+| `TestDatabaseBackend.test_postgres_transient_error_recognizes_lost_connection_messages` | Verifies transient Postgres detection recognizes connection-loss messages that arrive without SQLSTATE metadata. |
 | `TestDatabaseBackend.test_db_connect_routes_to_postgres_compat_when_configured` | Verifies `db_connect()` routes to the Postgres compatibility context when the Postgres backend is configured. |
 | `TestDatabaseBackend.test_postgres_requires_database_url` | Verifies the Postgres adapter rejects missing `database_url` before opening a pool. |
 | `TestDatabaseBackend.test_run_kind_import_does_not_cycle_through_metrics` | Verifies run-kind helpers can import without cycling through workspace metrics during one-off database setup. |
@@ -903,7 +905,7 @@ Meta-tests that verify documentation stays in sync with the test suite and opera
 | `TestProjectStructureCoverage.test_listed_paths_exist_in_git` | Checks that every leaf path written into the README project-structure tree corresponds to a real tracked or untracked-but-not-gitignored path on disk, catching typos and stale entries left behind after deletions. |
 | `TestProjectStructureCoverage.test_structure_order_matches_git_file_listing` | Checks that the README.md `## Project Structure` tree follows `git ls-files --cached` order with parent directories inserted before children. |
 | `TestArchitectureRouteInventory.test_route_inventory_matches_flask_url_map` | Checks that ARCHITECTURE.md `## HTTP Route Inventory` lists the same method/route pairs registered in Flask's URL map, without enforcing documentation order. |
-| `TestReleaseDraftDocs.test_release_draft_convention_is_documented_when_drafts_exist` | Checks that release-draft branch docs are documented when `docs/release-drafts/` exists. |
+| `TestReleaseDraftDocs.test_temporary_branch_artifacts_stay_out_of_official_docs` | Verifies temporary branch draft artifacts stay out of the official documentation map. |
 | `TestReleaseDraftDocs.test_release_drafts_are_paired_by_version` | Checks that each release draft version has both merge-request and release-notes files. |
 | `TestOperatorConfigurationDocs.test_config_yaml_represents_app_defaults` | Checks that every operator-facing default key from `app/config.py` is represented in the checked-in `app/conf/config.yaml` reference. |
 | `TestOperatorConfigurationDocs.test_configuration_reference_represents_app_defaults` | Checks that every operator-facing default key from `app/config.py` is represented in `CONFIGURATION.md` `## Application Settings`. |
@@ -1136,6 +1138,8 @@ Generic JSON webhook notification channel delivery and payload-shape coverage.
 | `test_webhook_channel_posts_json_payload` | Verifies the webhook channel resolves its vault-backed URL and sends a JSON POST with the configured timeout. |
 | `test_webhook_channel_uses_short_timeout_for_test_send` | Verifies manual webhook test sends use the shorter notification test timeout instead of the normal delivery timeout. |
 | `test_webhook_channel_retries_5xx_then_succeeds` | Verifies 5xx webhook responses are retryable and a later 2xx response succeeds. |
+| `test_notification_http_redirect_handler_refuses_redirects` | Verifies notification HTTP sends refuse absolute and relative redirects. |
+| `test_webhook_channel_does_not_follow_redirects` | Verifies webhook redirect responses do not trigger a second request to the redirected URL. |
 | `test_webhook_channel_treats_4xx_as_terminal` | Verifies 4xx webhook responses fail terminally instead of retrying. |
 | `test_webhook_channel_rejects_malformed_urls` | Verifies malformed or non-http(s) webhook URLs are rejected before an HTTP request is attempted. |
 | `test_webhook_channel_rejects_private_and_local_urls` | Verifies webhook delivery rejects loopback, link-local, private-network, and localhost destinations before sending. |
@@ -1274,6 +1278,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestNotificationChannelRoutes.test_notification_channel_test_endpoint_dispatches_sync_event` | Verifies the channel test route queues and synchronously dispatches a canned test payload. |
 | `TestNotificationChannelRoutes.test_notification_channel_test_endpoint_targets_requested_channel` | Verifies a channel test send targets only the requested notification channel. |
 | `TestNotificationChannelRoutes.test_notification_channel_test_endpoint_reports_delivery_failure_status` | Verifies a channel test send reports the persisted retry/failure status instead of showing queued success only. |
+| `TestNotificationChannelRoutes.test_notification_event_audit_route_lists_session_channel_deliveries` | Verifies the browser notification delivery audit route returns only the active session's channel events. |
 | `TestNotificationChannelRoutes.test_notification_channels_migrate_with_session_token_and_secrets` | Verifies session-token migration carries notification channels, queued events, and usable secret references forward. |
 | `TestNotificationChannelRoutes.test_notification_channel_delete_removes_channel_and_vault_secrets` | Verifies deleting a notification channel removes it from subsequent list responses and removes all channel-owned vault secrets. |
 | `TestProjectRoutes.test_project_host_target_ip_is_stored_as_ip_entity` | Verifies manual host targets that contain an IP literal are stored as IP Atlas entities instead of domain entities. |
@@ -1443,6 +1448,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestMobileWelcomeHintsRoute.test_items_key_present` | Checks items key present handling. |
 | `TestAtlasRoutes.test_lists_session_entities_and_detail` | Verifies Atlas summary, list, and detail routes return session-owned materialized entities and source runs. |
 | `TestAtlasRoutes.test_findings_list_can_filter_by_source_run` | Verifies Atlas summary counts, entity lists, and Findings can be scoped to one current-session source run without leaking rows from other runs or sessions. |
+| `TestAtlasRoutes.test_summary_can_filter_by_project` | Verifies Atlas summary counts honor project scope instead of reporting global session totals. |
 | `TestAtlasRoutes.test_entity_list_batches_metadata_for_current_page` | Verifies Atlas entity lists batch visible-page labels and project-link counts without loading full notes or project links per row. |
 | `TestAtlasRoutes.test_atlas_search_matches_entity_and_finding_metadata` | Verifies Atlas search matches entity and finding labels/notes without crossing session boundaries. |
 | `TestAtlasRoutes.test_entity_detail_caps_large_linked_collections` | Verifies Atlas entity detail responses page large linked source-run and finding collections while reporting totals and more-row state. |
@@ -2227,6 +2233,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `disables saved-view update and delete until a saved view is selected` | Verifies that Mobile Atlas keeps saved-view update/delete actions disabled until a saved view is selected. |
 | `enters select mode from the action sheet and uses row taps for bulk selection` | Verifies that the Mobile Atlas overflow action sheet enters select mode, shows the sticky bulk bar, and turns row taps into selection toggles. |
 | `opens finding detail and keeps review updates in the sticky footer` | Verifies that Mobile Atlas opens finding detail and routes the footer review-state picker through the shared finding update handler. |
+| `uses danger tone for high and critical finding badges` | Verifies that Mobile Atlas renders high and critical finding severity badges with the danger tone instead of success green. |
 | `honors forceView detail requests once the selected entity is resolved` | Verifies that Mobile Atlas opens directly to entity detail when a caller requests detail view and the selected entity is already resolved. |
 
 #### `autocomplete.test.js`
@@ -2453,6 +2460,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `_historyRelativeTime buckets recent diffs as just now / m / h / d and falls back to a short date` | Verifies the relative-time helper used by the mobile recents sheet returns stable bucket strings and a short date for older runs. |
 | `desktop history rows keep absolute clock time and no tooltip on the time span` | Regression: the desktop history drawer keeps exact clock time and does not set a title tooltip on the time span, so only the mobile sheet switches to relative copy. |
 | `refreshHistoryPanel sends the active server-side filters to /history` | Verifies that the history drawer sends the current search and filter state to `/history`. |
+| `sends structured output filters from the history drawer controls` | Verifies that the History drawer's signal, kind, entity, and entity-type controls send structured output filters to `/history` and render removable chips. |
 | `includes the selected project in history requests and active filter chips` | Verifies that the history drawer can filter by project and renders the selected project as a removable active-filter chip. |
 | `refreshHistoryPanel renders pagination controls and advances to the next page` | Verifies that the history drawer shows a paginated window and advances with the control buttons. |
 | `populates command root suggestions from loaded history runs` | Verifies that the history drawer populates command-root suggestions from the server-provided root list. |
@@ -2507,6 +2515,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `renders a fetched comparison in mobile mode with the real select enhancer` | Verifies that the fetched compare renderer can open the mobile unified view with the app-native select enhancer without falling into the generic failure toast. |
 | `surfaces backend compare errors instead of only the generic failure toast` | Verifies that failed compare responses include the backend validation message in the toast instead of collapsing every failure into the same generic copy. |
 | `hides equal-line context controls and rows in changes-only and findings-only modes` | Verifies that changes-only and findings-only comparison modes hide context controls and suppress transcript equal rows or the transcript pane. |
+| `renders added and removed entity-set diffs from comparison objects` | Verifies that run comparison renders added and removed entity diffs from the structured comparison object payload. |
 | `rerenders full equal hunks when context dropdown changes without refetching or saving defaults` | Verifies that the compare context dropdown reshapes already-loaded equal hunks without re-running the compare request or changing the saved default. |
 | `renders replace blocks while preserving each side output order` | Verifies that replace hunks keep each pane's original transcript order while aligning changed pairs. |
 | `keeps right-only replace lines before later paired right lines` | Verifies that a right-side inserted service line renders before a later paired summary line when that was the original B-side order. |
@@ -2550,7 +2559,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `renders token-required and empty states from refresh responses` | Verifies the Notifications tab surfaces durable-token errors and the empty-channel nudge from refresh responses. |
 | `uses cached channel metadata for tab revisits and preserves it after forced load failures` | Verifies the Notifications tab reuses cached channel rows for normal tab revisits and keeps the cached list visible after a forced refresh hits a rate-limit response. |
 | `validates required secrets and submits editor payloads without exposing them in the list` | Verifies the channel editor blocks missing secrets, then submits secret/config/trigger payloads through the channel route. |
-| `renders channel actions and routes test, mute, and delete requests` | Verifies notification channel rows route test-send success/failure to toasts while mute and delete still update the panel state. |
+| `renders channel actions and routes test, deliveries, mute, and delete requests` | Verifies notification channel rows route test-send success/failure to toasts, show delivery audit rows, and keep mute/delete updating panel state. |
 
 #### `output.test.js`
 
@@ -3808,7 +3817,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 - [CONTRIBUTING.md](../CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
 - [CONTRIBUTORS.md](../CONTRIBUTORS.md) - contributor and acknowledgement notes
 - [DECISIONS.md](../DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
-- [DOCS_STANDARDS.md](../DOCS_STANDARDS.md) - documentation structure, templates, and review rules
+- [DOC_STANDARDS.md](../DOC_STANDARDS.md) - documentation structure, templates, and review rules
 - [FEATURES.md](../FEATURES.md) - full per-feature reference
 - [README.md](../README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring

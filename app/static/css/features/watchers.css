@@ -128,7 +128,8 @@
 .watchers-section-header,
 .watchers-detail-actions,
 .watchers-pager,
-.watchers-fire-main {
+.watchers-fire-main,
+.watchers-fire-actions {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -137,7 +138,8 @@
 .watchers-section-header,
 .watchers-detail-actions,
 .watchers-pager,
-.watchers-fire-main {
+.watchers-fire-main,
+.watchers-fire-actions {
   flex-wrap: wrap;
 }
 
@@ -316,6 +318,10 @@
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px 12px;
   padding: 12px;
+}
+
+.watchers-fire-actions {
+  justify-content: flex-end;
 }
 
 .watchers-fire-summary {

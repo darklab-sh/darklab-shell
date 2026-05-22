@@ -14,9 +14,11 @@ from services.notifications.channels_store import (
     create_notification_channel,
     delete_notification_channel,
     list_notification_channels,
+    list_notification_events,
     send_test_notification,
     update_notification_channel,
 )
+from services.projects.utils import normalize_page_limit, normalize_page_offset
 from services.secrets.vault import MasterKeyError, SecretDecryptError
 
 notifications_bp = Blueprint("notifications", __name__)
@@ -61,6 +63,27 @@ def session_notification_channels_list():
         return error_response
     try:
         return jsonify({"channels": list_notification_channels(session_id)})
+    except (NotificationChannelError, MasterKeyError, SecretDecryptError, ValueError) as exc:
+        return _notification_error(exc)
+
+
+@notifications_bp.route("/session/notification-events", methods=["GET"])
+@limiter.limit(_notification_route_limit, key_func=get_session_id)
+def session_notification_events_list():
+    session_id, error_response = _required_token_session()
+    if error_response:
+        return error_response
+    try:
+        return jsonify(
+            list_notification_events(
+                session_id,
+                limit=normalize_page_limit(request.args.get("limit"), default=10, maximum=50),
+                offset=normalize_page_offset(request.args.get("offset")),
+                status=str(request.args.get("status") or ""),
+                channel_id=str(request.args.get("channel_id") or ""),
+                trigger=str(request.args.get("trigger") or ""),
+            )
+        )
     except (NotificationChannelError, MasterKeyError, SecretDecryptError, ValueError) as exc:
         return _notification_error(exc)
 

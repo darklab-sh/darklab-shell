@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Constrained PTY lifecycle for interactive runs."""
+
+from __future__ import annotations
 
 import fcntl
 import json
@@ -39,6 +39,7 @@ from services.pty.capture import (
     _terminal_history_line_limit,
 )
 from services.runs.output_model import LineKind, from_wire, line_event_from_legacy, to_wire
+from services.runs.output_store import unknown_line_event_collector
 from services import metrics as app_metrics
 
 log = logging.getLogger("shell")
@@ -60,6 +61,7 @@ _PTY_SNAPSHOT_PUBLISH_BYTES = 8192
 _PTY_SNAPSHOT_PUBLISH_SECONDS = 1.0
 _PTY_SNAPSHOT_MIN_PUBLISH_SECONDS = 0.2
 _PTY_SNAPSHOT_FALLBACK_ENTRY_LIMIT = 200
+_PTY_SNAPSHOT_UNKNOWN_COLLECTOR = unknown_line_event_collector({"source": "pty_snapshot"})
 _PTY_STALE_MESSAGE = "PTY run is no longer active"
 _PTY_ENV_PASSTHROUGH_KEYS = (
     "PATH",
@@ -334,8 +336,8 @@ def _set_pty_size(fd: int, rows: int, cols: int) -> None:
     try:
         packed = struct.pack("HHHH", rows, cols, 0, 0)
         fcntl.ioctl(fd, termios.TIOCSWINSZ, packed)
-    except OSError:
-        pass
+    except OSError as exc:
+        log.warning("PTY_RESIZE_IOCTL_FAILED", extra={"fd": fd, "rows": rows, "cols": cols, "error": str(exc)})
 
 
 def _command_env() -> dict[str, str]:
@@ -364,8 +366,12 @@ def _terminate_run(run: PtyRun) -> None:
             )
         else:
             os.killpg(pgid, signal.SIGTERM)
-    except (ProcessLookupError, subprocess.TimeoutExpired, OSError):
-        pass
+    except (ProcessLookupError, subprocess.TimeoutExpired, OSError) as exc:
+        log.warning(
+            "PTY_TERMINATE_FAILED",
+            exc_info=True,
+            extra={"run_id": run.run_id, "pid": run.proc.pid, "cmd": run.command, "error": str(exc)},
+        )
 
 
 def _store_pty_meta(run: PtyRun, *, closed: bool = False) -> None:
@@ -487,7 +493,7 @@ def _load_active_pty_meta_for_session(run_id: str, session_id: str) -> tuple[dic
 
 def _pty_snapshot_wire_entry(entry: object) -> dict[str, object]:
     if isinstance(entry, dict):
-        return to_wire(from_wire(entry))
+        return to_wire(from_wire(entry, _PTY_SNAPSHOT_UNKNOWN_COLLECTOR))
     return to_wire(line_event_from_legacy(str(entry)))
 
 
@@ -720,8 +726,17 @@ def _apply_pty_controls(run: PtyRun) -> None:
             if raw and len(raw) <= _pty_input_max_bytes():
                 try:
                     os.write(run.master_fd, raw)
-                except OSError:
-                    pass
+                    log.debug("PTY_CONTROL_APPLIED", extra={"run_id": run.run_id, "action": action, "bytes": len(raw)})
+                except OSError as exc:
+                    log.warning(
+                        "PTY_INPUT_WRITE_FAILED",
+                        extra={
+                            "run_id": run.run_id,
+                            "session": run.session_id,
+                            "bytes": len(raw),
+                            "error": str(exc),
+                        },
+                    )
             elif raw:
                 log.warning("PTY_INPUT_DROPPED", extra={
                     "run_id": run.run_id,
@@ -736,6 +751,12 @@ def _apply_pty_controls(run: PtyRun) -> None:
             run.terminal_capture.resize(run.rows, run.cols)
             _store_pty_meta(run)
             _store_pty_snapshot(run, force=True)
+            log.debug("PTY_CONTROL_APPLIED", extra={
+                "run_id": run.run_id,
+                "action": action,
+                "rows": run.rows,
+                "cols": run.cols,
+            })
     if redis_client:
         try:
             app_metrics.PTY_CONTROL_QUEUE_DEPTH.set(int(cast(Any, redis_client.xlen(_control_key(run.run_id)))))
@@ -1001,13 +1022,21 @@ def start_pty_run(
                     )
                 else:
                     os.killpg(pgid, signal.SIGTERM)
-            except (ProcessLookupError, subprocess.TimeoutExpired, OSError):
-                pass
+            except (ProcessLookupError, subprocess.TimeoutExpired, OSError) as cleanup_exc:
+                log.warning(
+                    "PTY_STARTUP_CLEANUP_FAILED",
+                    exc_info=True,
+                    extra={"run_id": run_id, "stage": "terminate", "error": str(cleanup_exc)},
+                )
         if proc is not None:
             try:
                 proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                pass
+            except subprocess.TimeoutExpired as cleanup_exc:
+                log.warning(
+                    "PTY_STARTUP_CLEANUP_FAILED",
+                    exc_info=True,
+                    extra={"run_id": run_id, "stage": "wait", "error": str(cleanup_exc)},
+                )
         if pid_registered:
             pid_pop(run_id)
         if active_registered:
@@ -1019,8 +1048,12 @@ def start_pty_run(
         if master_fd >= 0:
             try:
                 os.close(master_fd)
-            except OSError:
-                pass
+            except OSError as cleanup_exc:
+                log.warning(
+                    "PTY_STARTUP_CLEANUP_FAILED",
+                    exc_info=True,
+                    extra={"run_id": run_id, "stage": "close_master", "error": str(cleanup_exc)},
+                )
         raise
     finally:
         if slave_fd >= 0:

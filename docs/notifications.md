@@ -106,8 +106,9 @@ Notifications are queued in `notification_events`. A dedicated worker claims due
 - `notifications.delivery_rate_per_minute` caps each channel's sends.
 - `notifications.do_not_disturb` pauses delivery attempts without deleting events or consuming retry attempts.
 - Muted channels stay configured, but they do not queue test sends or other deliveries until unmuted.
+- If Postgres restarts while the worker is polling, the worker logs `NOTIFICATION_WORKER_DATABASE_INTERRUPTED` and retries instead of treating the restart as a delivery failure.
 
-The delivery audit is visible through `/api/v1/notification-events` and `darklab notify events`.
+The delivery audit is visible from the Options **Notifications** tab by opening a channel's **Deliveries** row. It is also available through `/api/v1/notification-events` and `darklab notify events`.
 
 ## Webhook Quickstart
 
@@ -189,7 +190,7 @@ The SMTP password is read from the environment variable named by `notifications.
 - [CONTRIBUTING.md](../CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
 - [CONTRIBUTORS.md](../CONTRIBUTORS.md) - contributor and acknowledgement notes
 - [DECISIONS.md](../DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
-- [DOCS_STANDARDS.md](../DOCS_STANDARDS.md) - documentation structure, templates, and review rules
+- [DOC_STANDARDS.md](../DOC_STANDARDS.md) - documentation structure, templates, and review rules
 - [FEATURES.md](../FEATURES.md) - full per-feature reference
 - [README.md](../README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring

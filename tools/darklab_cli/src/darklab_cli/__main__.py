@@ -28,7 +28,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=None, help="HTTP timeout in seconds")
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
-    sub.add_parser("whoami", help="Show token metadata and last-auth timestamp.")
+    whoami = sub.add_parser("whoami", help="Show token metadata and last-auth timestamp.")
+    whoami.add_argument("--format", choices=("text", "json"), default="text")
 
     run = sub.add_parser("run", help="Start a non-interactive command run.")
     run.add_argument("run_command")
@@ -56,6 +57,7 @@ def _parser() -> argparse.ArgumentParser:
 
     cancel = sub.add_parser("cancel", help="Cancel an active current-token run.")
     cancel.add_argument("run_id")
+    cancel.add_argument("--format", choices=("text", "json"), default="text")
 
     history = sub.add_parser("history", help="List completed run history.")
     history.add_argument("--project", dest="project_id")
@@ -108,6 +110,16 @@ def _parser() -> argparse.ArgumentParser:
     project = sub.add_parser("project", help="Show one project.")
     project.add_argument("project_id")
     project.add_argument("--format", choices=("text", "json"), default="text")
+
+    project_link = sub.add_parser("project-link", help="Link a completed run to a project.")
+    project_link.add_argument("run_id")
+    project_link.add_argument("project_id")
+    project_link.add_argument("--format", choices=("text", "json"), default="text")
+
+    project_unlink = sub.add_parser("project-unlink", help="Remove a completed run from a project.")
+    project_unlink.add_argument("run_id")
+    project_unlink.add_argument("project_id")
+    project_unlink.add_argument("--format", choices=("text", "json"), default="text")
 
     project_findings = sub.add_parser("project-findings", help="List project findings.")
     project_findings.add_argument("project_id")
@@ -190,8 +202,9 @@ def _parser() -> argparse.ArgumentParser:
     schedule_list.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
     schedule_create = schedule_sub.add_parser("create", help="Create a scheduled command.")
-    schedule_create.add_argument("--cron")
-    schedule_create.add_argument("--every", metavar="PRESET", help="Cadence preset: hourly, daily, or weekly.")
+    schedule_cadence = schedule_create.add_mutually_exclusive_group(required=True)
+    schedule_cadence.add_argument("--cron")
+    schedule_cadence.add_argument("--every", metavar="PRESET", help="Cadence preset: hourly, daily, or weekly.")
     schedule_create.add_argument("--label")
     schedule_create.add_argument("--timezone")
     schedule_create.add_argument("--format", choices=("text", "json"), default="text")
@@ -211,6 +224,7 @@ def _parser() -> argparse.ArgumentParser:
 
     schedule_delete = schedule_sub.add_parser("delete", help="Delete a scheduled command.")
     schedule_delete.add_argument("schedule_id")
+    schedule_delete.add_argument("--format", choices=("text", "json"), default="text")
 
     schedule_run = schedule_sub.add_parser("run", help="Fire a scheduled command immediately.")
     schedule_run.add_argument("schedule_id")
@@ -240,8 +254,9 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     watch_create.add_argument("--first-run", action="store_true", help="Capture the first successful watcher run as the baseline.")
-    watch_create.add_argument("--cron")
-    watch_create.add_argument("--every", metavar="PRESET", help="Cadence preset: hourly, daily, or weekly.")
+    watch_cadence = watch_create.add_mutually_exclusive_group(required=True)
+    watch_cadence.add_argument("--cron")
+    watch_cadence.add_argument("--every", metavar="PRESET", help="Cadence preset: hourly, daily, or weekly.")
     watch_create.add_argument("--label")
     watch_create.add_argument("--timezone")
     watch_create.add_argument("--disabled", action="store_true", help="Create the watcher paused.")
@@ -265,6 +280,7 @@ def _parser() -> argparse.ArgumentParser:
 
     watch_delete = watch_sub.add_parser("delete", help="Delete a watcher and its owned schedule.")
     watch_delete.add_argument("watcher_id")
+    watch_delete.add_argument("--format", choices=("text", "json"), default="text")
 
     watch_run = watch_sub.add_parser("run", help="Fire a watcher immediately.")
     watch_run.add_argument("watcher_id")
@@ -311,6 +327,7 @@ def _parser() -> argparse.ArgumentParser:
 
     notify_delete = notify_sub.add_parser("delete", help="Delete a notification channel.")
     notify_delete.add_argument("channel_id")
+    notify_delete.add_argument("--format", choices=("text", "json"), default="text")
 
     notify_test = notify_sub.add_parser("test", help="Send a test notification.")
     notify_test.add_argument("channel_id")
@@ -339,7 +356,8 @@ def _add_atlas_common_filters(parser: argparse.ArgumentParser, *, include_entity
 
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
-    args = parser.parse_args(_preprocess_watch_create_argv(argv))
+    raw_argv = sys.argv[1:] if argv is None else argv
+    args = parser.parse_args(_preprocess_watch_create_argv(raw_argv))
     try:
         client = DarklabClient(load_config(args))
         return _dispatch(client, args)
@@ -375,7 +393,7 @@ def _preprocess_watch_create_argv(argv: list[str] | None) -> list[str] | None:
 def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
     match args.command:
         case "whoami":
-            return _print_payload(client.request("GET", "/whoami"), "json")
+            return _print_payload(client.request("GET", "/whoami"), args.format)
         case "run":
             return _run(client, args)
         case "active":
@@ -383,7 +401,7 @@ def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
         case "tail":
             return _tail(client, args.run_id, args.format, after=args.after)
         case "cancel":
-            return _print_payload(client.request("POST", f"/runs/{args.run_id}/cancel"), "json")
+            return _print_payload(client.request("POST", f"/runs/{args.run_id}/cancel"), args.format)
         case "history":
             payload = client.request("GET", "/history", params=_page_params(args))
             return _print_collection(
@@ -428,6 +446,12 @@ def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
         case "project":
             payload = client.request("GET", f"/projects/{args.project_id}")
             return _print_payload(payload, args.format)
+        case "project-link":
+            payload = client.request("POST", f"/runs/{args.run_id}/projects/{args.project_id}")
+            return _print_payload(payload, args.format)
+        case "project-unlink":
+            payload = client.request("DELETE", f"/runs/{args.run_id}/projects/{args.project_id}")
+            return _print_payload(payload, args.format)
         case "project-findings":
             payload = client.request("GET", f"/projects/{args.project_id}/findings", params=_page_window_params(args))
             return _print_collection(payload, "findings", args.format, fields=("id", "status", "severity", "title"))
@@ -470,8 +494,6 @@ def _schedule(client: DarklabClient, args: argparse.Namespace) -> int:
                 fields=("id", "enabled", "next_run_at", "label", "command_text"),
             )
         case "create":
-            if bool(args.cron) == bool(args.every):
-                raise DarklabCliError("schedule create needs exactly one of --cron or --every.")
             body = {
                 "command": _schedule_command_text(args.schedule_argv),
                 "cron_expr": args.cron,
@@ -499,7 +521,7 @@ def _schedule(client: DarklabClient, args: argparse.Namespace) -> int:
             )
             return _print_schedule(payload, args.format)
         case "delete":
-            return _print_payload(client.request("DELETE", f"/schedules/{args.schedule_id}"), "json")
+            return _print_payload(client.request("DELETE", f"/schedules/{args.schedule_id}"), args.format)
         case "run":
             return _print_schedule_fire(client.request("POST", f"/schedules/{args.schedule_id}/run-now"), args.format)
         case "fires":
@@ -673,8 +695,6 @@ def _watch(client: DarklabClient, args: argparse.Namespace) -> int:
                 fields=("id", "state", "baseline_run_id", "label", "command_text"),
             )
         case "create":
-            if bool(args.cron) == bool(args.every):
-                raise DarklabCliError("watch create needs exactly one of --cron or --every.")
             if not args.first_run and not args.baseline_run_id:
                 raise DarklabCliError("watch create needs a baseline run id, or use --first-run with -- COMMAND.")
             body: dict[str, Any] = {
@@ -711,7 +731,7 @@ def _watch(client: DarklabClient, args: argparse.Namespace) -> int:
             payload = client.request("PATCH", f"/watchers/{args.watcher_id}", body={"state": "ok"})
             return _print_watcher(payload, args.format)
         case "delete":
-            return _print_payload(client.request("DELETE", f"/watchers/{args.watcher_id}"), "json")
+            return _print_payload(client.request("DELETE", f"/watchers/{args.watcher_id}"), args.format)
         case "run":
             return _print_watcher_fire(client.request("POST", f"/watchers/{args.watcher_id}/run-now"), args.format)
         case "accept":
@@ -797,7 +817,7 @@ def _notify(client: DarklabClient, args: argparse.Namespace) -> int:
             payload = client.request("PATCH", f"/notification-channels/{args.channel_id}", body={"muted": False})
             return _print_notification_channel(payload, args.format)
         case "delete":
-            return _print_payload(client.request("DELETE", f"/notification-channels/{args.channel_id}"), "json")
+            return _print_payload(client.request("DELETE", f"/notification-channels/{args.channel_id}"), args.format)
         case "test":
             payload = client.request("POST", f"/notification-channels/{args.channel_id}/test")
             if args.format == "json":
@@ -893,7 +913,7 @@ def _atlas(client: DarklabClient, args: argparse.Namespace) -> int:
                 return _print_payload(payload, "json")
             entity = payload.get("entity") if isinstance(payload, dict) else {}
             if isinstance(entity, dict):
-                print("  ".join(str(entity.get(field, "")) for field in ("type", "id", "occurrence_count", "canonical_value")))
+                _print_table([entity], ("type", "id", "occurrence_count", "canonical_value"))
             return 0
         case "findings":
             params = {**_atlas_filter_params(args), **_page_window_params(args), "review_state": args.review_state}
@@ -905,7 +925,7 @@ def _atlas(client: DarklabClient, args: argparse.Namespace) -> int:
                 return _print_payload(payload, "json")
             finding = payload.get("finding") if isinstance(payload, dict) else {}
             if isinstance(finding, dict):
-                print("  ".join(str(finding.get(field, "")) for field in ("id", "status", "severity", "title")))
+                _print_table([finding], ("id", "status", "severity", "title"))
             return 0
     return die("unknown atlas command")
 
@@ -1120,7 +1140,7 @@ def _print_payload(payload: Any, output_format: str) -> int:
         return 0
     if isinstance(payload, dict):
         for key, value in payload.items():
-            print(f"{key}: {value}")
+            print(f"{key}: {_format_table_value(value)}")
         return 0
     print(payload)
     return 0
@@ -1184,6 +1204,8 @@ def _format_table_value(value: Any) -> str:
         return ""
     if isinstance(value, bool):
         return "yes" if value else "no"
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
     return str(value)
 
 

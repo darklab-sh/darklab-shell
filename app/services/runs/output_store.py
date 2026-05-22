@@ -344,7 +344,7 @@ def load_run_output_events_for_run(
     prefer_full: bool = True,
     log_event: str = "FULL_OUTPUT_LOAD_FAILED",
 ) -> RunOutputLoadResult:
-    unknown_collector = _unknown_line_event_collector({
+    unknown_collector = unknown_line_event_collector({
         "run_id": str(run.get("id") or ""),
         "session": get_log_session_id(str(run.get("session_id") or "")),
     })
@@ -380,7 +380,7 @@ def load_run_output_entries_for_run(
     return load_run_output_events_for_run(run, prefer_full=prefer_full, log_event=log_event)
 
 
-def _unknown_line_event_collector(base_extra: Mapping[str, object]) -> UnknownCollector:
+def unknown_line_event_collector(base_extra: Mapping[str, object]) -> UnknownCollector:
     seen: set[tuple[str, str]] = set()
 
     def collect(family: str, value: str) -> None:

@@ -1031,13 +1031,24 @@ function _renderWatcherFires(parent, watcher) {
         row.appendChild(details);
       }
       if (fire.run_id) {
+        const actions = document.createElement('div');
+        actions.className = 'watchers-fire-actions';
+        if (fire.baseline_run_id && fire.baseline_run_id !== fire.run_id) {
+          const compare = document.createElement('button');
+          compare.type = 'button';
+          compare.className = 'btn btn-primary btn-compact';
+          compare.textContent = 'Compare';
+          _bindWatcherPressable(compare, () => _compareWatcherFireToBaseline(fire));
+          actions.appendChild(compare);
+        }
         const open = document.createElement('button');
         open.type = 'button';
         open.className = 'btn btn-secondary btn-compact';
         open.dataset.watcherRunId = fire.run_id;
         open.textContent = 'Open run';
         _bindWatcherPressable(open, () => _openWatcherRun(fire.run_id || ''));
-        row.appendChild(open);
+        actions.appendChild(open);
+        row.appendChild(actions);
       }
       rows.appendChild(row);
     });
@@ -1375,6 +1386,32 @@ function _changeWatcherFiresPage(direction) {
     ? Number(meta.offset || 0) + Number(meta.limit || WATCHERS_FIRES_LIMIT)
     : Math.max(0, Number(meta.offset || 0) - Number(meta.limit || WATCHERS_FIRES_LIMIT));
   _loadWatcherFires(_watchersState.selectedId, { offset: nextOffset }).catch(() => {});
+}
+
+async function _compareWatcherFireToBaseline(fire = {}) {
+  const baselineRunId = String(fire?.baseline_run_id || '').trim();
+  const runId = String(fire?.run_id || '').trim();
+  if (!baselineRunId || !runId || baselineRunId === runId) {
+    _watcherToast('Choose a watcher fire with a baseline and completed run to compare.', 'error');
+    return;
+  }
+  const compareFn = typeof fetchAndRenderHistoryComparison === 'function'
+    ? fetchAndRenderHistoryComparison
+    : typeof window !== 'undefined' && typeof window.fetchAndRenderHistoryComparison === 'function'
+      ? window.fetchAndRenderHistoryComparison
+      : null;
+  if (!compareFn) {
+    _watcherToast('Run comparison is not available.', 'error');
+    return;
+  }
+  const closed = await closeWatchersModal({ refocus: false });
+  if (!closed) return;
+  try {
+    await compareFn(baselineRunId, runId);
+  } catch (err) {
+    _watcherClientError('failed to compare watcher fire to baseline', err);
+    _watcherToast(err?.message || 'Could not open run comparison', 'error');
+  }
 }
 
 async function _openWatcherRun(runId) {

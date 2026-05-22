@@ -467,13 +467,13 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 - The **delete all** button in History prompts **Delete all** / **Delete Non-Favorites** / **Cancel** to separate destructive deletion from starred-only cleanup.
 - If the page reloads mid-run, the shell restores a running placeholder tab with the kill action available and subscribes back to the brokered `/runs/<run_id>/stream` for replay plus live output when events are still retained. Active-run recovery is client-aware: another browser using the same session token can see the live run in Status Monitor without automatically creating a terminal tab or taking over the stream. Non-running tabs restore separately from `sessionStorage` with labels, transcript previews, statuses, and draft input preserved; restored completed tabs remount a live prompt immediately.
 
-**Limits:** tab count capped by `max_tabs`; history surfaces paginate stored items rather than showing one unbounded list; brokered live replay is bounded by configured replay retention and `max_output_lines`, after which completed-run restore relies on persisted history/output artifacts. Snapshot search in the first pass matches the snapshot label, not the full snapshot body content.
+**Limits:** tab count capped by `max_tabs`; history surfaces paginate stored items rather than showing one unbounded list; brokered live replay is bounded by configured replay retention and `max_output_lines`, after which completed-run restore relies on persisted history/output artifacts. Snapshot search matches the snapshot label, not the full snapshot body content.
 
 **Configuration:** `max_tabs` in `config.yaml` (default 8; `0` for unlimited).
 
 **Related files:** `app/static/js/tabs.js` (tab lifecycle + drag + rename), `app/static/js/history.js` (history drawer + search UI), `app/blueprints/history.py` (history API + search queries), `app/core/database.py` (database schema, startup migration, and retention pruning).
 
-**Full-text search:** the history surfaces support a shared `type` filter, run-subtype filters, project filters for linked runs, and full-text search across command text and stored run output for run rows, with additional filters for command name, exit status, recent date range, starred-only, and structured output selectors such as `signal:findings`, `kind:error`, `kind!=info`, `role:exit-fail`, `entity:darklab.sh`, and `entity_type:cve`. The search field placeholder reads "search history". Search is backend-aware: SQLite uses `runs_fts` with a `LIKE` fallback for short terms, while Postgres uses substring `ILIKE` clauses backed by `pg_trgm` indexes. When full-output persistence is enabled, `output_search_text` is populated from the complete gzip artifact so early lines of long runs stay reachable; otherwise it falls back to the capped preview window. Snapshot search in the first pass matches the snapshot label only, and snapshots remain share/history records rather than project-linked records. On mobile, search, advanced filters, and bulk actions stay behind the dedicated **history tools** toggle to preserve result space; the command-name field uses app-owned autocomplete, and row actions keep the sheet open where that matches the desktop action contract. Ctrl+R remains command-first by default; typing a `findings:` prefix switches that reverse search to finding-bearing output rows.
+**Full-text search:** the history surfaces support a shared `type` filter, run-subtype filters, project filters for linked runs, and full-text search across command text and stored run output for run rows, with additional filters for command name, exit status, recent date range, starred-only, and structured output selectors such as `signal:findings`, `kind:error`, `kind!=info`, `role:exit-fail`, `entity:darklab.sh`, and `entity_type:cve`. The drawer also exposes `signal`, `kind`, `entity`, and `entity_type` as visible controls, so common structured-output searches don't require memorizing query syntax. The search field placeholder reads "search history". Search is backend-aware: SQLite uses `runs_fts` with a `LIKE` fallback for short terms, while Postgres uses substring `ILIKE` clauses backed by `pg_trgm` indexes. When full-output persistence is enabled, `output_search_text` is populated from the complete gzip artifact so early lines of long runs stay reachable; otherwise it falls back to the capped preview window. Snapshot search matches the snapshot label only, and snapshots remain share/history records rather than project-linked records. On mobile, search, advanced filters, and bulk actions stay behind the dedicated **history tools** toggle to preserve result space; the command-name field uses app-owned autocomplete, and row actions keep the sheet open where that matches the desktop action contract. Ctrl+R remains command-first by default; typing a `findings:` prefix switches that reverse search to finding-bearing output rows.
 
 On mobile, the **☰** menu in the top-right header opens a bottom-sheet that groups session-scoped actions (search, clear, line numbers, timestamps) and overlays (options, history, status, commands, workflows, files, theme, FAQ, diag) — see the Mobile Shell section below for the full layout.
 
@@ -565,7 +565,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - The modal asks before closing, refreshing, opening a fired run, or switching schedules when the current form has unsaved changes.
 - Fired runs appear in normal History with a `scheduled` badge. Clicking that badge, or the Schedule row in Run Details, reopens the schedule that created the run.
 - Run Details includes **Schedule this command**, which opens the Schedules modal with the completed run's command already filled in.
-- The schedule detail view shows recent fire audit rows, and fired rows can open the resulting Run Details modal.
+- The schedule detail view shows recent fire audit rows. Fired rows can open the resulting Run Details modal, and rows with an older completed fire on the current page can compare against that previous fire.
 - If the owning session token is revoked, the worker disables the schedule and the browser shows it as paused instead of deleting it.
 
 **Limits:** schedules require a durable session token. Anonymous sessions cannot create schedules because there is no durable owner for the worker to enforce after the browser closes. Cron support is strict five-field POSIX cron, and custom cron expressions cannot run more often than every five minutes. Workflow scheduling, blackout calendars, and per-target schedules are out of scope.
@@ -589,7 +589,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Each watcher owns a schedule, reruns the watched command on that cadence, and compares each completed watcher run against the current baseline.
 - Watcher textual diffs ignore progress/status-line/PTY chrome and include entity-set deltas in the saved summary, so noisy redraws do not look like real changes and newly observed hosts, URLs, hashes, or CVEs are easier to spot.
 - Watcher rows show whether the latest check is `ok`, `pending baseline`, `changed`, `firing`, `paused`, or `error`.
-- The detail pane shows the last diff summary, recent fire audit rows with expandable diff details, and links back to the runs created by watcher fires.
+- The detail pane shows the last diff summary, recent fire audit rows with expandable diff details, links back to the runs created by watcher fires, and a direct Compare action for baseline-vs-fire review.
 - Empty checks still appear in the fire audit as `diff_kind='none'`, so it's clear the watcher is still running even when nothing changed.
 - Operators can pause, resume, manually fire, delete, or accept the latest run as the new baseline from the modal. Accepting a baseline asks for confirmation because it discards the previous comparison point.
 - The modal asks before closing, refreshing, opening a watcher run, or switching watchers when the current form has unsaved changes.
@@ -741,7 +741,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Test sends use the same queue and delivery path as real notifications, so a successful test verifies both channel config and delivery plumbing. Muted channels stay configured but do not queue test sends or other deliveries until unmuted.
 - Delivery events are queued, claimed by the notification worker, retried with backoff when failures are retryable, and moved to dead-letter state when attempts or retry age are exhausted. Sent delivery audit rows are pruned after the configured retention window.
 - Webhook-style channels reject non-public destinations by default, with an operator allowlist for trusted internal receivers.
-- Delivery audit rows are available through `/api/v1/notification-events` and `darklab notify events`; the CLI can also update, mute, unmute, test, and delete channels.
+- Delivery audit rows are available from each channel's **Deliveries** control in the Options **Notifications** tab, through `/api/v1/notification-events`, and through `darklab notify events`; the CLI can also update, mute, unmute, test, and delete channels.
 
 **Limits:** anonymous browser sessions cannot create outbound channels. Email channels require SMTP settings before they can be saved or tested. Channel payloads are intentionally compact and should still be sent only to destinations you trust.
 
@@ -1366,7 +1366,7 @@ The repo also includes a starter Grafana dashboard at `examples/grafana/darklab-
 - [CONTRIBUTING.md](CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
 - [CONTRIBUTORS.md](CONTRIBUTORS.md) - contributor and acknowledgement notes
 - [DECISIONS.md](DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
-- [DOCS_STANDARDS.md](DOCS_STANDARDS.md) - documentation structure, templates, and review rules
+- [DOC_STANDARDS.md](DOC_STANDARDS.md) - documentation structure, templates, and review rules
 - [README.md](README.md) - project overview, quick start, documentation map, and installed tools
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas

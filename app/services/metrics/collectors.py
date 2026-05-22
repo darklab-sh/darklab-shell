@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import logging
 import time
 from typing import Any
 
@@ -19,6 +20,8 @@ from services.intel.registry import INTEL_PROVIDERS
 from services.metrics import build_info_labels
 from services.workspace.files import workspace_root, workspace_settings
 
+
+log = logging.getLogger("shell")
 
 _REDIS_SCAN_KEY_CAP = 2000
 _REDIS_PREFIXES = ("runstream", "proc", "procmeta", "sessionprocs", "intel")
@@ -229,6 +232,11 @@ class RuntimeStateCollector:
                 self._add_snapshots(conn, snapshots)
                 self._add_intel_missing(conn, intel_missing)
         except Exception:
+            log.warning(
+                "METRICS_DB_COLLECT_FAILED",
+                exc_info=True,
+                extra={"database_backend": database.DB_BACKEND.value},
+            )
             health.add_metric(["db"], 0)
             db_size.add_metric([], 0)
             reclaimable.add_metric([], 0)
@@ -319,6 +327,7 @@ class RuntimeStateCollector:
             except Exception:
                 redis_clients.add_metric([], 0)
         except Exception:
+            log.warning("METRICS_REDIS_COLLECT_FAILED", exc_info=True)
             redis_up.add_metric([], 0)
             redis_ping.add_metric([], 0)
             redis_clients.add_metric([], 0)
@@ -363,6 +372,7 @@ class RuntimeStateCollector:
                     elif len(parts) >= 4 and parts[0:2] == ["intel", "quota"] and parts[-1] in counts:
                         counts[parts[-1]]["quota"] += 1
         except Exception:
+            log.debug("METRICS_INTEL_CACHE_COLLECT_FAILED", exc_info=True)
             counts = {provider_id: {"cache": 0, "quota": 0} for provider_id in INTEL_PROVIDERS}
         for provider_id, provider_counts in counts.items():
             cache_entries.add_metric([provider_id], provider_counts["cache"])

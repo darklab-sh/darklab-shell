@@ -50,6 +50,9 @@
 
   let _channelsCache = null;
   let _channelsLoading = false;
+  const _deliveryPanels = new Set();
+  const _deliveryCache = new Map();
+  const _deliveryLoading = new Set();
   let _bound = false;
 
   function _el(id) {
@@ -91,6 +94,124 @@
 
   function _secretConfigured(channel, name) {
     return (channel.secret_fields || []).some(field => field.name === name && field.configured);
+  }
+
+  function _deliveryStatusLabel(status) {
+    return String(status || 'pending').replaceAll('_', ' ');
+  }
+
+  function _deliveryStatusClass(status) {
+    if (status === 'sent') return 'badge-tone-green';
+    if (status === 'dead') return 'badge-tone-red';
+    if (status === 'retry_wait') return 'badge-tone-amber';
+    return 'badge-tone-muted';
+  }
+
+  function _formatDeliveryTime(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return raw;
+    return date.toLocaleString([], {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  function _shortRunId(runId) {
+    const value = String(runId || '').trim();
+    return value ? value.slice(0, 8) : '';
+  }
+
+  function _eventMeta(event) {
+    const parts = [];
+    const runId = _shortRunId(event.run_id);
+    if (runId) parts.push(`run ${runId}`);
+    if (event.attempts) parts.push(`${event.attempts} attempt${event.attempts === 1 ? '' : 's'}`);
+    const timestamp = _formatDeliveryTime(event.last_attempt_at || event.created);
+    if (timestamp) parts.push(timestamp);
+    if (event.next_attempt_at && event.status === 'retry_wait') {
+      parts.push(`retry ${_formatDeliveryTime(event.next_attempt_at)}`);
+    }
+    return parts.join(' · ');
+  }
+
+  function _deliveryEventRow(event) {
+    const row = document.createElement('div');
+    row.className = 'options-notification-event-row';
+    const badge = document.createElement('span');
+    badge.className = `badge ${_deliveryStatusClass(event.status)} options-secret-chip`;
+    badge.textContent = _deliveryStatusLabel(event.status);
+    const main = document.createElement('div');
+    main.className = 'options-notification-event-main';
+    const title = document.createElement('div');
+    title.className = 'options-notification-event-title';
+    title.textContent = String(event.trigger || 'notification').replaceAll('_', ' ');
+    const meta = document.createElement('div');
+    meta.className = 'options-secret-meta';
+    meta.textContent = _eventMeta(event);
+    main.append(title, meta);
+    if (event.last_error) {
+      const error = document.createElement('div');
+      error.className = 'options-notification-event-error';
+      error.textContent = event.last_error;
+      main.appendChild(error);
+    }
+    row.append(badge, main);
+    return row;
+  }
+
+  function _renderDeliveryPanel(channel) {
+    const panel = document.createElement('div');
+    panel.className = 'options-notification-deliveries';
+    panel.dataset.notificationDeliveries = channel.id;
+    const header = document.createElement('div');
+    header.className = 'options-notification-deliveries-header';
+    const title = document.createElement('div');
+    title.className = 'options-notification-deliveries-title';
+    title.textContent = 'Recent deliveries';
+    const refresh = document.createElement('button');
+    refresh.type = 'button';
+    refresh.className = 'btn btn-secondary btn-compact';
+    refresh.textContent = 'Refresh';
+    refresh.disabled = _deliveryLoading.has(channel.id);
+    refresh.addEventListener('click', () => refreshNotificationChannelDeliveries(channel, { force: true }));
+    header.append(title, refresh);
+    panel.appendChild(header);
+
+    if (_deliveryLoading.has(channel.id)) {
+      const loading = document.createElement('div');
+      loading.className = 'options-secret-meta';
+      loading.textContent = 'Loading recent deliveries...';
+      panel.appendChild(loading);
+      return panel;
+    }
+
+    const data = _deliveryCache.get(channel.id);
+    if (data?.error) {
+      const error = document.createElement('div');
+      error.className = 'options-secret-meta is-error';
+      error.textContent = `Could not load deliveries: ${data.error}`;
+      panel.appendChild(error);
+      return panel;
+    }
+
+    const events = Array.isArray(data?.events) ? data.events : [];
+    if (!events.length) {
+      const empty = document.createElement('div');
+      empty.className = 'options-secret-meta';
+      empty.textContent = 'No deliveries recorded for this channel yet.';
+      panel.appendChild(empty);
+      return panel;
+    }
+
+    const list = document.createElement('div');
+    list.className = 'options-notification-event-list';
+    events.forEach(event => list.appendChild(_deliveryEventRow(event)));
+    panel.appendChild(list);
+    return panel;
   }
 
   function _field(label, input) {
@@ -219,6 +340,12 @@
       test.className = 'btn btn-secondary btn-compact';
       test.textContent = 'Test';
       test.addEventListener('click', () => testNotificationChannel(channel));
+      const deliveries = document.createElement('button');
+      deliveries.type = 'button';
+      deliveries.className = 'btn btn-secondary btn-compact';
+      deliveries.textContent = 'Deliveries';
+      deliveries.setAttribute('aria-expanded', _deliveryPanels.has(channel.id) ? 'true' : 'false');
+      deliveries.addEventListener('click', () => toggleNotificationChannelDeliveries(channel));
       const edit = document.createElement('button');
       edit.type = 'button';
       edit.className = 'btn btn-secondary btn-compact';
@@ -229,10 +356,50 @@
       remove.className = 'btn btn-destructive btn-compact';
       remove.textContent = 'Delete';
       remove.addEventListener('click', () => deleteNotificationChannel(channel));
-      actions.append(mute, test, edit, remove);
+      actions.append(mute, test, deliveries, edit, remove);
       row.append(body, actions);
+      if (_deliveryPanels.has(channel.id)) {
+        row.appendChild(_renderDeliveryPanel(channel));
+      }
       list.appendChild(row);
     });
+  }
+
+  async function refreshNotificationChannelDeliveries(channel, { force = false } = {}) {
+    if (!channel?.id) return null;
+    if (_deliveryLoading.has(channel.id) && !force) return _deliveryCache.get(channel.id) || null;
+    if (_deliveryCache.has(channel.id) && !force) {
+      _renderChannels(_channelsCache || []);
+      return _deliveryCache.get(channel.id);
+    }
+    _deliveryLoading.add(channel.id);
+    _renderChannels(_channelsCache || []);
+    try {
+      const url = `/session/notification-events?channel_id=${encodeURIComponent(channel.id)}&limit=5`;
+      const resp = await _apiFetch()(url);
+      const data = await resp.json().catch(() => ({}));
+      if (resp && resp.ok === false) throw new Error(data.message || data.error || `HTTP ${resp.status}`);
+      const payload = { ...data, events: Array.isArray(data.events) ? data.events : [] };
+      _deliveryCache.set(channel.id, payload);
+      return payload;
+    } catch (error) {
+      _deliveryCache.set(channel.id, { events: [], error: error.message || 'network error' });
+      return _deliveryCache.get(channel.id);
+    } finally {
+      _deliveryLoading.delete(channel.id);
+      _renderChannels(_channelsCache || []);
+    }
+  }
+
+  async function toggleNotificationChannelDeliveries(channel) {
+    if (!channel?.id) return;
+    if (_deliveryPanels.has(channel.id)) {
+      _deliveryPanels.delete(channel.id);
+      _renderChannels(_channelsCache || []);
+      return;
+    }
+    _deliveryPanels.add(channel.id);
+    await refreshNotificationChannelDeliveries(channel);
   }
 
   async function refreshNotificationChannels({ force = false } = {}) {
@@ -455,6 +622,9 @@
           data.queued ? 'success' : 'error',
         );
       }
+      if (_deliveryPanels.has(channel.id)) {
+        await refreshNotificationChannelDeliveries(channel, { force: true });
+      }
     } catch (error) {
       _toast(`Test failed: ${error.message || 'network error'}`, 'error');
     } finally {
@@ -483,6 +653,8 @@
       });
       const data = await resp.json().catch(() => ({}));
       if (resp && resp.ok === false) throw new Error(data.message || data.error || `HTTP ${resp.status}`);
+      _deliveryPanels.delete(channel.id);
+      _deliveryCache.delete(channel.id);
       _channelsCache = null;
       await refreshNotificationChannels({ force: true });
       _toast('Notification channel deleted.');

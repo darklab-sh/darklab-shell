@@ -238,12 +238,10 @@ function loadShellChrome({
         </form>
         <form id="project-notes-form">
           <textarea id="project-notes-input"></textarea>
-          <div id="project-notes-save-status" class="u-hidden">saved</div>
         </form>
         <form id="project-labels-form">
           <input id="project-labels-input">
           <button id="project-labels-save-btn" type="submit"></button>
-          <div id="project-labels-save-status" class="u-hidden">saved</div>
         </form>
         <div id="project-workspace-body"></div>
         <div id="project-explorer-body"></div>
@@ -1872,9 +1870,7 @@ describe('shell chrome project workspace', () => {
 
     await shell.openProjectWorkspace()
     const input = document.getElementById('project-notes-input')
-    const saved = document.getElementById('project-notes-save-status')
     expect(input.value).toBe('Initial notes')
-    expect(saved.classList.contains('u-hidden')).toBe(true)
 
     vi.useFakeTimers()
     try {
@@ -1891,7 +1887,7 @@ describe('shell chrome project workspace', () => {
         method: 'PUT',
         body: JSON.stringify({ notes: 'Updated notes' }),
       })))
-      await vi.waitFor(() => expect(saved.classList.contains('u-hidden')).toBe(false))
+      await vi.waitFor(() => expect(shell.showToast).toHaveBeenCalledWith('Project notes saved.', 'success'))
     } finally {
       vi.useRealTimers()
     }
@@ -2002,10 +1998,8 @@ describe('shell chrome project workspace', () => {
       }
     }
     const input = document.getElementById('project-labels-input')
-    const saved = document.getElementById('project-labels-save-status')
 
     expect(input.value).toBe('old-label')
-    expect(saved.closest('.project-labels-heading')).not.toBeNull()
     expect(document.querySelector('.project-label-chips')?.textContent).toContain('old-label')
 
     vi.useFakeTimers()
@@ -2028,25 +2022,19 @@ describe('shell chrome project workspace', () => {
         body: JSON.stringify({ label: 'retest' }),
       }))
       expect(input.value).toBe('important, retest')
-      expect(saved.classList.contains('u-hidden')).toBe(false)
+      expect(shell.showToast).toHaveBeenCalledWith('Project labels saved.', 'success')
       expect(document.querySelector('.project-label-chips')?.textContent).toContain('important')
       expect(document.querySelector('.project-workspace-label-chips')?.textContent).toContain('retest')
-
-      await vi.advanceTimersByTimeAsync(1999)
-      expect(saved.classList.contains('u-hidden')).toBe(false)
-      await vi.advanceTimersByTimeAsync(1)
-      expect(saved.classList.contains('u-hidden')).toBe(true)
 
       input.value = 'triage'
       document.getElementById('project-labels-form')
         .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
       await flushLabelsSave()
-      expect(saved.classList.contains('u-hidden')).toBe(false)
+      expect(shell.showToast).toHaveBeenCalledWith('Project labels saved.', 'success')
 
       document.querySelector('[data-project-id="project-2"][data-project-action="select"]')
         .dispatchEvent(new Event('click', { bubbles: true, cancelable: true }))
       await flushLabelsSave()
-      expect(saved.classList.contains('u-hidden')).toBe(true)
     } finally {
       vi.useRealTimers()
     }

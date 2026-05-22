@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from email.message import EmailMessage
+import logging
 import os
 import smtplib
 from typing import Any
@@ -13,6 +14,8 @@ from services.notifications import notification_cfg
 from services.notifications.base import Channel
 from services.notifications.channels._format import format_plain_text, format_summary_fields, parse_email_recipients
 from services.notifications.models import ChannelResult, notification_app_name
+
+log = logging.getLogger("shell")
 
 DEFAULT_SMTP_TIMEOUT_SECONDS = 15.0
 DEFAULT_SMTP_TEST_TIMEOUT_SECONDS = 4.0
@@ -163,6 +166,16 @@ class EmailChannel(Channel):
             return ChannelResult.terminal("SMTP port must be between 1 and 65535")
         tls_mode = _tls_mode(config.get("tls"))
         timeout = _timeout_seconds(self.channel.config, cfg=cfg, test_send=str(payload.get("trigger") or "") == "test")
+        log.debug(
+            "NOTIFICATION_SMTP_SEND_ATTEMPT",
+            extra={
+                "host": host,
+                "port": port,
+                "tls_mode": tls_mode,
+                "timeout": timeout,
+                "channel_id": self.channel.id,
+            },
+        )
         try:
             if tls_mode == "ssl":
                 with smtplib.SMTP_SSL(host, port, timeout=timeout) as smtp:
@@ -175,5 +188,15 @@ class EmailChannel(Channel):
                     smtp.login(str(config.get("user") or ""), password)
                     smtp.send_message(message)
         except (OSError, smtplib.SMTPException) as exc:
+            log.warning(
+                "NOTIFICATION_SMTP_SEND_FAILED",
+                extra={
+                    "host": host,
+                    "port": port,
+                    "tls_mode": tls_mode,
+                    "channel_id": self.channel.id,
+                    "error": str(exc),
+                },
+            )
             return ChannelResult.retry(f"email delivery failed: {exc}")
         return ChannelResult.success()

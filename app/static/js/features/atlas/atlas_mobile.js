@@ -843,7 +843,8 @@
     const badges = document.createElement('span');
     badges.className = 'atlas-entity-badges';
     if (finding.suppressed) badges.appendChild(controller.badge('suppressed', 'muted'));
-    if (severity) badges.appendChild(controller.badge(severity, severity === 'high' || severity === 'critical' ? 'green' : 'muted'));
+    const severityTone = severity === 'high' || severity === 'critical' ? 'red' : 'muted';
+    if (severity) badges.appendChild(controller.badge(severity, severityTone));
 
     const chev = document.createElement('span');
     chev.className = 'atlas-mobile-row-chev drill-chev';

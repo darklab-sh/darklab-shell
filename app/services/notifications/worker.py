@@ -6,6 +6,7 @@ import logging
 import signal
 import time
 
+from core.database_backend import is_transient_postgres_error
 from services.notifications.dispatcher import dispatch_due_events, prune_sent_events
 
 log = logging.getLogger("shell")
@@ -30,7 +31,30 @@ def run_forever(*, poll_seconds: float = DEFAULT_POLL_SECONDS, limit: int = 100)
     signal.signal(signal.SIGINT, _handle_stop)
     log.info("NOTIFICATION_WORKER_STARTED")
     while not _STOP:
-        delivered = run_once(limit=limit)
+        phase = "run_once"
+        try:
+            delivered = run_once(limit=limit)
+        except Exception as exc:  # noqa: BLE001
+            if is_transient_postgres_error(exc):
+                log.warning(
+                    "NOTIFICATION_WORKER_DATABASE_INTERRUPTED",
+                    extra={
+                        "phase": phase,
+                        "limit": limit,
+                        "poll_seconds": poll_seconds,
+                        "error_type": type(exc).__name__,
+                        "sqlstate": str(getattr(exc, "sqlstate", "") or ""),
+                    },
+                )
+                time.sleep(max(0.1, float(poll_seconds)))
+                continue
+            log.error(
+                "NOTIFICATION_WORKER_CRASHED",
+                exc_info=True,
+                extra={"phase": phase, "limit": limit, "poll_seconds": poll_seconds},
+            )
+            raise
+        log.debug("NOTIFICATION_WORKER_TICK", extra={"delivered": delivered, "limit": limit})
         if delivered == 0:
             time.sleep(max(0.1, float(poll_seconds)))
     log.info("NOTIFICATION_WORKER_STOPPED")

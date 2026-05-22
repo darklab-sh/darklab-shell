@@ -727,6 +727,9 @@ function _historyCompareObjectText(item, kind) {
   if (kind === 'artifact') {
     return item.workspace_path || item.display_name || item.id || '';
   }
+  if (kind === 'entity') {
+    return item.canonical_value || item.value || item.id || '';
+  }
   return item.title || item.raw_line || item.id || '';
 }
 
@@ -737,6 +740,13 @@ function _historyCompareObjectMeta(item, kind) {
       item.kind || 'file',
       item.byte_size !== undefined && item.byte_size !== null ? `${Number(item.byte_size).toLocaleString()} bytes` : '',
       item.detected_by || '',
+    ].filter(Boolean).join(' · ');
+  }
+  if (kind === 'entity') {
+    return [
+      item.type || '',
+      item.confidence || '',
+      item.value && item.value !== item.canonical_value ? item.value : '',
     ].filter(Boolean).join(' · ');
   }
   return [
@@ -937,21 +947,28 @@ function _renderHistoryComparison(data) {
   const objects = data.objects || {};
   const findingObjects = objects.findings || {};
   const artifactObjects = objects.artifacts || {};
+  const entityObjects = objects.entities || {};
   const addedFindings = Array.isArray(findingObjects.added) ? findingObjects.added : [];
   const removedFindings = Array.isArray(findingObjects.removed) ? findingObjects.removed : [];
   const addedArtifacts = Array.isArray(artifactObjects.added) ? artifactObjects.added : [];
   const removedArtifacts = Array.isArray(artifactObjects.removed) ? artifactObjects.removed : [];
+  const addedEntities = Array.isArray(entityObjects.added) ? entityObjects.added : [];
+  const removedEntities = Array.isArray(entityObjects.removed) ? entityObjects.removed : [];
   if (addedFindings.length) body.appendChild(_renderHistoryCompareObjectSection('Added findings', addedFindings, 'finding', '+'));
   if (removedFindings.length) body.appendChild(_renderHistoryCompareObjectSection('Removed findings', removedFindings, 'finding', '-'));
+  if (addedEntities.length) body.appendChild(_renderHistoryCompareObjectSection('Added entities', addedEntities, 'entity', '+'));
+  if (removedEntities.length) body.appendChild(_renderHistoryCompareObjectSection('Removed entities', removedEntities, 'entity', '-'));
   if (addedArtifacts.length) body.appendChild(_renderHistoryCompareObjectSection('Added artifacts', addedArtifacts, 'artifact', '+'));
   if (removedArtifacts.length) body.appendChild(_renderHistoryCompareObjectSection('Removed artifacts', removedArtifacts, 'artifact', '-'));
   if (
     !changedOutputCount
-    && !addedFindings.length && !removedFindings.length && !addedArtifacts.length && !removedArtifacts.length
+    && !addedFindings.length && !removedFindings.length
+    && !addedEntities.length && !removedEntities.length
+    && !addedArtifacts.length && !removedArtifacts.length
   ) {
     const empty = document.createElement('div');
     empty.className = 'history-compare-empty';
-    empty.textContent = 'No changed output, findings, or artifacts.';
+    empty.textContent = 'No changed output, findings, entities, or artifacts.';
     body.appendChild(empty);
   }
 }

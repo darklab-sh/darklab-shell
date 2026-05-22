@@ -1043,7 +1043,12 @@
 
   function badge(label, tone) {
     const el = document.createElement('span');
-    el.className = `badge ${tone === 'green' ? 'badge-tone-green' : 'badge-tone-muted'}`;
+    const toneClass = {
+      amber: 'badge-tone-amber',
+      green: 'badge-tone-green',
+      red: 'badge-tone-red',
+    }[tone] || 'badge-tone-muted';
+    el.className = `badge ${toneClass}`;
     el.textContent = label;
     return el;
   }
@@ -1260,6 +1265,7 @@
         suppression_filter: state.suppressionFilter,
       });
       if (state.runId) summaryParams.set('run_id', state.runId);
+      if (state.projectId) summaryParams.set('project_id', state.projectId);
       const summaryResp = await api()(
         `/atlas?${summaryParams.toString()}`,
         requestOptions(controller, { cache: 'no-store' }),
@@ -1273,6 +1279,7 @@
           orphan_filter: state.orphanFilter,
           suppression_filter: state.suppressionFilter,
         });
+        if (state.projectId) baseSummaryParams.set('project_id', state.projectId);
         const baseSummaryResp = await api()(
           `/atlas?${baseSummaryParams.toString()}`,
           requestOptions(controller, { cache: 'no-store' }),

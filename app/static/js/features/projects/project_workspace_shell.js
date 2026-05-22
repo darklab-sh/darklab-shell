@@ -49,7 +49,7 @@
         dismiss.textContent = '\u2715';
         ctx.projectWorkspaceMessage.append(messageText, dismiss);
       }
-      if (text && !error && toast && showWorkspaceToast(text)) {
+      if (text && toast && showWorkspaceToast(text, error ? 'error' : 'success')) {
         messageText.textContent = '';
         ctx.projectWorkspaceMessage.classList.add('u-hidden');
         ctx.projectWorkspaceMessage.classList.remove('is-error');

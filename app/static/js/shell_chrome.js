@@ -81,11 +81,9 @@
   const projectEntitySubmitButton = document.getElementById('project-entity-submit');
   const projectNotesForm = document.getElementById('project-notes-form');
   const projectNotesInput = document.getElementById('project-notes-input');
-  const projectNotesSaveStatus = document.getElementById('project-notes-save-status');
   const projectLabelsForm = document.getElementById('project-labels-form');
   const projectLabelsInput = document.getElementById('project-labels-input');
   const projectLabelsSaveButton = document.getElementById('project-labels-save-btn');
-  const projectLabelsSaveStatus = document.getElementById('project-labels-save-status');
   const projectWorkspaceMessage = document.getElementById('project-workspace-message');
   const EntityMetadataClient = (
     typeof window !== 'undefined' && window.DarklabEntityMetadata
@@ -1127,11 +1125,9 @@
       entityMetadataClient: EntityMetadataClient,
       projectNotesForm,
       projectNotesInput,
-      projectNotesSaveStatus,
       projectLabelsForm,
       projectLabelsInput,
       projectLabelsSaveButton,
-      projectLabelsSaveStatus,
       projectWorkspaceTab: projectWorkspaceState.tab,
       selectedProject: _selectedProject,
       selectedProjectId: projectWorkspaceState.selectedId,
@@ -1157,9 +1153,6 @@
       renderProjectExplorer: _renderProjectExplorer,
       renderActiveProject: _renderActiveProject,
       projectNotesAutosaveDelayMs: PROJECT_WORKSPACE_CONSTANTS.projectNotesAutosaveDelayMs,
-      fieldSavedIndicatorDelayMs: PROJECT_WORKSPACE_CONSTANTS.fieldSavedIndicatorDelayMs,
-      fieldSavedIndicatorVisibleMs: PROJECT_WORKSPACE_CONSTANTS.fieldSavedIndicatorVisibleMs,
-      projectLabelsSavedVisibleMs: PROJECT_WORKSPACE_CONSTANTS.projectLabelsSavedVisibleMs,
     });
     return projectDetailsController;
   }

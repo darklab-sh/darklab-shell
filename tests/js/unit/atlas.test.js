@@ -684,6 +684,10 @@ describe('Atlas overlay', () => {
 
     expect(document.getElementById('atlas-subtitle')?.textContent).toBe('1 entity · 1 finding · Case Alpha')
     expect(apiFetch).toHaveBeenCalledWith(
+      '/atlas?orphan_filter=hide&suppression_filter=hide&project_id=prj_1',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+    expect(apiFetch).toHaveBeenCalledWith(
       '/atlas/findings?limit=50&offset=0&project_id=prj_1&orphan_filter=hide&suppression_filter=hide',
       expect.objectContaining({ cache: 'no-store' }),
     )

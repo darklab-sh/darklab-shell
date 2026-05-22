@@ -528,6 +528,29 @@ describe('history panel actions', () => {
       </select>
       <input id="history-root-input" />
       <div id="history-root-dropdown" class="u-hidden"></div>
+      <select id="history-signal-filter">
+        <option value="all">all</option>
+        <option value="findings">findings</option>
+        <option value="warnings">warnings</option>
+        <option value="errors">errors</option>
+        <option value="summaries">summaries</option>
+      </select>
+      <select id="history-kind-filter">
+        <option value="all">all</option>
+        <option value="error">error</option>
+        <option value="warn">warn</option>
+        <option value="notice">notice</option>
+        <option value="info">info</option>
+      </select>
+      <input id="history-entity-input" />
+      <select id="history-entity-type-filter">
+        <option value="all">all</option>
+        <option value="domain">domain</option>
+        <option value="ip">ip</option>
+        <option value="url">url</option>
+        <option value="hash">hash</option>
+        <option value="cve">cve</option>
+      </select>
       <select id="history-exit-filter">
         <option value="all">all</option>
         <option value="0">0</option>
@@ -662,6 +685,10 @@ describe('history panel actions', () => {
     const historyTypeFilter = document.getElementById('history-type-filter')
     const historyRootInput = document.getElementById('history-root-input')
     const historyRootDropdown = document.getElementById('history-root-dropdown')
+    const historySignalFilter = document.getElementById('history-signal-filter')
+    const historyKindFilter = document.getElementById('history-kind-filter')
+    const historyEntityInput = document.getElementById('history-entity-input')
+    const historyEntityTypeFilter = document.getElementById('history-entity-type-filter')
     const historyExitFilter = document.getElementById('history-exit-filter')
     const historyDateFilter = document.getElementById('history-date-filter')
     const historyProjectFilter = document.getElementById('history-project-filter')
@@ -696,6 +723,10 @@ describe('history panel actions', () => {
           historyTypeFilter,
           historyRootInput,
           historyRootDropdown,
+          historySignalFilter,
+          historyKindFilter,
+          historyEntityInput,
+          historyEntityTypeFilter,
           historyExitFilter,
           historyDateFilter,
           historyProjectFilter,
@@ -3429,6 +3460,39 @@ describe('history panel actions', () => {
     expect(typeof refreshHistoryPanel).toBe('function')
   })
 
+  it('sends structured output filters from the history drawer controls', async () => {
+    const { apiFetch, _buildHistoryRequestUrl } = loadHistoryPanel()
+
+    document.getElementById('history-signal-filter').value = 'findings'
+    document
+      .getElementById('history-signal-filter')
+      .dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('history-kind-filter').value = 'error'
+    document
+      .getElementById('history-kind-filter')
+      .dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('history-entity-input').value = 'tor-stats.darklab.sh'
+    document
+      .getElementById('history-entity-input')
+      .dispatchEvent(new Event('input', { bubbles: true }))
+    document.getElementById('history-entity-type-filter').value = 'domain'
+    document
+      .getElementById('history-entity-type-filter')
+      .dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise((resolve) => setTimeout(resolve, 140))
+
+    expect(_buildHistoryRequestUrl()).toBe(
+      '/history?page=1&page_size=8&include_total=1&type=runs&signal=findings&kind=error&entity=tor-stats.darklab.sh&entity_type=domain',
+    )
+    expect(apiFetch).toHaveBeenLastCalledWith(
+      '/history?page=1&page_size=8&include_total=1&type=runs&signal=findings&kind=error&entity=tor-stats.darklab.sh&entity_type=domain',
+    )
+    expect(document.getElementById('history-active-filters').textContent).toContain('signal: findings')
+    expect(document.getElementById('history-active-filters').textContent).toContain('kind: error')
+    expect(document.getElementById('history-active-filters').textContent).toContain('entity: tor-stats.darklab.sh')
+    expect(document.getElementById('history-active-filters').textContent).toContain('entity_type: domain')
+  })
+
   it('includes the selected project in history requests and active filter chips', async () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/projects?include_archived=1') {
@@ -3899,6 +3963,22 @@ describe('history panel actions', () => {
     document
       .getElementById('history-exit-filter')
       .dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('history-signal-filter').value = 'findings'
+    document
+      .getElementById('history-signal-filter')
+      .dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('history-kind-filter').value = 'warn'
+    document
+      .getElementById('history-kind-filter')
+      .dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('history-entity-input').value = 'darklab.sh'
+    document
+      .getElementById('history-entity-input')
+      .dispatchEvent(new Event('input', { bubbles: true }))
+    document.getElementById('history-entity-type-filter').value = 'domain'
+    document
+      .getElementById('history-entity-type-filter')
+      .dispatchEvent(new Event('change', { bubbles: true }))
     document.getElementById('history-date-filter').value = '24h'
     document
       .getElementById('history-date-filter')
@@ -3914,6 +3994,10 @@ describe('history panel actions', () => {
     expect(_buildHistoryRequestUrl()).toBe('/history?page=1&page_size=8&include_total=1')
     expect(document.getElementById('history-search-input').value).toBe('')
     expect(document.getElementById('history-root-input').value).toBe('')
+    expect(document.getElementById('history-signal-filter').value).toBe('all')
+    expect(document.getElementById('history-kind-filter').value).toBe('all')
+    expect(document.getElementById('history-entity-input').value).toBe('')
+    expect(document.getElementById('history-entity-type-filter').value).toBe('all')
     expect(document.getElementById('history-exit-filter').value).toBe('all')
     expect(document.getElementById('history-project-filter').value).toBe('all')
     expect(document.getElementById('history-date-filter').value).toBe('all')

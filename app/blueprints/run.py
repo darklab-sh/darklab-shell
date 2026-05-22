@@ -12,7 +12,6 @@ import shlex
 import shutil
 import signal
 import subprocess
-import threading
 import uuid
 from collections import deque
 from collections.abc import Sequence
@@ -65,7 +64,7 @@ from services.runs.broker import (
     publish_run_event,
     stream_run_events,
 )
-from services.runs.output_store import RunOutputCapture, load_full_output_entries
+from services.runs.output_store import RunOutputCapture, load_full_output_entries, unknown_line_event_collector
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, run_kind_for_cmd_type
 from services.runs.output_model import (
     LineEvent,
@@ -77,6 +76,12 @@ from services.runs.output_model import (
     to_wire,
 )
 from services.runs.structured_summary import replace_run_output_summary
+from services.runs.start import (
+    RunPreparationError as _RunPreparationError,
+    RunSpawnError as _RunSpawnError,
+    RunStartHandlers,
+    start_brokered_run as _start_brokered_run_service,
+)
 from services.storage.body_store import inline_threshold_bytes, maybe_store_text_body
 from services.atlas.materializer import materialize_run_entities
 from services.secrets.audit import emit_secret_event
@@ -374,11 +379,12 @@ _SEARCH_ENTITY_MAX_BYTES = 4096
 
 def _line_events_from_output_entries(entries) -> list[LineEvent]:
     events = []
+    unknown_collector = unknown_line_event_collector({"source": "run_output_entries"})
     for line in entries or []:
         if line is None:
             continue
         if isinstance(line, dict):
-            events.append(from_wire(line))
+            events.append(from_wire(line, unknown_collector))
         else:
             events.append(line_event_from_legacy(str(line)))
     return events
@@ -1202,18 +1208,27 @@ class _StartedRealCommand:
     workspace_path_filter: _WorkspacePathOutputFilter
 
 
-class _RunPreparationError(Exception):
-    def __init__(self, message: str, *, status_code: int = 403):
-        super().__init__(message)
-        self.status_code = status_code
-
-
-class _RunSpawnError(Exception):
-    pass
-
-
 def _preparation_error_response(exc: _RunPreparationError):
     return jsonify({"error": str(exc)}), exc.status_code
+
+
+def _run_start_handlers() -> RunStartHandlers:
+    return RunStartHandlers(
+        resolves_exact_special_builtin_command=resolves_exact_special_builtin_command,
+        execute_builtin_command=execute_builtin_command,
+        history_safe_command_for_storage=_history_safe_command_for_storage,
+        brokered_synthetic_run=_brokered_synthetic_run,
+        prepare_command_input=_prepare_command_input,
+        resolve_builtin_command=resolve_builtin_command,
+        filter_builtin_command_events=_filter_builtin_command_events,
+        prepare_real_command=_prepare_real_command,
+        runtime_missing_command_message=runtime_missing_command_message,
+        start_real_command_process=_start_real_command_process,
+        publish_run_event=publish_run_event,
+        brokered_real_run_worker=_brokered_real_run_worker,
+        workspace_notice_lines=_workspace_notice_lines,
+        workspace_artifacts_from_validation=_workspace_artifacts_from_validation,
+    )
 
 
 def _coerce_positive_int(value: object, default: int) -> int:
@@ -2159,107 +2174,21 @@ def start_brokered_run():
     if not original_command:
         return jsonify({"error": "No command provided"}), 400
 
-    if resolves_exact_special_builtin_command(original_command):
-        events, exit_code = execute_builtin_command(original_command, session_id, tab_id=owner_tab_id)
-        storage_command = _history_safe_command_for_storage(original_command)
-        run_id = _brokered_synthetic_run(
-            storage_command,
-            session_id,
-            client_ip,
-            events,
-            exit_code,
-            owner_tab_id=owner_tab_id,
-        )
-        return jsonify({"run_id": run_id, "stream": f"/runs/{run_id}/stream"}), 202
-
     try:
-        prepared_input = _prepare_command_input(original_command, session_id, client_ip)
-    except _RunPreparationError as exc:
-        return _preparation_error_response(exc)
-
-    if resolve_builtin_command(prepared_input.execution_command):
-        events, exit_code = execute_builtin_command(
-            prepared_input.execution_command,
-            session_id,
-            tab_id=owner_tab_id,
-        )
-        filtered_events = _filter_builtin_command_events(
-            events,
-            prepared_input.variable_notice,
-            prepared_input.postfilter,
-        )
-        storage_command = _history_safe_command_for_storage(original_command)
-        run_id = _brokered_synthetic_run(
-            storage_command,
-            session_id,
-            client_ip,
-            filtered_events,
-            exit_code,
-            owner_tab_id=owner_tab_id,
-        )
-        return jsonify({"run_id": run_id, "stream": f"/runs/{run_id}/stream"}), 202
-
-    try:
-        prepared_real = _prepare_real_command(
-            original_command,
-            prepared_input.execution_command,
-            session_id,
-            client_ip,
-            workspace_cwd,
-        )
-    except _RunPreparationError as exc:
-        return _preparation_error_response(exc)
-    if prepared_real.missing_runtime:
-        events = [{"type": "output", "text": runtime_missing_command_message(prepared_real.missing_runtime)}]
-        run_id = _brokered_synthetic_run(
-            original_command,
-            session_id,
-            client_ip,
-            events,
-            127,
-            cmd_type="missing",
-            owner_tab_id=owner_tab_id,
-        )
-        return jsonify({"run_id": run_id, "stream": f"/runs/{run_id}/stream"}), 202
-
-    try:
-        started = _start_real_command_process(
-            original_command,
-            session_id,
-            client_ip,
-            prepared_real,
+        started = _start_brokered_run_service(
+            original_command=original_command,
+            session_id=session_id,
+            client_ip=client_ip,
+            handlers=_run_start_handlers(),
             owner_client_id=owner_client_id,
             owner_tab_id=owner_tab_id,
+            workspace_cwd=workspace_cwd,
+            thread_name_prefix="run-broker",
         )
+    except _RunPreparationError as exc:
+        return _preparation_error_response(exc)
     except _RunSpawnError as exc:
         return jsonify({"error": str(exc)}), 500
-
-    publish_run_event(started.run_id, "started", {"run_id": started.run_id, "started": started.run_started})
-    threading.Thread(
-        target=_brokered_real_run_worker,
-        kwargs={
-            "run_id": started.run_id,
-            "proc": started.proc,
-            "session_id": session_id,
-            "client_ip": client_ip,
-            "original_command": original_command,
-            "run_started": started.run_started,
-            "capture": started.capture,
-            "signal_classifier": started.signal_classifier,
-            "postfilter": prepared_input.postfilter,
-            "workspace_path_filter": started.workspace_path_filter,
-            "variable_notice": prepared_input.variable_notice,
-            "rewrite_notice": prepared_real.rewrite_notice,
-            "workspace_notices": _workspace_notice_lines(prepared_real.validation),
-            "workspace_artifacts": _workspace_artifacts_from_validation(
-                prepared_real.validation,
-                session_id,
-            ),
-            "owner_tab_id": owner_tab_id,
-        },
-        name=f"run-broker-{started.run_id[:8]}",
-        daemon=True,
-    ).start()
     return jsonify({"run_id": started.run_id, "stream": f"/runs/{started.run_id}/stream"}), 202
 
 

@@ -148,6 +148,7 @@ function compareData(overrides = {}) {
     ],
     objects: {
       findings: { added: [], removed: [] },
+      entities: { added: [], removed: [] },
       artifacts: { added: [], removed: [] },
     },
     ...overrides,
@@ -327,6 +328,51 @@ describe('history compare split renderer', () => {
     expect(document.querySelector('.history-compare-context-select')).toBeNull()
     expect(document.querySelector('.history-compare-split')).toBeNull()
     expect(document.querySelector('.history-compare-object-section')).not.toBeNull()
+  })
+
+  it('renders added and removed entity-set diffs from comparison objects', () => {
+    const { _renderHistoryComparison } = loadCompareHelpers()
+    _renderHistoryComparison(compareData({
+      hunks: [],
+      totals: {
+        left_total_lines: 3,
+        right_total_lines: 3,
+        equal_line_count: 3,
+        changed_line_count: 0,
+        added_line_count: 0,
+        removed_line_count: 0,
+      },
+      objects: {
+        findings: { added: [], removed: [] },
+        entities: {
+          added: [{
+            type: 'domain',
+            value: 'www.darklab.sh',
+            canonical_value: 'www.darklab.sh',
+            confidence: 'high',
+          }],
+          removed: [{
+            type: 'ip',
+            value: '192.0.2.10',
+            canonical_value: '192.0.2.10',
+            confidence: 'medium',
+          }],
+          unchanged_count: 1,
+        },
+        artifacts: { added: [], removed: [] },
+      },
+    }))
+
+    const sections = Array.from(document.querySelectorAll('.history-compare-object-section'));
+    expect(sections.map(section => section.querySelector('summary')?.textContent)).toEqual([
+      'Added entities (1)',
+      'Removed entities (1)',
+    ])
+    expect(document.querySelector('[data-object-kind="entity"][data-compare-side="b"]')?.textContent)
+      .toContain('www.darklab.sh')
+    expect(document.querySelector('[data-object-kind="entity"][data-compare-side="a"]')?.textContent)
+      .toContain('192.0.2.10')
+    expect(document.querySelector('.history-compare-empty')).toBeNull()
   })
 
   it('rerenders full equal hunks when context dropdown changes without refetching or saving defaults', () => {

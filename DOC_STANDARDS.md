@@ -143,50 +143,7 @@ Both shapes use indented sub-bullets, so the choice is easy to get wrong.
 
 If the work shipped as one commit or one coordinated change, use T2 long. If it spans multiple reader-relevant subsystems, use T1.
 
-### T3. Merge-request doc shape
-
-Use for merge-request drafts.
-
-Release branches should keep active merge-request and release-note drafts under `docs/release-drafts/` so normal git diffs and review show when release messaging changes. Treat these files as temporary branch artifacts: update them alongside user-facing changes, keep them passing markdown lint, and remove them before merging to `main` unless the release intentionally preserves those drafts.
-
-Required top-level headings:
-
-- `Summary`
-- `Validation`
-- `Risks`
-- `Docs`
-
-Do not add or remove those top-level headings. Sub-structure inside each section is the author's choice — the shape below is a suggested starting point, not a second layer of requirements.
-
-Suggested shape:
-
-```md
-## Summary
-### What changed
-{paragraph + inventory bullets}
-
-### Why it changed
-- {pain point}
-- {pain point}
-
-## Validation
-- {checks run}
-- {test totals or coverage deltas}
-
-## Risks
-- {risk and mitigation}
-
-## Docs
-- **{file}** — {what changed}
-```
-
-Must keep:
-
-- The four required top-level headings are always present, in order.
-- Validation carries concrete evidence (commands run, counts, deltas) — not a promise that it was tested.
-- Risks names the risk and the mitigation in the same bullet.
-
-### T4. Architecture section shape
+### T3. Architecture section shape
 
 Use for `ARCHITECTURE.md` sections that are inventory- or contract-shaped.
 
@@ -217,7 +174,7 @@ Must keep:
 - Request-flow narratives stay prose — do not convert them into bullets when order is part of the meaning.
 - Sibling sections across the doc feel consistent in shape.
 
-### T5. Feature inventory shape
+### T4. Feature inventory shape
 
 Use for `FEATURES.md` sections where the reader is looking up how a feature works.
 
@@ -240,7 +197,7 @@ Must keep:
 - Other labeled fields are optional, but sibling sections that genuinely have limits or configuration must not silently skip them.
 - Detailed reference material (YAML examples, tables, long lists) sits below the labeled fields, not inline within them.
 
-### T6. Testing overview shape
+### T5. Testing overview shape
 
 Use for `tests/README.md` overview sections.
 
@@ -265,7 +222,7 @@ Must keep:
 - The command block is the canonical invocation reviewers will copy-paste.
 - Notes after the command cover config, artifacts, and gotchas — not implementation trivia.
 
-### T7. Release-note entry shape
+### T6. Release-note entry shape
 
 Use for release-note drafts.
 

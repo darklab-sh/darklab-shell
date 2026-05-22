@@ -290,6 +290,10 @@ def _schedule_has_fresh_fire_claim(schedule: Schedule) -> bool:
     try:
         claimed_at = datetime.fromisoformat(str(schedule.last_run_at or ""))
     except ValueError:
+        log.warning(
+            "SCHEDULE_FIRE_CLAIM_TIME_INVALID",
+            extra=_schedule_log_payload(schedule, last_run_at=schedule.last_run_at),
+        )
         return True
     if claimed_at.tzinfo is None:
         claimed_at = claimed_at.replace(tzinfo=timezone.utc)
@@ -307,7 +311,9 @@ def _claim_schedule_fire(conn, schedule: Schedule, *, fired_at: str) -> bool:
         """,
         (claim_id, fired_at, fired_at, schedule.id, schedule.last_run_id or ""),
     )
-    return int(getattr(result, "rowcount", 0) or 0) == 1
+    claimed = int(getattr(result, "rowcount", 0) or 0) == 1
+    log.debug("SCHEDULE_FIRE_CLAIMED", extra=_schedule_log_payload(schedule, claimed=claimed, fired_at=fired_at))
+    return claimed
 
 
 def _disable_revoked_schedule(conn, schedule: Schedule, *, fired_at: str) -> None:

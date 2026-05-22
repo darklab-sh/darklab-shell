@@ -13,7 +13,7 @@ from typing import Iterator
 
 from config import resolve_data_dir
 from core import database
-from core.database_backend import DatabaseBackend, postgres_advisory_lock_id
+from core.database_backend import DatabaseBackend, is_transient_postgres_error, postgres_advisory_lock_id
 from services.scheduler import scheduler_cfg
 from services.scheduler.dispatch import fire_schedule
 from services.scheduler.recovery import recover_missed_fires
@@ -62,6 +62,18 @@ def _worker_log_context(*, tick_seconds: float, limit: int) -> dict[str, object]
     }
 
 
+def _transient_database_extra(exc: BaseException, *, phase: str) -> dict[str, object]:
+    return {
+        "phase": phase,
+        "error_type": type(exc).__name__,
+        "sqlstate": str(getattr(exc, "sqlstate", "") or ""),
+    }
+
+
+def _is_transient_database_error(exc: BaseException) -> bool:
+    return database.DB_BACKEND == DatabaseBackend.POSTGRES and is_transient_postgres_error(exc)
+
+
 @contextmanager
 def acquire_scheduler_lock() -> Iterator[bool]:
     """Try to acquire the one-worker scheduler lock without blocking."""
@@ -76,7 +88,15 @@ def acquire_scheduler_lock() -> Iterator[bool]:
             try:
                 yield True
             finally:
-                conn.execute("SELECT pg_advisory_unlock(?)", (lock_id,))
+                try:
+                    conn.execute("SELECT pg_advisory_unlock(?)", (lock_id,))
+                except Exception as exc:  # noqa: BLE001
+                    if not _is_transient_database_error(exc):
+                        raise
+                    log.warning(
+                        "SCHEDULER_LOCK_RELEASE_SKIPPED",
+                        extra=_transient_database_extra(exc, phase="unlock"),
+                    )
         return
 
     path = _lock_path()
@@ -117,26 +137,35 @@ def run_forever(*, tick_seconds: float | None = None, limit: int = 50) -> None:
     signal.signal(signal.SIGINT, _handle_stop)
     sleep_for = tick_seconds if tick_seconds is not None else _tick_seconds()
     context = _worker_log_context(tick_seconds=float(sleep_for), limit=limit)
-    phase = "lock"
-    try:
-        with acquire_scheduler_lock() as acquired:
-            if not acquired:
-                log.info("SCHEDULER_WORKER_LOCK_HELD", extra=context)
+    while not _STOP:
+        phase = "lock"
+        try:
+            with acquire_scheduler_lock() as acquired:
+                if not acquired:
+                    log.info("SCHEDULER_WORKER_LOCK_HELD", extra=context)
+                    return
+                log.info("SCHEDULER_WORKER_STARTED", extra=context)
+                phase = "recovery"
+                with database.db_connect() as conn:
+                    recover_missed_fires(conn)
+                    conn.commit()
+                phase = "tick"
+                while not _STOP:
+                    fired = run_once(limit=limit)
+                    if fired == 0:
+                        time.sleep(max(0.1, float(sleep_for)))
+                log.info("SCHEDULER_WORKER_STOPPED", extra=context)
                 return
-            log.info("SCHEDULER_WORKER_STARTED", extra=context)
-            phase = "recovery"
-            with database.db_connect() as conn:
-                recover_missed_fires(conn)
-                conn.commit()
-            phase = "tick"
-            while not _STOP:
-                fired = run_once(limit=limit)
-                if fired == 0:
-                    time.sleep(max(0.1, float(sleep_for)))
-            log.info("SCHEDULER_WORKER_STOPPED", extra=context)
-    except Exception:
-        log.error("SCHEDULER_WORKER_CRASHED", exc_info=True, extra={**context, "phase": phase})
-        raise
+        except Exception as exc:  # noqa: BLE001
+            if _is_transient_database_error(exc):
+                log.warning(
+                    "SCHEDULER_WORKER_DATABASE_INTERRUPTED",
+                    extra={**context, **_transient_database_extra(exc, phase=phase)},
+                )
+                time.sleep(max(0.1, float(sleep_for)))
+                continue
+            log.error("SCHEDULER_WORKER_CRASHED", exc_info=True, extra={**context, "phase": phase})
+            raise
 
 
 def main() -> None:

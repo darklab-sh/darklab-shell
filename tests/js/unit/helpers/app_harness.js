@@ -280,7 +280,6 @@ export async function loadAppFns({
           </select>
           <input id="options-prompt-username-input" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Prompt name" data-bwignore="true" data-1p-ignore="true" data-lpignore="true" />
           <div id="options-prompt-username-error" class="u-hidden"></div>
-          <div id="options-prompt-username-saved" class="u-hidden"></div>
           <span id="options-session-token-status"></span>
           <button id="options-session-token-generate-btn"></button>
           <button id="options-session-token-set-btn"></button>
@@ -411,7 +410,6 @@ export async function loadAppFns({
     optionsCompareContextSelect: document.getElementById('options-compare-context-select'),
     optionsPromptUsernameInput: document.getElementById('options-prompt-username-input'),
     optionsPromptUsernameError: document.getElementById('options-prompt-username-error'),
-    optionsPromptUsernameSaved: document.getElementById('options-prompt-username-saved'),
     themeSelect: document.getElementById('theme-select'),
     tsBtn: document.getElementById('ts-btn'),
     lnBtn: document.getElementById('ln-btn'),

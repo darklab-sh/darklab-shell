@@ -146,9 +146,14 @@ function createController(overrides = {}) {
     currentTab: () => TABS.find(tab => tab.id === state.activeTab) || TABS[0],
     text: (value, fallback = '') => String(value || fallback || ''),
     countLabel: (count, singular, plural) => `${count} ${count === 1 ? singular : plural}`,
-    badge: (text) => {
+    badge: (text, tone = 'muted') => {
       const badge = document.createElement('span')
-      badge.className = 'badge'
+      const toneClass = {
+        amber: 'badge-tone-amber',
+        green: 'badge-tone-green',
+        red: 'badge-tone-red',
+      }[tone] || 'badge-tone-muted'
+      badge.className = `badge ${toneClass}`
       badge.textContent = text
       return badge
     },
@@ -383,6 +388,29 @@ describe('Mobile Atlas controller', () => {
       expect.objectContaining({ id: 'fnd_1' }),
       'reviewed',
     )
+  })
+
+  it('uses danger tone for high and critical finding badges', () => {
+    const { controller, render } = createController({
+      state: {
+        activeTab: 'findings',
+        findings: [
+          { ...FINDING, id: 'fnd_high', severity: 'high' },
+          { ...FINDING, id: 'fnd_critical', severity: 'critical' },
+        ],
+      },
+    })
+    loadMobileAtlas(controller)
+
+    render()
+
+    const badges = [...document.querySelectorAll('.atlas-entity-badges .badge')]
+    const highBadge = badges.find(badge => badge.textContent === 'high')
+    const criticalBadge = badges.find(badge => badge.textContent === 'critical')
+    expect(highBadge?.classList.contains('badge-tone-red')).toBe(true)
+    expect(criticalBadge?.classList.contains('badge-tone-red')).toBe(true)
+    expect(highBadge?.classList.contains('badge-tone-green')).toBe(false)
+    expect(criticalBadge?.classList.contains('badge-tone-green')).toBe(false)
   })
 
   it('honors forceView detail requests once the selected entity is resolved', () => {

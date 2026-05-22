@@ -21,8 +21,6 @@
   };
 
   global.DarklabProjectWorkspaceConstants = {
-    fieldSavedIndicatorDelayMs: 200,
-    fieldSavedIndicatorVisibleMs: 1600,
     findingNoteStateOptions: [
       { value: 'all', label: 'All notes' },
       { value: 'noted', label: 'With notes' },
@@ -63,7 +61,6 @@
       { value: 'newest', label: 'Newest run' },
     ],
     mobileNotePreviewLimit: 100,
-    projectLabelsSavedVisibleMs: 2000,
     projectNotesAutosaveDelayMs: 450,
     workspaceBroadcastKey: 'darklab_project_workspace_changed',
   };

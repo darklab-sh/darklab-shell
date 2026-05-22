@@ -1348,6 +1348,7 @@ OPENAPI_SPEC: dict = {
             "get": {
                 "parameters": [
                     {"name": "run_id", "in": "query", "schema": {"type": "string"}},
+                    {"name": "project_id", "in": "query", "schema": {"type": "string"}},
                     {
                         "name": "orphan_filter",
                         "in": "query",

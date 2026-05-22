@@ -550,6 +550,40 @@ class TestDatabaseBackend:
             ("context_exit", None),
         ]
 
+    def test_postgres_compat_connection_preserves_transient_error_when_rollback_is_lost(self, monkeypatch):
+        calls = []
+        admin_shutdown = type("AdminShutdown", (Exception,), {"sqlstate": "57P01"})("admin shutdown")
+
+        class FakePostgresConnection:
+            def execute(self, sql, params=()):
+                calls.append(("execute", sql, params))
+                raise admin_shutdown
+
+            def rollback(self):
+                calls.append(("rollback",))
+                raise RuntimeError("the connection is lost")
+
+        sleep_mock = mock.Mock()
+        monkeypatch.setattr(database_backend.time, "sleep", sleep_mock)
+
+        conn = database_backend.PostgresSqliteCompatConnection(FakePostgresConnection())
+        with pytest.raises(type(admin_shutdown)) as excinfo:
+            conn.execute("SELECT id FROM runs WHERE id = ?", ("run-1",))
+
+        assert excinfo.value is admin_shutdown
+        assert calls == [
+            ("execute", "SELECT id FROM runs WHERE id = %s", ("run-1",)),
+            ("rollback",),
+        ]
+        sleep_mock.assert_not_called()
+
+    def test_postgres_transient_error_recognizes_lost_connection_messages(self):
+        assert database_backend.is_transient_postgres_error(RuntimeError("the connection is lost")) is True
+        assert database_backend.is_transient_postgres_error(
+            RuntimeError("server closed the connection unexpectedly"),
+        ) is True
+        assert database_backend.is_transient_postgres_error(RuntimeError("permission denied")) is False
+
     def test_db_connect_routes_to_postgres_compat_when_configured(self, monkeypatch):
         postgres_context = object()
         sqlite_context = object()
@@ -602,6 +636,8 @@ class TestDatabaseBackend:
             for namespace in database_backend.POSTGRES_ADVISORY_LOCK_NAMESPACES
         ]
         assert len(lock_ids) == len(set(lock_ids))
+        admin_shutdown = type("AdminShutdown", (Exception,), {"sqlstate": "57P01"})()
+        assert database_backend.is_transient_postgres_error(admin_shutdown) is True
         with pytest.raises(ValueError):
             database_backend.quote_postgres_identifier("")
 
@@ -1587,7 +1623,15 @@ class TestSchedulerFoundation:
     def test_scheduler_postgres_lock_exits_when_already_held(self, monkeypatch):
         from services.scheduler import worker
 
+        class FakeAdminShutdown(Exception):
+            sqlstate = "57P01"
+
         class FakeConnection:
+            def __init__(self, *, acquired=False, unlock_fails=False):
+                self.acquired = acquired
+                self.unlock_fails = unlock_fails
+                self.calls = []
+
             def __enter__(self):
                 return self
 
@@ -1595,18 +1639,26 @@ class TestSchedulerFoundation:
                 return False
 
             def execute(self, sql, params=()):
-                self.sql = sql
-                self.params = params
+                self.calls.append((sql, params))
+                if "pg_advisory_unlock" in sql and self.unlock_fails:
+                    raise FakeAdminShutdown("postgres stopped")
                 return self
 
             def fetchone(self):
-                return {"acquired": False}
+                return {"acquired": self.acquired}
 
         monkeypatch.setattr(database, "DB_BACKEND", database_backend.DatabaseBackend.POSTGRES)
-        monkeypatch.setattr(database, "db_connect", mock.Mock(return_value=FakeConnection()))
+        held_conn = FakeConnection(acquired=False)
+        shutdown_conn = FakeConnection(acquired=True, unlock_fails=True)
+        monkeypatch.setattr(database, "db_connect", mock.Mock(side_effect=[held_conn, shutdown_conn]))
 
         with worker.acquire_scheduler_lock() as acquired:
             assert acquired is False
+        with worker.acquire_scheduler_lock() as acquired:
+            assert acquired is True
+
+        assert held_conn.calls[0][0] == "SELECT pg_try_advisory_lock(?) AS acquired"
+        assert shutdown_conn.calls[-1][0] == "SELECT pg_advisory_unlock(?)"
 
 
 class TestWatchersFoundation:
@@ -8969,10 +9021,11 @@ class TestRunOutputCapture:
             def executemany(self, sql, rows):
                 return sqlite_conn.executemany(sql, rows)
 
-        replace_run_output_summary(DeleteRaceConnection(), "run-race", [
-            {"text": "one", "cls": "", "tsC": "", "tsE": ""},
-            {"text": "two", "cls": "", "tsC": "", "tsE": ""},
-        ])
+        with mock.patch("services.runs.output_store.log.warning") as warning:
+            replace_run_output_summary(DeleteRaceConnection(), "run-race", [
+                {"text": "one", "cls": "", "tsC": "", "tsE": "", "kind": "future-kind"},
+                {"text": "two", "cls": "", "tsC": "", "tsE": ""},
+            ])
 
         rows = sqlite_conn.execute(
             "SELECT family, value, count FROM run_output_summary WHERE run_id = ? ORDER BY family, value",
@@ -8982,6 +9035,12 @@ class TestRunOutputCapture:
             {"family": "kind", "value": "info", "count": 2},
             {"family": "role", "value": "body", "count": 2},
         ]
+        unknown_calls = [
+            call.kwargs["extra"]
+            for call in warning.call_args_list
+            if call.args == ("LINE_EVENT_UNKNOWN_VALUE",)
+        ]
+        assert [(extra["family"], extra["value"]) for extra in unknown_calls] == [("kind", "future-kind")]
 
     def test_legacy_event_factory_matches_typed_add_event_bytes(self):
         legacy_capture = RunOutputCapture(

@@ -7,6 +7,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from services.runs.output_model import LineEvent, from_wire
+from services.runs.output_store import unknown_line_event_collector
 
 
 SUMMARY_FAMILY_KIND = "kind"
@@ -31,9 +32,10 @@ def summarize_events(events: Iterable[LineEvent]) -> dict[str, dict[str, int]]:
 
 def summarize_entries(entries: Iterable[Mapping[str, Any]]) -> dict[str, dict[str, int]]:
     events: list[LineEvent] = []
+    unknown_collector = unknown_line_event_collector({"source": "run_output_summary"})
     for entry in entries:
         if isinstance(entry, Mapping):
-            events.append(from_wire(entry))
+            events.append(from_wire(entry, unknown_collector))
     return summarize_events(events)
 
 

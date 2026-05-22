@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Active process tracking and Redis setup.
 
@@ -7,6 +5,8 @@ When Redis is available, PIDs are stored in Redis so any Gunicorn worker can
 kill a process started by a different worker. When Redis is unavailable
 (local dev), an in-process dict with a threading.Lock is used instead.
 """
+
+from __future__ import annotations
 
 import os
 import threading
@@ -16,6 +16,7 @@ import time
 from functools import lru_cache
 import fnmatch
 from typing import Any, cast
+from urllib.parse import urlparse
 
 from config import CFG
 
@@ -32,6 +33,20 @@ log = logging.getLogger("shell")
 # only appropriate for local dev or single-worker deployments.
 REDIS_URL = os.environ.get("REDIS_URL") or CFG.get("redis_url", "")
 _FAKE_REDIS_ENABLED = os.environ.get("APP_FAKE_REDIS") == "1"
+
+
+def _redis_log_fields(url: object) -> dict[str, object]:
+    parsed = urlparse(str(url or ""))
+    try:
+        port: int | str = parsed.port or ""
+    except ValueError:
+        port = ""
+    return {
+        "redis_scheme": parsed.scheme,
+        "redis_host": parsed.hostname or "",
+        "redis_port": port,
+        "redis_db": (parsed.path or "").lstrip("/") or "0",
+    }
 
 
 class _FakeRedisClient:
@@ -219,15 +234,19 @@ redis_client = None
 if _FAKE_REDIS_ENABLED:
     REDIS_URL = REDIS_URL or "memory://"
     redis_client = _FakeRedisClient()
-    log.info("Redis faked in-memory for capture mode")
+    log.info("REDIS_FAKE_ENABLED", extra={"fallback": "in_memory"})
 elif REDIS_URL:
     try:
         import redis as redis_lib
         redis_client = redis_lib.from_url(REDIS_URL, decode_responses=True)
         redis_client.ping()
-        log.info("Redis connected: %s", REDIS_URL)
-    except Exception as e:
-        log.warning("Redis unavailable (%s) — falling back to in-process mode", e)
+        log.info("REDIS_CONNECTED", extra=_redis_log_fields(REDIS_URL))
+    except Exception:
+        log.warning(
+            "REDIS_UNAVAILABLE",
+            exc_info=True,
+            extra={**_redis_log_fields(REDIS_URL), "redis_configured": True, "fallback": "in_process"},
+        )
         redis_client = None
 
 if not redis_client:
@@ -269,13 +288,15 @@ def fallback_pid_snapshot() -> dict[str, int]:
         }
 
 
-def _load_active_run_payload(raw: object) -> dict[str, Any] | None:
+def _load_active_run_payload(raw: object, key: str = "") -> dict[str, Any] | None:
     """Best-effort parse of a Redis-stored active-run JSON payload."""
     if not isinstance(raw, (str, bytes, bytearray)):
         return None
     try:
         payload = json.loads(raw)
-    except Exception:
+    except Exception as exc:
+        if key:
+            log.warning("ACTIVE_RUN_METADATA_DECODE_FAILED", extra={"key": key, "error": str(exc)})
         return None
     return cast(dict[str, Any], payload) if isinstance(payload, dict) else None
 
@@ -408,6 +429,7 @@ def _redis_smembers_strings(key: str) -> list[str]:
     try:
         raw_members = redis_client.smembers(key)
     except Exception:
+        log.warning("REDIS_SESSION_SET_READ_FAILED", exc_info=True, extra={"key": key})
         return []
     if not isinstance(raw_members, (set, list, tuple)):
         return []
@@ -420,6 +442,7 @@ def _redis_scan_strings(pattern: str) -> list[str]:
     try:
         return [str(key) for key in redis_client.scan_iter(match=pattern, count=100)]
     except Exception:
+        log.warning("REDIS_SCAN_FAILED", exc_info=True, extra={"pattern": pattern})
         return []
 
 
@@ -449,8 +472,9 @@ def pid_pop_for_session(run_id: str, session_id: str) -> int | None:
         return None
 
     if redis_client:
-        raw = redis_client.get(f"procmeta:{run_id}")
-        payload = _load_active_run_payload(raw)
+        meta_key = f"procmeta:{run_id}"
+        raw = redis_client.get(meta_key)
+        payload = _load_active_run_payload(raw, meta_key)
         if not payload or str(payload.get("session_id", "")) != session_id:
             return None
         pid = pid_pop(run_id)
@@ -521,7 +545,7 @@ def active_run_touch_owner(run_id: str, owner_client_id: str = "", owner_tab_id:
     if redis_client:
         meta_key = f"procmeta:{run_id}"
         raw = redis_client.get(meta_key)
-        payload = _load_active_run_payload(raw)
+        payload = _load_active_run_payload(raw, meta_key)
         if not payload:
             return False
         if str(payload.get("owner_client_id", "") or "") != owner_client_id:
@@ -555,7 +579,7 @@ def active_run_claim_owner_transition(run_id: str, owner_client_id: str = "", ow
     if redis_client:
         meta_key = f"procmeta:{run_id}"
         raw = redis_client.get(meta_key)
-        payload = _load_active_run_payload(raw)
+        payload = _load_active_run_payload(raw, meta_key)
         if not payload:
             return {"claimed": False, "changed_client": False}
         previous_client_id = str(payload.get("owner_client_id", "") or "")
@@ -606,7 +630,8 @@ def active_run_owned_by(run_id: str, owner_client_id: str = "", owner_tab_id: st
         return False
 
     if redis_client:
-        payload = _load_active_run_payload(redis_client.get(f"procmeta:{run_id}"))
+        meta_key = f"procmeta:{run_id}"
+        payload = _load_active_run_payload(redis_client.get(meta_key), meta_key)
     else:
         with _pid_lock:
             payload = dict(_active_run_meta.get(run_id) or {})
@@ -631,7 +656,8 @@ def active_run_belongs_to_session(run_id: str, session_id: str) -> bool:
         return False
 
     if redis_client:
-        payload = _load_active_run_payload(redis_client.get(f"procmeta:{run_id}"))
+        meta_key = f"procmeta:{run_id}"
+        payload = _load_active_run_payload(redis_client.get(meta_key), meta_key)
     else:
         with _pid_lock:
             payload = dict(_active_run_meta.get(run_id) or {})
@@ -648,7 +674,7 @@ def active_run_remove(run_id: str) -> None:
         raw = redis_client.get(meta_key)
         payload = None
         if raw:
-            payload = _load_active_run_payload(raw)
+            payload = _load_active_run_payload(raw, meta_key)
             session_id = str(payload.get("session_id", "")) if payload else ""
             run_type = str(payload.get("run_type", "command") or "command") if payload else "command"
             if session_id:
@@ -682,7 +708,7 @@ def cleanup_stale_active_run_metadata() -> dict[str, int]:
 
     for meta_key in _redis_scan_strings("procmeta:*"):
         raw = redis_client.get(meta_key)
-        payload = _load_active_run_payload(raw)
+        payload = _load_active_run_payload(raw, meta_key)
         run_id = str((payload or {}).get("run_id", "") or meta_key.split(":", 1)[-1])
         if not run_id:
             continue
@@ -754,7 +780,7 @@ def active_runs_for_session(session_id: str, client_id: str = "") -> list[dict]:
             if not raw:
                 stale.append(run_id)
                 continue
-            payload = _load_active_run_payload(raw)
+            payload = _load_active_run_payload(raw, meta_key)
             if not payload:
                 stale.append(run_id)
                 continue

@@ -238,6 +238,32 @@ async function _openScheduleRun(runId) {
   }
 }
 
+async function _compareScheduleFireToPrevious(fire = {}, previousFire = {}) {
+  const runId = String(fire?.run_id || '').trim();
+  const previousRunId = String(previousFire?.run_id || '').trim();
+  if (!runId || !previousRunId || runId === previousRunId) {
+    _scheduleToast('Choose two completed schedule fires to compare.', 'error');
+    return;
+  }
+  const compareFn = typeof fetchAndRenderHistoryComparison === 'function'
+    ? fetchAndRenderHistoryComparison
+    : typeof window !== 'undefined' && typeof window.fetchAndRenderHistoryComparison === 'function'
+      ? window.fetchAndRenderHistoryComparison
+      : null;
+  if (!compareFn) {
+    _scheduleToast('Run comparison is not available.', 'error');
+    return;
+  }
+  const closed = await closeSchedulesModal({ refocus: false });
+  if (!closed) return;
+  try {
+    await compareFn(previousRunId, runId);
+  } catch (err) {
+    _scheduleClientError('failed to compare schedule fire to previous fire', err);
+    _scheduleToast(err?.message || 'Could not open run comparison', 'error');
+  }
+}
+
 function _setSchedulesOpen(open) {
   const { overlay } = _scheduleEls();
   if (!overlay) return;
@@ -617,7 +643,7 @@ function _renderScheduleFires(parent, schedule) {
   } else {
     const rows = document.createElement('div');
     rows.className = 'schedules-fire-list';
-    _schedulesState.fires.forEach((fire) => {
+    _schedulesState.fires.forEach((fire, index) => {
       const row = document.createElement('div');
       row.className = 'schedules-fire-row';
       const main = document.createElement('div');
@@ -634,13 +660,25 @@ function _renderScheduleFires(parent, schedule) {
       reason.textContent = fire.reason || '';
       row.append(main, reason);
       if (fire.run_id) {
+        const actions = document.createElement('div');
+        actions.className = 'schedules-fire-actions';
+        const previousFire = _schedulesState.fires.slice(index + 1).find(item => String(item?.run_id || '').trim());
+        if (previousFire?.run_id && previousFire.run_id !== fire.run_id) {
+          const compare = document.createElement('button');
+          compare.type = 'button';
+          compare.className = 'btn btn-primary btn-compact';
+          compare.textContent = 'Compare previous';
+          _bindSchedulePressable(compare, () => _compareScheduleFireToPrevious(fire, previousFire));
+          actions.appendChild(compare);
+        }
         const open = document.createElement('button');
         open.type = 'button';
         open.className = 'btn btn-secondary btn-compact';
         open.dataset.scheduleRunId = fire.run_id;
         open.textContent = 'Open run';
         _bindSchedulePressable(open, () => _openScheduleRun(fire.run_id || ''));
-        row.appendChild(open);
+        actions.appendChild(open);
+        row.appendChild(actions);
       }
       rows.appendChild(row);
     });

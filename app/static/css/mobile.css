@@ -766,6 +766,7 @@ body.mobile-terminal-mode .sheet-filter-menu.dropdown-surface .dropdown-item {
   body.mobile-terminal-mode #history-mobile-filters-toggle,
   body.mobile-terminal-mode .history-root-autocomplete,
   body.mobile-terminal-mode #history-root-input,
+  body.mobile-terminal-mode #history-entity-input,
   body.mobile-terminal-mode #history-exit-filter,
   body.mobile-terminal-mode #history-date-filter,
   body.mobile-terminal-mode .history-filter-toggle,

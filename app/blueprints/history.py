@@ -19,8 +19,6 @@ from core.database_backend import (
     DatabaseBackend,
     SQLiteOperationalError,
     dialect_for_backend,
-    sqlite_table_columns,
-    sqlite_table_exists,
 )
 from core.helpers import (
     GRACEFUL_TERMINATION_EXIT_CODE,
@@ -31,6 +29,18 @@ from core.helpers import (
 )
 from core.output_signals import command_root as output_command_root
 from services.history.permalinks import _format_duration, _permalink_error_page, _permalink_page
+from services.history.run_metadata import (
+    history_add_filters as _history_add_filters,
+    history_column_exists as _history_column_exists,
+    history_cutoff_for_range as _history_cutoff_for_range,
+    history_offloaded_search_run_ids as _history_offloaded_search_run_ids,
+    history_run_kind_sql as _history_run_kind_sql,
+    history_table_exists as _history_table_exists,
+    normalize_history_filter_text as _normalize_history_filter_text,
+    run_atlas_counts_by_run as _run_atlas_counts_by_run,
+    run_file_artifacts_by_run as _run_file_artifacts_by_run,
+    run_metadata_counts_by_run as _run_metadata_counts_by_run,
+)
 from services.history.search import run_search_clause, sqlite_fts_query
 from core.process import active_runs_for_session
 from services.atlas.cleanup import (
@@ -38,7 +48,6 @@ from services.atlas.cleanup import (
     delete_atlas_cleanup_preview,
     public_cleanup_preview,
 )
-from services.atlas.lookup import atlas_counts_by_run
 from services.projects.comparisons import compare_project_runs
 from services.projects.contracts import (
     BULK_AUDIT_FAILURE_LIMIT,
@@ -47,7 +56,7 @@ from services.projects.contracts import (
     ProjectWorkspaceError,
 )
 from core.redaction import line_entries_from_events, omit_raw_only_line_entries, redact_line_entries
-from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, builtin_command_roots_for_storage
+from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL
 from services.runs.output_model import LineKind, line_event_from_legacy, to_legacy_entry
 from services.runs.output_store import (
     load_run_output_entries_for_run,
@@ -65,7 +74,7 @@ from services.runs.structured_filters import (
     structured_filters_from_params,
 )
 from services.scheduler.service import schedule_ids_by_run
-from services.storage.body_store import inline_threshold_bytes, load_text_body, maybe_store_text_body, stored_body_pointer
+from services.storage.body_store import inline_threshold_bytes, load_text_body, maybe_store_text_body
 from services import metrics as app_metrics
 
 APP_VERSION = _config.APP_VERSION
@@ -75,52 +84,16 @@ log = logging.getLogger("shell")
 
 history_bp = Blueprint("history", __name__)
 
-_HISTORY_TABLE_EXISTS_CACHE: dict[tuple[DatabaseBackend, str, str], bool] = {}
-_HISTORY_TABLE_COLUMNS_CACHE: dict[tuple[DatabaseBackend, str, str], frozenset[str]] = {}
 
-
-def _normalize_history_filter_text(value):
-    if value is None:
-        return ""
-    return str(value).strip()
-
-
-def _history_cutoff_for_range(date_range):
-    # Relative ranges avoid local-time/calendar ambiguity while still giving the
-    # history drawer an easy way to narrow recent activity.
-    now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
-    if date_range == "24h":
-        return (now - timedelta(hours=24)).isoformat()
-    if date_range == "7d":
-        return (now - timedelta(days=7)).isoformat()
-    if date_range == "30d":
-        return (now - timedelta(days=30)).isoformat()
+@history_bp.before_request
+def _require_history_write_session():
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and not get_session_id():
+        return jsonify({"error": "session_required"}), 401
     return None
 
 
 def _build_fts_query(raw):
     return sqlite_fts_query(raw)
-
-
-def _history_add_filters(sql, params, command_root, exit_code_filter, date_range):
-    if command_root:
-        sql += " AND (LOWER(r.command) = ? OR LOWER(r.command) LIKE ?)"
-        params.extend([command_root, f"{command_root} %"])
-    if exit_code_filter == "0":
-        sql += " AND r.exit_code = 0"
-    elif exit_code_filter == "nonzero":
-        sql += " AND r.exit_code IS NOT NULL AND r.exit_code != 0 AND r.exit_code != ?"
-        params.append(GRACEFUL_TERMINATION_EXIT_CODE)
-    elif exit_code_filter == str(GRACEFUL_TERMINATION_EXIT_CODE):
-        sql += " AND r.exit_code = ?"
-        params.append(GRACEFUL_TERMINATION_EXIT_CODE)
-    elif exit_code_filter == "incomplete":
-        sql += " AND r.exit_code IS NULL"
-    cutoff = _history_cutoff_for_range(date_range)
-    if cutoff:
-        sql += " AND r.started >= ?"
-        params.append(cutoff)
-    return sql, params
 
 
 def _history_command_roots(conn, session_id):
@@ -172,76 +145,6 @@ def _parse_history_int(value, default, *, minimum=1, maximum=None):
     return parsed
 
 
-def _history_schema_cache_key(conn) -> str:
-    if DB_BACKEND == DatabaseBackend.POSTGRES:
-        row = conn.execute("SELECT current_schema() AS schema_name").fetchone()
-        return "schema:" + str(row["schema_name"] if row else "public")
-    try:
-        rows = conn.execute("PRAGMA database_list").fetchall()
-    except SQLiteOperationalError:
-        return "connection:" + str(id(conn))
-    for row in rows:
-        if str(row["name"] or "") == "main":
-            main_file = str(row["file"] or "").strip()
-            return "file:" + (main_file or str(id(conn)))
-    return "connection:" + str(id(conn))
-
-
-def _history_table_exists(conn, table_name):
-    cache_key = (DB_BACKEND, _history_schema_cache_key(conn), str(table_name))
-    if cache_key in _HISTORY_TABLE_EXISTS_CACHE:
-        return _HISTORY_TABLE_EXISTS_CACHE[cache_key]
-    if DB_BACKEND == DatabaseBackend.POSTGRES:
-        row = conn.execute(
-            "SELECT 1 AS present "
-            "FROM information_schema.tables "
-            "WHERE table_schema = current_schema() AND table_name = ?",
-            (table_name,),
-        ).fetchone()
-        exists = row is not None
-    else:
-        exists = sqlite_table_exists(conn, table_name)
-    _HISTORY_TABLE_EXISTS_CACHE[cache_key] = exists
-    return exists
-
-
-def _history_table_columns(conn, table_name):
-    cache_key = (DB_BACKEND, _history_schema_cache_key(conn), str(table_name))
-    if cache_key in _HISTORY_TABLE_COLUMNS_CACHE:
-        return _HISTORY_TABLE_COLUMNS_CACHE[cache_key]
-    if DB_BACKEND == DatabaseBackend.POSTGRES:
-        rows = conn.execute(
-            "SELECT column_name "
-            "FROM information_schema.columns "
-            "WHERE table_schema = current_schema() AND table_name = ?",
-            (table_name,),
-        ).fetchall()
-        columns = frozenset(str(row["column_name"]) for row in rows)
-    else:
-        try:
-            columns = frozenset(sqlite_table_columns(conn, table_name))
-        except SQLiteOperationalError:
-            columns = frozenset()
-    _HISTORY_TABLE_COLUMNS_CACHE[cache_key] = columns
-    return columns
-
-
-def _history_column_exists(conn, table_name, column_name):
-    return str(column_name) in _history_table_columns(conn, table_name)
-
-
-def _history_run_kind_sql(column):
-    builtin_roots = sorted(builtin_command_roots_for_storage())
-    if not builtin_roots:
-        return f"'{RUN_KIND_EXTERNAL}'"
-    roots = ", ".join("'" + root.replace("'", "''") + "'" for root in builtin_roots)
-    return (
-        "CASE WHEN "
-        f"{dialect_for_backend(DB_BACKEND).command_root_expr(column)} IN ({roots}) "
-        f"THEN '{RUN_KIND_BUILTIN}' ELSE '{RUN_KIND_EXTERNAL}' END"
-    )
-
-
 def _history_match_clause(query, scope, force_like=False):
     clause = run_search_clause(
         DB_BACKEND,
@@ -252,72 +155,6 @@ def _history_match_clause(query, scope, force_like=False):
         postgres_placeholder="?",
     )
     return clause.sql, clause.params, clause.fts_query
-
-
-def _history_search_text_matches_body(body, query):
-    text = str(body or "").casefold()
-    needle = str(query or "").strip().casefold()
-    if not needle:
-        return False
-    if needle in text:
-        return True
-    terms = [term for term in needle.split() if term]
-    return bool(terms) and all(term in text for term in terms)
-
-
-def _history_offloaded_search_run_ids(
-    conn,
-    session_id,
-    query,
-    command_root,
-    exit_code_filter,
-    date_range,
-    project_id,
-    *,
-    starred_only=False,
-    run_kind="all",
-    has_run_kind_column=True,
-):
-    if not query:
-        return []
-    sql = " FROM runs r WHERE r.session_id = ?"
-    params: list[Any] = [session_id]
-    if run_kind in {RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL}:
-        run_kind_expr = "r.run_kind" if has_run_kind_column else _history_run_kind_sql("r.command")
-        sql += f" AND {run_kind_expr} = ?"
-        params.append(run_kind)
-    if project_id:
-        sql += (
-            " AND EXISTS (SELECT 1 FROM project_links pl "  # nosec
-            "JOIN projects p ON p.id = pl.project_id "
-            "WHERE p.session_id = ? AND p.id = ? "
-            "AND pl.entity_type = 'run' AND pl.entity_id = r.id) "
-        )
-        params.extend([session_id, project_id])
-    if starred_only:
-        sql += (
-            " AND EXISTS (SELECT 1 FROM starred_commands sc "
-            "WHERE sc.session_id = r.session_id AND sc.command = r.command)"
-        )
-    sql, params = _history_add_filters(sql, params, command_root, exit_code_filter, date_range)
-    rows = conn.execute("SELECT r.id, r.output_search_text" + sql, params).fetchall()
-    run_ids = []
-    for row in rows:
-        stored = row["output_search_text"]
-        if stored_body_pointer(stored) is None:
-            continue
-        try:
-            body = load_text_body(stored)
-        except (OSError, ValueError) as exc:
-            log.warning("HISTORY_BODY_SEARCH_SKIPPED", extra={
-                "run_id": row["id"],
-                "session": get_log_session_id(session_id),
-                "error": str(exc),
-            })
-            continue
-        if _history_search_text_matches_body(body, query):
-            run_ids.append(str(row["id"]))
-    return run_ids
 
 
 def _history_base_clause(
@@ -338,7 +175,7 @@ def _history_base_clause(
     sql = " FROM runs r WHERE r.session_id = ?"
     params: list[Any] = [session_id]
     if run_kind in {RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL}:
-        run_kind_expr = "r.run_kind" if has_run_kind_column else _history_run_kind_sql("r.command")
+        run_kind_expr = "r.run_kind" if has_run_kind_column else _history_run_kind_sql("r.command", DB_BACKEND)
         sql += f" AND {run_kind_expr} = ?"
         params.append(run_kind)
     if project_id:
@@ -832,37 +669,6 @@ def _run_output_structured_summary(events):
     return summary
 
 
-def _run_file_artifacts_by_run(conn, run_ids):
-    ids = [str(run_id) for run_id in run_ids if run_id]
-    if not ids:
-        return {}
-    if not _history_table_exists(conn, "run_file_artifacts"):
-        return {run_id: [] for run_id in ids}
-    placeholders = ",".join("?" for _ in ids)
-    rows = conn.execute(
-        "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "  # nosec
-        "detected_by, content_type, preview_type, created "
-        f"FROM run_file_artifacts WHERE run_id IN ({placeholders}) "
-        "ORDER BY created ASC, workspace_path ASC",
-        ids,
-    ).fetchall()
-    grouped = {run_id: [] for run_id in ids}
-    for row in rows:
-        grouped.setdefault(str(row["run_id"]), []).append({
-            "id": row["id"],
-            "run_id": row["run_id"],
-            "workspace_path": row["workspace_path"],
-            "display_name": row["display_name"],
-            "kind": row["kind"],
-            "byte_size": int(row["byte_size"] or 0),
-            "detected_by": row["detected_by"],
-            "content_type": row["content_type"],
-            "preview_type": row["preview_type"],
-            "created": row["created"],
-        })
-    return grouped
-
-
 def _project_links_by_run(conn, session_id, run_ids):
     ids = [str(run_id) for run_id in run_ids if run_id]
     if not ids:
@@ -903,58 +709,6 @@ def _project_links_by_run(conn, session_id, run_ids):
             },
         })
     return grouped
-
-
-def _run_metadata_counts_by_run(conn, run_ids):
-    ids = [str(run_id) for run_id in run_ids if run_id]
-    counts = {
-        run_id: {"finding_count": 0, "label_count": 0, "note_count": 0}
-        for run_id in ids
-    }
-    if not ids:
-        return counts
-    placeholders = ",".join("?" for _ in ids)
-    if _history_table_exists(conn, "findings"):
-        for row in conn.execute(
-            "SELECT fo.run_id, COUNT(*) AS count "
-            "FROM findings_occurrences fo JOIN findings f ON f.id = fo.finding_id "
-            f"WHERE f.session_id IN (SELECT session_id FROM runs WHERE id IN ({placeholders})) "  # nosec
-            f"AND fo.run_id IN ({placeholders}) GROUP BY fo.run_id",
-            [*ids, *ids],
-        ).fetchall():
-            counts.setdefault(str(row["run_id"]), {"finding_count": 0, "label_count": 0, "note_count": 0})
-            counts[str(row["run_id"])]["finding_count"] = int(row["count"] or 0)
-    if _history_table_exists(conn, "entity_labels"):
-        for row in conn.execute(
-            "SELECT entity_id, COUNT(*) AS count FROM entity_labels WHERE entity_type = 'run' "  # nosec
-            f"AND entity_id IN ({placeholders}) GROUP BY entity_id",
-            ids,
-        ).fetchall():
-            counts.setdefault(str(row["entity_id"]), {"finding_count": 0, "label_count": 0, "note_count": 0})
-            counts[str(row["entity_id"])]["label_count"] = int(row["count"] or 0)
-    if _history_table_exists(conn, "entity_notes"):
-        for row in conn.execute(
-            "SELECT entity_id, COUNT(*) AS count FROM entity_notes WHERE entity_type = 'run' "  # nosec
-            f"AND entity_id IN ({placeholders}) GROUP BY entity_id",
-            ids,
-        ).fetchall():
-            counts.setdefault(str(row["entity_id"]), {"finding_count": 0, "label_count": 0, "note_count": 0})
-            counts[str(row["entity_id"])]["note_count"] = int(row["count"] or 0)
-    return counts
-
-
-def _run_atlas_counts_by_run(conn, session_id, run_ids):
-    ids = [str(run_id) for run_id in run_ids if run_id]
-    counts = {
-        run_id: {"atlas_entity_count": 0, "atlas_finding_count": 0}
-        for run_id in ids
-    }
-    if not ids:
-        return counts
-    required_tables = ("runs", "entities", "entity_run_links", "findings", "findings_occurrences")
-    if not all(_history_table_exists(conn, table_name) for table_name in required_tables):
-        return counts
-    return atlas_counts_by_run(conn, session_id, ids)
 
 
 def _entity_labels_by_entity_ids(conn, entity_type, entity_ids):
@@ -1232,7 +986,7 @@ def get_history():
 
         run_select = (
             "SELECT 'run' AS type, r.id, "
-            + ("r.run_kind" if has_run_kind_column else _history_run_kind_sql("r.command"))
+            + ("r.run_kind" if has_run_kind_column else _history_run_kind_sql("r.command", DB_BACKEND))
             + " AS run_kind, r.command, r.started, r.finished, r.exit_code, "
             "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated, "
             "r.command AS label, r.started AS created, r.started AS sort_created"

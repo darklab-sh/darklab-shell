@@ -31,6 +31,7 @@ function loadSchedulesModalTestFns({
   showConfirm = vi.fn(async () => null),
   showToast = vi.fn(),
   openHistoryRunDetails = vi.fn(),
+  fetchAndRenderHistoryComparison = vi.fn(),
 } = {}) {
   document.body.innerHTML = `
     <div id="schedules-overlay" class="u-hidden">
@@ -54,6 +55,7 @@ function loadSchedulesModalTestFns({
       showConfirm,
       showToast,
       openHistoryRunDetails,
+      fetchAndRenderHistoryComparison,
       bindDismissible,
       refocusComposerAfterAction: vi.fn(),
     },
@@ -66,6 +68,7 @@ function loadSchedulesModalTestFns({
     showConfirm,
     showToast,
     openHistoryRunDetails,
+    fetchAndRenderHistoryComparison,
     list: document.getElementById('schedules-list'),
     detail: document.getElementById('schedules-detail'),
   }
@@ -76,6 +79,7 @@ function loadWatchersModalTestFns({
   showConfirm = vi.fn(async () => null),
   showToast = vi.fn(),
   openHistoryRunDetails = vi.fn(),
+  fetchAndRenderHistoryComparison = vi.fn(),
 } = {}) {
   document.body.innerHTML = `
     <div id="watchers-overlay" class="u-hidden">
@@ -105,6 +109,7 @@ function loadWatchersModalTestFns({
       showConfirm,
       showToast,
       openHistoryRunDetails,
+      fetchAndRenderHistoryComparison,
       _compareMetricCell: compareMetricCell,
       _closeMajorOverlays: vi.fn(),
       bindDismissible,
@@ -119,6 +124,7 @@ function loadWatchersModalTestFns({
     showConfirm,
     showToast,
     openHistoryRunDetails,
+    fetchAndRenderHistoryComparison,
     list: document.getElementById('watchers-list'),
     detail: document.getElementById('watchers-detail'),
   }
@@ -500,8 +506,12 @@ describe('app helpers', () => {
         return {
           ok: true,
           json: async () => ({
-            fires: [{ status: 'fired', fired_at: '2026-05-20T12:00:00+00:00', run_id: 'run_actions' }],
-            total: 1,
+            fires: [
+              { status: 'fired', fired_at: '2026-05-20T12:00:00+00:00', run_id: 'run_actions' },
+              { status: 'skipped', fired_at: '2026-05-20T11:00:00+00:00', run_id: '', reason: 'overlap' },
+              { status: 'fired', fired_at: '2026-05-20T10:00:00+00:00', run_id: 'run_previous' },
+            ],
+            total: 3,
             limit: 20,
             offset: 0,
             has_more: false,
@@ -520,7 +530,12 @@ describe('app helpers', () => {
       throw new Error(`unexpected request ${url}`)
     })
     const showToast = vi.fn()
-    const { _bindSchedulesModal, refreshSchedulesModal } = loadSchedulesModalTestFns({ apiFetch, showToast })
+    const fetchAndRenderHistoryComparison = vi.fn()
+    const { _bindSchedulesModal, refreshSchedulesModal } = loadSchedulesModalTestFns({
+      apiFetch,
+      showToast,
+      fetchAndRenderHistoryComparison,
+    })
     _bindSchedulesModal()
 
     await refreshSchedulesModal()
@@ -535,7 +550,12 @@ describe('app helpers', () => {
     await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Schedule resumed', 'success'))
     Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Run now').click()
     await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Schedule fired', 'success'))
+    expect(document.getElementById('schedules-detail').textContent).toContain('Compare previous')
     expect(document.getElementById('schedules-detail').textContent).toContain('Open run')
+    Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Compare previous').click()
+    await vi.waitFor(() => (
+      expect(fetchAndRenderHistoryComparison).toHaveBeenCalledWith('run_previous', 'run_actions')
+    ))
   })
 
   it('prompts before switching schedules or creating a new schedule with unsaved edits', async () => {
@@ -651,6 +671,7 @@ describe('app helpers', () => {
               id: 'fire_1',
               watcher_id: 'wtr_created',
               run_id: 'run_current',
+              baseline_run_id: 'run_base',
               diff_kind: 'signal',
               diff_summary: {
                 classifier: 'findings',
@@ -676,10 +697,12 @@ describe('app helpers', () => {
     })
     const showToast = vi.fn()
     const showConfirm = vi.fn(async () => null)
+    const fetchAndRenderHistoryComparison = vi.fn()
     const { _bindWatchersModal, openWatchersModal, closeWatchersModal, detail, list } = loadWatchersModalTestFns({
       apiFetch,
       showConfirm,
       showToast,
+      fetchAndRenderHistoryComparison,
     })
     _bindWatchersModal()
 
@@ -716,7 +739,12 @@ describe('app helpers', () => {
     expect(detail.textContent).toContain('Diff details')
     expect(detail.textContent).toContain('Exposed HTTP service')
     expect(detail.textContent).not.toContain('findings classifier')
+    expect(detail.textContent).toContain('Compare')
     expect(detail.textContent).toContain('Open run')
+    Array.from(detail.querySelectorAll('button'))
+      .find(btn => btn.textContent === 'Compare')
+      .click()
+    await vi.waitFor(() => expect(fetchAndRenderHistoryComparison).toHaveBeenCalledWith('run_base', 'run_current'))
   })
 
   it('creates watchers that capture the first run as the baseline', async () => {
@@ -1092,21 +1120,21 @@ describe('app helpers', () => {
   })
 
   it('applies the saved prompt username preference to the live prompt', async () => {
+    const showToast = vi.fn()
     await loadAppFns({
       cookies: { pref_prompt_username: 'nona' },
       setTimeout: globalThis.setTimeout,
       clearTimeout: globalThis.clearTimeout,
+      showToast,
     })
     const promptPrefix = document.querySelector('#shell-prompt-wrap .prompt-prefix')
     const input = document.getElementById('options-prompt-username-input')
-    const saved = document.getElementById('options-prompt-username-saved')
     expect(promptPrefix.textContent).toBe('nona@darklab.sh:/ $')
     expect(input.value).toBe('nona')
     expect(input.getAttribute('aria-label')).toBe('Prompt name')
     expect(input.getAttribute('data-bwignore')).toBe('true')
     expect(input.getAttribute('data-1p-ignore')).toBe('true')
     expect(input.getAttribute('data-lpignore')).toBe('true')
-    expect(saved.classList.contains('u-hidden')).toBe(true)
 
     input.value = 'ops-user'
     input.dispatchEvent(new Event('input', { bubbles: true }))
@@ -1114,7 +1142,7 @@ describe('app helpers', () => {
 
     expect(promptPrefix.textContent).toContain('ops-user@darklab.sh:')
     expect(document.cookie).toContain('pref_prompt_username=ops-user')
-    expect(saved.classList.contains('u-hidden')).toBe(false)
+    expect(showToast).toHaveBeenCalledWith('Prompt name saved', 'success')
   })
 
   it('shows live validation for invalid prompt username input without saving it', async () => {
@@ -5605,7 +5633,8 @@ describe('app helpers', () => {
       const ok = await opts.actions.find(action => action.id === 'save').onActivate()
       return ok ? 'save' : null
     })
-    await loadAppFns({ apiFetch, showConfirm })
+    const showToast = vi.fn()
+    await loadAppFns({ apiFetch, showConfirm, showToast })
 
     document.getElementById('options-secret-new-btn').click()
     await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/session/secrets', expect.objectContaining({
@@ -5653,7 +5682,8 @@ describe('app helpers', () => {
       const ok = await opts.actions.find(action => action.id === 'save').onActivate()
       return ok ? 'save' : null
     })
-    await loadAppFns({ apiFetch, showConfirm })
+    const showToast = vi.fn()
+    await loadAppFns({ apiFetch, showConfirm, showToast })
 
     document.getElementById('options-secret-new-btn').click()
     await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/session/secrets', expect.objectContaining({
@@ -5666,7 +5696,7 @@ describe('app helpers', () => {
       value: 'custom-secret-value',
       consumer_envs: ['FUTURE_API_KEY'],
     })
-    expect(document.getElementById('options-secrets-msg').textContent).toContain('not currently used')
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('not currently used'), 'success')
   })
 
   it('suggests app-native intel secret consumers in the options prompt', async () => {
