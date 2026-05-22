@@ -37,6 +37,11 @@ body.mobile-terminal-mode.atlas-mobile-ready #atlas-mobile-root.atlas-mobile-roo
   background: var(--theme-bg);
 }
 
+body.mobile-terminal-mode #atlas-surface > .sheet-grab.gesture-handle {
+  position: relative;
+  z-index: 2;
+}
+
 /* Each of the three views fills the same surface area; only one is
  * visible at a time. View toggling is owned by `atlas_mobile.js` via
  * the `u-hidden` class so the structural layout below applies once. */
@@ -135,9 +140,15 @@ body.mobile-terminal-mode.atlas-mobile-ready #atlas-mobile-root.atlas-mobile-roo
 .atlas-mobile-tabs {
   display: flex;
   gap: 4px;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   overflow-x: auto;
   scrollbar-width: none;
   padding: 8px 12px 4px;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
 }
 
 .atlas-mobile-tabs::-webkit-scrollbar {
@@ -175,6 +186,7 @@ body.mobile-terminal-mode.atlas-mobile-ready #atlas-mobile-root.atlas-mobile-roo
 .atlas-mobile-tab.tab-strip-item {
   flex: 0 0 auto;
   white-space: nowrap;
+  touch-action: pan-x;
 }
 
 /* Tools row — search input + refresh side by side. */

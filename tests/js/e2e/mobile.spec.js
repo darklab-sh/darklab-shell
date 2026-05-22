@@ -481,6 +481,68 @@ test.beforeEach(async ({ page }) => {
   })
 
   test('mobile menu FAQ and options open overlays in the mobile shell', async ({ page }) => {
+    await page.route(/https?:\/\/[^/]+\/(?:schedules|watchers)(?:\?|$)/, async (route) => {
+      const url = new URL(route.request().url())
+      if (url.pathname === '/schedules') {
+        await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ schedules: [] }) })
+        return
+      }
+      if (url.pathname === '/watchers') {
+        await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ watchers: [] }) })
+        return
+      }
+      await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not found' }) })
+    })
+
+    async function openMobileSheet(action, overlaySelector, modalSelector) {
+      await page.locator('#hamburger-btn').click()
+      await page.locator(`#mobile-menu-sheet [data-menu-action="${action}"]`).click()
+      await expect(page.locator(overlaySelector)).toHaveClass(/\bopen\b/)
+      await expect(page.locator(`${modalSelector} > .sheet-grab.gesture-handle`)).toBeVisible()
+    }
+
+    async function tapSheetHandleToClose(overlaySelector, modalSelector) {
+      const handle = page.locator(`${modalSelector} > .sheet-grab.gesture-handle`)
+      const box = await handle.boundingBox()
+      expect(box).not.toBeNull()
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+      await expect(page.locator(overlaySelector)).not.toHaveClass(/\bopen\b/)
+    }
+
+    async function dragSheetHandleToClose(overlaySelector, modalSelector) {
+      const handle = page.locator(`${modalSelector} > .sheet-grab.gesture-handle`)
+      const box = await handle.boundingBox()
+      expect(box).not.toBeNull()
+      const x = box.x + box.width / 2
+      const y = box.y + box.height / 2
+      await page.evaluate(({ modalSelector, x, y }) => {
+        const grab = document.querySelector(`${modalSelector} > .sheet-grab.gesture-handle`)
+        grab.dispatchEvent(new PointerEvent('pointerdown', {
+          pointerId: 92,
+          pointerType: 'touch',
+          clientX: x,
+          clientY: y,
+          button: 0,
+          bubbles: true,
+        }))
+        grab.dispatchEvent(new PointerEvent('pointermove', {
+          pointerId: 92,
+          pointerType: 'touch',
+          clientX: x,
+          clientY: y + 90,
+          bubbles: true,
+        }))
+        grab.dispatchEvent(new PointerEvent('pointerup', {
+          pointerId: 92,
+          pointerType: 'touch',
+          clientX: x,
+          clientY: y + 90,
+          bubbles: true,
+        }))
+      }, { modalSelector, x, y })
+      await expect(page.locator(overlaySelector)).not.toHaveClass(/\bopen\b/)
+    }
+
     await page.locator('#hamburger-btn').click()
     await page.locator('#mobile-menu-sheet [data-menu-action="faq"]').click()
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
@@ -494,6 +556,16 @@ test.beforeEach(async ({ page }) => {
 
     await page.locator('#options-overlay').click({ position: { x: 10, y: 10 } })
     await expect(page.locator('#options-overlay')).not.toHaveClass(/open/)
+
+    await openMobileSheet('schedules', '#schedules-overlay', '#schedules-modal')
+    await tapSheetHandleToClose('#schedules-overlay', '#schedules-modal')
+    await openMobileSheet('schedules', '#schedules-overlay', '#schedules-modal')
+    await dragSheetHandleToClose('#schedules-overlay', '#schedules-modal')
+
+    await openMobileSheet('watchers', '#watchers-overlay', '#watchers-modal')
+    await tapSheetHandleToClose('#watchers-overlay', '#watchers-modal')
+    await openMobileSheet('watchers', '#watchers-overlay', '#watchers-modal')
+    await dragSheetHandleToClose('#watchers-overlay', '#watchers-modal')
   })
 
   test('mobile menu contains history and theme action buttons', async ({ page }) => {
@@ -1327,6 +1399,58 @@ test.beforeEach(async ({ page }) => {
         page.evaluate(() => document.body.classList.contains('mobile-terminal-mode')),
       )
       .toBe(true)
+
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="atlas"]').click()
+    await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#atlas-mobile-root')).toBeVisible()
+    const atlasGrab = page.locator('#atlas-surface > .sheet-grab.gesture-handle')
+    await expect(atlasGrab).toBeVisible()
+    const tabScrollLeft = await page.locator('#atlas-mobile-tabs').evaluate((el) => {
+      const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth)
+      el.scrollLeft = maxScroll
+      return Math.round(el.scrollLeft)
+    })
+    expect(tabScrollLeft).toBeGreaterThan(0)
+    const atlasGrabBox = await atlasGrab.boundingBox()
+    expect(atlasGrabBox).not.toBeNull()
+    await page.mouse.click(atlasGrabBox.x + atlasGrabBox.width / 2, atlasGrabBox.y + atlasGrabBox.height / 2)
+    await expect(page.locator('#atlas-overlay')).not.toHaveClass(/\bopen\b/)
+
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="atlas"]').click()
+    await expect(page.locator('#atlas-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#atlas-mobile-root')).toBeVisible()
+    const dragGrabBox = await page.locator('#atlas-surface > .sheet-grab.gesture-handle').boundingBox()
+    expect(dragGrabBox).not.toBeNull()
+    const dragX = dragGrabBox.x + dragGrabBox.width / 2
+    const dragY = dragGrabBox.y + dragGrabBox.height / 2
+    await page.evaluate(({ dragX, dragY }) => {
+      const grab = document.querySelector('#atlas-surface > .sheet-grab.gesture-handle')
+      grab.dispatchEvent(new PointerEvent('pointerdown', {
+        pointerId: 81,
+        pointerType: 'touch',
+        clientX: dragX,
+        clientY: dragY,
+        button: 0,
+        bubbles: true,
+      }))
+      grab.dispatchEvent(new PointerEvent('pointermove', {
+        pointerId: 81,
+        pointerType: 'touch',
+        clientX: dragX,
+        clientY: dragY + 90,
+        bubbles: true,
+      }))
+      grab.dispatchEvent(new PointerEvent('pointerup', {
+        pointerId: 81,
+        pointerType: 'touch',
+        clientX: dragX,
+        clientY: dragY + 90,
+        bubbles: true,
+      }))
+    }, { dragX, dragY })
+    await expect(page.locator('#atlas-overlay')).not.toHaveClass(/\bopen\b/)
 
     await page.locator('#hamburger-btn').click()
     await page.locator('#mobile-menu-sheet [data-menu-action="atlas"]').click()

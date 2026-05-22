@@ -1123,7 +1123,7 @@ function _bindSchedulesModal() {
       level: 'modal',
       isOpen: isSchedulesOverlayOpen,
       onClose: closeSchedulesModal,
-      closeButtons: overlay.querySelectorAll('.schedules-close'),
+      closeButtons: overlay.querySelectorAll('.schedules-close, .sheet-grab'),
     });
   }
 }

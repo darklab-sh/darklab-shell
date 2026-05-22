@@ -1490,7 +1490,7 @@ function _bindWatchersModal() {
       level: 'modal',
       isOpen: isWatchersOverlayOpen,
       onClose: closeWatchersModal,
-      closeButtons: overlay.querySelectorAll('.watchers-close'),
+      closeButtons: overlay.querySelectorAll('.watchers-close, .sheet-grab'),
     });
   }
 }

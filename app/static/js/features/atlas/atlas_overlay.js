@@ -1993,7 +1993,17 @@
   }
 
   function bindEvents() {
+    const grab = surface?.querySelector?.(':scope > .sheet-grab') || null;
+    const closeControls = surface?.querySelectorAll?.(':scope > .sheet-grab, .atlas-close') || (closeBtn ? [closeBtn] : []);
+
     closeBtn?.addEventListener('click', () => closeAtlas());
+    grab?.addEventListener('click', () => closeAtlas());
+    grab?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        closeAtlas();
+      }
+    });
     refreshBtn?.addEventListener('click', () => refreshAtlas());
     clearFiltersBtn?.addEventListener('click', () => clearAtlasFilters());
     prevBtn?.addEventListener('click', () => {
@@ -2120,9 +2130,12 @@
         level: 'panel',
         isOpen,
         onClose: () => closeAtlas(),
-        closeButtons: closeBtn,
+        closeButtons: closeControls,
         closeOnBackdrop: true,
       });
+    }
+    if (typeof global.bindMobileSheet === 'function' && surface) {
+      global.bindMobileSheet(surface, { onClose: () => closeAtlas() });
     }
   }
 

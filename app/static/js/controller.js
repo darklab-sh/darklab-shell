@@ -125,6 +125,9 @@ function setupMobileSheetDragClose() {
   const workflowEditor = document.getElementById('workflow-editor-form');
   const projectWorkspaceModal = document.getElementById('project-workspace-modal');
   const providerStatusModal = document.getElementById('provider-status-modal');
+  const atlasSurface = document.getElementById('atlas-surface');
+  const schedulesModal = document.getElementById('schedules-modal');
+  const watchersModal = document.getElementById('watchers-modal');
 
   bindMobileSheet(mobileMenu,         { onClose: () => hideMobileMenu() });
   bindMobileSheet(historyPanel,       { onClose: () => hideHistoryPanel() });
@@ -136,6 +139,9 @@ function setupMobileSheetDragClose() {
   bindMobileSheet(projectWorkspaceModal, { onClose: () => { if (typeof closeProjectWorkspace === 'function') closeProjectWorkspace(); } });
   bindMobileSheet(optionsModal,       { onClose: () => closeOptions() });
   bindMobileSheet(providerStatusModal, { onClose: () => { if (typeof closeProviderStatusModal === 'function') closeProviderStatusModal(); } });
+  bindMobileSheet(atlasSurface,       { onClose: () => { if (typeof closeAtlas === 'function') closeAtlas(); } });
+  bindMobileSheet(schedulesModal,     { onClose: () => { if (typeof closeSchedulesModal === 'function') closeSchedulesModal(); } });
+  bindMobileSheet(watchersModal,      { onClose: () => { if (typeof closeWatchersModal === 'function') closeWatchersModal(); } });
 }
 
 function setupDismissibleOverlays() {

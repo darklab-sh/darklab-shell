@@ -577,6 +577,14 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Run Details entity links bring Atlas forward** — clicking an entity-highlighted value in restored output now closes Run Details before opening the matching Atlas entity.
   - **Why:** the Atlas detail loaded correctly, but the Run Details modal stayed above it, making the navigation look broken.
   - **What:** the shared major-overlay closer now includes Run Details, so Atlas launches use the same one-surface-at-a-time behavior from output tokens and run actions.
+- **Mobile Atlas sheet matches the shared mobile sheet behavior** — the mobile Atlas tab strip now scrolls horizontally, and the Atlas sheet handle can tap-close or drag-close like the other mobile sheets.
+  - **Why:** the tab strip could be clipped by its overflow wrapper instead of scrolling, and Atlas had the visual handle without the shared bottom-sheet gesture binding.
+  - **What:** the mobile tab strip is constrained to the sheet width with horizontal pan handling, and the Atlas surface now uses the shared mobile sheet binder while also registering the handle as a normal close control.
+  - **Tests:** expanded the mobile Atlas Playwright flow to verify tab scrolling and handle close behavior.
+- **Mobile Schedules and Watchers use the shared sheet handle** — the Schedules and Watchers modals now include the same mobile grab handle as the rest of the bottom sheets, with tap-to-close, drag-to-close, and outside-click dismissal.
+  - **Why:** both modals were styled as mobile sheets but only had desktop close buttons, which are hidden in mobile mode.
+  - **What:** the templates now render accessible sheet handles, the shared mobile-sheet binder wires both modals, and dismissible close controls include the handles.
+  - **Tests:** expanded the mobile menu Playwright flow to verify Schedules and Watchers handle tap and drag close behavior.
 - **Completed-run exports are available from Run Details** — finished runs now expose plain text, styled HTML, and PDF exports directly in the Run Details modal.
   - **Why:** completed output could only be exported after restoring the run or opening a permalink, and exported HTML entity links pointed back at the local file instead of a usable app target.
   - **What:** Run Details exports fetch the saved full output when available, permalink pages now show structured finding/entity highlights with an on-page toggle, and HTML exports render entity highlights as non-clickable spans with their own highlight toggle instead of broken local anchors.
