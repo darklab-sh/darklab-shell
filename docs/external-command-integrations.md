@@ -228,6 +228,27 @@ That allows `nc -zv`, `nc -vz`, and `nc -zvn` without listing every ordering, wh
 
 ---
 
+## Help Output Metadata
+
+Command help flags live with the command entry so the app can treat help output consistently. The same metadata keeps help transcripts out of findings and Atlas entity discovery, lets `/runs` skip required-secret preflight for safe help commands, and lets the container smoke corpus run help examples for tools that normally require encrypted secrets:
+
+```yaml
+help:
+  flags:
+    - -h
+    - --help
+autocomplete:
+  examples:
+    - value: shodan --help
+      description: Show help and usage
+      smoke:
+        profile: unauthenticated
+```
+
+Only mark an example as `smoke.profile: unauthenticated` when it can run without provider credentials or workspace setup.
+
+---
+
 ## Amass
 
 Amass needs special handling because the useful result set lives in its database, not only in stdout.
@@ -347,5 +368,5 @@ Before merging a new external-command adaptation:
 - Keep user-facing examples aligned with the app-owned rewrite behavior.
 - Add backend tests for validation, rewrite, and workspace path handling.
 - Add autocomplete tests if examples, flags, or positional hints change.
-- Add or update container smoke expectations when the change affects visible examples or workflow steps. The generic smoke corpus skips examples for commands with required encrypted secrets; cover those roots with registry, policy, and secret-injection tests unless you are adding a keyed smoke profile.
+- Add or update container smoke expectations when the change affects visible examples or workflow steps. The generic smoke corpus skips normal examples for commands with required encrypted secrets, but it can include registry-declared help examples marked with `smoke.profile: unauthenticated`. Cover credentialed behavior with registry, policy, secret-injection, or keyed smoke tests.
 - Document tool-specific behavior here when the app does more than simple allowlist metadata.

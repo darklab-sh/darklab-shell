@@ -97,7 +97,7 @@ async function handleThemeCommand(cmd, tabId = null) {
       entries.forEach((entry) => {
         const slug = _cliThemeSlug(entry);
         const marker = slug === _cliCurrentThemeSlug() ? '*' : ' ';
-        _cliAppendLine(`  ${marker} ${slug.padEnd(24)}  ${String(entry.label || slug)}`, 'builtin-help-row', tabId);
+        _cliAppendLine(`  ${marker} ${slug.padEnd(24)}  ${String(entry.label || slug)}`, 'builtin-help-row builtin-plain', tabId);
       });
     });
     _cliRecordSuccess(cmd);

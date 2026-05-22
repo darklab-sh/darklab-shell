@@ -26,6 +26,7 @@ from services.diagnostics.storage import (
     storage_snapshot,
     table_storage_breakdown,
 )
+from core.output_signals import OutputSignalClassifier, strip_ansi_codes
 from core.helpers import (
     FONT_FILES,
     GRACEFUL_TERMINATION_EXIT_CODE,
@@ -41,6 +42,7 @@ from services.runs.broker import (
     broker_unavailable_reason,
     memory_store_snapshot,
 )
+from services.runs.output_model import line_event_from_legacy
 from services import metrics as app_metrics
 
 log = logging.getLogger("shell")
@@ -95,6 +97,10 @@ _DIAG_REDIS_KEY_PREFIXES = (
     ("procmeta", "procmeta:*"),
     ("sessionprocs", "sessionprocs:*"),
 )
+_DIAG_CLASSIFIER_LINE_LIMIT = 4096
+_DIAG_CLASSIFIER_COMMAND_LIMIT = 512
+_DIAG_CLASSIFIER_CLS_LIMIT = 80
+_DIAG_CLASSIFIER_CMD_TYPES = frozenset({"real", "builtin"})
 # Themed groupings for the Config card. Every key emitted into
 # `result["config"]` must appear in exactly one group, otherwise it is
 # invisible on the rendered page (the drift test
@@ -139,6 +145,15 @@ _DIAG_CONFIG_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "log_format",
     )),
 )
+
+
+def _require_diag_access() -> str:
+    allowed_cidrs = CFG.get("diagnostics_allowed_cidrs") or []
+    client_ip = get_client_ip()
+    if not ip_is_in_cidrs(client_ip, allowed_cidrs):
+        log.warning("DIAG_DENIED", extra={"ip": client_ip, "allowed_cidrs": allowed_cidrs})
+        abort(404)
+    return client_ip
 
 
 def _diag_fmt_bytes(n) -> str:
@@ -212,6 +227,57 @@ def _diag_tool_entry(name: str) -> dict | None:
         "name": name,
         "path": path,
     }
+
+
+def _diag_classifier_inspector(args) -> dict:
+    line = str(args.get("classifier_line", ""))[:_DIAG_CLASSIFIER_LINE_LIMIT]
+    command = str(args.get("classifier_command", ""))[:_DIAG_CLASSIFIER_COMMAND_LIMIT]
+    legacy_cls = str(args.get("classifier_cls", ""))[:_DIAG_CLASSIFIER_CLS_LIMIT]
+    cmd_type = str(args.get("classifier_cmd_type", "real")).strip().lower()
+    if cmd_type not in _DIAG_CLASSIFIER_CMD_TYPES:
+        cmd_type = "real"
+    submitted = any(key in args for key in (
+        "classifier_line",
+        "classifier_command",
+        "classifier_cls",
+        "classifier_cmd_type",
+    ))
+    payload: dict = {
+        "submitted": submitted,
+        "line": line,
+        "command": command,
+        "cls": legacy_cls,
+        "cmd_type": cmd_type,
+        "result": None,
+    }
+    if not submitted or not line.strip():
+        return payload
+
+    classifier = OutputSignalClassifier(command, cmd_type=cmd_type)
+    metadata = classifier.classify_line(line, cls=legacy_cls)
+    base_event = line_event_from_legacy(line, legacy_cls)
+    role = str(metadata.get("role") or base_event.role.value)
+    raw_signals = metadata.get("signals")
+    signals = [str(signal) for signal in raw_signals if str(signal)] if isinstance(raw_signals, list) else []
+    raw_entities = metadata.get("entities")
+    entities = [
+        entity
+        for entity in raw_entities
+        if isinstance(entity, dict)
+    ] if isinstance(raw_entities, list) else []
+    raw_line_index = metadata.get("line_index")
+    line_index = raw_line_index if isinstance(raw_line_index, int) and not isinstance(raw_line_index, bool) else 0
+    payload["result"] = {
+        "kind": base_event.kind.value,
+        "role": role,
+        "signals": signals,
+        "entities": entities,
+        "line_index": line_index,
+        "command_root": str(metadata.get("command_root") or ""),
+        "target": str(metadata.get("target") or ""),
+        "normalized_text": strip_ansi_codes(line).strip(),
+    }
+    return payload
 
 
 def _diag_decode_key(raw):
@@ -639,11 +705,7 @@ def diag():
           - "127.0.0.1/32"
           - "172.16.0.0/12"
     """
-    allowed_cidrs = CFG.get("diagnostics_allowed_cidrs") or []
-    client_ip = get_client_ip()
-    if not ip_is_in_cidrs(client_ip, allowed_cidrs):
-        log.warning("DIAG_DENIED", extra={"ip": client_ip, "allowed_cidrs": allowed_cidrs})
-        abort(404)
+    client_ip = _require_diag_access()
 
     result: dict = {}
 
@@ -749,6 +811,9 @@ def diag():
             "error": "no fonts in manifest",
         },
     }
+
+    # ── Classifier inspector ─────────────────────────────────────────────────
+    result["classifier_inspector"] = _diag_classifier_inspector(request.args)
 
     # ── Usage stats ──────────────────────────────────────────────────────────
     stats: dict = {"ok": False}
@@ -888,6 +953,12 @@ def diag():
         current_theme=current_theme,
         current_theme_css=current_theme["vars"],
     )
+
+
+@assets_bp.route("/diag/classifier-inspector")
+def diag_classifier_inspector():
+    _require_diag_access()
+    return jsonify(_diag_classifier_inspector(request.args))
 
 
 @assets_bp.route("/metrics")

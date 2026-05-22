@@ -157,9 +157,49 @@
     {
       "no_output": false,
       "exit_code": 0,
+      "command": "shodan --help",
+      "expected_patterns": [
+        "(?i)usage"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "vt --help",
+      "expected_patterns": [
+        "(?i)usage"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "greynoise --help",
+      "expected_patterns": [
+        "(?i)usage"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
       "command": "ipinfo --help",
       "expected_text": [
         "Usage"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "urlscan-cli --help",
+      "expected_patterns": [
+        "(?i)usage"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "chaos -h",
+      "expected_patterns": [
+        "(?i)usage"
       ]
     },
     {

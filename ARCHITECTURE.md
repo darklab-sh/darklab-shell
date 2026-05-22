@@ -483,6 +483,7 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | `GET` | `/health` | Returns Docker/load-balancer health with DB and optional Redis checks; degraded dependencies return 503. |
 | `GET` | `/status` | Returns lightweight HUD status data for uptime, DB, Redis, and server time; always responds 200. |
 | `GET` | `/diag` | Serves IP-gated operator diagnostics as HTML or JSON; returns 404 outside `diagnostics_allowed_cidrs`. |
+| `GET` | `/diag/classifier-inspector` | Runs the same IP-gated one-line classifier check used by the `/diag` inspector without loading the full diagnostics page. |
 | `GET` | `/metrics` | Serves IP-gated Prometheus text metrics; returns 404 when metrics are disabled or the caller is outside `diagnostics_allowed_cidrs`. |
 
 ---
@@ -1723,7 +1724,7 @@ The current event inventory is:
 
 - `/health` remains the load-balancer contract and reports whether DB and Redis are healthy, with degraded states surfacing through status code.
 - `/status` is intentionally a softer browser-HUD contract and always responds 200 so status-pill polling never causes UI flapping or reconnect churn.
-- `/diag` is the operator-facing structured view that surfaces runtime config, service health, asset presence, database storage breakdowns, tool availability, and activity summaries without opening a shell session.
+- `/diag` is the operator-facing structured view that surfaces runtime config, service health, asset presence, database storage breakdowns, tool availability, activity summaries, and a line classifier inspector without opening a shell session.
 - `/metrics` is the Prometheus scrape contract for trendable operational signals, including HTTP traffic, runs, PTYs, rate limits, broker mode/activity, DB/Redis/workspace gauges, selected database hot-path latency, intel provider outcomes/cache size, evidence package builds, findings, snapshots, and error counters.
 
 These surfaces share the same runtime health model, but they target different consumers: infrastructure checks, browser chrome, operator diagnostics, and time-series monitoring.
@@ -1737,6 +1738,7 @@ Operationally, `/diag` sits on top of the same underlying sources described earl
 - Redis and database health come from the same runtime boundary described in **System Structure**
 - run counts, top commands, and stored artifacts come from the persistence layer described in **State And Persistence**
 - table/index or relation storage, logical payload estimates, search-index rollups, and largest saved-run hints come from the same database connection as the Database card; SQLite allocated byte counts appear when SQLite was built with `SQLITE_ENABLE_DBSTAT_VTAB`, while Postgres relation sizes come from catalog functions
+- the classifier inspector uses the backend output signal classifier against one pasted line and optional command context, so operators can see the resulting kind, role, signals, entities, root, and target without staging a run
 - config values reflect the browser/backend config split described in **Configuration Surfaces**
 - access control and denied-access logging reuse the same client-IP trust model described in **Security Model** and **Logging**
 - Prometheus counters, histograms, label normalizers, cardinality policies, and multiprocess registry setup live in `app/services/metrics/__init__.py`; scrape-time collectors for database, Redis, broker mode, workspace, intel cache size, Atlas, findings, snapshots, and provider-secret health live in `app/services/metrics/collectors.py`
@@ -1808,12 +1810,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,195
+- behavior tests: 3,206
 - docs/inventory meta-tests: 33
-- `pytest`: 1737 (1704 behavior + 33 meta)
-- `vitest`: 1239
+- `pytest`: 1744 (1711 behavior + 33 meta)
+- `vitest`: 1243
 - `playwright`: 252
-- total: 3,228
+- total: 3,239
 
 ### Testing Architecture
 

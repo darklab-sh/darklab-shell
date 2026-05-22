@@ -511,7 +511,7 @@ test.describe('? keyboard-shortcuts overlay', () => {
   test('overlay and shortcuts built-in share the same source', async ({ page }) => {
     // Built-in command output
     await runCommand(page, 'shortcuts')
-    const termText = await page.locator('.tab-panel.active .output').innerText()
+    const termText = await page.locator('.tab-panel.active .output').textContent() || ''
     // Overlay payload (grouped into sections)
     const overlay = await page.evaluate(async () => {
       const resp = await fetch('/shortcuts')

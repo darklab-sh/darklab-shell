@@ -130,6 +130,7 @@ body.diag-page::before { display: none; }
   grid-template-columns: repeat(4, minmax(0, 1fr));
   grid-template-areas:
     "app      db       redis    assets"
+    "classify classify classify classify"
     "dbd      dbd      redisd   redisd"
     "storage  storage  storage  storage"
     "cfg      cfg      cfg      cfg"
@@ -159,6 +160,7 @@ body.diag-page::before { display: none; }
 .diag-section.s-redis-details { grid-area: redisd; }
 .diag-section.s-storage { grid-area: storage; }
 .diag-section.s-config   { grid-area: cfg; }
+.diag-section.s-classifier { grid-area: classify; }
 .diag-section.s-usage    { grid-area: usage; }
 .diag-section.s-outcomes { grid-area: outcomes; }
 .diag-section.s-cmds     { grid-area: cmds; }
@@ -422,6 +424,102 @@ body.diag-page::before { display: none; }
   border-radius: 4px;
 }
 
+/* ── Classifier inspector ─────────────────────────────────────────────────── */
+.diag-classifier-form {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--theme-panel-border);
+}
+
+.diag-classifier-form.is-loading {
+  opacity: 0.74;
+}
+
+.diag-classifier-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 220px);
+  gap: 12px;
+}
+
+.diag-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.diag-field input,
+.diag-field select,
+.diag-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 4px;
+  background: var(--theme-bg);
+  color: var(--fg);
+  font: 14px var(--font-mono);
+  letter-spacing: 0;
+  padding: 9px 10px;
+}
+
+.diag-field textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.diag-field input:focus,
+.diag-field select:focus,
+.diag-field textarea:focus {
+  outline: none;
+  border-color: var(--green);
+  box-shadow: 0 0 0 1px var(--green-glow);
+}
+
+.diag-classifier-actions,
+.diag-classifier-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.diag-classifier-result {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px 18px;
+}
+
+.diag-classifier-result-region:empty {
+  display: none;
+}
+
+.diag-classifier-advanced {
+  border-top: 1px solid var(--theme-panel-border);
+  padding-top: 10px;
+}
+
+.diag-classifier-advanced summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+}
+
+.diag-classifier-advanced summary:focus-visible {
+  outline: 1px solid var(--green);
+  outline-offset: 3px;
+}
+
+.diag-classifier-advanced .diag-field {
+  margin-top: 10px;
+}
+
 /* ── Tools chip grid ────────────────────────────────────────────────────────── */
 .diag-tools-block {
   padding: 14px 14px 10px;
@@ -597,6 +695,7 @@ body.diag-page::before { display: none; }
     grid-template-areas:
       "app       db"
       "redis     assets"
+      "classify  classify"
       "dbd       dbd"
       "redisd    redisd"
       "storage   storage"
@@ -606,6 +705,7 @@ body.diag-page::before { display: none; }
       "tools     tools";
   }
   .diag-config-grid { grid-template-columns: 1fr; }
+  .diag-classifier-grid { grid-template-columns: 1fr; }
   .diag-cmd-cols { grid-template-columns: 1fr; }
   .diag-cmd-cols > * + * { border-left: none; border-top: 1px solid var(--theme-panel-border); }
 }

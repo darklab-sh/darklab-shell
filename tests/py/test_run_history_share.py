@@ -3560,11 +3560,30 @@ class TestRunStreaming:
                     "root": "shodan",
                     "category": "External Intel",
                     "policy": {"allow": ["shodan"], "deny": []},
+                    "help": {"flags": ["--help"], "subcommands": []},
                     "requires_secrets": [{"env": "SHODAN_API_KEY", "optional": False}],
                 },
             ],
             "pipe_helpers": [],
         }
+        fake_proc = _FakeProc(lines=["Usage: shodan [OPTIONS]\n", ""])
+
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.get_secret_value_for_env") as get_secret, \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            help_resp = _post_run(
+                client,
+                json={"command": "shodan --help"},
+                headers={"X-Session-ID": "sess-missing-secret"},
+            )
+
+        assert help_resp.status_code == 200
+        popen.assert_called_once()
+        get_secret.assert_not_called()
 
         with mock.patch("services.commands.registry.load_commands_registry", return_value=registry), \
              mock.patch("blueprints.run.subprocess.Popen") as popen:

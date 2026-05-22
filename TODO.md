@@ -47,9 +47,6 @@ Now that per-line `kind`, `role`, `signals`, `entities`, and `line_index` flow e
 
 **Smaller wins / quality**
 
-- **Virtual-scroll line coalescing.** `role=progress` and `role=status-line` are inherently last-value-wins. Folding consecutive same-role lines in the output renderer would let progress bars render as one updating line instead of thousands of stacked rows. Pairs with the existing high-volume-resume path.
-- **Builtin help / FAQ structured rendering.** `role=help-row`, `kv`, `section-header`, `faq-q`/`faq-a` are already classified. The Welcome screen could render these as a real table/accordion instead of text+ANSI.
-- **Diagnostics page classifier inspector.** `/diag` could grow a per-line inspector — paste a line, see how `OutputSignalClassifier` would assign `kind`/`role`/`signals`/`entities`. Useful for debugging classifier regressions without staging a real run.
 - **Classifier drift report.** Add a developer-only report that samples recent stored lines by `kind`/`role`/`signals` and highlights unknown or low-value buckets. This would make classifier regressions visible before they show up as noisy findings, watchers, or exports.
 - **PTY scrollback findings.** `app/services/pty/transcript.py:60` already has a `scrollback_findings` mode; filtering out `role=prompt-echo`/`pty-marker` would tighten its false-positive rate.
 - **Ctrl+R findings search discoverability.** Find a clearer way to surface findings-output search from reverse search without making normal command-history recall feel surprising.

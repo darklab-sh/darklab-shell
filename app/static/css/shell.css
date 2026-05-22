@@ -271,6 +271,17 @@ body.ln-on.ts-clock .output .shell-prompt-wrap::before {
   overflow-wrap: normal;
 }
 
+.output .line.progress,
+.output .line.status-line {
+  animation: none;
+}
+
+.output .line.progress .line-content,
+.output .line.status-line .line-content {
+  overflow: hidden;
+  white-space: pre;
+}
+
 .pty-screen {
   display: block;
   min-height: 22rem;
@@ -1708,8 +1719,10 @@ body.mobile-terminal-mode .output-follow-btn {
 .line.builtin-section {
   color: var(--blue);
   font-weight: 700;
+  letter-spacing: 0.04em;
   margin-top: 6px;
   margin-bottom: 2px;
+  text-transform: uppercase;
 }
 .line.builtin-kv .line-content {
   white-space: pre-wrap;
@@ -1730,6 +1743,24 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 .line.builtin-help-row {
   margin: 1px 0;
+}
+.line.builtin-help-row .line-content,
+.line.builtin-catalog-item .line-content {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5ch 1.25ch;
+}
+.builtin-help-command {
+  color: var(--green);
+  font-weight: 700;
+}
+.builtin-help-description {
+  color: var(--muted);
+}
+.builtin-inline-code {
+  color: var(--text);
+  font-weight: 700;
 }
 .line.builtin-signal-summary-header {
   color: var(--blue);
@@ -1802,8 +1833,24 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 .line.builtin-faq-a {
   color: var(--text);
-  padding-left: 1.5rem;
+  margin: 1px 0 4px;
   white-space: pre-wrap;
+}
+.line.builtin-faq-q .line-content,
+.line.builtin-faq-a .line-content {
+  align-items: baseline;
+  display: grid;
+  gap: 1ch;
+  grid-template-columns: 2ch minmax(0, 1fr);
+}
+.builtin-row-marker {
+  color: var(--green);
+  font-weight: 700;
+  text-align: right;
+}
+.builtin-faq-answer-text {
+  color: var(--text);
+  font-weight: 400;
 }
 .line.builtin-spacer {
   min-height: 0.45rem;

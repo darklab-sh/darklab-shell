@@ -1299,6 +1299,7 @@ If a session has run history, workspace files, project workspace records, user w
 **Behavior:**
 
 - `/diag` provides a live operator view of the running instance and is disabled by default.
+- The diagnostics page includes a classifier inspector near the top of the page. Paste one output line, optionally add the command context, and it shows the line's `kind`, `role`, signals, entities, command root, and target using the same backend classifier used for saved runs without rerunning the heavier diagnostics probes. An Advanced disclosure keeps the legacy line-class override available when you need to debug old transcript classes.
 - `/metrics` returns Prometheus text for scrape-based monitoring and uses the same IP/CIDR allowlist as `/diag`.
 - When the visiting IP is in the allowed range, a `⊕ diag` button appears in the desktop rail and the mobile menu alongside the other toolbar buttons. It stays hidden for all other visitors.
 
@@ -1327,6 +1328,7 @@ diagnostics_allowed_cidrs:
 | **Redis** | Whether Redis is configured, and connection status when it is |
 | **Vendor Assets** | Whether `ansi_up.js`, `jspdf.umd.min.js`, and the font files are present (`loaded`) or missing (`missing`) from `app/static/` |
 | **Config** | All operational config values: rate limits, timeouts, output caps, retention, proxy CIDRs, log settings |
+| **Classifier Inspector** | One-line output classifier check for kind, role, signals, entities, command root, target, and ANSI-stripped text; the Inspect action updates this section without reloading the full page |
 | **Activity** | Run counts for today, last 7 days, this month, this year, and all-time, plus outcome breakdown (success / failed / incomplete). SIGTERM-terminated runs stay in totals but are not counted as failures. |
 | **Top Commands** | Top 10 commands by run frequency and top 5 longest individual runs |
 | **Tools** | Per-tool availability derived from the allowlist — which command roots are present on `$PATH` and which are missing |

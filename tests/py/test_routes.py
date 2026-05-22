@@ -4058,6 +4058,36 @@ class TestDiagRoute:
             assert key in pty
         assert "Interactive PTY" in body
 
+    def test_classifier_inspector_reports_line_metadata(self):
+        client = self._allowed_client()
+        query = {
+            "format": "json",
+            "classifier_command": "masscan -p 1-1000 192.168.1.3",
+            "classifier_line": "rate:  0.10-kpps, 49.90% done,   0:00:09 remaining, found=2",
+        }
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag", query_string=query).data)
+            fast_data = json.loads(client.get(
+                "/diag/classifier-inspector",
+                query_string={key: value for key, value in query.items() if key != "format"},
+            ).data)
+            body = client.get(
+                "/diag",
+                query_string={key: value for key, value in query.items() if key != "format"},
+            ).get_data(as_text=True)
+
+        inspector = data["classifier_inspector"]
+        assert fast_data == inspector
+        assert inspector["submitted"] is True
+        assert inspector["result"]["kind"] == "info"
+        assert inspector["result"]["role"] == "progress"
+        assert inspector["result"]["command_root"] == "masscan"
+        assert inspector["result"]["signals"] == []
+        assert "Classifier Inspector" in body
+        assert "progress" in body
+        assert "diag-classifier-form" in body
+        assert body.index("Classifier Inspector") < body.index("Database Details")
+
     def test_every_config_key_belongs_to_a_group(self):
         """Drift guard: every key emitted into result['config'] must be
         listed in exactly one `_DIAG_CONFIG_GROUPS` entry, otherwise it

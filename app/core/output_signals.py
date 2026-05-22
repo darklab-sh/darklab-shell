@@ -12,6 +12,7 @@ import ipaddress
 import re
 from urllib.parse import urlparse
 
+from services.runs.output_model import LineRole
 from services.intel.canonical import (
     CanonicalizationError,
     canonical_cve,
@@ -107,49 +108,6 @@ _APP_SIGNAL_EXCLUDES = [
     re.compile(r"^\[workspace\]\s+(?:reading|writing)\s+\S", re.I),
 ]
 
-_HELP_FLAGS_BY_ROOT = {
-    "amass": {"-h", "-help", "--help"},
-    "assetfinder": {"-h", "--help"},
-    "chaos": {"-h", "--help"},
-    "curl": {"-h", "--help"},
-    "dig": {"-h"},
-    "dnsenum": {"-h", "--help"},
-    "dnsrecon": {"-h", "--help"},
-    "dnsx": {"-h", "--help"},
-    "feroxbuster": {"-h", "--help"},
-    "ffuf": {"-h", "--help"},
-    "fierce": {"-h", "--help"},
-    "fping": {"-h", "--help"},
-    "gobuster": {"-h", "--help"},
-    "greynoise": {"--help"},
-    "ipinfo": {"--help"},
-    "katana": {"-h", "-help", "--help"},
-    "masscan": {"--help"},
-    "mtr": {"-h", "--help"},
-    "naabu": {"-h", "-help", "--help"},
-    "nc": {"-h", "--help"},
-    "nikto": {"-help", "--help"},
-    "nmap": {"-h", "--help"},
-    "nuclei": {"-h", "--help"},
-    "openssl": {"-help"},
-    "httpx": {"-h", "--help"},
-    "ping": {"-h", "--help"},
-    "rustscan": {"--help"},
-    "shodan": {"--help"},
-    "sslscan": {"-h", "--help"},
-    "sslyze": {"--help"},
-    "subfinder": {"-h", "--help"},
-    "tcptraceroute": {"-h", "--help"},
-    "testssl": {"--help"},
-    "traceroute": {"--help"},
-    "urlscan-cli": {"--help"},
-    "vt": {"--help"},
-    "wafw00f": {"--help"},
-    "wget": {"-h", "--help"},
-    "whois": {"--help"},
-    "wpscan": {"-h", "--help"},
-}
-
 _DNS_SIGNAL_ROOTS = {"dig", "host", "nslookup"}
 _CRAWL_URL_ROOTS = {"katana"}
 _PROJECTDISCOVERY_ROOTS = {"chaos", "dnsx", "httpx", "katana", "naabu", "nuclei", "subfinder"}
@@ -209,6 +167,8 @@ _RUSTSCAN_OPEN_RE = re.compile(r"^Open\s+[0-9a-f:.]+:\d+$", re.I)
 _NAABU_FOUND_PORTS_RE = re.compile(r"^\[INF\]\s+Found\s+\d+\s+ports?\s+on host\b", re.I)
 _NUCLEI_RESULT_RE = re.compile(r"^\[[^\]]+\]\s+\[[a-z0-9_-]+\]\s+\[(?:info|low|medium|high|critical)\]\s+\S+", re.I)
 _SCAN_COMPLETED_RE = re.compile(r"^\[INF\]\s+Scan completed\b.*\bmatches found\.", re.I)
+_MASSCAN_RATE_RE = re.compile(r"^rate:\s+.*\bdone\b.*\bfound=\d+\b", re.I)
+_FFUF_PROGRESS_RE = re.compile(r"^::\s*Progress:\s*\[\d+/\d+\]\s*::", re.I)
 _CIDR_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}$")
 _DNS_BARE_IP_RE = re.compile(
     r"^(?:(?:\d{1,3}\.){3}\d{1,3}|[0-9a-f:]*[0-9a-f]+:[0-9a-f:]*[0-9a-f]+)$",
@@ -534,6 +494,16 @@ def _is_command_scoped_summary(root: str, stripped: str) -> bool:
 def _is_command_scoped_signal_noise(root: str, stripped: str) -> bool:
     if root == "gobuster" and _GOBUSTER_CONFIG_RE.search(stripped):
         return True
+    if _is_progress_role_line(root, stripped):
+        return True
+    return False
+
+
+def _is_progress_role_line(root: str, stripped: str) -> bool:
+    if root == "masscan" and _MASSCAN_RATE_RE.search(stripped):
+        return True
+    if root == "ffuf" and _FFUF_PROGRESS_RE.search(stripped):
+        return True
     return False
 
 
@@ -583,21 +553,13 @@ def tokenize_command(command: str) -> list[str]:
 
 
 def _is_help_output_command(command: str, root: str | None = None) -> bool:
-    tokens = tokenize_command(command)
-    resolved_root = str(root if root is not None else (tokens[0] if tokens else "")).lower()
-    if not resolved_root:
+    if not str(command or "").strip():
         return False
-    help_flags = _HELP_FLAGS_BY_ROOT.get(resolved_root)
-    if not help_flags:
+    try:
+        from services.commands.registry import is_help_invocation
+    except Exception:
         return False
-    return any(_normalize_help_flag_token(token) in help_flags for token in tokens[1:])
-
-
-def _normalize_help_flag_token(token: str) -> str:
-    raw = str(token or "")
-    if raw.startswith("--") or len(raw) > 2:
-        return raw.lower()
-    return raw
+    return is_help_invocation(command, root=root)
 
 
 def command_root(command: str) -> str:
@@ -770,6 +732,9 @@ class OutputSignalClassifier:
             metadata["target"] = target
         if scopes:
             metadata["signals"] = scopes
+        role = classify_line_role(text, root=self.root, command=self.command)
+        if role is not None:
+            metadata["role"] = role.value
         if self.cmd_type not in {"builtin"} and not self.is_help_output:
             entities = _extract_entities_for_command(self.root, text, source_line=self.line_index)
             if entities:
@@ -840,3 +805,13 @@ def classify_line(
             scopes.append(scope)
 
     return list(dict.fromkeys(scopes))
+
+
+def classify_line_role(text: str, *, root: str | None = None, command: str = "") -> LineRole | None:
+    stripped = _normalize_signal_text(text)
+    if not stripped:
+        return None
+    root = root if root is not None else command_root(command)
+    if _is_progress_role_line(root, stripped):
+        return LineRole.progress
+    return None

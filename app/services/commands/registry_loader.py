@@ -101,6 +101,42 @@ def normalize_allow_grouping_flags(raw_entry: dict) -> list[str]:
     return result
 
 
+def normalize_help_flag_token(token: object) -> str:
+    raw = str(token or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("--") or len(raw) > 2:
+        return raw.lower()
+    return raw
+
+
+def normalize_help_spec(raw_spec: object) -> dict[str, object]:
+    if not isinstance(raw_spec, dict):
+        return {}
+    raw_flags = raw_spec.get("flags", []) or []
+    if not isinstance(raw_flags, list):
+        raw_flags = [raw_flags]
+    raw_subcommands = raw_spec.get("subcommands", []) or []
+    if not isinstance(raw_subcommands, list):
+        raw_subcommands = [raw_subcommands]
+    flags = [
+        token
+        for token in (normalize_help_flag_token(item) for item in raw_flags)
+        if token
+    ]
+    subcommands = [
+        str(item or "").strip().lower()
+        for item in raw_subcommands
+        if str(item or "").strip()
+    ]
+    spec: dict[str, object] = {}
+    if flags:
+        spec["flags"] = dedupe_preserve_order(flags)
+    if subcommands:
+        spec["subcommands"] = dedupe_preserve_order(subcommands)
+    return spec
+
+
 def normalize_runtime_inject_flags(items) -> list[dict[str, object]]:
     result: list[dict[str, object]] = []
     for item in items or []:
@@ -338,6 +374,7 @@ def normalize_commands_registry_entry(
         "deny": normalize_policy_list(raw_policy.get("deny"), lowercase=False),
     }
     entry["workspace_flags"] = normalize_workspace_flags(raw_entry.get("workspace_flags"))
+    entry["help"] = normalize_help_spec(raw_entry.get("help"))
     entry["allow_grouping_flags"] = normalize_allow_grouping_flags(raw_entry)
     entry["runtime_adaptations"] = normalize_runtime_adaptations(raw_entry.get("runtime_adaptations"))
     entry["requires_secrets"] = normalize_required_secrets(raw_entry.get("requires_secrets"))
@@ -460,6 +497,23 @@ def merge_command_registry_entries(
         if overlay_entry.get("interactive"):
             interactive = merged.setdefault("interactive", {})
             interactive.update(deepcopy(overlay_entry["interactive"]))
+        if overlay_entry.get("help"):
+            help_spec = merged.setdefault("help", {})
+            if isinstance(help_spec, dict):
+                for key in ("flags", "subcommands"):
+                    values = [
+                        str(item)
+                        for item in help_spec.setdefault(key, [])
+                        if str(item).strip()
+                    ]
+                    seen_values = set(values)
+                    for item in overlay_entry.get("help", {}).get(key, []) or []:
+                        value = str(item)
+                        if value in seen_values:
+                            continue
+                        values.append(value)
+                        seen_values.add(value)
+                    help_spec[key] = values
         if overlay_entry.get("requires_secrets"):
             existing_secrets = {
                 (item.get("env"), item.get("inject_env") or item.get("env")): item

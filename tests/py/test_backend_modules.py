@@ -4783,6 +4783,12 @@ class TestDerivedCommandRegistry:
                     - ping
                   deny:
                     - ping -f
+                help:
+                  flags:
+                    - -h
+                    - --HELP
+                  subcommands:
+                    - Help
                 workspace_flags:
                   - flag: -iL
                     mode: read
@@ -4859,6 +4865,8 @@ class TestDerivedCommandRegistry:
                   examples:
                     - value: ping -c 4 darklab.sh
                       description: Send four probes
+                      smoke:
+                        profile: unauthenticated
               - root: mtr
                 category: Network
                 policy:
@@ -4892,6 +4900,11 @@ class TestDerivedCommandRegistry:
         assert ping["category"] == "Network"
         assert ping["policy"]["allow"] == ["ping"]
         assert ping["policy"]["deny"] == ["ping -f"]
+        assert ping["help"] == {"flags": ["-h", "--help"], "subcommands": ["help"]}
+        assert commands.is_help_invocation("ping -h", registry=registry)
+        assert commands.is_help_invocation("ping --help", registry=registry)
+        assert commands.is_help_invocation("ping help", registry=registry)
+        assert not commands.is_help_invocation("ping -H darklab.sh", registry=registry)
         assert ping["allow_grouping_flags"] == ["-v"]
         assert ping["workspace_flags"] == [
             {"flag": "-iL", "mode": "read", "value": "separate", "format": "text"},
@@ -4928,6 +4941,17 @@ class TestDerivedCommandRegistry:
                 "fallback_envs": ["VTCLI_APIKEY"],
             },
         ]
+        with mock.patch("services.commands.registry.load_commands_registry", return_value=registry):
+            assert commands.required_secrets_for_command("ping -h") == []
+            assert commands.required_secrets_for_command("ping example.org") == [
+                {"env": "SHODAN_API_KEY", "optional": False},
+                {
+                    "env": "VT_API_KEY",
+                    "optional": True,
+                    "inject_env": "VTCLI_APIKEY",
+                    "fallback_envs": ["VTCLI_APIKEY"],
+                },
+            ]
         mtr = registry["commands"][1]
         assert mtr["root"] == "mtr"
         assert mtr["interactive"] == {
@@ -4973,6 +4997,7 @@ class TestDerivedCommandRegistry:
         assert ping["autocomplete"]["subcommands"]["stats"]["flags"][0]["value"] == "--json"
         assert ping["autocomplete"]["subcommands"]["stats"]["examples"][0]["value"] == "ping stats --json"
         assert ping["autocomplete"]["examples"][0]["value"] == "ping -c 4 darklab.sh"
+        assert ping["autocomplete"]["examples"][0]["smoke"] == {"profile": "unauthenticated"}
         grep = registry["pipe_helpers"][0]
         assert grep["root"] == "grep"
         assert grep["autocomplete"]["pipe_command"] is True
@@ -8645,6 +8670,43 @@ class TestOutputSignals:
             "summaries",
         ]
 
+    def test_classifies_scanner_progress_lines_as_progress_role(self):
+        from blueprints.run import _capture_event_with_signals
+
+        masscan_classifier = OutputSignalClassifier("masscan -p 1-1000 192.168.1.3")
+        ffuf_classifier = OutputSignalClassifier("ffuf -u https://darklab.sh/FUZZ -w words.txt")
+
+        masscan_progress = masscan_classifier.classify_line(
+            "rate:  0.10-kpps, 49.90% done,   0:00:09 remaining, found=2"
+        )
+        masscan_waiting = masscan_classifier.classify_line(
+            "rate:  0.00-kpps, 100.00% done, waiting 10-secs, found=4"
+        )
+        ffuf_progress = ffuf_classifier.classify_line(
+            ":: Progress: [17778/87664] :: Job [1/1] :: 921 req/sec :: Duration: [0:00:19] :: Errors: 0 ::"
+        )
+
+        assert masscan_progress["role"] == LineRole.progress.value
+        assert masscan_waiting["role"] == LineRole.progress.value
+        assert ffuf_progress["role"] == LineRole.progress.value
+        assert "signals" not in masscan_progress
+        assert "signals" not in masscan_waiting
+        assert "signals" not in ffuf_progress
+
+        capture = RunOutputCapture(
+            "test-run-output-scanner-progress-role",
+            preview_limit=5,
+            persist_full_output=False,
+            full_output_max_bytes=0,
+        )
+        _capture_event_with_signals(
+            capture,
+            OutputSignalClassifier("ffuf -u https://darklab.sh/FUZZ -w words.txt"),
+            ":: Progress: [17778/87664] :: Job [1/1] :: 921 req/sec :: Duration: [0:00:19] :: Errors: 0 ::",
+        )
+
+        assert capture.preview_lines[0]["cls"] == LineRole.progress.value
+
     def test_signal_matching_uses_ansi_normalized_text(self):
         examples = [
             (
@@ -9497,7 +9559,13 @@ class TestAutocompleteContextLoading:
             },
             "shodan": {
                 "requires_secrets": [{"env": "SHODAN_API_KEY", "optional": False}],
+                "help": {"flags": ["--help"]},
                 "examples": [
+                    {
+                        "value": "shodan --help",
+                        "description": "Unauthenticated help",
+                        "smoke": {"profile": "unauthenticated"},
+                    },
                     {"value": "shodan host 8.8.8.8", "description": "Secret-required lookup"},
                 ],
             },
@@ -9511,7 +9579,7 @@ class TestAutocompleteContextLoading:
                 result = load_container_smoke_test_commands()
 
         load_context.assert_called_once_with({"workspace_enabled": False})
-        assert result == ["curl -I https://ip.darklab.sh"]
+        assert result == ["curl -I https://ip.darklab.sh", "shodan --help"]
 
     def test_container_smoke_test_interactive_commands_include_only_pty_examples(self):
         registry_context = {

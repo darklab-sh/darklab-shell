@@ -46,6 +46,8 @@
   {% set rstats = data.redis.stats or {} %}
   {% set broker = data.broker or {} %}
   {% set fb = broker.fallback or {} %}
+  {% set inspector = data.classifier_inspector or {} %}
+  {% set inspector_result = inspector.result or {} %}
   {% set assets_loaded = (1 if data.assets.ansi_up.ok else 0) + (1 if data.assets.jspdf.ok else 0) + (1 if data.assets.fonts.ok else 0) %}
 
   {% macro diag_config_value(value) -%}
@@ -54,6 +56,93 @@
     {%- elif value is sameas true %}true
     {%- elif value is sameas false %}<span class="diag-muted">false</span>
     {%- else %}{{ value }}{% endif %}
+  {%- endmacro %}
+
+  {% macro classifier_inspector_section(inspector, inspector_result) -%}
+  <section class="diag-section s-classifier diag-classifier-inspector">
+    <div class="diag-section-title">Classifier Inspector</div>
+    <form class="diag-classifier-form" method="get" action="/diag" data-diag-classifier-form>
+      {% if request.args.get('tz_offset') is not none %}
+      <input type="hidden" name="tz_offset" value="{{ request.args.get('tz_offset') }}">
+      {% endif %}
+      <div class="diag-classifier-grid">
+        <label class="diag-field">
+          <span>Command</span>
+          <input type="text" name="classifier_command" value="{{ inspector.command }}" placeholder="nmap -sV darklab.sh">
+        </label>
+        <label class="diag-field">
+          <span>Command type</span>
+          <select class="form-select" name="classifier_cmd_type">
+            <option value="real"{% if inspector.cmd_type != 'builtin' %} selected{% endif %}>real</option>
+            <option value="builtin"{% if inspector.cmd_type == 'builtin' %} selected{% endif %}>builtin</option>
+          </select>
+        </label>
+      </div>
+      <label class="diag-field diag-classifier-line">
+        <span>Output line</span>
+        <textarea name="classifier_line" rows="3" placeholder="Paste one output line to inspect">{{ inspector.line }}</textarea>
+      </label>
+      <details class="diag-classifier-advanced"{% if inspector.cls %} open{% endif %}>
+        <summary>Advanced</summary>
+        <label class="diag-field">
+          <span>Line class</span>
+          <input type="text" name="classifier_cls" value="{{ inspector.cls }}" placeholder="notice, progress, builtin-help-row">
+        </label>
+      </details>
+      <div class="diag-classifier-actions">
+        <button class="btn btn-primary btn-compact" type="submit">Inspect</button>
+        <a class="btn btn-secondary btn-compact" href="/diag{% if request.args.get('tz_offset') is not none %}?tz_offset={{ request.args.get('tz_offset') }}{% endif %}" data-diag-classifier-clear>Clear</a>
+      </div>
+    </form>
+    <div class="diag-classifier-result-region" aria-live="polite">
+    {% if inspector.submitted %}
+      {% if inspector_result %}
+      <div class="diag-classifier-result">
+        <div class="diag-classifier-summary">
+          <span class="diag-count-item"><span class="diag-count-name">kind</span><span class="diag-count-value">{{ inspector_result.kind }}</span></span>
+          <span class="diag-count-item"><span class="diag-count-name">role</span><span class="diag-count-value">{{ inspector_result.role }}</span></span>
+          <span class="diag-count-item"><span class="diag-count-name">root</span><span class="diag-count-value">{{ inspector_result.command_root or '—' }}</span></span>
+          <span class="diag-count-item"><span class="diag-count-name">target</span><span class="diag-count-value">{{ inspector_result.target or '—' }}</span></span>
+        </div>
+        <table class="diag-table">
+          <tr>
+            <td>signals</td>
+            <td>
+              {% if inspector_result.signals %}
+              <span class="diag-chips">
+                {% for signal in inspector_result.signals %}<span class="diag-chip present">{{ signal }}</span>{% endfor %}
+              </span>
+              {% else %}
+              <span class="diag-muted">none</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td>entities</td>
+            <td>
+              {% if inspector_result.entities %}
+              <div class="diag-count-list">
+                {% for entity in inspector_result.entities %}
+                <span class="diag-count-item">
+                  <span class="diag-count-name">{{ entity.type }}</span>
+                  <span class="diag-count-value">{{ entity.canonical_value }}</span>
+                </span>
+                {% endfor %}
+              </div>
+              {% else %}
+              <span class="diag-muted">none</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr><td>normalized</td><td><code>{{ inspector_result.normalized_text or '—' }}</code></td></tr>
+        </table>
+      </div>
+      {% else %}
+      <div class="diag-empty">Paste one output line to inspect.</div>
+      {% endif %}
+    {% endif %}
+    </div>
+  </section>
   {%- endmacro %}
 
   {# ── Health Summary ────────────────────────────────────────────────────── #}
@@ -129,6 +218,8 @@
       </div>
     </div>
   </section>
+
+  {{ classifier_inspector_section(inspector, inspector_result) }}
 
   {# ── Database Details ──────────────────────────────────────────────────── #}
   <section class="diag-section s-db-details">
@@ -602,8 +693,18 @@
     var inFlight = false;
     var indicator = document.querySelector('.diag-live-indicator');
 
+    function shouldDeferDiagRefresh() {
+      if (document.visibilityState !== 'visible') return true;
+      if (document.querySelector('.diag-classifier-form.is-dirty, .diag-classifier-form.is-loading')) return true;
+      return !!(
+        document.activeElement
+        && document.activeElement.closest
+        && document.activeElement.closest('.diag-classifier-form')
+      );
+    }
+
     async function refreshDiag() {
-      if (inFlight || document.visibilityState !== 'visible') return;
+      if (inFlight || shouldDeferDiagRefresh()) return;
       inFlight = true;
       if (indicator) indicator.classList.add('refreshing');
       try {
@@ -613,6 +714,7 @@
         });
         if (!resp.ok) return;
         var html = await resp.text();
+        if (shouldDeferDiagRefresh()) return;
         var doc = new DOMParser().parseFromString(html, 'text/html');
         var newMain = doc.querySelector('.diag-main');
         var oldMain = document.querySelector('.diag-main');
@@ -637,6 +739,183 @@
       // Refresh immediately when the tab becomes visible again so the
       // operator does not stare at a stale snapshot for up to 10s.
       if (document.visibilityState === 'visible') refreshDiag();
+    });
+    document.addEventListener('input', function (event) {
+      var form = event.target && event.target.closest
+        ? event.target.closest('.diag-classifier-form')
+        : null;
+      if (form) form.classList.add('is-dirty');
+    });
+  })();
+
+  // Classifier inspector: submit the small classifier request on its own so the
+  // expensive diagnostics probes do not rerun every time an operator checks one
+  // line. The form still has a normal GET action as a no-JS fallback.
+  (function () {
+    var CLASSIFIER_KEYS = [
+      'classifier_command',
+      'classifier_cls',
+      'classifier_cmd_type',
+      'classifier_line',
+    ];
+
+    function appendText(parent, tag, className, text) {
+      var el = document.createElement(tag);
+      if (className) el.className = className;
+      el.textContent = text == null || text === '' ? '—' : String(text);
+      parent.appendChild(el);
+      return el;
+    }
+
+    function appendCountItem(parent, name, value) {
+      var item = document.createElement('span');
+      item.className = 'diag-count-item';
+      appendText(item, 'span', 'diag-count-name', name);
+      appendText(item, 'span', 'diag-count-value', value);
+      parent.appendChild(item);
+    }
+
+    function appendTableRow(table, label, valueNode) {
+      var row = document.createElement('tr');
+      appendText(row, 'td', '', label);
+      var valueCell = document.createElement('td');
+      valueCell.appendChild(valueNode);
+      row.appendChild(valueCell);
+      table.appendChild(row);
+    }
+
+    function renderClassifierResult(region, payload) {
+      if (!region) return;
+      region.replaceChildren();
+      if (!payload || !payload.submitted) return;
+      if (!payload.result) {
+        appendText(region, 'div', 'diag-empty', 'Paste one output line to inspect.');
+        return;
+      }
+
+      var result = payload.result;
+      var wrap = document.createElement('div');
+      wrap.className = 'diag-classifier-result';
+
+      var summary = document.createElement('div');
+      summary.className = 'diag-classifier-summary';
+      appendCountItem(summary, 'kind', result.kind);
+      appendCountItem(summary, 'role', result.role);
+      appendCountItem(summary, 'root', result.command_root);
+      appendCountItem(summary, 'target', result.target);
+      wrap.appendChild(summary);
+
+      var table = document.createElement('table');
+      table.className = 'diag-table';
+
+      var signalCell = document.createElement('span');
+      if (Array.isArray(result.signals) && result.signals.length) {
+        signalCell.className = 'diag-chips';
+        result.signals.forEach(function (signal) {
+          appendText(signalCell, 'span', 'diag-chip present', signal);
+        });
+      } else {
+        appendText(signalCell, 'span', 'diag-muted', 'none');
+      }
+      appendTableRow(table, 'signals', signalCell);
+
+      var entityCell;
+      if (Array.isArray(result.entities) && result.entities.length) {
+        entityCell = document.createElement('div');
+        entityCell.className = 'diag-count-list';
+        result.entities.forEach(function (entity) {
+          var item = document.createElement('span');
+          item.className = 'diag-count-item';
+          appendText(item, 'span', 'diag-count-name', entity && entity.type);
+          appendText(item, 'span', 'diag-count-value', entity && entity.canonical_value);
+          entityCell.appendChild(item);
+        });
+      } else {
+        entityCell = document.createElement('span');
+        entityCell.className = 'diag-muted';
+        entityCell.textContent = 'none';
+      }
+      appendTableRow(table, 'entities', entityCell);
+
+      var code = document.createElement('code');
+      code.textContent = result.normalized_text || '—';
+      appendTableRow(table, 'normalized', code);
+
+      wrap.appendChild(table);
+      region.appendChild(wrap);
+    }
+
+    function syncClassifierUrl(form, clear) {
+      if (!window.history || typeof window.history.replaceState !== 'function') return;
+      var params = new URLSearchParams(window.location.search);
+      params.delete('format');
+      CLASSIFIER_KEYS.forEach(function (key) { params.delete(key); });
+      if (!clear) {
+        var data = new FormData(form);
+        CLASSIFIER_KEYS.forEach(function (key) {
+          var value = data.get(key);
+          if (value != null && String(value).trim()) params.set(key, value);
+        });
+        if (!params.has('classifier_cmd_type')) {
+          params.set('classifier_cmd_type', data.get('classifier_cmd_type') || 'real');
+        }
+      }
+      var query = params.toString();
+      window.history.replaceState(null, '', window.location.pathname + (query ? '?' + query : ''));
+    }
+
+    document.addEventListener('submit', async function (event) {
+      var form = event.target && event.target.matches && event.target.matches('[data-diag-classifier-form]')
+        ? event.target
+        : null;
+      if (!form) return;
+      event.preventDefault();
+      var card = form.closest('.diag-classifier-inspector');
+      var region = card ? card.querySelector('.diag-classifier-result-region') : null;
+      var submit = form.querySelector('[type="submit"]');
+      form.classList.add('is-loading');
+      form.setAttribute('aria-busy', 'true');
+      if (submit) submit.disabled = true;
+      try {
+        var params = new URLSearchParams(new FormData(form));
+        var resp = await fetch('/diag/classifier-inspector?' + params.toString(), {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' },
+        });
+        if (!resp.ok) throw new Error(String(resp.status));
+        renderClassifierResult(region, await resp.json());
+        form.classList.remove('is-dirty');
+        syncClassifierUrl(form, false);
+      } catch (_) {
+        if (region) appendText(region, 'div', 'diag-empty diag-fail', 'Classifier inspection failed.');
+      } finally {
+        form.classList.remove('is-loading');
+        form.removeAttribute('aria-busy');
+        if (submit) submit.disabled = false;
+      }
+    });
+
+    document.addEventListener('click', function (event) {
+      var clear = event.target && event.target.closest
+        ? event.target.closest('[data-diag-classifier-clear]')
+        : null;
+      if (!clear) return;
+      var card = clear.closest('.diag-classifier-inspector');
+      var form = card ? card.querySelector('[data-diag-classifier-form]') : null;
+      if (!form) return;
+      event.preventDefault();
+      CLASSIFIER_KEYS.forEach(function (key) {
+        var field = form.elements[key];
+        if (!field) return;
+        field.value = key === 'classifier_cmd_type' ? 'real' : '';
+      });
+      var region = card.querySelector('.diag-classifier-result-region');
+      if (region) region.replaceChildren();
+      form.classList.remove('is-dirty');
+      var advanced = form.querySelector('.diag-classifier-advanced');
+      if (advanced) advanced.open = false;
+      syncClassifierUrl(form, true);
     });
   })();
 

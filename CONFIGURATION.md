@@ -330,7 +330,7 @@ The `tour_enabled` setting in `config.yaml` is the kill-switch for tour entry po
 
 ## Command Registry Autocomplete
 
-`app/conf/commands.yaml` stores each external command under `commands`, with policy, runtime adaptations, encrypted secret requirements, workspace file flags, and root-aware flag, argument, subcommand, and example hints. Optional local additions can live in `app/conf/commands.local.yaml`. A local entry with a new `root` adds a new command; a local entry with an existing `root` merges into the base command entry instead of replacing it wholesale.
+`app/conf/commands.yaml` stores each external command under `commands`, with policy, help flags, runtime adaptations, encrypted secret requirements, workspace file flags, and root-aware flag, argument, subcommand, and example hints. Optional local additions can live in `app/conf/commands.local.yaml`. A local entry with a new `root` adds a new command; a local entry with an existing `root` merges into the base command entry instead of replacing it wholesale.
 
 ```yaml
 commands:
@@ -341,6 +341,10 @@ commands:
         - nmap
       deny:
         - nmap -sU
+    help:
+      flags:
+        - -h
+        - --help
     runtime_adaptations:
       inject_flags:
         - flags: [-sT]
@@ -354,10 +358,17 @@ commands:
         fallback_envs:
           - VTCLI_APIKEY
     autocomplete:
+      examples:
+        - value: nmap -h
+          description: Show help and usage
+          smoke:
+            profile: unauthenticated
       flags:
         - value: -sV
           description: Service/version detection
 ```
+
+`help.flags` marks invocations whose output should stay visible but should not create findings or Atlas entities. Help invocations also bypass required-secret preflight for that command root, so users can run safe `--help` commands before configuring provider keys. An example can opt into the default container smoke corpus with `smoke.profile: unauthenticated` when it is safe to run without provider credentials or workspace setup.
 
 `requires_secrets` names encrypted session secrets that should be passed to the subprocess environment for that command root. Required missing secrets or a missing session identity block launch before the process starts. Optional missing secrets log a warning and let the command run without that env var; the `ipinfo` wrapper uses this for `IPINFO_TOKEN` because the CLI can still return limited unauthenticated output. Secret values are never rendered into command text. `inject_env` lets a registry entry store a friendly app secret name while exporting the vendor-required env var to the subprocess. `fallback_envs` lets users store an accepted native name instead; the VirusTotal CLI entry accepts either `VT_API_KEY` or `VTCLI_APIKEY` and always launches `vt` with `VTCLI_APIKEY`. The urlscan and Chaos CLI wrappers use `URLSCAN_API_KEY` and `PDCP_API_KEY` from the same vault path. Interactive PTY commands can't declare `requires_secrets`; the registry rejects that combination because the PTY path doesn't inject secret env vars.
 

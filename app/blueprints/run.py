@@ -27,6 +27,7 @@ from services.commands.registry import (
     command_root,
     interactive_pty_spec_for_command,
     is_command_allowed,
+    is_help_invocation,
     parse_synthetic_postfilter,
     required_secrets_for_command,
     rewrite_command,
@@ -69,6 +70,7 @@ from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, run_kind_fo
 from services.runs.output_model import (
     LineEvent,
     LineKind,
+    LineRole,
     from_wire,
     legacy_cls_for_event,
     line_event_from_legacy,
@@ -354,12 +356,14 @@ def _capture_event_with_signals(
     metadata_event = line_event_from_legacy(
         base_event.text,
         legacy_cls_for_event(base_event),
+        role=metadata.get("role") if isinstance(metadata.get("role"), str) else base_event.role,
         signals=metadata.get("signals") if isinstance(metadata.get("signals"), list) else None,
         entities=metadata.get("entities") if isinstance(metadata.get("entities"), list) else None,
     )
     captured_event = replace(
         base_event,
         signals=metadata_event.signals,
+        role=metadata_event.role if metadata_event.role != LineRole.body else base_event.role,
         line_index=metadata.get("line_index") if isinstance(metadata.get("line_index"), int) else None,
         command_root=str(metadata.get("command_root", "")),
         target=str(metadata.get("target", "")),
@@ -1383,6 +1387,8 @@ def _filter_builtin_command_events(events, variable_notice: str, postfilter: _Sy
 
 
 def _resolve_secret_environment(command: str, session_id: str) -> tuple[dict[str, str], list[str]]:
+    if is_help_invocation(command):
+        return {}, []
     declarations = required_secrets_for_command(command)
     if not declarations:
         return {}, []

@@ -8,6 +8,10 @@ commands:
   - root: ping
     description: Sends ICMP echo probes to check host reachability and latency.
     category: Network Diagnostics
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - ping
@@ -54,6 +58,10 @@ commands:
   - root: fping
     description: Sends fast ICMP echo probes to one or more hosts with summary results.
     category: Network Diagnostics
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - fping
@@ -95,6 +103,9 @@ commands:
   - root: traceroute
     description: Maps the network path to a host by showing each hop and round-trip timing.
     category: Network Diagnostics
+    help:
+      flags:
+        - --help
     policy:
       allow:
         - traceroute
@@ -149,6 +160,10 @@ commands:
   - root: tcptraceroute
     description: Traces the network path to a TCP service by probing a specific destination port.
     category: Network Diagnostics
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - tcptraceroute
@@ -189,6 +204,10 @@ commands:
   - root: nc
     description: Tests TCP port reachability and basic interactive socket connectivity.
     category: Network Diagnostics
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - nc -z
@@ -289,6 +308,10 @@ commands:
   - root: mtr
     description: Combines traceroute and ping to show live hop-by-hop reachability and loss.
     category: Network Diagnostics
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - mtr
@@ -353,6 +376,9 @@ commands:
   - root: dig
     description: Queries DNS records and resolver behavior with detailed response output.
     category: Network Diagnostics
+    help:
+      flags:
+        - -h
     policy:
       allow:
         - dig
@@ -461,6 +487,9 @@ commands:
   - root: whois
     description: Retrieves domain, IP, and network registration records from WHOIS services.
     category: Network Diagnostics
+    help:
+      flags:
+        - --help
     policy:
       allow:
         - whois
@@ -505,6 +534,10 @@ commands:
   - root: curl
     description: Sends HTTP(S) requests and displays or saves the response.
     category: Network Diagnostics
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - curl
@@ -596,6 +629,10 @@ commands:
   - root: wget
     description: Downloads HTTP(S) resources and can save responses into session files.
     category: Network Diagnostics
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - wget
@@ -707,6 +744,9 @@ commands:
   - root: openssl
     description: Inspects TLS connections, certificates, and cryptographic details through OpenSSL subcommands.
     category: TLS / Certificates
+    help:
+      flags:
+        - -help
     policy:
       allow:
         - openssl s_client
@@ -823,6 +863,10 @@ commands:
   - root: sslscan
     description: Scans TLS services for supported protocols, cipher suites, and certificate details.
     category: TLS / Certificates
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - sslscan
@@ -879,6 +923,9 @@ commands:
   - root: sslyze
     description: Analyzes TLS server configuration and common SSL/TLS weaknesses.
     category: TLS / Certificates
+    help:
+      flags:
+        - --help
     policy:
       allow:
         - sslyze
@@ -954,6 +1001,10 @@ commands:
   - root: dnsrecon
     description: Performs DNS reconnaissance including record enumeration and zone transfer checks.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - dnsrecon
@@ -1069,6 +1120,10 @@ commands:
   - root: subfinder
     description: Discovers subdomains from passive sources and optional provider configuration.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - subfinder
@@ -1261,6 +1316,11 @@ commands:
   - root: amass
     description: Enumerates and manages attack-surface intelligence such as subdomains and related assets.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - -help
+        - --help
     policy:
       allow:
         - amass
@@ -1572,6 +1632,10 @@ commands:
   - root: dnsx
     description: Performs fast DNS lookups and filtering across domains or target lists.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - dnsx
@@ -1683,6 +1747,10 @@ commands:
   - root: httpx
     description: Probes HTTP(S) services and reports web metadata such as status, title, and technology signals.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - httpx
@@ -1857,6 +1925,10 @@ commands:
   - root: assetfinder
     description: Finds related domains and subdomains from public asset sources.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - assetfinder
@@ -1879,6 +1951,10 @@ commands:
   - root: fierce
     description: Finds DNS records, nearby hosts, and possible zone-transfer exposure for a domain.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - fierce
@@ -1922,6 +1998,10 @@ commands:
   - root: dnsenum
     description: Enumerates DNS records, nameservers, mail exchangers, and subdomains for a domain.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - dnsenum
@@ -1966,6 +2046,10 @@ commands:
   - root: gobuster
     description: Brute-forces web paths, DNS names, and virtual hosts using wordlists.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - gobuster
@@ -2279,6 +2363,10 @@ commands:
   - root: ffuf
     description: Fuzzes web requests with wordlists to discover paths, parameters, hosts, or other inputs.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - ffuf
@@ -2381,6 +2469,11 @@ commands:
   - root: naabu
     description: Performs fast port discovery against hosts or target lists.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - -help
+        - --help
     policy:
       allow:
         - naabu
@@ -2551,6 +2644,11 @@ commands:
   - root: katana
     description: Crawls web targets to discover URLs, forms, and linked resources.
     category: Network Reconnaissance
+    help:
+      flags:
+        - -h
+        - -help
+        - --help
     policy:
       allow:
         - katana
@@ -2767,6 +2865,9 @@ commands:
   - root: wafw00f
     description: Detects whether a web target is protected by a web application firewall.
     category: Network Reconnaissance
+    help:
+      flags:
+        - --help
     policy:
       allow:
         - wafw00f
@@ -2867,6 +2968,9 @@ commands:
   - root: masscan
     description: Runs high-speed port scans across hosts or networks.
     category: Vulnerability Scanning
+    help:
+      flags:
+        - --help
     policy:
       allow:
         - masscan
@@ -3011,6 +3115,9 @@ commands:
   - root: rustscan
     description: Performs fast port discovery and can hand results to deeper scanners.
     category: Vulnerability Scanning
+    help:
+      flags:
+        - --help
     policy:
       allow:
         - rustscan
@@ -3073,6 +3180,10 @@ commands:
   - root: nmap
     description: Scans hosts for open ports, services, versions, and network characteristics.
     category: Vulnerability Scanning
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - nmap
@@ -3245,6 +3356,9 @@ commands:
   - root: shodan
     description: Queries Shodan for internet-exposed host and service intelligence.
     category: External Intelligence
+    help:
+      flags:
+        - --help
     policy:
       allow:
         - shodan --help
@@ -3293,6 +3407,8 @@ commands:
       examples:
         - value: shodan --help
           description: Show help and usage
+          smoke:
+            profile: unauthenticated
         - value: shodan version
           description: Show the Shodan CLI version
         - value: shodan info
@@ -3426,6 +3542,9 @@ commands:
   - root: vt
     description: Queries VirusTotal for IP, domain, URL, and file-hash reputation.
     category: External Intelligence
+    help:
+      flags:
+        - --help
     policy:
       allow:
         - vt --help
@@ -3457,6 +3576,8 @@ commands:
       examples:
         - value: vt --help
           description: Show help and usage
+          smoke:
+            profile: unauthenticated
         - value: vt ip 8.8.8.8
           description: Look up an IP address
         - value: vt domain darklab.sh
@@ -3506,6 +3627,9 @@ commands:
   - root: greynoise
     description: Queries GreyNoise for internet scanner classification on public IPs.
     category: External Intelligence
+    help:
+      flags:
+        - --help
     policy:
       allow:
         - greynoise --help
@@ -3530,6 +3654,8 @@ commands:
       examples:
         - value: greynoise --help
           description: Show help and usage
+          smoke:
+            profile: unauthenticated
         - value: greynoise ip 8.8.8.8
           description: Look up full GreyNoise context for a public IP
         - value: greynoise quick 8.8.8.8
@@ -3558,6 +3684,9 @@ commands:
   - root: ipinfo
     description: Queries IPinfo for IP geolocation, ASN, and ownership context.
     category: External Intelligence
+    help:
+      flags:
+        - --help
     policy:
       allow:
         - ipinfo
@@ -3607,6 +3736,9 @@ commands:
   - root: urlscan-cli
     description: Submits URLs to urlscan.io, retrieves scan results, and searches urlscan data.
     category: External Intelligence
+    help:
+      flags:
+        - --help
     policy:
       allow:
         - urlscan-cli --help
@@ -3629,6 +3761,8 @@ commands:
       examples:
         - value: urlscan-cli --help
           description: Show help and usage
+          smoke:
+            profile: unauthenticated
         - value: urlscan-cli scan submit https://darklab.sh/
           description: Submit a URL for scanning
         - value: urlscan-cli search domain:darklab.sh
@@ -3668,6 +3802,10 @@ commands:
   - root: chaos
     description: Queries ProjectDiscovery Chaos for known subdomains of a domain.
     category: External Intelligence
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - chaos -h
@@ -3684,6 +3822,8 @@ commands:
       examples:
         - value: chaos -h
           description: Show help and usage
+          smoke:
+            profile: unauthenticated
         - value: chaos -d darklab.sh -silent
           description: List known subdomains for a domain
       flags:
@@ -3712,6 +3852,9 @@ commands:
   - root: testssl
     description: Tests TLS services for protocol support, cipher choices, certificate issues, and known weaknesses.
     category: Vulnerability Scanning
+    help:
+      flags:
+        - --help
     policy:
       allow:
         - testssl
@@ -3832,6 +3975,10 @@ commands:
   - root: nikto
     description: Scans web servers for common misconfigurations, risky files, and known issues.
     category: Vulnerability Scanning
+    help:
+      flags:
+        - -help
+        - --help
     policy:
       allow:
         - nikto
@@ -3911,6 +4058,10 @@ commands:
   - root: wpscan
     description: Scans WordPress sites for exposed versions, plugins, themes, and known vulnerabilities.
     category: Vulnerability Scanning
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - wpscan
@@ -3993,6 +4144,10 @@ commands:
   - root: nuclei
     description: Runs template-based checks to detect known exposures, misconfigurations, and vulnerabilities.
     category: Vulnerability Scanning
+    help:
+      flags:
+        - -h
+        - --help
     policy:
       allow:
         - nuclei

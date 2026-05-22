@@ -660,7 +660,10 @@ def required_secrets_for_command(command: str) -> list[dict[str, object]]:
     root = command_root(command)
     if not root:
         return []
-    for entry in load_commands_registry().get("commands", []) or []:
+    registry = load_commands_registry()
+    if is_help_invocation(command, root=root, registry=registry):
+        return []
+    for entry in registry.get("commands", []) or []:
         if str(entry.get("root") or "").strip().lower() == root:
             return [dict(item) for item in entry.get("requires_secrets") or [] if isinstance(item, dict)]
     return []
@@ -1024,6 +1027,8 @@ def autocomplete_context_from_commands_registry(registry: dict, cfg=None) -> dic
                     spec["description"] = entry["description"]
                 if entry.get("feature_required"):
                     spec["feature_required"] = entry["feature_required"]
+                if entry.get("help"):
+                    spec["help"] = deepcopy(entry["help"])
                 required_secrets = [
                     dict(item)
                     for item in entry.get("requires_secrets") or []
@@ -1033,6 +1038,50 @@ def autocomplete_context_from_commands_registry(registry: dict, cfg=None) -> dic
                     spec["requires_secrets"] = required_secrets
                 context[root] = spec
     return _filter_autocomplete_context_by_features(context, app_config.CFG if cfg is None else cfg)
+
+
+def _entry_for_command_root(root: str, registry: dict | None = None) -> dict | None:
+    resolved_root = str(root or "").strip().lower()
+    if not resolved_root:
+        return None
+    active_registry = registry or load_commands_registry()
+    for entry in active_registry.get("commands", []) or []:
+        if isinstance(entry, dict) and str(entry.get("root") or "").strip().lower() == resolved_root:
+            return entry
+    return None
+
+
+def is_help_invocation_for_spec(command: str, help_spec: object, root: str | None = None) -> bool:
+    """Return True when a command matches one command's help invocation metadata."""
+    tokens = split_command_argv(command)
+    resolved_root = str(root if root is not None else (tokens[0] if tokens else "")).strip().lower()
+    if not resolved_root or not tokens or tokens[0].lower() != resolved_root:
+        return False
+    if not isinstance(help_spec, dict):
+        return False
+
+    flags = {
+        registry_loader.normalize_help_flag_token(token)
+        for token in help_spec.get("flags", []) or []
+        if registry_loader.normalize_help_flag_token(token)
+    }
+    subcommands = {
+        str(token or "").strip().lower()
+        for token in help_spec.get("subcommands", []) or []
+        if str(token or "").strip()
+    }
+    if flags and any(registry_loader.normalize_help_flag_token(token) in flags for token in tokens[1:]):
+        return True
+    return bool(len(tokens) > 1 and tokens[1].lower() in subcommands)
+
+
+def is_help_invocation(command: str, root: str | None = None, registry: dict | None = None) -> bool:
+    """Return True when a command matches registry-declared help invocation metadata."""
+    tokens = split_command_argv(command)
+    resolved_root = str(root if root is not None else (tokens[0] if tokens else "")).strip().lower()
+    entry = _entry_for_command_root(resolved_root, registry)
+    help_spec = entry.get("help") if isinstance(entry, dict) else None
+    return is_help_invocation_for_spec(command, help_spec, root=resolved_root)
 
 
 def _attach_workspace_autocomplete_flags(spec: dict, workspace_flags: list[dict[str, object]]) -> dict:
@@ -1619,7 +1668,28 @@ def _normalize_context_suggestion(item):
     required_features = _suggestion_required_features(item)
     if required_features:
         result["feature_required"] = required_features if len(required_features) > 1 else required_features[0]
+    smoke = _normalize_smoke_metadata(item.get("smoke"))
+    if smoke is not None:
+        result["smoke"] = smoke
     return result
+
+
+def _normalize_smoke_metadata(raw_value):
+    if isinstance(raw_value, bool):
+        return raw_value
+    if isinstance(raw_value, str):
+        profile = raw_value.strip().lower()
+        return {"profile": profile} if profile else None
+    if not isinstance(raw_value, dict):
+        return None
+    result = {}
+    for key in ("profile", "purpose"):
+        value = str(raw_value.get(key) or "").strip().lower()
+        if value:
+            result[key] = value
+    if "enabled" in raw_value:
+        result["enabled"] = bool(raw_value["enabled"])
+    return result or None
 
 
 def _suggestion_enabled_for_features(item, cfg=None) -> bool:
@@ -2129,22 +2199,38 @@ def load_container_smoke_test_commands():
             if isinstance(sub_spec, dict):
                 yield from _example_sources(sub_spec)
 
+    def _example_smoke_profile(example: dict) -> str:
+        smoke = example.get("smoke")
+        if isinstance(smoke, str):
+            return smoke.strip().lower()
+        if isinstance(smoke, dict):
+            return str(smoke.get("profile") or "").strip().lower()
+        return ""
+
+    def _is_unauthenticated_help_smoke(root: str, spec: dict, example: dict) -> bool:
+        if _example_smoke_profile(example) != "unauthenticated":
+            return False
+        command = str(example.get("value") or "").strip()
+        return bool(command and is_help_invocation_for_spec(command, spec.get("help"), root=root))
+
     # The generic smoke corpus has no per-command file setup. Workspace-only
-    # examples and secret-required examples are covered by dedicated fixtures
-    # instead.
-    for spec in load_autocomplete_context_from_commands_registry({"workspace_enabled": False}).values():
+    # examples are covered by dedicated fixtures. Secret-required command roots
+    # only contribute examples explicitly marked as safe unauthenticated help
+    # smoke coverage.
+    for root, spec in load_autocomplete_context_from_commands_registry({"workspace_enabled": False}).items():
         if not isinstance(spec, dict):
             continue
+        root = str(root or "").strip().lower()
         required_secrets = [
             item for item in spec.get("requires_secrets") or []
             if isinstance(item, dict) and not bool(item.get("optional"))
         ]
-        if required_secrets:
-            continue
         for example in _example_sources(spec):
             if not isinstance(example, dict):
                 continue
             if not _suggestion_enabled_for_features(example, {"workspace_enabled": False}):
+                continue
+            if required_secrets and not _is_unauthenticated_help_smoke(root, spec, example):
                 continue
             command = str(example.get("value") or "").strip()
             if not command or command in seen:

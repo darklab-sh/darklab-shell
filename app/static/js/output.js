@@ -62,6 +62,7 @@ const _OUTPUT_SYNC_BURST_LIMIT = 60;
 const _OUTPUT_BATCH_SIZE = 300;
 const _OUTPUT_APPEND_LINES_CHUNK_SIZE = 300;
 const _OUTPUT_RESTORE_TAIL_DELAYS = [0, 16, 64, 160, 320];
+const _OUTPUT_COALESCED_LINE_ROLES = new Set(['progress', 'status-line']);
 const _pendingOutputBatches = new Map();
 const _OUTPUT_SIGNAL_SCOPES = _outputCore.OUTPUT_SIGNAL_SCOPES;
 const _HIGH_VOLUME_OUTPUT_DEFAULT_LINE_THRESHOLD = 50000;
@@ -312,6 +313,55 @@ function _syncOutputPrefixesForAppend(out, appendedLine = null) {
   out.style.setProperty('--output-prefix-width', `${_prefixWidthForOutput(out)}ch`);
 }
 
+function _coalescedOutputRoleForEvent(event) {
+  const role = String(event && event.role || '').trim();
+  return _OUTPUT_COALESCED_LINE_ROLES.has(role) ? role : '';
+}
+
+function _coalescedOutputRoleForLine(line) {
+  const role = String(line && line.dataset && line.dataset.outputRole || '').trim();
+  if (_OUTPUT_COALESCED_LINE_ROLES.has(role)) return role;
+  const classes = line && line.classList ? line.classList : null;
+  if (classes?.contains?.('progress')) return 'progress';
+  if (classes?.contains?.('status-line')) return 'status-line';
+  return '';
+}
+
+function _lastRenderedOutputLine(out) {
+  if (!out) return null;
+  let node = out.lastElementChild;
+  if (node && node.id === 'shell-prompt-wrap') node = node.previousElementSibling;
+  return node && node.classList?.contains?.('line') ? node : null;
+}
+
+function _replaceLastRenderedLineIfCoalescible(out, entry) {
+  const role = String(entry && entry.coalesceRole || '');
+  if (!role) return false;
+  const previous = _lastRenderedOutputLine(out);
+  if (!previous || _coalescedOutputRoleForLine(previous) !== role) return false;
+  _updateRenderedOutputLineInPlace(previous, entry.span);
+  return true;
+}
+
+function _updateRenderedOutputLineInPlace(current, next) {
+  if (!current || !next) return;
+  Array.from(current.attributes || []).forEach(attr => current.removeAttribute(attr.name));
+  Array.from(next.attributes || []).forEach(attr => current.setAttribute(attr.name, attr.value));
+  current.replaceChildren(...Array.from(next.childNodes || []));
+}
+
+function _queuePendingOutputEntry(state, entry) {
+  if (!state || !entry) return false;
+  const role = String(entry.coalesceRole || '');
+  const previous = state.items[state.items.length - 1];
+  if (role && previous && String(previous.coalesceRole || '') === role) {
+    state.items[state.items.length - 1] = entry;
+    return true;
+  }
+  state.items.push(entry);
+  return false;
+}
+
 function _isWelcomeLine(line) {
   if (!line || !line.classList) return false;
   return [...line.classList].some(cls => cls.startsWith('welcome-') || cls.startsWith('wlc-'));
@@ -381,6 +431,7 @@ function _getPendingOutputBatch(tabId) {
   if (!state) {
     state = {
       items: [],
+      rawLines: [],
       scheduled: false,
       burstCount: 0,
     };
@@ -400,7 +451,7 @@ function _cancelPendingOutputBatch(tabId) {
 
 function hasPendingOutputBatch(tabId) {
   const state = _pendingOutputBatches.get(tabId);
-  return !!(state && (state.scheduled || state.items.length > 0));
+  return !!(state && (state.scheduled || state.items.length > 0 || state.rawLines.length > 0));
 }
 
 function _schedulePendingOutputFlush(tabId) {
@@ -512,10 +563,21 @@ function _entityTokenFromText(text, entity, tabId) {
   return token;
 }
 
+function _prepareOutputRenderedLinks(container) {
+  if (!container || typeof container.querySelectorAll !== 'function') return;
+  container.querySelectorAll('a[href]').forEach(link => {
+    link.setAttribute('target', '_blank');
+    const rel = new Set(String(link.getAttribute('rel') || '').split(/\s+/).filter(Boolean));
+    rel.add('noopener');
+    link.setAttribute('rel', Array.from(rel).join(' '));
+  });
+}
+
 function _renderAnsiWithEntityTokens(content, text, entities, tabId) {
   const ranges = _outputEntityRanges(text, entities);
   if (!ranges.length) {
     content.innerHTML = _getAnsiRendererForTab(tabId).ansi_to_html(text);
+    _prepareOutputRenderedLinks(content);
     return;
   }
   const renderer = _getAnsiRendererForTab(tabId);
@@ -534,6 +596,7 @@ function _renderAnsiWithEntityTokens(content, text, entities, tabId) {
     trailing.innerHTML = renderer.ansi_to_html(text.slice(cursor));
     content.appendChild(trailing);
   }
+  _prepareOutputRenderedLinks(content);
 }
 
 function _openAtlasForOutputEntity(token, options = {}) {
@@ -978,11 +1041,11 @@ function _appendHighVolumeOutputNotice(tabId, state, { force = false } = {}) {
 
 function _flushPendingOutputBeforeHighVolumeSkip(tabId) {
   const state = _pendingOutputBatches.get(tabId);
-  if (!state || !state.items.length) return;
-  while (state.items.length > 0) {
+  if (!state || (!state.items.length && !state.rawLines.length)) return;
+  while (state.items.length > 0 || state.rawLines.length > 0) {
     _flushPendingOutputBatch(tabId);
     const latest = _pendingOutputBatches.get(tabId);
-    if (!latest || latest === state && !latest.items.length) break;
+    if (!latest || latest === state && !latest.items.length && !latest.rawLines.length) break;
   }
 }
 
@@ -1080,7 +1143,9 @@ function _bindHighVolumeOutputResumeButton(button) {
 }
 
 function _activateOutputCommandChip(command) {
-  const activate = typeof globalThis.activateFaqCommandChip === 'function'
+  const activate = typeof activateFaqCommandChip === 'function'
+    ? activateFaqCommandChip
+    : typeof globalThis.activateFaqCommandChip === 'function'
     ? globalThis.activateFaqCommandChip
     : null;
   if (typeof activate === 'function') activate(command);
@@ -1103,11 +1168,92 @@ function _appendOutputCommandChip(content, command, label = '') {
   content.appendChild(chip);
 }
 
+function _appendOutputInlineText(content, text) {
+  const parts = String(text || '').split(/(`[^`]+`)/g);
+  parts.forEach((part) => {
+    if (!part) return;
+    if (part.length >= 2 && part.startsWith('`') && part.endsWith('`')) {
+      const code = document.createElement('span');
+      code.className = 'builtin-inline-code';
+      code.textContent = part.slice(1, -1);
+      content.appendChild(code);
+      return;
+    }
+    content.appendChild(document.createTextNode(part));
+  });
+}
+
+function _appendBuiltinMarkerRow(content, marker, text, textClass = '') {
+  const markerEl = document.createElement('span');
+  markerEl.className = 'builtin-row-marker';
+  markerEl.textContent = marker;
+  const textEl = document.createElement('span');
+  textEl.className = ['builtin-row-text', textClass].filter(Boolean).join(' ');
+  _appendOutputInlineText(textEl, text);
+  content.append(markerEl, textEl);
+}
+
+function _appendBuiltinCommandCell(content, command) {
+  const value = String(command || '').trim();
+  if (/^[a-z][a-z0-9_.-]*$/i.test(value)) {
+    _appendOutputCommandChip(content, value, value);
+    return;
+  }
+  const commandEl = document.createElement('span');
+  commandEl.className = 'builtin-help-command';
+  commandEl.textContent = value;
+  content.appendChild(commandEl);
+}
+
+function _appendStructuredBuiltinHelpRow(content, text) {
+  const value = String(text || '').trim();
+  if (!value) return false;
+  const match = value.match(/^(\S+)(?:\s{2,}|\s+-\s+)(.+)$/);
+  if (!match) {
+    _appendOutputInlineText(content, value);
+    return true;
+  }
+  const command = match[1].trim();
+  const description = match[2].trim();
+  _appendBuiltinCommandCell(content, command);
+  const desc = document.createElement('span');
+  desc.className = 'builtin-help-description';
+  _appendOutputInlineText(desc, description);
+  content.appendChild(desc);
+  return true;
+}
+
+function _appendStructuredBuiltinLine(content, text, cls) {
+  const classes = String(cls || '').split(/\s+/).filter(Boolean);
+  if (classes.includes('builtin-faq-q')) {
+    _appendBuiltinMarkerRow(content, 'Q', String(text || '').replace(/^Q\s+/, ''), 'builtin-faq-question-text');
+    return true;
+  }
+  if (classes.includes('builtin-faq-a')) {
+    _appendBuiltinMarkerRow(content, 'A', String(text || '').replace(/^A\s+/, ''), 'builtin-faq-answer-text');
+    return true;
+  }
+  if (classes.includes('builtin-plain')) {
+    _appendOutputInlineText(content, text);
+    return true;
+  }
+  if (classes.includes('builtin-help-row') || classes.includes('builtin-catalog-item')) {
+    return _appendStructuredBuiltinHelpRow(content, text);
+  }
+  return false;
+}
+
+function _isBuiltinNoteLine(cls) {
+  return String(cls || '').split(/\s+/).filter(Boolean).includes('builtin-note');
+}
+
 function _buildOutputLine(event, tabId, now, runStart, metadata = null) {
   const text = String(event && event.text || '');
   const cls = _legacyClsForLineEvent(event);
   const span = document.createElement('span');
   span.className = 'line' + (cls ? ' ' + cls : '');
+  const coalesceRole = _coalescedOutputRoleForEvent(event);
+  if (event && event.role) span.dataset.outputRole = String(event.role || '');
   const content = document.createElement('span');
   content.className = 'line-content';
 
@@ -1139,10 +1285,14 @@ function _buildOutputLine(event, tabId, now, runStart, metadata = null) {
     button.title = 'Render new output lines live again';
     _bindHighVolumeOutputResumeButton(button);
     content.appendChild(button);
-  } else if (_isPlainOutputLineEvent(event)) {
-    content.textContent = text;
   } else if (metadata && typeof metadata.faq_command === 'string' && metadata.faq_command.trim()) {
     _appendOutputCommandChip(content, metadata.faq_command.trim(), String(text || '').trim());
+  } else if (_isBuiltinNoteLine(cls)) {
+    _renderAnsiWithEntityTokens(content, String(text || ''), [], tabId);
+  } else if (_appendStructuredBuiltinLine(content, text, cls)) {
+    // Rendered above from stable builtin output classes.
+  } else if (_isPlainOutputLineEvent(event)) {
+    content.textContent = text;
   } else {
     _renderAnsiWithEntityTokens(content, String(text || ''), _normalizeOutputEntities(metadata && metadata.entities), tabId);
   }
@@ -1155,7 +1305,7 @@ function _buildOutputLine(event, tabId, now, runStart, metadata = null) {
   };
   _applyOutputSignalMetadata(span, rawLine, metadata);
 
-  return { span, rawLine };
+  return { span, rawLine, coalesceRole };
 }
 
 function _appendOutputSpan(out, span) {
@@ -1262,7 +1412,9 @@ function _appendRestoredOutputSpan(out, rawLine, tabId) {
   const span = document.createElement('span');
   const event = _lineEventFromWire(rawLine || {});
   const cls = _legacyClsForLineEvent(event);
+  const coalesceRole = _coalescedOutputRoleForEvent(event);
   span.className = 'line' + (cls ? ' ' + cls : '');
+  if (event && event.role) span.dataset.outputRole = String(event.role || '');
   span.dataset.tsC = String(rawLine && rawLine.tsC || '');
   if (rawLine && rawLine.tsE) span.dataset.tsE = String(rawLine.tsE);
   if (Number.isInteger(rawLine && rawLine.line_number)) span.dataset.lineNumber = String(rawLine.line_number);
@@ -1281,13 +1433,19 @@ function _appendRestoredOutputSpan(out, rawLine, tabId) {
 
     const bodyText = stripPromptLabelFromEchoText(text);
     if (bodyText) content.appendChild(document.createTextNode(bodyText));
+  } else if (_isBuiltinNoteLine(cls)) {
+    _renderAnsiWithEntityTokens(content, text, [], tabId);
+  } else if (_appendStructuredBuiltinLine(content, text, cls)) {
+    // Rendered above from stable builtin output classes.
   } else if (_isPlainOutputLineEvent(event)) {
     content.textContent = text;
   } else {
     _renderAnsiWithEntityTokens(content, text, _normalizeOutputEntities(rawLine && rawLine.entities), tabId);
   }
   span.appendChild(content);
-  _appendOutputSpan(out, span);
+  if (!coalesceRole || !_replaceLastRenderedLineIfCoalescible(out, { span, coalesceRole })) {
+    _appendOutputSpan(out, span);
+  }
 }
 
 function renderRestoredTabOutput(tabId, rawLines) {
@@ -1342,18 +1500,26 @@ function _flushPendingOutputBatch(tabId) {
 
   const shouldStickToBottom = tab.followOutput !== false;
   const fragment = document.createDocumentFragment();
-  const wasLargeBurst = state.burstCount >= _OUTPUT_SYNC_BURST_LIMIT || state.items.length > 1;
+  const pendingItemCount = state.items.length;
+  const wasLargeBurst = state.burstCount >= _OUTPUT_SYNC_BURST_LIMIT || pendingItemCount > 1;
   const batch = state.items.splice(0, _OUTPUT_BATCH_SIZE);
-  batch.forEach(entry => {
+  const rawBatch = state.rawLines.splice(0, _OUTPUT_BATCH_SIZE);
+  const mountBatch = batch.slice();
+  mountBatch.forEach(entry => {
     entry.span.dataset.prefix = _isPrefixExcludedLine(entry.span) ? '' : _lineTimestampPrefix(entry.span);
-    fragment.appendChild(entry.span);
-    _syncTabRawLines(tab, entry.rawLine);
   });
-  _appendOutputSpan(out, fragment);
+  if (mountBatch.length && _replaceLastRenderedLineIfCoalescible(out, mountBatch[0])) {
+    mountBatch.shift();
+  }
+  mountBatch.forEach(entry => {
+    fragment.appendChild(entry.span);
+  });
+  if (mountBatch.length) _appendOutputSpan(out, fragment);
+  rawBatch.forEach(rawLine => _syncTabRawLines(tab, rawLine));
 
-  _trimOutputToMaxLines(out);
+  if (mountBatch.length) _trimOutputToMaxLines(out);
 
-  _syncOutputPrefixesForAppend(out);
+  if (batch.length) _syncOutputPrefixesForAppend(out);
   if (shouldStickToBottom) {
     _followOutputAfterAppend(out, tab, { afterLargeBatch: wasLargeBurst || batch.length > 1 });
   }
@@ -1364,7 +1530,7 @@ function _flushPendingOutputBatch(tabId) {
     else refreshSearchDiscoverabilityUi();
   }
 
-  if (state.items.length > 0) {
+  if (state.items.length > 0 || state.rawLines.length > 0) {
     _schedulePendingOutputFlush(tabId);
     return;
   }
@@ -1388,7 +1554,7 @@ function _maybeMountDeferredPrompt(tabId) {
   if (!tab || !tab.deferPromptMount || tab.st === 'running') return;
   if (typeof _tabSessionRestoreInProgress !== 'undefined' && _tabSessionRestoreInProgress) return;
   const state = _pendingOutputBatches.get(tabId);
-  if (state && (state.scheduled || state.items.length > 0)) return;
+  if (state && (state.scheduled || state.items.length > 0 || state.rawLines.length > 0)) return;
   tab.deferPromptMount = false;
   if (tabId === activeTabId && typeof mountShellPrompt === 'function') {
     mountShellPrompt(tabId, true);
@@ -1467,22 +1633,25 @@ function appendLine(text, cls, tabId, metadata = null) {
   }
   const state = _getPendingOutputBatch(id);
   const shouldBatch = state.scheduled || state.items.length > 0 || state.burstCount >= _OUTPUT_SYNC_BURST_LIMIT;
-  const { span, rawLine } = _buildOutputLine(event, id, now, runStart, normalized.metadata);
+  const entry = _buildOutputLine(event, id, now, runStart, normalized.metadata);
+  const { span, rawLine } = entry;
   const lineNumber = _assignOutputLineNumber(out, tab, span);
   if (lineNumber > 0) rawLine.line_number = lineNumber;
 
   if (shouldBatch) {
-    state.items.push({ span, rawLine });
+    _queuePendingOutputEntry(state, entry);
+    state.rawLines.push(rawLine);
     _schedulePendingOutputFlush(id);
     return;
   }
 
   state.burstCount += 1;
 
-  _appendOutputSpan(out, span);
+  const replacedCoalescedLine = _replaceLastRenderedLineIfCoalescible(out, entry);
+  if (!replacedCoalescedLine) _appendOutputSpan(out, span);
 
   // Enforce max output lines — drop oldest lines from the top.
-  _trimOutputToMaxLines(out);
+  if (!replacedCoalescedLine) _trimOutputToMaxLines(out);
 
   _syncOutputPrefixesForAppend(out, span);
   _followOutputAfterAppend(out, tab);
@@ -1527,10 +1696,11 @@ function appendLines(lines, tabId) {
           }
           continue;
         }
-        const { span, rawLine } = _buildOutputLine(entry.event, id, now, runStart, entry.metadata);
-        const lineNumber = _assignOutputLineNumber(out, tab, span);
-        if (lineNumber > 0) rawLine.line_number = lineNumber;
-        state.items.push({ span, rawLine });
+        const outputEntry = _buildOutputLine(entry.event, id, now, runStart, entry.metadata);
+        const lineNumber = _assignOutputLineNumber(out, tab, outputEntry.span);
+        if (lineNumber > 0) outputEntry.rawLine.line_number = lineNumber;
+        _queuePendingOutputEntry(state, outputEntry);
+        state.rawLines.push(outputEntry.rawLine);
       }
       state.burstCount = Math.max(state.burstCount, _OUTPUT_SYNC_BURST_LIMIT);
       _schedulePendingOutputFlush(id);

@@ -114,12 +114,30 @@ describe('appendLine', () => {
   })
 
   it('renders non-plain classes through ansi_to_html', () => {
-    const { appendLine } = loadOutputFns()
+    class LinkAnsiUp {
+      constructor() {
+        this.use_classes = false
+      }
+
+      ansi_to_html(text) {
+        const raw = String(text || '')
+        return raw
+          .replace(/\x1b]8;;([^\x07]+)\x07([^\x1b]+)\x1b]8;;\x07/g, '<a href="$1">$2</a>')
+          .replace(/^hello$/, '<em>hello</em>')
+      }
+    }
+    const { appendLine } = loadOutputFns({ AnsiUpCtor: LinkAnsiUp, appConfig: { max_output_lines: 10 } })
 
     appendLine('hello', '', 'tab-1')
+    appendLine('README: \x1b]8;;https://example.test\x07README\x1b]8;;\x07', 'builtin-note', 'tab-1')
 
-    const line = document.querySelector('.line')
+    const line = document.querySelector('.line:not(.builtin-note)')
     expect(line.innerHTML).toContain('<em>hello</em>')
+    const link = document.querySelector('.line.builtin-note a')
+    expect(link?.getAttribute('href')).toBe('https://example.test')
+    expect(link?.getAttribute('target')).toBe('_blank')
+    expect(link?.getAttribute('rel')).toBe('noopener')
+    expect(link?.textContent).toBe('README')
   })
 
   it('isolates ANSI parser state between tabs', () => {
@@ -235,6 +253,30 @@ describe('appendLine', () => {
     expect(line.querySelector('.line-content').innerHTML).toContain('<em>hello</em>')
   })
 
+  it('renders builtin help and FAQ rows as structured terminal content', () => {
+    const activateFaqCommandChip = vi.fn()
+    const { appendLine } = loadOutputFns({
+      appConfig: { max_output_lines: 20 },
+      extraGlobals: { activateFaqCommandChip },
+    })
+
+    appendLine('  history  Show saved runs', 'builtin-help-row', 'tab-1')
+    appendLine('Q  How do I export?', 'builtin-faq-q', 'tab-1')
+    appendLine('A  Run `help` first.', 'builtin-faq-a', 'tab-1')
+
+    const helpLine = document.querySelector('.line.builtin-help-row')
+    const chip = helpLine.querySelector('.faq-chip[data-faq-command="history"]')
+    expect(chip?.textContent).toBe('history')
+    expect(helpLine.querySelector('.builtin-help-description')?.textContent).toBe('Show saved runs')
+    chip.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(activateFaqCommandChip).toHaveBeenCalledWith('history')
+
+    expect(document.querySelector('.line.builtin-faq-q .builtin-row-marker')?.textContent).toBe('Q')
+    expect(document.querySelector('.line.builtin-faq-q .builtin-faq-question-text')?.textContent).toBe('How do I export?')
+    expect(document.querySelector('.line.builtin-faq-a .builtin-row-marker')?.textContent).toBe('A')
+    expect(document.querySelector('.line.builtin-faq-a .builtin-inline-code')?.textContent).toBe('help')
+  })
+
   it('trims old lines and keeps rawLines in sync', () => {
     const { appendLine, _getTabs } = loadOutputFns()
 
@@ -251,6 +293,62 @@ describe('appendLine', () => {
     expect(tab.rawLines).toHaveLength(2)
     expect(tab.rawLines[0].text).toBe('two')
     expect(tab.rawLines[1].text).toBe('three')
+  })
+
+  it('coalesces consecutive progress rows in the live renderer while retaining raw lines', () => {
+    const { appendLine, _getTabs } = loadOutputFns({ appConfig: { max_output_lines: 20 } })
+
+    appendLine({ text: '10%', kind: 'info', role: 'progress' }, 'tab-1')
+    const firstProgressLine = document.querySelector('.line.progress')
+    appendLine({ text: '20%', kind: 'info', role: 'progress' }, 'tab-1')
+    appendLine('done', '', 'tab-1')
+    appendLine({ text: 'index 1', kind: 'info', role: 'progress' }, 'tab-1')
+
+    const lines = Array.from(document.querySelectorAll('.line'))
+    expect(lines).toHaveLength(3)
+    expect(lines[0]).toBe(firstProgressLine)
+    expect(lines[0].textContent).toContain('20%')
+    expect(lines[0].dataset.lineNumber).toBe('2')
+    expect(lines[1].textContent).toContain('done')
+    expect(lines[2].textContent).toContain('index 1')
+    expect(_getTabs()[0].rawLines.map(line => line.text)).toEqual(['10%', '20%', 'done', 'index 1'])
+  })
+
+  it('coalesces batched status rows without dropping raw output history', async () => {
+    const { appendLines, _getTabs } = loadOutputFns({ appConfig: { max_output_lines: 20 } })
+
+    await appendLines([
+      { text: 'phase 1', kind: 'info', role: 'status-line' },
+      { text: 'phase 2', kind: 'info', role: 'status-line' },
+      { text: 'body', cls: '' },
+      { text: 'phase 3', kind: 'info', role: 'status-line' },
+      { text: 'phase 4', kind: 'info', role: 'status-line' },
+    ], 'tab-1')
+    await new Promise((resolve) => setTimeout(resolve, 25))
+
+    const lines = Array.from(document.querySelectorAll('.line'))
+    expect(lines).toHaveLength(3)
+    expect(lines.map(line => line.textContent.trim())).toEqual(['phase 2', 'body', 'phase 4'])
+    expect(lines[0].dataset.lineNumber).toBe('2')
+    expect(lines[2].dataset.lineNumber).toBe('5')
+    expect(_getTabs()[0].rawLines.map(line => line.text)).toEqual(['phase 1', 'phase 2', 'body', 'phase 3', 'phase 4'])
+  })
+
+  it('coalesces restored progress rows while keeping restored raw lines intact', () => {
+    const { renderRestoredTabOutput, _getTabs } = loadOutputFns({ appConfig: { max_output_lines: 20 } })
+
+    renderRestoredTabOutput('tab-1', [
+      { text: 'loading 1', cls: 'progress', tsC: '12:00:00', tsE: '+0.1s', line_number: 1 },
+      { text: 'loading 2', cls: 'progress', tsC: '12:00:01', tsE: '+0.2s', line_number: 2 },
+      { text: 'finished', cls: '', tsC: '12:00:02', tsE: '+0.3s', line_number: 3 },
+    ])
+
+    const lines = Array.from(document.querySelectorAll('.line'))
+    expect(lines).toHaveLength(2)
+    expect(lines[0].textContent).toContain('loading 2')
+    expect(lines[0].dataset.lineNumber).toBe('2')
+    expect(lines[1].textContent).toContain('finished')
+    expect(_getTabs()[0].rawLines.map(line => line.text)).toEqual(['loading 1', 'loading 2', 'finished'])
   })
 
   it('avoids full output scans while trimming in default prefix mode', () => {
