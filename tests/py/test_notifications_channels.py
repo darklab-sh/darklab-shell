@@ -129,6 +129,18 @@ def test_summary_fields_truncate_long_run_ids():
     assert ("Run", "...ef123456") in fields
 
 
+def test_summary_fields_format_structured_count_maps_as_text():
+    fields = format_summary_fields({
+        "summary_fields": {
+            "output_entity_type_counts": {"ip": 2, "domain": 2},
+            "output_signal_counts": {"findings": 2, "summaries": 1},
+        },
+    })
+
+    assert ("Output Entity Type Counts", "domain 2, ip 2") in fields
+    assert ("Output Signal Counts", "findings 2, summaries 1") in fields
+
+
 def test_discord_channel_formats_embed(monkeypatch):
     captured = {}
     monkeypatch.setattr("services.notifications.channels.webhook.get_channel_secret", lambda *_: "https://example.invalid/discord")

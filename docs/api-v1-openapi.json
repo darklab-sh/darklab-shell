@@ -2463,6 +2463,13 @@
       },
       "WatcherCreateRequest": {
         "properties": {
+          "baseline_mode": {
+            "enum": [
+              "existing_run",
+              "first_run"
+            ],
+            "type": "string"
+          },
           "baseline_run_id": {
             "type": "string"
           },
@@ -2502,9 +2509,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "baseline_run_id"
-        ],
         "type": "object"
       },
       "WatcherDiffSummary": {

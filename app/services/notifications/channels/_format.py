@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from services.notifications.models import notification_app_name
@@ -38,6 +39,30 @@ def humanize_key(value: str) -> str:
     return str(value or "").replace("_", " ").strip().title()
 
 
+def _format_mapping_value(value: Mapping[Any, Any]) -> str:
+    pairs: list[tuple[str, int]] = []
+    for raw_key, raw_count in value.items():
+        key = str(raw_key or "").strip()
+        if not key:
+            continue
+        try:
+            count = int(raw_count or 0)
+        except (TypeError, ValueError):
+            continue
+        if count <= 0:
+            continue
+        pairs.append((key, count))
+    if not pairs:
+        return ""
+    return ", ".join(f"{key} {count}" for key, count in sorted(pairs))
+
+
+def format_field_value(value: Any) -> str:
+    if isinstance(value, Mapping):
+        return truncate_text(_format_mapping_value(value))
+    return truncate_text(value)
+
+
 def notification_title(payload: dict[str, Any]) -> str:
     trigger = str(payload.get("trigger") or "notification").replace("_", " ")
     app_name = str(payload.get("app_name") or "").strip() or notification_app_name()
@@ -66,7 +91,9 @@ def format_summary_fields(payload: dict[str, Any]) -> list[tuple[str, str]]:
         for key in sorted(summary_fields):
             value = summary_fields.get(key)
             if value not in ("", None):
-                fields.append((humanize_key(str(key)), truncate_text(value)))
+                display_value = format_field_value(value)
+                if display_value:
+                    fields.append((humanize_key(str(key)), display_value))
     return fields
 
 

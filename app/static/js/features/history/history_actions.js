@@ -62,6 +62,11 @@ function _closeHistoryRunActionMenus(except = null) {
     wrap.classList.remove('open');
     wrap.querySelector('.history-run-action-menu-trigger')?.setAttribute('aria-expanded', 'false');
   });
+  document.querySelectorAll('.history-run-export-menu-wrap.open').forEach((wrap) => {
+    if (except && wrap === except) return;
+    wrap.classList.remove('open');
+    wrap.querySelector('.history-run-export-menu-trigger')?.setAttribute('aria-expanded', 'false');
+  });
 }
 
 function _resetHistoryActionMenuPosition(wrap) {

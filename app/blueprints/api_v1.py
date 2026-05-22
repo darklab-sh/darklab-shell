@@ -288,6 +288,15 @@ def _baseline_run_for_api_session(run_id: str, session_id: str, *, conn=None) ->
     return dict(row)
 
 
+def _api_baseline_mode_from_create(data: dict[str, Any]) -> str:
+    requested = str(data.get("baseline_mode") or "").strip().lower().replace("-", "_")
+    if requested in {"first_run", "first"}:
+        return "first_run"
+    if requested in {"existing_run", "existing", "run"}:
+        return "existing_run"
+    return "existing_run" if str(data.get("baseline_run_id") or "").strip() else "first_run"
+
+
 def _api_watcher_error_shape(exc: Exception) -> tuple[str, str, int]:
     if isinstance(exc, ApiAuthError):
         return exc.code, exc.message, exc.status_code
@@ -1410,7 +1419,10 @@ def api_watcher_create():
     try:
         data = _json_body()
         with db_connect() as conn:
-            baseline = _baseline_run_for_api_session(str(data.get("baseline_run_id") or ""), session_id, conn=conn)
+            baseline_mode = _api_baseline_mode_from_create(data)
+            baseline: dict[str, Any] = {}
+            if baseline_mode == "existing_run":
+                baseline = _baseline_run_for_api_session(str(data.get("baseline_run_id") or ""), session_id, conn=conn)
             command_text = str(data.get("command") or data.get("command_text") or baseline.get("command") or "")
             command = validate_schedule_command(
                 command_text,
@@ -1420,7 +1432,7 @@ def api_watcher_create():
             watcher = create_watcher(
                 session_id,
                 command_text=command,
-                baseline_run_id=str(baseline["id"]),
+                baseline_run_id=str(baseline.get("id") or ""),
                 cron_expr=data.get("cron_expr"),
                 cadence_preset=data.get("cadence_preset"),
                 timezone_name=data.get("timezone", data.get("timezone_name")),

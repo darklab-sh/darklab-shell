@@ -511,6 +511,7 @@ describe('history panel actions', () => {
     openMetadataEditorImpl = vi.fn(),
     openAtlasImpl = vi.fn(() => Promise.resolve()),
     openWatchersModalImpl = vi.fn(() => Promise.resolve()),
+    downloadBlobAsAttachmentImpl = vi.fn(),
     emitUiEvent = vi.fn(),
   } = {}) {
     document.body.innerHTML = `
@@ -608,7 +609,20 @@ describe('history panel actions', () => {
               Promise.resolve({
                 command: 'ping darklab.sh',
                 output: ['ok'],
+                output_entries: [{ text: 'ok', cls: '' }],
                 exit_code: 0,
+              }),
+          })
+        }
+        if (url === '/history/run-1?json') {
+          return Promise.resolve({
+            json: () =>
+              Promise.resolve({
+                id: 'run-1',
+                command: 'ping darklab.sh',
+                output_entries: [{ text: 'full export line', cls: '' }],
+                exit_code: 0,
+                started: '2026-01-01T00:00:00Z',
               }),
           })
         }
@@ -709,7 +723,7 @@ describe('history panel actions', () => {
           setTabStatus,
           hideTabKillBtn,
           showToast,
-          window: { open: windowOpen },
+          window: { open: windowOpen, downloadBlobAsAttachment: downloadBlobAsAttachmentImpl },
           refreshHistoryPanel: () => {},
           renderHistory: () => {},
           hideHistoryPanel: vi.fn(() => {
@@ -719,6 +733,7 @@ describe('history panel actions', () => {
           emitUiEvent,
           openAtlas: openAtlasImpl,
           openWatchersModal: openWatchersModalImpl,
+          downloadBlobAsAttachment: downloadBlobAsAttachmentImpl,
           bindPressable,
           confirmHistAction: () => {},
           executeHistAction: () => {},
@@ -741,6 +756,9 @@ describe('history panel actions', () => {
         _historySetPage,
         _historyRelativeTime,
         _historyResetSelectionOnClose,
+        _handleHistoryRunExport,
+        _historyRunPrimary,
+        _historyRunPlainExportText,
         _restoreBothHistoryCompareRuns,
         _highlightRestoredHistoryLine,
         resetHistoryMobileFilters,
@@ -766,6 +784,7 @@ describe('history panel actions', () => {
       openMetadataEditor: openMetadataEditorImpl,
       openAtlas: openAtlasImpl,
       openWatchersModal: openWatchersModalImpl,
+      downloadBlobAsAttachment: downloadBlobAsAttachmentImpl,
       emitUiEvent,
     }
   }
@@ -822,7 +841,16 @@ describe('history panel actions', () => {
   it('clicking a history entry row opens run details without closing the panel', async () => {
     const clipboard = { writeText: vi.fn(() => Promise.resolve()) }
     const openAtlas = vi.fn(() => Promise.resolve())
-    const { refreshHistoryPanel } = loadHistoryPanel({ clipboardImpl: clipboard, openAtlasImpl: openAtlas })
+    const {
+      refreshHistoryPanel,
+      apiFetch,
+      _handleHistoryRunExport,
+      _historyRunPrimary,
+      _historyRunPlainExportText,
+    } = loadHistoryPanel({
+      clipboardImpl: clipboard,
+      openAtlasImpl: openAtlas,
+    })
     const historyPanel = document.getElementById('history-panel')
     const cmdInput = document.getElementById('cmd')
     historyPanel.classList.add('open')
@@ -862,6 +890,15 @@ describe('history panel actions', () => {
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await Promise.resolve()
     expect(clipboard.writeText).toHaveBeenCalledWith('ping darklab.sh')
+
+    document.querySelector('.history-run-export-menu-trigger')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(document.querySelector('.history-run-export-menu-wrap').classList.contains('open')).toBe(true)
+    expect(_historyRunPrimary().id).toBe('run-1')
+    expect(_historyRunPlainExportText({ output_entries: [{ text: 'full export line', cls: '' }] }))
+      .toBe('full export line')
+    await _handleHistoryRunExport('txt')
+    expect(apiFetch).toHaveBeenCalledWith('/history/run-1?json', { cache: 'no-store' })
 
     document.querySelector('.history-run-action-menu-trigger').click()
     document

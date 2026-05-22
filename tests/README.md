@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,176
+- behavior tests: 3,180
 - docs/inventory meta-tests: 33
-- `pytest`: 1727 (1694 behavior + 33 meta)
-- `vitest`: 1230
+- `pytest`: 1728 (1695 behavior + 33 meta)
+- `vitest`: 1234
 - `playwright`: 252
-- total: 3,209
+- total: 3,214
 
 This document is organized in two parts:
 
@@ -392,14 +392,14 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `test_api_v1_schedules_reject_invalid_body_and_disallowed_command` | Verifies schedule API creates reject non-object bodies and commands that fail command policy. |
 | `test_api_v1_schedule_create_normalizes_string_false_enabled` | Verifies schedule API create treats string `"false"` as disabled instead of truthy. |
 | `test_api_v1_watchers_crud_run_now_accept_and_fire_audit_are_token_scoped` | Verifies watcher API CRUD, manual run-now, accept-baseline, fire audit rows, and cross-session 404 behavior. |
-| `test_api_v1_watchers_reject_invalid_body_disallowed_command_and_bad_baseline` | Verifies watcher API creates reject non-object bodies, hidden baselines, and commands that fail command policy. |
+| `test_api_v1_watchers_reject_invalid_body_disallowed_command_and_bad_baseline` | Verifies watcher API creates reject non-object bodies, hidden baselines, first-run commands that fail policy, and commands that fail command policy. |
 | `test_api_v1_openapi_route_matches_checked_in_contract` | Verifies live `/api/v1/openapi.json` matches the checked-in OpenAPI snapshot. |
 | `test_api_v1_notification_channels_crud_masks_secrets_and_lists_events` | Verifies notification channel API CRUD, secret masking, test-send payloads, and delivery event audit rows. |
 | `test_api_v1_notification_channels_are_token_scoped` | Verifies notification channel API reads and writes are scoped to the owning token. |
 | `test_api_v1_notification_channel_rejections_are_logged` | Verifies notification channel API rejections emit structured warning logs with session-safe context. |
 | `test_darklab_cli_notify_commands_use_secret_file_and_event_reader` | Verifies CLI notification commands read secrets from a JSON file, avoid command-line secret flags, and render channel/event table output. |
 | `test_darklab_cli_schedule_commands_manage_api_schedules` | Verifies CLI schedule commands create, list, inspect, pause, resume, run, list fires, and delete schedules through the API client. |
-| `test_darklab_cli_watch_commands_manage_api_watchers` | Verifies CLI watcher commands create, list, inspect, pause, resume, run, list fires, accept, and delete watchers through the API client. |
+| `test_darklab_cli_watch_commands_manage_api_watchers` | Verifies CLI watcher commands create existing-run and first-run watchers, list, inspect, pause, resume, run, list fires, accept, and delete watchers through the API client. |
 | `test_api_v1_openapi_generator_snapshot_is_current` | Verifies the checked-in OpenAPI JSON matches the generator output byte-for-byte. |
 | `test_api_v1_openapi_contract_describes_public_shapes` | Verifies the OpenAPI contract includes core request, response, parameter, stream, and error shapes. |
 | `test_api_v1_whoami_last_seen_is_current_auth_timestamp` | Verifies `whoami` reports and stores the current successful API authentication timestamp. |
@@ -489,7 +489,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWatchersFoundation.test_watcher_fire_insert_is_idempotent_for_same_watcher_and_run` | Verifies duplicate watcher-fire records for the same watcher and run reuse the existing audit row. |
 | `TestWatchersFoundation.test_watcher_update_pause_resume_and_accept_baseline_update_owned_schedule` | Verifies watcher edit, pause, resume, and accept-baseline actions keep the watcher row and owned schedule aligned. |
 | `TestWatchersFoundation.test_watcher_schedule_fire_launches_run_and_records_pending_fire` | Verifies watcher-owned schedules launch through scheduler dispatch, mark the watcher as firing, and record a pending watcher fire. |
-| `TestWatchersFoundation.test_watcher_full_cycle_fires_detects_change_notifies_and_accepts_baseline` | Verifies a watcher can fire with no changes, fire again with a detected change, queue a notification, and promote the changed run as the new baseline. |
+| `TestWatchersFoundation.test_watcher_full_cycle_captures_first_run_detects_change_notifies_and_accepts_baseline` | Verifies a watcher can capture the first successful run as its baseline, fire again with a detected change, queue a notification, and promote the changed run as the new baseline. |
 | `TestWatchersFoundation.test_watcher_textual_diff_reports_entity_delta` | Verifies textual watcher diffs report added, removed, and unchanged structured entities when line metadata is available. |
 | `TestWatchersFoundation.test_watcher_finalize_changed_diff_updates_state_and_queues_notification` | Verifies completed watcher runs with a textual diff move to changed state and queue a watcher-changed notification. |
 | `TestWatchersFoundation.test_watcher_finalize_no_change_recovers_only_after_changed_state` | Verifies no-change watcher fires stay quiet from ok state and emit recovered only after a prior changed state. |
@@ -1092,6 +1092,7 @@ Slack, Discord, Telegram, and Pushover notification channel coverage.
 | `test_registered_channels_implement_delivery_contract` | Verifies every registered notification channel implements the shared validation and send contract. |
 | `test_slack_channel_formats_blocks` | Verifies Slack notifications use incoming-webhook blocks with a header and summary fields. |
 | `test_summary_fields_truncate_long_run_ids` | Verifies chat/email notification summary fields shorten long run ids to a readable suffix. |
+| `test_summary_fields_format_structured_count_maps_as_text` | Verifies structured notification count maps render as compact text instead of Python dictionary syntax. |
 | `test_discord_channel_formats_embed` | Verifies Discord notifications use embeds with a title, fields, and timestamp footer. |
 | `test_chat_webhook_channels_share_retry_and_terminal_outcomes` | Verifies chat-webhook channels share retryable 5xx and terminal 4xx handling. |
 | `test_telegram_channel_requires_chat_id` | Verifies Telegram channels require a non-secret chat id in channel config. |
@@ -1785,11 +1786,11 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestSchedulesRoutes.test_schedule_create_and_patch_normalize_edge_inputs` | Verifies browser schedule routes normalize disabled string booleans, trim labels, reject invalid timezones and blank commands, and preserve paused schedules during cadence updates. |
 | `TestSchedulesRoutes.test_schedule_fires_pagination_bounds` | Verifies schedule fire audit pagination returns stable limits, offsets, totals, has-more flags, and newest-first rows. |
 | `TestWatchersRoutes.test_watcher_routes_crud_and_cascade_owned_schedule` | Verifies browser watcher create/list/pause/resume/delete behavior, cross-session isolation, and owned-schedule cascade cleanup. |
-| `TestWatchersRoutes.test_watcher_create_validates_baseline_visibility_and_completion` | Verifies watcher creation hides cross-session baseline runs and rejects unfinished current-session baselines. |
+| `TestWatchersRoutes.test_watcher_create_validates_baseline_visibility_and_completion` | Verifies watcher creation hides cross-session baseline runs, rejects unfinished current-session baselines, and allows first-run baseline creation. |
 | `TestWatchersRoutes.test_watcher_accept_baseline_promotes_latest_fire_and_resets_state` | Verifies accept-baseline promotes the latest watcher fire and clears changed-state counters. |
 | `TestWatchersRoutes.test_watcher_run_now_keeps_same_command_fire_audits_separate` | Verifies manual watcher fire creates audit rows only for the selected watcher even when another watcher has the same command. |
 | `TestWatchBuiltin.test_watch_builtin_create_list_info_and_state_changes` | Verifies the terminal watch command creates, lists, inspects, pauses, resumes, and deletes current-session watchers and owned schedules. |
-| `TestWatchBuiltin.test_watch_builtin_validates_baseline_and_command_policy` | Verifies the terminal watch command rejects missing, unfinished, and disallowed-command baselines before persistence. |
+| `TestWatchBuiltin.test_watch_builtin_validates_baseline_and_command_policy` | Verifies the terminal watch command rejects missing, unfinished, and disallowed-command baselines before persistence, and creates pending first-run watchers. |
 | `TestWatchBuiltin.test_watch_builtin_run_records_fire_and_accepts_latest_baseline` | Verifies the terminal watch run subcommand records watcher fire audit rows and accept promotes the latest watcher run as baseline. |
 | `TestWatchBuiltin.test_watch_builtin_requires_durable_session_token` | Verifies the terminal watch command requires a persistent session token. |
 | `TestScheduleBuiltin.test_schedule_builtin_create_list_info_and_state_changes` | Verifies the terminal schedule command creates, lists, inspects, pauses, resumes, and deletes current-session schedules. |
@@ -2003,6 +2004,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `pauses resumes and fires schedules from the modal action buttons` | Verifies Schedules modal pause, resume, and run-now actions call the right endpoints and refresh action state. |
 | `prompts before switching schedules or creating a new schedule with unsaved edits` | Verifies that dirty Schedule modal edits prompt before selecting another schedule or starting a new one. |
 | `creates watchers from a baseline run and renders diff audit rows` | Verifies the Watchers modal creates a watcher from a Run Details baseline, sends cadence/options payloads, renders comparison-style diff details, and shows fire audit run handoffs. |
+| `creates watchers that capture the first run as the baseline` | Verifies the Watchers modal can create a first-run watcher without a Run ID and shows the pending baseline state. |
 | `pauses resumes fires and accepts watcher baselines from action buttons` | Verifies Watchers modal pause, resume, run-now, and accept-baseline actions call the right endpoints and confirmation flow. |
 | `does not let history outside-click dismissal close behind modal overlays` | Verifies that History drawer outside-click dismissal exempts modal overlays so stacked editors keep focus. |
 | `applies the saved theme at startup` | Verifies that applies the saved theme at startup. |
@@ -2602,6 +2604,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `creates a .line span for each entry` | Verifies that creates a .line span for each entry. |
 | `adds the cls class alongside "line"` | Verifies that adds the cls class alongside "line". |
 | `calls ansi_to_html for normal output lines` | Verifies that calls ansi_to_html for normal output lines. |
+| `renders structured finding and entity highlights on the permalink page` | Verifies that permalink output shows structured finding badges and entity highlights. |
+| `toggles structured finding and entity highlights without changing output text` | Verifies that the permalink highlight toggle hides visual emphasis without changing the rendered transcript text. |
 | `uses ExportHtmlUtils.renderExportPromptEcho for prompt-echo lines` | Verifies that uses ExportHtmlUtils.renderExportPromptEcho for prompt-echo lines. |
 | `uses ExportHtmlUtils role helpers for typed prompt lines` | Verifies that typed prompt-role lines use the shared export role helpers before rendering. |
 | `uses textContent (not ansi_to_html) for plain classes` | Verifies that uses textContent (not ansi_to_html) for plain classes. |
@@ -3054,6 +3058,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `builds exported HTML with color-scheme metadata and themed shell surfaces` | Verifies that builds exported HTML with color-scheme metadata and themed shell surfaces. |
 | `builds a shared export header model with canonical run-meta ordering` | Verifies that the shared export header model preserves the canonical run-meta ordering used across permalink, HTML, and PDF surfaces. |
 | `renders export header html with the same title/meta/run-meta structure as permalink pages` | Verifies that the shared export header HTML matches the permalink page title/meta/run-meta structure. |
+| `can build exported HTML with structured highlights initially off` | Verifies that saved HTML exports include the highlight toggle and can load with structured highlights already muted. |
 | `saveTab shows a toast when there is only welcome output` | Verifies that saveTab shows a toast when there is only welcome output. |
 | `saveTab does not apply redaction rules to exported text` | Verifies that saveTab does not apply redaction rules to exported text. |
 | `exportTabHtml does not apply redaction rules to rendered HTML output` | Verifies that exportTabHtml does not apply redaction rules to rendered HTML output. |

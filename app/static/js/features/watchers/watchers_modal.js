@@ -89,9 +89,11 @@ function _watcherDraftFromWatcher(watcher = null, baselineRun = null) {
     watcher?.baseline_run_id || baselineRun?.id || baselineRun?.run_id || '',
   ).trim();
   const command = String(watcher?.command_text || baselineRun?.command || '').trim();
+  const baselineMode = baselineId ? 'existing_run' : 'first_run';
   return {
     id: watcher?.id || '',
     label: String(watcher?.label || '').trim(),
+    baseline_mode: baselineMode,
     baseline_run_id: baselineId,
     command_text: command,
     cadence_preset: preset,
@@ -181,6 +183,9 @@ function _watcherTimezoneOptions(selected) {
 
 function _watcherStateLabel(watcher) {
   const state = String(watcher?.state || '').trim().toLowerCase();
+  if (!String(watcher?.baseline_run_id || '').trim() && state !== 'firing' && state !== 'paused' && state !== 'error') {
+    return 'pending baseline';
+  }
   if (!state) return 'ok';
   if (state === 'firing') return 'firing';
   if (state === 'paused') return 'paused';
@@ -192,7 +197,7 @@ function _watcherStateLabel(watcher) {
 function _watcherStateTone(watcher) {
   const label = _watcherStateLabel(watcher);
   if (label === 'ok') return 'badge-tone-green';
-  if (label === 'changed' || label === 'firing') return 'badge-tone-amber';
+  if (label === 'changed' || label === 'firing' || label === 'pending baseline') return 'badge-tone-amber';
   if (label === 'error') return 'badge-tone-red';
   return 'badge-tone-muted';
 }
@@ -239,6 +244,7 @@ function _normalizeWatcherComparable(data = {}) {
   return {
     label: String(data.label || '').trim(),
     baseline_run_id: String(data.baseline_run_id || '').trim(),
+    baseline_mode: String(data.baseline_mode || (data.baseline_run_id ? 'existing_run' : 'first_run')).trim(),
     command: String(data.command ?? data.command_text ?? '').trim(),
     cadence_preset: preset === 'custom' ? '' : preset,
     cron_expr: String(data.cron_expr || WATCHERS_DEFAULT_CRON).trim(),
@@ -272,6 +278,7 @@ function _watcherNewDraftHasMeaningfulInput(draft) {
   return !!(
     data.label
     || data.baseline_run_id
+    || data.baseline_mode !== 'first_run'
     || data.command
     || data.cadence_preset !== 'hourly'
     || data.cron_expr !== WATCHERS_DEFAULT_CRON
@@ -366,7 +373,7 @@ function _renderWatchersList() {
     meta.className = 'watchers-list-meta';
     const schedule = _watcherSchedule(watcher);
     const cadence = schedule.cadence_preset || schedule.cron_expr || 'custom';
-    meta.textContent = `${cadence} - baseline ${watcher.baseline_run_id || 'unknown'}`;
+    meta.textContent = `${cadence} - baseline ${watcher.baseline_run_id || 'pending'}`;
     const status = document.createElement('span');
     status.className = `badge ${_watcherStateTone(watcher)} watchers-list-status`;
     status.textContent = _watcherStateLabel(watcher);
@@ -465,6 +472,29 @@ function _setWatcherCadencePreset(value) {
   });
 }
 
+function _setWatcherBaselineMode(value, root = document) {
+  const mode = value === 'existing_run' ? 'existing_run' : 'first_run';
+  root.querySelectorAll('.watchers-baseline-mode-btn').forEach((btn) => {
+    const active = btn.dataset.watcherBaselineMode === mode;
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-checked', active ? 'true' : 'false');
+  });
+  const baselineInput = root.querySelector('#watchers-baseline-input');
+  const commandInput = root.querySelector('#watchers-command-input');
+  if (baselineInput) {
+    baselineInput.disabled = mode === 'first_run';
+    baselineInput.required = mode === 'existing_run';
+    baselineInput.placeholder = mode === 'first_run' ? 'Captured after the first successful run' : 'Completed run id';
+    if (mode === 'first_run') baselineInput.value = '';
+  }
+  if (commandInput) {
+    commandInput.required = mode === 'first_run';
+    commandInput.placeholder = mode === 'first_run'
+      ? 'Command to run for the first baseline and future checks'
+      : 'Inherits the baseline command when left blank';
+  }
+}
+
 function _watcherPreviewNode() {
   const wrap = document.createElement('div');
   wrap.className = 'watchers-preview';
@@ -525,7 +555,6 @@ function _renderWatcherForm(parent, watcher) {
   const baselineInput = _watcherInput(draft.baseline_run_id, {
     id: 'watchers-baseline-input',
     autocomplete: 'off',
-    required: 'required',
   });
   if (watcher) {
     baselineInput.readOnly = true;
@@ -536,7 +565,7 @@ function _renderWatcherForm(parent, watcher) {
   commandInput.value = draft.command_text;
   commandInput.rows = 3;
   commandInput.spellcheck = false;
-  commandInput.placeholder = 'Inherits the baseline command when left blank';
+  commandInput.placeholder = 'Command to run for the first baseline and future checks';
   const timezoneInput = _watcherTimezoneSelect(draft.timezone || _watcherDefaultTimezone());
   const cronInput = _watcherInput(draft.cron_expr || WATCHERS_DEFAULT_CRON, {
     id: 'watchers-cron-input',
@@ -544,12 +573,44 @@ function _renderWatcherForm(parent, watcher) {
     required: 'required',
   });
 
+  form.appendChild(_watcherFormField('Label', labelInput));
+  const baselineMode = document.createElement('div');
+  baselineMode.className = 'watchers-field watchers-cadence-field';
+  const baselineModeLabel = document.createElement('span');
+  baselineModeLabel.className = 'watchers-field-label';
+  baselineModeLabel.textContent = 'Baseline';
+  const baselineModeControls = document.createElement('div');
+  baselineModeControls.className = 'watchers-cadence-controls tab-strip';
+  baselineModeControls.setAttribute('role', 'radiogroup');
+  baselineModeControls.setAttribute('aria-label', 'Watcher baseline mode');
+  [
+    ['first_run', 'First run'],
+    ['existing_run', 'Existing run'],
+  ].forEach(([mode, label]) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'tab-strip-item watchers-baseline-mode-btn';
+    btn.dataset.watcherBaselineMode = mode;
+    btn.setAttribute('role', 'radio');
+    btn.setAttribute('aria-checked', draft.baseline_mode === mode ? 'true' : 'false');
+    if (draft.baseline_mode === mode) btn.classList.add('is-active');
+    btn.textContent = label;
+    if (watcher) btn.disabled = true;
+    _bindWatcherPressable(btn, () => {
+      if (watcher) return;
+      _watchersState.formDirty = true;
+      _setWatcherBaselineMode(mode);
+    });
+    baselineModeControls.appendChild(btn);
+  });
+  baselineMode.append(baselineModeLabel, baselineModeControls);
   form.append(
-    _watcherFormField('Label', labelInput),
+    baselineMode,
     _watcherFormField('Baseline run', baselineInput, {
       helpLabel: 'How to choose a watcher baseline run',
       helpText: [
-        'The baseline run is the completed run this watcher compares future checks against.',
+        'Use First run to let the watcher capture its first successful check as the baseline.',
+        'Use Existing run when you already have a completed run to compare future checks against.',
         'To fill it automatically, open a completed external run from History and choose Actions,',
         'then Create watcher from this baseline. You can also paste a run ID from Run Details',
         'after choosing Actions, then Copy run ID.',
@@ -653,14 +714,19 @@ function _renderWatcherForm(parent, watcher) {
   }
   form.appendChild(actions);
   parent.appendChild(form);
+  _setWatcherBaselineMode(draft.baseline_mode || 'first_run', form);
 }
 
 function _collectWatcherDraft(form = document.getElementById('watchers-form')) {
   const root = form || document;
   const preset = root.querySelector?.('.watchers-cadence-btn.is-active')?.dataset.watcherPreset || 'hourly';
+  const baselineMode = root.querySelector?.('.watchers-baseline-mode-btn.is-active')?.dataset.watcherBaselineMode || 'first_run';
   return {
     label: String(root.querySelector?.('#watchers-label-input')?.value || '').trim(),
-    baseline_run_id: String(root.querySelector?.('#watchers-baseline-input')?.value || '').trim(),
+    baseline_mode: baselineMode,
+    baseline_run_id: baselineMode === 'existing_run'
+      ? String(root.querySelector?.('#watchers-baseline-input')?.value || '').trim()
+      : '',
     command: String(root.querySelector?.('#watchers-command-input')?.value || '').trim(),
     cadence_preset: preset === 'custom' ? '' : preset,
     cron_expr: String(root.querySelector?.('#watchers-cron-input')?.value || WATCHERS_DEFAULT_CRON).trim() || WATCHERS_DEFAULT_CRON,
@@ -678,6 +744,7 @@ function _syncWatcherDraftFromForm() {
   _watchersState.draft = {
     id: _watchersState.draft?.id || _watchersState.selectedId || '',
     label: data.label,
+    baseline_mode: data.baseline_mode,
     baseline_run_id: data.baseline_run_id,
     command_text: data.command,
     cadence_preset: data.cadence_preset || 'custom',
@@ -754,7 +821,7 @@ function _watcherSummaryCounts(summary = {}) {
 
 function _watcherListItemText(item) {
   if (!item || typeof item !== 'object') return String(item || '');
-  return item.key || item.host || item.title || item.raw_line || item.field || item.id || JSON.stringify(item);
+  return item.title || item.raw_line || item.key || item.host || item.field || item.id || JSON.stringify(item);
 }
 
 function _watcherListItemMeta(item) {
@@ -805,13 +872,57 @@ function _renderWatcherSignalSection(title, items, sign) {
   return section;
 }
 
-function _renderWatcherDiffSummary(summary = {}, { kind = '', truncated = false } = {}) {
+function _watcherInt(value) {
+  const numeric = Number(value || 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function _watcherFireSummaryText(fire = {}) {
+  const summary = fire.diff_summary && typeof fire.diff_summary === 'object' ? fire.diff_summary : {};
+  const classifier = String(summary.classifier || '').trim();
+  if (classifier === 'findings') {
+    const added = _watcherInt(summary.added_finding_count);
+    const removed = _watcherInt(summary.removed_finding_count) - _watcherInt(summary.suppressed_removed_finding_count);
+    const unchanged = _watcherInt(summary.unchanged_finding_count);
+    if (!added && !removed) return 'No finding changes';
+    return `Findings: +${added.toLocaleString()}, -${Math.max(0, removed).toLocaleString()}, unchanged ${unchanged.toLocaleString()}`;
+  }
+  if (classifier === 'ports') {
+    const added = _watcherInt(summary.added_port_count);
+    const removed = Math.max(0, _watcherInt(summary.removed_port_count) - _watcherInt(summary.suppressed_removed_port_count));
+    const changed = _watcherInt(summary.changed_port_count);
+    if (!added && !removed && !changed) return 'No port changes';
+    return `Ports: +${added.toLocaleString()}, -${removed.toLocaleString()}, changed ${changed.toLocaleString()}`;
+  }
+  if (classifier === 'hosts') {
+    const added = _watcherInt(summary.added_host_count);
+    const removed = Math.max(0, _watcherInt(summary.removed_host_count) - _watcherInt(summary.suppressed_removed_host_count));
+    if (!added && !removed) return 'No host changes';
+    return `Hosts: +${added.toLocaleString()}, -${removed.toLocaleString()}`;
+  }
+  if (classifier === 'tls') {
+    const changed = _watcherInt(summary.changed_tls_field_count);
+    return changed ? `TLS fields changed: ${changed.toLocaleString()}` : 'No TLS field changes';
+  }
+  if (classifier === 'baseline' || summary.baseline_created) return 'Baseline captured from first run';
+  const counts = _watcherSummaryCounts(summary)
+    .filter(([, value]) => Number(value || 0) > 0)
+    .slice(0, 3);
+  if (counts.length) {
+    const prefix = classifier ? `${classifier[0].toUpperCase()}${classifier.slice(1)}: ` : '';
+    return prefix + counts.map(([label, value]) => `${label} ${Number(value || 0).toLocaleString()}`).join(', ');
+  }
+  if (fire.diff_kind === 'none') return 'No changes';
+  return classifier ? `${classifier} diff` : '';
+}
+
+function _renderWatcherDiffSummary(summary = {}, { kind = '', truncated = false, titleText = 'Last diff' } = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'watchers-diff history-compare-result';
   const header = document.createElement('div');
   header.className = 'watchers-section-header';
   const title = document.createElement('h3');
-  title.textContent = 'Last diff';
+  title.textContent = titleText;
   const badge = document.createElement('span');
   badge.className = `badge ${_watcherDiffTone(kind)}`;
   badge.textContent = kind || 'none';
@@ -904,9 +1015,21 @@ function _renderWatcherFires(parent, watcher) {
       row.appendChild(main);
       const summary = document.createElement('div');
       summary.className = 'watchers-fire-summary';
-      const classifier = fire.diff_summary?.classifier ? `${fire.diff_summary.classifier} classifier` : '';
-      summary.textContent = classifier || (fire.diff_kind === 'none' ? "diff_kind='none'" : '');
+      summary.textContent = _watcherFireSummaryText(fire);
       row.appendChild(summary);
+      if (fire.diff_summary && typeof fire.diff_summary === 'object' && Object.keys(fire.diff_summary).length) {
+        const details = document.createElement('details');
+        details.className = 'watchers-fire-details';
+        const detailsSummary = document.createElement('summary');
+        detailsSummary.textContent = 'Diff details';
+        details.appendChild(detailsSummary);
+        details.appendChild(_renderWatcherDiffSummary(fire.diff_summary, {
+          kind: fire.diff_kind,
+          truncated: fire.truncated,
+          titleText: 'Fire diff',
+        }));
+        row.appendChild(details);
+      }
       if (fire.run_id) {
         const open = document.createElement('button');
         open.type = 'button';
@@ -1114,14 +1237,18 @@ async function openWatchersModal(options = {}) {
 async function _saveWatcherForm(event) {
   event?.preventDefault?.();
   const data = _collectWatcherDraft();
-  if (!data.baseline_run_id) {
+  const selected = _watcherSelected();
+  const isNew = _watchersState.mode === 'new' || !selected;
+  if (isNew && data.baseline_mode === 'existing_run' && !data.baseline_run_id) {
     _watcherToast('Baseline run is required', 'error');
+    return;
+  }
+  if (isNew && data.baseline_mode === 'first_run' && !data.command) {
+    _watcherToast('Command is required for first-run baselines', 'error');
     return;
   }
   _watchersState.saving = true;
   _renderWatchersDetail();
-  const selected = _watcherSelected();
-  const isNew = _watchersState.mode === 'new' || !selected;
   try {
     const url = isNew ? '/watchers' : `/watchers/${encodeURIComponent(selected.id)}`;
     const method = isNew ? 'POST' : 'PATCH';

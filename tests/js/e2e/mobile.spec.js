@@ -3,6 +3,7 @@ import {
   createShareSnapshot,
   ensurePromptReady,
   setComposerValueForTest,
+  waitForActiveOutputSettled,
   waitForHistoryRuns,
   browserSessionId,
   seedExternalHistoryRuns,
@@ -239,7 +240,9 @@ test.beforeEach(async ({ page }) => {
       )
       .toBeGreaterThan(100)
 
-    await page.reload()
+    await waitForActiveOutputSettled(page, { timeout: 15_000 })
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 15_000 })
+    await ensurePromptReady(page, { timeout: 15_000 })
     await page.evaluate(() => window.dispatchEvent(new Event('resize')))
     await expect
       .poll(async () =>

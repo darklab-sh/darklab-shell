@@ -157,6 +157,15 @@ def _baseline_run_for_session_or_error(run_id: str, session_id: str, *, conn=Non
     return dict(row)
 
 
+def _baseline_mode_from_create(data: dict[str, Any]) -> str:
+    requested = str(data.get("baseline_mode") or "").strip().lower().replace("-", "_")
+    if requested in {"first_run", "first"}:
+        return "first_run"
+    if requested in {"existing_run", "existing", "run"}:
+        return "existing_run"
+    return "existing_run" if str(data.get("baseline_run_id") or "").strip() else "first_run"
+
+
 def _schedule_for_watcher(watcher, *, conn=None):
     schedule = get_schedule(watcher.schedule_id, conn=conn)
     if schedule is None:
@@ -202,7 +211,10 @@ def watchers_create():
         return jsonify({"error": "Request body must be a JSON object"}), 400
     try:
         with database.db_connect() as conn:
-            baseline = _baseline_run_for_session_or_error(str(data.get("baseline_run_id") or ""), session_id, conn=conn)
+            baseline_mode = _baseline_mode_from_create(data)
+            baseline: dict[str, Any] = {}
+            if baseline_mode == "existing_run":
+                baseline = _baseline_run_for_session_or_error(str(data.get("baseline_run_id") or ""), session_id, conn=conn)
             command_text = str(data.get("command") or data.get("command_text") or baseline.get("command") or "")
             command = validate_schedule_command(
                 command_text,
@@ -212,7 +224,7 @@ def watchers_create():
             watcher = create_watcher(
                 session_id,
                 command_text=command,
-                baseline_run_id=str(baseline["id"]),
+                baseline_run_id=str(baseline.get("id") or ""),
                 cron_expr=data.get("cron_expr"),
                 cadence_preset=data.get("cadence_preset"),
                 timezone_name=data.get("timezone"),

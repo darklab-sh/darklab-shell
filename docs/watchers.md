@@ -1,6 +1,6 @@
 # Watchers
 
-Watchers turn a completed run into a recurring change check. A watcher reruns one command on a cadence, compares the new run against a baseline run, and records whether anything meaningful changed.
+Watchers turn a command into a recurring change check. A watcher reruns one command on a cadence, compares each new run against a baseline run, and records whether anything meaningful changed.
 
 You can manage watchers from four places:
 
@@ -11,8 +11,8 @@ You can manage watchers from four places:
 
 Each watcher stores:
 
-- one baseline run id
-- one command, usually inherited from that baseline run
+- one baseline run id, or a pending first-run baseline
+- one command, usually inherited from the baseline run
 - one owned schedule row for cadence
 - a state such as `ok`, `changed`, `firing`, `paused`, or `error`
 - bounded diff details from the last completed check
@@ -24,17 +24,26 @@ Watchers require a durable `tok_` session token. Anonymous browser sessions cann
 
 ## Creating a watcher
 
-The easiest path is from a completed run:
+The easiest path is to let the watcher capture its own baseline:
+
+1. Open **Watchers**.
+2. Choose **First run** as the baseline mode.
+3. Enter the command, pick a cadence, and save.
+
+The first successful watcher fire becomes the baseline. That first audit row is recorded as a baseline capture, not a changed result, and it does not send a watcher-changed notification.
+
+You can also start from a completed run:
 
 1. Open the run from History or Run Details.
 2. Choose **Create watcher from this baseline**.
 3. Pick a cadence and save.
 
-The browser pre-fills the baseline run and command. If you prefer to paste a run id, the Watchers modal includes a helper beside **Baseline Run** that explains where to find it.
+The browser pre-fills the baseline run and command. If you prefer to paste a run id, choose **Existing run** in the Watchers modal and use the helper beside **Baseline Run**.
 
 From the bundled CLI:
 
 ```bash
+darklab watch create --first-run --every hourly -- nmap -sV darklab.sh
 darklab watch create run_123 --every hourly
 darklab watch create run_123 --cron "*/15 * * * *" --label "HTTP drift"
 darklab watch create run_123 --every daily -- curl -I https://darklab.sh
@@ -50,7 +59,9 @@ Custom cron expressions use the same rules as scheduled runs: five-field POSIX c
 
 The baseline run is the point every new watcher fire compares against.
 
-- A watcher can only be created from a completed run visible to the current token.
+- A watcher can be created from a completed run visible to the current token, or from the first successful watcher fire.
+- First-run watchers show as pending until a successful run is captured as the baseline.
+- If the first run fails, the watcher records the error and keeps the baseline pending for the next fire or manual **Run now**.
 - A watcher can be paused, resumed, manually fired, or deleted without changing the baseline.
 - **Accept baseline** promotes the latest watcher fire, or a selected run id, to become the new baseline.
 - If the baseline run is deleted from History, the watcher moves to `error`, records `state_reason='baseline_deleted'`, and pauses its owned schedule.
@@ -61,7 +72,7 @@ Accepting a baseline is useful when a change is expected. For example, if a new 
 
 ## Fire audit
 
-Every watcher fire writes an audit row, even when there is no diff. Empty checks use `diff_kind='none'`, which makes it clear the watcher is still running.
+Every watcher fire writes an audit row, even when there is no diff. Empty checks use `diff_kind='none'`, which makes it clear the watcher is still running. The browser fire audit summarizes the actual diff counts in each row, such as added/removed findings or changed ports, and each row can expand to show the bounded added, removed, and changed items stored with that fire.
 
 Useful places to inspect fire history:
 
@@ -126,7 +137,7 @@ The API uses the same JSON error envelope as the rest of `/api/v1`.
 | Method | Route | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/v1/watchers` | List current-token watchers. |
-| `POST` | `/api/v1/watchers` | Create a watcher from `baseline_run_id`, cadence, and optional command override. |
+| `POST` | `/api/v1/watchers` | Create a watcher from `baseline_run_id` or `baseline_mode='first_run'`, cadence, and optional command override. |
 | `GET` | `/api/v1/watchers/<watcher_id>` | Read one watcher. |
 | `PATCH` | `/api/v1/watchers/<watcher_id>` | Update command, cadence, label, options, or pause/resume state. |
 | `DELETE` | `/api/v1/watchers/<watcher_id>` | Delete one watcher and its owned schedule. |

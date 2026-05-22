@@ -652,7 +652,16 @@ describe('app helpers', () => {
               watcher_id: 'wtr_created',
               run_id: 'run_current',
               diff_kind: 'signal',
-              diff_summary: { classifier: 'ports' },
+              diff_summary: {
+                classifier: 'findings',
+                added_finding_count: 2,
+                removed_finding_count: 0,
+                unchanged_finding_count: 14,
+                added_findings: [
+                  { title: 'Exposed HTTP service', severity: 'medium', line_number: 22 },
+                  { title: 'TLS certificate expiring soon', severity: 'low', line_number: 45 },
+                ],
+              },
               state_at_fire: 'changed',
               created: '2026-05-20T12:00:00+00:00',
             }],
@@ -694,6 +703,7 @@ describe('app helpers', () => {
     await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Watcher created', 'success'))
     const postCall = apiFetch.mock.calls.find(([url, options]) => url === '/watchers' && options?.method === 'POST')
     expect(JSON.parse(postCall[1].body)).toMatchObject({
+      baseline_mode: 'existing_run',
       baseline_run_id: 'run_base',
       command: 'nmap -sV darklab.sh',
       cadence_preset: 'hourly',
@@ -702,7 +712,75 @@ describe('app helpers', () => {
     expect(list.textContent).toContain('Watch nmap')
     expect(detail.textContent).toContain('Last diff')
     expect(detail.textContent).toContain('443/tcp')
+    expect(detail.textContent).toContain('Findings: +2, -0, unchanged 14')
+    expect(detail.textContent).toContain('Diff details')
+    expect(detail.textContent).toContain('Exposed HTTP service')
+    expect(detail.textContent).not.toContain('findings classifier')
     expect(detail.textContent).toContain('Open run')
+  })
+
+  it('creates watchers that capture the first run as the baseline', async () => {
+    let watcher = null
+    const apiFetch = vi.fn(async (url, options = {}) => {
+      if (url === '/watchers' && !options.method) {
+        return { ok: true, json: async () => ({ watchers: watcher ? [watcher] : [] }) }
+      }
+      if (url.startsWith('/schedules/preview')) {
+        return { ok: true, json: async () => ({ cron_expr: '0 * * * *', timezone: 'UTC', next_fires: [] }) }
+      }
+      if (url === '/watchers' && options.method === 'POST') {
+        const body = JSON.parse(options.body)
+        watcher = {
+          id: 'wtr_first_run',
+          label: body.label,
+          command_text: body.command,
+          baseline_run_id: '',
+          last_run_id: '',
+          state: 'ok',
+          state_reason: 'pending_baseline',
+          options: body.options,
+          last_diff_summary: {},
+          schedule: {
+            id: 'sch_first_run',
+            cadence_preset: 'hourly',
+            cron_expr: '0 * * * *',
+            timezone: 'UTC',
+            enabled: true,
+          },
+        }
+        return { ok: true, json: async () => ({ watcher }) }
+      }
+      if (url.startsWith('/watchers/wtr_first_run/fires')) {
+        return {
+          ok: true,
+          json: async () => ({ fires: [], total: 0, limit: 20, offset: 0, has_more: false }),
+        }
+      }
+      throw new Error(`unexpected request ${url}`)
+    })
+    const showToast = vi.fn()
+    const { _bindWatchersModal, openWatchersModal, detail, list } = loadWatchersModalTestFns({ apiFetch, showToast })
+    _bindWatchersModal()
+
+    await openWatchersModal()
+    await vi.waitFor(() => expect(document.getElementById('watchers-new-btn')).not.toBeNull())
+    document.getElementById('watchers-new-btn').click()
+    await vi.waitFor(() => expect(document.getElementById('watchers-form')).not.toBeNull())
+    expect(document.querySelector('[data-watcher-baseline-mode="first_run"]').classList.contains('is-active')).toBe(true)
+    expect(document.getElementById('watchers-baseline-input').disabled).toBe(true)
+    document.getElementById('watchers-label-input').value = 'Watch first run'
+    document.getElementById('watchers-command-input').value = 'nmap -sV darklab.sh'
+    document.getElementById('watchers-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+
+    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith('Watcher created', 'success'))
+    const postCall = apiFetch.mock.calls.find(([url, options]) => url === '/watchers' && options?.method === 'POST')
+    expect(JSON.parse(postCall[1].body)).toMatchObject({
+      baseline_mode: 'first_run',
+      baseline_run_id: '',
+      command: 'nmap -sV darklab.sh',
+    })
+    expect(list.textContent).toContain('baseline pending')
+    expect(detail.textContent).toContain('pending baseline')
   })
 
   it('pauses resumes fires and accepts watcher baselines from action buttons', async () => {

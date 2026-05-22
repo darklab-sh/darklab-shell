@@ -1173,7 +1173,7 @@ describe('tabs helpers', () => {
       },
     }
 
-    const { buildTerminalExportHtml } = fromDomScripts(
+    const { buildExportLinesHtml, buildTerminalExportHtml } = fromDomScripts(
       ['app/static/js/export_html.js'],
       {
         document,
@@ -1182,11 +1182,25 @@ describe('tabs helpers', () => {
       'ExportHtmlUtils',
     )
 
+    const { linesHtml } = buildExportLinesHtml([
+      {
+        text: 'https://tor-stats.darklab.sh/static/',
+        signals: ['findings'],
+        entities: [{
+          type: 'domain',
+          canonical_value: 'tor-stats.darklab.sh',
+          start: 8,
+          end: 28,
+        }],
+      },
+    ], {
+      ansiToHtml: (text) => String(text),
+    })
     const html = buildTerminalExportHtml({
       appName: 'darklab_shell',
       title: 'share export',
       metaHtml: '<span>meta</span>',
-      linesHtml: '<span class="line">hello</span>',
+      linesHtml,
       exportCss: '.export-header { background: var(--theme-terminal-bar-bg, var(--bg)); }',
     })
 
@@ -1195,6 +1209,10 @@ describe('tabs helpers', () => {
     expect(html).toContain('--theme-panel-bg: #edf4fb;')
     expect(html).toContain('.export-header { background: var(--theme-terminal-bar-bg, var(--bg)); }')
     expect(html).toContain('<h1 class="export-title">darklab_shell</h1>')
+    expect(html).toContain('line-severity-finding')
+    expect(html).toContain('<span class="export-entity-token"')
+    expect(html).toContain('data-export-toggle-highlights')
+    expect(html).not.toContain('href="#entity-')
 
     delete window.ThemeRegistry
   })
@@ -1253,6 +1271,29 @@ describe('tabs helpers', () => {
     expect(html).toContain('meta-badge-fail')
     expect(html).toContain('exit 1')
     expect(html).toContain('9 lines')
+  })
+
+  it('can build exported HTML with structured highlights initially off', () => {
+    const { buildTerminalExportHtml } = fromDomScripts(
+      ['app/static/js/export_html.js'],
+      {
+        document,
+        window,
+      },
+      'ExportHtmlUtils',
+    )
+
+    const html = buildTerminalExportHtml({
+      appName: 'darklab_shell',
+      title: 'dense findings',
+      linesHtml: '<span class="line"><span class="perm-content"><span class="line-severity-badge line-severity-finding">finding</span><span class="export-entity-token">tor-stats.darklab.sh</span></span></span>',
+      highlights: 'off',
+    })
+
+    expect(html).toContain('<body class="structured-highlights-off">')
+    expect(html).toContain('data-export-toggle-highlights')
+    expect(html).toContain('structured-highlights-off')
+    expect(html).toContain('highlights: ')
   })
 
   it('saveTab shows a toast when there is only welcome output', () => {

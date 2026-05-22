@@ -937,8 +937,8 @@ OPENAPI_SPEC: dict = {
             },
             "WatcherCreateRequest": {
                 "type": "object",
-                "required": ["baseline_run_id"],
                 "properties": {
+                    "baseline_mode": {"type": "string", "enum": ["existing_run", "first_run"]},
                     "baseline_run_id": {"type": "string"},
                     "command": {"type": "string"},
                     "command_text": {"type": "string"},

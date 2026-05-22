@@ -232,9 +232,14 @@ def _parser() -> argparse.ArgumentParser:
 
     watch_create = watch_sub.add_parser(
         "create",
-        help="Create a watcher from a completed baseline run.",
-        description="Create a watcher from a completed baseline run. Add `-- COMMAND` to override the baseline command.",
+        help="Create a watcher from a baseline run or from its first run.",
+        description=(
+            "Create a watcher from a completed baseline run, or use --first-run to capture "
+            "the first successful watcher run as the baseline. Add `-- COMMAND` to override "
+            "the baseline command or provide the first-run command."
+        ),
     )
+    watch_create.add_argument("--first-run", action="store_true", help="Capture the first successful watcher run as the baseline.")
     watch_create.add_argument("--cron")
     watch_create.add_argument("--every", metavar="PRESET", help="Cadence preset: hourly, daily, or weekly.")
     watch_create.add_argument("--label")
@@ -244,7 +249,7 @@ def _parser() -> argparse.ArgumentParser:
     watch_create.add_argument("--notify-metadata-changes", action="store_true", help="Treat metadata-only changes as diffs.")
     watch_create.add_argument("--format", choices=("text", "json"), default="text")
     watch_create.add_argument("--command-override", default=None, help=argparse.SUPPRESS)
-    watch_create.add_argument("baseline_run_id")
+    watch_create.add_argument("baseline_run_id", nargs="?")
 
     watch_info = watch_sub.add_parser("info", help="Show one watcher.")
     watch_info.add_argument("watcher_id")
@@ -670,8 +675,11 @@ def _watch(client: DarklabClient, args: argparse.Namespace) -> int:
         case "create":
             if bool(args.cron) == bool(args.every):
                 raise DarklabCliError("watch create needs exactly one of --cron or --every.")
+            if not args.first_run and not args.baseline_run_id:
+                raise DarklabCliError("watch create needs a baseline run id, or use --first-run with -- COMMAND.")
             body: dict[str, Any] = {
-                "baseline_run_id": args.baseline_run_id,
+                "baseline_mode": "first_run" if args.first_run else "existing_run",
+                "baseline_run_id": "" if args.first_run else args.baseline_run_id,
                 "cron_expr": args.cron,
                 "cadence_preset": args.every,
                 "label": args.label,
@@ -687,6 +695,8 @@ def _watch(client: DarklabClient, args: argparse.Namespace) -> int:
                 if not command:
                     raise DarklabCliError("watch create needs a command after --.")
                 body["command"] = command
+            if args.first_run and not body.get("command"):
+                raise DarklabCliError("watch create --first-run needs a command after --.")
             return _print_watcher(client.request("POST", "/watchers", body=body), args.format)
         case "info":
             return _print_watcher(client.request("GET", f"/watchers/{args.watcher_id}"), args.format)

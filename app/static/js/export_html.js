@@ -91,6 +91,12 @@
       .replace(/>/g, '&gt;');
   }
 
+  function escapeExportAttr(text) {
+    return escapeExportHtml(text)
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   function renderExportPromptEcho(text) {
     const raw = String(text || '');
     const firstSpace = raw.indexOf(' ');
@@ -133,11 +139,12 @@
       const entityType = String(entity.type || '');
       const entityValue = String(entity.canonical_value || entity.value || raw.slice(range.start, range.end));
       const tokenText = raw.slice(range.start, range.end);
-      html += '<a class="export-entity-token"'
-        + ' href="#entity-' + encodeURIComponent(entityType + '-' + entityValue) + '"'
-        + ' title="Entity: ' + escapeExportHtml(entityValue) + '">'
+      html += '<span class="export-entity-token"'
+        + ' data-entity-type="' + escapeExportAttr(entityType) + '"'
+        + ' data-entity-value="' + escapeExportAttr(entityValue) + '"'
+        + ' title="Entity: ' + escapeExportAttr(entityValue) + '">'
         + ansiToHtml(tokenText)
-        + '</a>';
+        + '</span>';
       cursor = range.end;
     });
     if (cursor < raw.length) html += ansiToHtml(raw.slice(cursor));
@@ -187,6 +194,20 @@
     return '<section class="export-findings-summary">'
       + chips.map(chip => `<span>${escapeExportHtml(chip)}</span>`).join('')
       + '</section>';
+  }
+
+  function renderExportLineContent(line, ansiToHtml) {
+    const lineEvent = lineEventFromWire(line);
+    const text = String(lineEvent.text || '');
+    let content;
+    if (isPromptEchoEvent(lineEvent)) {
+      content = renderExportPromptEcho(text);
+    } else if (isPlainEvent(lineEvent)) {
+      content = escapeExportHtml(text);
+    } else {
+      content = renderExportEntityContent(text, lineEvent.entities, ansiToHtml);
+    }
+    return exportLineBadgeHtml(lineEvent) + content;
   }
 
   function exportTimestamp() {
@@ -298,21 +319,13 @@
     const summary = buildExportLineSummary(rawLines);
     const linesHtml = rawLines.map((rawLine, i) => {
       const line = lineEventFromWire(rawLine);
-      const text = String(line.text || '');
       const cls = lineLegacyClass(line);
       const prefix = prefixes[i];
       const prefixSpan = prefix
         ? `<span class="perm-prefix">${escapeExportHtml(prefix)}</span>`
         : '';
-      let content;
-      if (isPromptEchoEvent(line)) {
-        content = renderExportPromptEcho(text);
-      } else if (isPlainEvent(line)) {
-        content = escapeExportHtml(text);
-      } else {
-        content = renderExportEntityContent(text, line.entities, ansiToHtml);
-      }
-      return `<span class="line${cls ? ' ' + cls : ''}">${prefixSpan}<span class="perm-content">${exportLineBadgeHtml(line)}${content}</span></span>`;
+      const content = renderExportLineContent(line, ansiToHtml);
+      return `<span class="line${cls ? ' ' + cls : ''}">${prefixSpan}<span class="perm-content">${content}</span></span>`;
     }).join('');
     return { linesHtml, prefixWidth, summary, summaryHtml: buildExportSummaryHtml(summary) };
   }
@@ -358,7 +371,7 @@
     }).join('');
   }
 
-  function buildTerminalExportHeaderHtml(headerModel) {
+  function buildTerminalExportHeaderHtml(headerModel, { includeHighlightToggle = false } = {}) {
     const titleHtml = `<h1 class="export-title">${escapeExportHtml(headerModel.appName)}</h1>`;
     const metaHtml = headerModel.metaLine
       ? `<div class="export-meta">${escapeExportHtml(headerModel.metaLine)}</div>`
@@ -366,13 +379,38 @@
     const runMetaHtml = headerModel.runMetaItems.length
       ? `<div class="export-run-meta">${buildExportRunMetaHtml(headerModel.runMetaItems)}</div>`
       : '';
+    const actionsHtml = includeHighlightToggle
+      ? `<div class="export-header-actions">
+    <button type="button" class="export-highlight-toggle" data-export-toggle-highlights aria-pressed="true">highlights: on</button>
+  </div>`
+      : '';
     return `<header class="export-header">
   <div class="export-header-copy">
     ${titleHtml}
     ${metaHtml}
     ${runMetaHtml}
   </div>
+  ${actionsHtml}
 </header>`;
+  }
+
+  function buildTerminalExportScript() {
+    return `<script>
+(function () {
+  var btn = document.querySelector('[data-export-toggle-highlights]');
+  if (!btn) return;
+  function sync() {
+    var off = document.body.classList.contains('structured-highlights-off');
+    btn.textContent = 'highlights: ' + (off ? 'off' : 'on');
+    btn.setAttribute('aria-pressed', off ? 'false' : 'true');
+  }
+  btn.addEventListener('click', function () {
+    document.body.classList.toggle('structured-highlights-off');
+    sync();
+  });
+  sync();
+}());
+</script>`;
   }
 
   // ── Styles ────────────────────────────────────────────────────────────────
@@ -421,10 +459,13 @@ ${themeDecls}
     prefixWidth = 0,
     fontFacesCss = '',
     exportCss = '',
+    includeHighlightToggle = true,
+    highlights = 'on',
   }) {
     const colorScheme = getThemeExportColorScheme();
     const headerModel = buildExportHeaderModel({ appName, metaLine, runMeta });
     const styles = buildTerminalExportStyles(fontFacesCss, prefixWidth, exportCss);
+    const bodyClass = highlights === 'off' ? ' class="structured-highlights-off"' : '';
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -435,12 +476,13 @@ ${themeDecls}
 ${styles}
 </style>
 </head>
-<body>
-${buildTerminalExportHeaderHtml(headerModel)}
+<body${bodyClass}>
+${buildTerminalExportHeaderHtml(headerModel, { includeHighlightToggle })}
 ${summaryHtml || ''}
 <main class="export-output nice-scroll">
 ${linesHtml}
 </main>
+${includeHighlightToggle ? buildTerminalExportScript() : ''}
 </body>
 </html>`;
   }
@@ -496,7 +538,10 @@ ${linesHtml}
     isPlainEvent,
     buildExportDocumentModel,
     escapeExportHtml,
+    escapeExportAttr,
     renderExportPromptEcho,
+    renderExportEntityContent,
+    renderExportLineContent,
     buildExportLinesHtml,
     buildExportLineSummary,
     buildExportRunMetaItems,

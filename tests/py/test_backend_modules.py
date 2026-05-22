@@ -1928,33 +1928,42 @@ class TestWatchersFoundation:
             ("fired", "run_fire", "started watcher run"),
         ]
 
-    def test_watcher_full_cycle_fires_detects_change_notifies_and_accepts_baseline(self, monkeypatch, tmp_path):
+    def test_watcher_full_cycle_captures_first_run_detects_change_notifies_and_accepts_baseline(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
         from services.notifications.models import TRIGGER_WATCHER_CHANGED
         from services.scheduler import dispatch as scheduler_dispatch
         from services.scheduler import service as schedule_service
         from services.watchers import finalize as watcher_finalize
         from services.watchers import service as watcher_service
 
-        next_run_ids = iter(["run_same", "run_changed"])
+        next_run_ids = iter(["run_baseline", "run_changed"])
 
         with self._watcher_db(monkeypatch, tmp_path) as conn:
             self._register_token(conn)
             self._insert_notification_channel(conn, TRIGGER_WATCHER_CHANGED)
-            self._insert_run(conn, "run_baseline", ["80/tcp open http"])
             watcher = watcher_service.create_watcher(
                 "tok_watchers",
                 command_text="nmap -sV darklab.sh",
-                baseline_run_id="run_baseline",
                 cadence_preset="hourly",
                 conn=conn,
             )
+            assert watcher.baseline_run_id == ""
+            assert watcher.state_reason == "pending_baseline"
             monkeypatch.setattr(scheduler_dispatch, "_launch_user_schedule_run", lambda _schedule: next(next_run_ids))
 
             schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
             assert schedule is not None
             assert scheduler_dispatch.fire_schedule(conn, schedule, fired_at="2026-05-20T10:05:00+00:00") == "fired"
-            self._insert_run(conn, "run_same", ["80/tcp open http"])
-            watcher_finalize.finalize_watcher_run("run_same", conn=conn)
+            self._insert_run(conn, "run_baseline", ["80/tcp open http"])
+            watcher_finalize.finalize_watcher_run("run_baseline", conn=conn)
+            captured = watcher_service.get_watcher(watcher.id, conn=conn)
+            assert captured is not None
+            assert captured.baseline_run_id == "run_baseline"
+            assert captured.state == "ok"
+            assert captured.state_reason == "baseline_created"
 
             schedule = schedule_service.get_schedule(watcher.schedule_id, conn=conn)
             assert schedule is not None
@@ -1976,8 +1985,9 @@ class TestWatchersFoundation:
         assert total == 2
         assert [(fire.run_id, fire.diff_kind, fire.state_at_fire) for fire in fires] == [
             ("run_changed", "signal", "changed"),
-            ("run_same", "none", "ok"),
+            ("run_baseline", "none", "ok"),
         ]
+        assert fires[1].diff_summary["baseline_created"] is True
         assert [(row["trigger"], row["status"], row["run_id"]) for row in events] == [
             (TRIGGER_WATCHER_CHANGED, "pending", "run_changed"),
         ]

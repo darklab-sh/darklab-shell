@@ -432,7 +432,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 
 ## Copy, Save, and Export
 
-**Purpose:** keep copy-to-clipboard and download-output actions (`txt` / `html` / `pdf`) consistent across the desktop HUD, mobile menu, and permalink page.
+**Purpose:** keep copy-to-clipboard and download-output actions (`txt` / `html` / `pdf`) consistent across the desktop HUD, Run Details, mobile menu, and permalink page.
 
 **Behavior:**
 
@@ -441,14 +441,15 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
   - **txt** — plain-text file with a timestamped filename.
   - **html** — themed HTML file with ANSI colors preserved, renders correctly in a browser without the shell; fonts and theme colors are inlined so the file is fully self-contained.
   - **pdf** — themed PDF rendered entirely in the browser via jsPDF, no server round-trip; includes the app header, command, exit-status badge, timestamp, and full ANSI output while following the same header/meta ordering and transcript-preparation model as the browser-rendered permalink and saved-HTML surfaces.
-- The same `save ▾` dropdown is available on the desktop HUD bar, the permalink page header, and the mobile menu, so the export experience is consistent across all surfaces.
+- The same `save ▾` dropdown is available on the desktop HUD bar, the Run Details header for saved runs, the permalink page header, and the mobile menu, so the export experience is consistent across all surfaces.
+- Permalink pages and saved HTML exports include a **highlights** toggle. Turning it off hides finding badges and removes entity-token styling from dense output while keeping the original text and structured metadata available.
 - The browser-rendered parity target is permalink/share page ↔ saved HTML. PDF is intentionally treated as a best-effort renderer against that same browser baseline rather than a separately styled surface.
 
 **Limits:** local text exports produce unredacted output. Local HTML/PDF exports also stay unredacted, except for raw-only app-native intel response bodies, which are replaced with an omission notice so provider data does not leave the browser as styled share/export content.
 
 **Configuration:** none — export formats and filename shape are not user-tunable.
 
-**Related files:** `app/static/js/tabs.js` (per-tab save menu), `app/static/js/shell_chrome.js` (HUD save menu), `app/static/js/export_html.js` (shared browser export model), `app/static/js/export_pdf.js` (jsPDF renderer consuming the shared model), `app/static/js/permalink.js` (permalink/share save actions), `app/static/css/terminal_export.css` (shared browser export chrome).
+**Related files:** `app/static/js/tabs.js` (per-tab save menu), `app/static/js/shell_chrome.js` (HUD save menu), `app/static/js/features/history/history_run_details.js` (saved-run export menu), `app/static/js/export_html.js` (shared browser export model), `app/static/js/export_pdf.js` (jsPDF renderer consuming the shared model), `app/static/js/permalink.js` (permalink/share save actions), `app/static/css/terminal_export.css` (shared browser export chrome).
 
 ---
 
@@ -577,22 +578,23 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 ## Watchers
 
-**Purpose:** recurring change checks that compare a new run against a completed baseline run.
+**Purpose:** recurring change checks that compare each new run against a captured baseline run.
 
 **Behavior:**
 
 - The **Watchers** modal opens from the desktop rail, mobile menu, or Run Details.
 - Run Details and the History drawer action menu include **Create watcher from this baseline**, which opens the modal with the completed run already selected as the baseline.
-- The Baseline run field includes a short helper card for operators who prefer to paste a run id manually.
-- Each watcher owns a schedule, reruns the baseline command on that cadence, and compares each completed watcher run against the current baseline.
+- New watchers can use **First run** mode, which captures the first successful watcher fire as the baseline without needing an existing run id.
+- The Baseline run field includes a short helper card for operators who prefer to paste a run id manually in **Existing run** mode.
+- Each watcher owns a schedule, reruns the watched command on that cadence, and compares each completed watcher run against the current baseline.
 - Watcher textual diffs ignore progress/status-line/PTY chrome and include entity-set deltas in the saved summary, so noisy redraws do not look like real changes and newly observed hosts, URLs, hashes, or CVEs are easier to spot.
-- Watcher rows show whether the latest check is `ok`, `changed`, `firing`, `paused`, or `error`.
-- The detail pane shows the last diff summary, recent fire audit rows, and links back to the runs created by watcher fires.
+- Watcher rows show whether the latest check is `ok`, `pending baseline`, `changed`, `firing`, `paused`, or `error`.
+- The detail pane shows the last diff summary, recent fire audit rows with expandable diff details, and links back to the runs created by watcher fires.
 - Empty checks still appear in the fire audit as `diff_kind='none'`, so it's clear the watcher is still running even when nothing changed.
 - Operators can pause, resume, manually fire, delete, or accept the latest run as the new baseline from the modal. Accepting a baseline asks for confirmation because it discards the previous comparison point.
 - The modal asks before closing, refreshing, opening a watcher run, or switching watchers when the current form has unsaved changes.
 
-**Limits:** watchers require a durable `tok_` session token. Anonymous sessions cannot create watchers because the scheduler needs a stable owner. Watchers monitor one baseline command at a time, use the same five-minute minimum custom cron interval as schedules, and keep bounded diff summaries rather than unlimited raw diff payloads.
+**Limits:** watchers require a durable `tok_` session token. Anonymous sessions cannot create watchers because the scheduler needs a stable owner. First-run watchers require a command because there is no completed run to inherit from yet. Watchers monitor one baseline command at a time, use the same five-minute minimum custom cron interval as schedules, and keep bounded diff summaries rather than unlimited raw diff payloads.
 
 **Related files:** `app/blueprints/watchers.py` (browser watcher routes), `app/services/watchers/` (watcher state, diff classifiers, finalization, and fire audit helpers), `app/static/js/features/watchers/watchers_modal.js` (Watchers modal), `app/static/css/features/watchers.css` (modal layout), and `docs/watchers.md` (operator guide).
 

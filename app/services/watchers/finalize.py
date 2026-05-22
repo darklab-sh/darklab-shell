@@ -59,7 +59,13 @@ def finalize_watcher_run(run_id: str, *, conn=None) -> tuple[Watcher, WatcherFir
                 fire,
                 f"watcher run exited with code {int(current_run.get('exit_code') or 0)}",
                 run_id=run_id,
+                state_reason="pending_baseline_failed" if not watcher.baseline_run_id else "run_failed",
             )
+            if ctx is not None:
+                conn.commit()
+            return updated
+        if not watcher.baseline_run_id:
+            updated = _capture_first_baseline(conn, watcher, fire, run_id=run_id)
             if ctx is not None:
                 conn.commit()
             return updated
@@ -176,6 +182,60 @@ def _apply_diff(
     return updated_watcher, updated_fire
 
 
+def _capture_first_baseline(
+    conn,
+    watcher: Watcher,
+    fire: WatcherFire,
+    *,
+    run_id: str,
+) -> tuple[Watcher, WatcherFire]:
+    summary = {
+        "classifier": "baseline",
+        "baseline_created": True,
+        "baseline_run_id": run_id,
+    }
+    now = watcher_service._utc_now()
+    conn.execute(
+        """
+        UPDATE watchers
+        SET baseline_run_id = ?, state = ?, state_reason = ?, last_error = ?,
+            last_run_id = ?, last_diff_summary_json = ?,
+            consecutive_no_change = ?, consecutive_changed = ?, consecutive_failures = ?,
+            updated = ?
+        WHERE id = ?
+        """,
+        (
+            run_id,
+            WATCHER_STATE_OK,
+            "baseline_created",
+            "",
+            run_id,
+            watcher_service._dialect().json_param(summary),
+            0,
+            0,
+            0,
+            now,
+            watcher.id,
+        ),
+    )
+    updated_watcher = watcher_service.get_watcher(watcher.id, conn=conn)
+    if updated_watcher is None:
+        raise watcher_service.WatcherError("watcher disappeared during first-baseline finalization")
+    updated_fire = watcher_service.update_watcher_fire(
+        conn,
+        fire.id,
+        diff_summary=summary,
+        diff_kind=DIFF_KIND_NONE,
+        truncated=False,
+        notification_event_ids=[],
+        state_at_fire=WATCHER_STATE_OK,
+    )
+    if updated_fire is None:
+        raise watcher_service.WatcherError("watcher fire disappeared during first-baseline finalization")
+    log.info("WATCHER_BASELINE_CAPTURED", extra=_log_payload(updated_watcher, run_id=run_id))
+    return updated_watcher, updated_fire
+
+
 def _mark_error(
     conn,
     watcher: Watcher,
@@ -183,6 +243,7 @@ def _mark_error(
     error: str,
     *,
     run_id: str,
+    state_reason: str = "run_failed",
 ) -> tuple[Watcher, WatcherFire]:
     failures = watcher.consecutive_failures + 1
     event_ids = dispatcher.enqueue(
@@ -196,7 +257,7 @@ def _mark_error(
     updated_watcher = watcher_service.set_watcher_state(
         watcher.id,
         state=WATCHER_STATE_ERROR,
-        state_reason="run_failed",
+        state_reason=state_reason,
         last_error=error,
         last_run_id=run_id,
         consecutive_failures=failures,

@@ -453,12 +453,22 @@ class TestWatchersRoutes:
             headers={"X-Session-ID": owner},
             json={"baseline_run_id": "run_unfinished_baseline", "cadence_preset": "hourly"},
         )
+        first_run = client.post(
+            "/watchers",
+            headers={"X-Session-ID": owner},
+            json={"baseline_mode": "first_run", "command": "nmap -sV darklab.sh", "cadence_preset": "hourly"},
+        )
 
         assert missing.status_code == 404
         assert missing.get_json()["error"] == "baseline_run_not_found"
         assert unfinished.status_code == 400
         assert unfinished.get_json()["error"] == "invalid_baseline"
         assert unfinished.get_json()["message"] == "baseline run must be completed"
+        assert first_run.status_code == 201
+        first_run_watcher = first_run.get_json()["watcher"]
+        assert first_run_watcher["baseline_run_id"] == ""
+        assert first_run_watcher["state_reason"] == "pending_baseline"
+        assert first_run_watcher["command_text"] == "nmap -sV darklab.sh"
 
     def test_watcher_accept_baseline_promotes_latest_fire_and_resets_state(self, monkeypatch, tmp_path):
         from services.watchers import service as watcher_service
@@ -597,6 +607,21 @@ class TestWatchBuiltin:
         with db_connect() as conn:
             count = conn.execute("SELECT COUNT(*) AS count FROM watchers WHERE session_token = ?", (token,)).fetchone()
         assert count["count"] == 0
+
+        first_run_lines, first_run_exit = execute_builtin_command(
+            "watch create --first-run --every hourly --command 'nmap -sV darklab.sh'",
+            token,
+        )
+        assert first_run_exit == 0
+        assert any("pending first run" in _line_text(line) for line in first_run_lines)
+        with db_connect() as conn:
+            pending = conn.execute(
+                "SELECT baseline_run_id, state_reason, command_text FROM watchers WHERE session_token = ?",
+                (token,),
+            ).fetchone()
+        assert pending["baseline_run_id"] == ""
+        assert pending["state_reason"] == "pending_baseline"
+        assert pending["command_text"] == "nmap -sV darklab.sh"
 
     def test_watch_builtin_run_records_fire_and_accepts_latest_baseline(self, monkeypatch, tmp_path):
         from services.scheduler import dispatch

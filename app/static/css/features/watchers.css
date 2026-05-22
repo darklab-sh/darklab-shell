@@ -323,6 +323,23 @@
   overflow-wrap: anywhere;
 }
 
+.watchers-fire-details {
+  grid-column: 1 / -1;
+}
+
+.watchers-fire-details > summary {
+  width: max-content;
+  max-width: 100%;
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.watchers-fire-details .watchers-diff {
+  margin-top: 10px;
+}
+
 .watchers-fire-date {
   color: var(--text);
   font-family: var(--font-mono);

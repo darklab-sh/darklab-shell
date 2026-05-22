@@ -571,6 +571,23 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Run Details output summary layout** — the Output tab now stacks the compact summary above the outline so long outline rows have the full modal width.
   - **Why:** the previous two-column layout left the summary card mostly empty while forcing high-value outline rows, such as long URLs, to wrap in a narrow column.
   - **What:** the summary rows now render as a compact full-width strip, and the outline renders in its own full-width card below it.
+- **Run Details entity links bring Atlas forward** — clicking an entity-highlighted value in restored output now closes Run Details before opening the matching Atlas entity.
+  - **Why:** the Atlas detail loaded correctly, but the Run Details modal stayed above it, making the navigation look broken.
+  - **What:** the shared major-overlay closer now includes Run Details, so Atlas launches use the same one-surface-at-a-time behavior from output tokens and run actions.
+- **Completed-run exports are available from Run Details** — finished runs now expose plain text, styled HTML, and PDF exports directly in the Run Details modal.
+  - **Why:** completed output could only be exported after restoring the run or opening a permalink, and exported HTML entity links pointed back at the local file instead of a usable app target.
+  - **What:** Run Details exports fetch the saved full output when available, permalink pages now show structured finding/entity highlights with an on-page toggle, and HTML exports render entity highlights as non-clickable spans with their own highlight toggle instead of broken local anchors.
+  - **Tests:** added permalink rendering/toggle coverage for structured findings and entities plus exported-HTML highlight-toggle coverage. Current suite total: 1727 pytest + 1233 Vitest + 252 Playwright = **3,212 tests**.
+- **Notification count maps read like text** — run-complete notifications now format structured output count maps as compact labels such as `domain 2, ip 2` instead of Python dictionary syntax.
+  - **Why:** entity-type and signal summaries were useful, but `{'ip': 2, 'domain': 2}` looked out of place in plain-text, email, chat, and push notifications.
+  - **Tests:** added notification formatter coverage for structured count maps. Current suite total: 1728 pytest + 1233 Vitest + 252 Playwright = **3,213 tests**.
+- **Watcher fire audit rows explain the diff** — fire audit rows now summarize changed counts and include an expandable diff detail section for the stored added, removed, and changed items.
+  - **Why:** rows that only said "findings classifier" described which classifier ran, but not what actually changed.
+  - **What:** findings, port, host, TLS, and fallback summaries now render human-readable counts, and each fire row can drill into the same bounded diff detail model used by the Watchers last-diff panel.
+- **Watchers can capture their first baseline** — new watchers can now use a first-run baseline mode instead of starting from an existing Run ID.
+  - **Why:** "watch this command from now on" should not require running the command first, opening History, copying a run id, and coming back to Watchers.
+  - **What:** browser, API, terminal, and CLI watcher creation accept first-run baselines; the watcher stays pending until the first successful fire, records that fire as the baseline without change notifications, and then compares later runs against it.
+  - **Tests:** added Watchers modal coverage for first-run baseline creation. Current suite total: 1728 pytest + 1234 Vitest + 252 Playwright = **3,214 tests**.
 - **Browser output pages load the shared line-event model** — the main shell and permalink pages now load `run_output_model.js` before transcript/export helpers, and the fallback decoder preserves legacy classes if the model is unavailable.
   - **Why:** without the browser-side decoder, fresh output still displayed as text but lost semantic classes such as `prompt-echo` and `exit-ok`, which broke prompt formatting, exit-row styling, mobile restore checks, and prompt-aware permalink exports.
   - **Tests:** reran the affected Playwright command, tab recall, kill, welcome, mobile, and share permalink flows.

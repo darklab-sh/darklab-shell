@@ -1109,6 +1109,11 @@ def test_api_v1_watchers_reject_invalid_body_disallowed_command_and_bad_baseline
         headers=_headers(token),
         json={"baseline_run_id": "missing", "cadence_preset": "hourly"},
     )
+    first_run = client.post(
+        "/api/v1/watchers",
+        headers=_headers(token),
+        json={"baseline_mode": "first_run", "cadence_preset": "hourly", "command": "nmap darklab.sh"},
+    )
     disallowed = client.post(
         "/api/v1/watchers",
         headers=_headers(token),
@@ -1119,6 +1124,8 @@ def test_api_v1_watchers_reject_invalid_body_disallowed_command_and_bad_baseline
     assert json.loads(invalid_body.data)["error"]["code"] == "invalid_body"
     assert missing_baseline.status_code == 404
     assert json.loads(missing_baseline.data)["error"]["code"] == "not_found"
+    assert first_run.status_code == 400
+    assert json.loads(first_run.data)["error"]["code"] == "invalid_command"
     assert disallowed.status_code == 400
     assert json.loads(disallowed.data)["error"]["code"] == "invalid_command"
 
@@ -1531,7 +1538,13 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
         def request(self, method, path, *, params=None, body=None, **_kwargs):
             calls.append((method, path, params, body))
             if path == "/watchers" and method == "POST":
+                assert body is not None
+                if body.get("baseline_mode") == "first_run":
+                    assert body["baseline_run_id"] == ""
+                    assert body["command"] == "nmap darklab.sh"
+                    return {"watcher": {**watcher, "baseline_run_id": "", "state_reason": "pending_baseline"}}
                 assert body == {
+                    "baseline_mode": "existing_run",
                     "baseline_run_id": "run_base",
                     "cron_expr": None,
                     "cadence_preset": "hourly",
@@ -1595,6 +1608,8 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
         "darklab.sh",
     ]) == 0
     assert "wtr_cli" in capsys.readouterr().out
+    assert cli_main.main(["watch", "create", "--first-run", "--every", "hourly", "--", "nmap", "darklab.sh"]) == 0
+    assert "wtr_cli" in capsys.readouterr().out
     assert cli_main.main(["watch", "create", "run_base", "--every", "hourly", "--"]) == 1
     assert "needs a command after --" in capsys.readouterr().err
     assert cli_main.main(["watch", "list", "--limit", "10"]) == 0
@@ -1617,6 +1632,7 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["removed"] is True
 
     assert [call[1] for call in calls] == [
+        "/watchers",
         "/watchers",
         "/watchers",
         "/watchers/wtr_cli",

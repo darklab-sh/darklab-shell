@@ -212,7 +212,7 @@ def create_watcher(
     session_token: str,
     *,
     command_text: str,
-    baseline_run_id: str,
+    baseline_run_id: str = "",
     cron_expr: str | None = None,
     cadence_preset: str | None = None,
     timezone_name: str | None = None,
@@ -226,8 +226,6 @@ def create_watcher(
     baseline = str(baseline_run_id or "").strip()
     if not command:
         raise WatcherError("command text is required")
-    if not baseline:
-        raise WatcherError("baseline run id is required")
     normalized_options = normalize_watcher_options(options)
     watcher_id = _watcher_id()
     ctx = None
@@ -252,7 +250,7 @@ def create_watcher(
         )
         now = _utc_now()
         state = WATCHER_STATE_OK if enabled else WATCHER_STATE_PAUSED
-        state_reason = "" if enabled else "created_paused"
+        state_reason = "pending_baseline" if enabled and not baseline else ("" if enabled else "created_paused")
         conn.execute(
             """
             INSERT INTO watchers (
@@ -360,10 +358,11 @@ def pause_watcher(watcher_id: str, reason: str = "", *, conn=None) -> Watcher | 
 
 
 def resume_watcher(watcher_id: str, *, conn=None) -> Watcher | None:
+    existing = get_watcher(watcher_id, conn=conn)
     watcher = set_watcher_state(
         watcher_id,
         state=WATCHER_STATE_OK,
-        state_reason="",
+        state_reason="pending_baseline" if existing is not None and not existing.baseline_run_id else "",
         last_error="",
         consecutive_failures=0,
         schedule_enabled=True,

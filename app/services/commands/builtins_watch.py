@@ -41,6 +41,7 @@ def _watch_usage() -> list[dict[str, object]]:
         output_line("  watch list", "builtin-help-row"),
         output_line('  watch create <baseline_run_id> --cron "0 * * * *"', "builtin-help-row"),
         output_line("  watch create <baseline_run_id> --every hourly|daily|weekly", "builtin-help-row"),
+        output_line("  watch create --first-run --every hourly --command 'nmap -sV darklab.sh'", "builtin-help-row"),
         output_line("  watch pause <id>", "builtin-help-row"),
         output_line("  watch resume <id>", "builtin-help-row"),
         output_line("  watch delete <id>", "builtin-help-row"),
@@ -145,12 +146,20 @@ def _read_option_value(parts: list[str], index: int, option: str) -> tuple[str, 
 
 
 def _parse_create(parts: list[str]) -> dict[str, Any]:
-    if len(parts) < 4 or not str(parts[2] or "").strip():
+    if len(parts) < 3:
         raise BuiltinWatchError("Usage: watch create <baseline_run_id> --every hourly|daily|weekly")
-    parsed: dict[str, Any] = {"baseline_run_id": str(parts[2]).strip(), "label": ""}
-    index = 3
+    first_run = str(parts[2] or "") == "--first-run"
+    parsed: dict[str, Any] = {"baseline_run_id": "" if first_run else str(parts[2]).strip(), "label": "", "first_run": first_run}
+    if not first_run and not parsed["baseline_run_id"]:
+        raise BuiltinWatchError("Usage: watch create <baseline_run_id> --every hourly|daily|weekly")
+    index = 3 if not first_run else 2
     while index < len(parts):
         option = parts[index]
+        if option == "--first-run":
+            parsed["first_run"] = True
+            parsed["baseline_run_id"] = ""
+            index += 1
+            continue
         if option == "--cron":
             parsed["cron_expr"], index = _read_option_value(parts, index, option)
             continue
@@ -162,6 +171,9 @@ def _parse_create(parts: list[str]) -> dict[str, Any]:
             continue
         if option == "--timezone":
             parsed["timezone_name"], index = _read_option_value(parts, index, option)
+            continue
+        if option == "--command":
+            parsed["command"], index = _read_option_value(parts, index, option)
             continue
         raise BuiltinWatchError(f"watch create: unknown option {option}")
     if not parsed.get("cron_expr") and not parsed.get("cadence_preset"):
@@ -188,12 +200,19 @@ def _baseline_for_session(baseline_run_id: str, session_id: str) -> dict[str, An
 
 def _create_watch(parts: list[str], session_id: str) -> list[dict[str, object]]:
     payload = _parse_create(parts)
-    baseline = _baseline_for_session(str(payload["baseline_run_id"]), session_id)
-    command = validate_schedule_command(str(baseline.get("command") or ""), session_id)
+    if payload.get("first_run"):
+        command_text = str(payload.get("command") or "").strip()
+        if not command_text:
+            raise BuiltinWatchError("watch create: --first-run requires --command")
+        baseline: dict[str, Any] = {}
+    else:
+        baseline = _baseline_for_session(str(payload["baseline_run_id"]), session_id)
+        command_text = str(baseline.get("command") or "")
+    command = validate_schedule_command(command_text, session_id)
     watcher = create_watcher(
         session_id,
         command_text=command,
-        baseline_run_id=str(baseline["id"]),
+        baseline_run_id=str(baseline.get("id") or ""),
         cron_expr=payload.get("cron_expr"),
         cadence_preset=payload.get("cadence_preset"),
         timezone_name=payload.get("timezone_name"),
@@ -213,7 +232,7 @@ def _create_watch(parts: list[str], session_id: str) -> list[dict[str, object]]:
     })
     return [
         output_line(f"watch: created {watcher.id}", "builtin-success"),
-        output_line(format_native_record("baseline run", watcher.baseline_run_id, 13), "builtin-kv"),
+        output_line(format_native_record("baseline run", watcher.baseline_run_id or "pending first run", 13), "builtin-kv"),
         output_line(format_native_record("next run", schedule.next_run_at, 13), "builtin-kv"),
     ]
 

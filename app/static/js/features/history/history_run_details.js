@@ -52,7 +52,10 @@ function _ensureHistoryRunOverlay() {
           <div id="history-run-title" class="history-run-title">RUN DETAILS</div>
           <div id="history-run-subtitle" class="history-run-subtitle"></div>
         </div>
-        <button type="button" class="close-btn history-run-close" aria-label="Close run details">✕</button>
+        <div class="history-run-header-actions">
+          <div id="history-run-header-export"></div>
+          <button type="button" class="close-btn history-run-close" aria-label="Close run details">✕</button>
+        </div>
       </div>
       <div class="history-run-tabs tab-strip" role="tablist" aria-label="Run details sections">
         <button type="button" class="tab-strip-item history-run-tab" data-history-run-tab="summary" role="tab">Summary</button>
@@ -67,6 +70,18 @@ function _ensureHistoryRunOverlay() {
   document.body.appendChild(overlay);
   overlay.addEventListener('click', e => {
     if (e.target === overlay) closeHistoryRunOverlay();
+    const exportTrigger = e.target.closest?.('.history-run-export-menu-trigger');
+    if (exportTrigger) {
+      e.preventDefault();
+      e.stopPropagation();
+      const wrap = exportTrigger.closest('.history-run-export-menu-wrap');
+      if (!wrap) return;
+      const open = !wrap.classList.contains('open');
+      _closeHistoryRunActionMenus(open ? wrap : null);
+      wrap.classList.toggle('open', open);
+      exportTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+      return;
+    }
     const menuTrigger = e.target.closest?.('.history-run-action-menu-trigger');
     if (menuTrigger) {
       e.preventDefault();
@@ -106,6 +121,13 @@ function _ensureHistoryRunOverlay() {
     if (entityRow) {
       e.preventDefault();
       _openHistoryRunEntityInAtlas(entityRow.dataset.historyRunEntityId || '');
+      return;
+    }
+    const exportAction = e.target.closest?.('[data-history-run-export]');
+    if (exportAction) {
+      e.preventDefault();
+      _closeHistoryRunActionMenus();
+      void _handleHistoryRunExport(String(exportAction.dataset.historyRunExport || ''));
       return;
     }
     const action = e.target.closest?.('[data-history-run-action]');
@@ -201,6 +223,9 @@ function _historyRunOutputEntries(run) {
       cls: String(entry && typeof entry === 'object' ? entry.cls || '' : ''),
       kind: String(entry && typeof entry === 'object' ? entry.kind || '' : ''),
       role: String(entry && typeof entry === 'object' ? entry.role || '' : ''),
+      tsC: String(entry && typeof entry === 'object' ? entry.tsC || entry.ts_clock || '' : ''),
+      tsE: String(entry && typeof entry === 'object' ? entry.tsE || entry.ts_elapsed || '' : ''),
+      line_number: Number.isInteger(entry && entry.line_number) ? entry.line_number : undefined,
       signals: Array.isArray(entry && entry.signals) ? entry.signals.map(signal => String(signal || '')).filter(Boolean) : [],
       entities: Array.isArray(entry && entry.entities) ? entry.entities : [],
     }));
@@ -364,6 +389,35 @@ function _historyRunActionMenu() {
     item.type = 'button';
     item.className = 'dropdown-item dropdown-item-compact';
     item.dataset.historyRunAction = action;
+    item.setAttribute('role', 'menuitem');
+    item.textContent = label;
+    menu.appendChild(item);
+  });
+  wrap.append(trigger, menu);
+  return wrap;
+}
+
+function _historyRunExportMenu() {
+  const wrap = document.createElement('div');
+  wrap.className = 'history-run-export-menu-wrap save-menu-wrap save-menu-down';
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'btn btn-secondary btn-compact history-run-export-menu-trigger';
+  trigger.textContent = 'Export';
+  trigger.setAttribute('aria-haspopup', 'menu');
+  trigger.setAttribute('aria-expanded', 'false');
+  const menu = document.createElement('div');
+  menu.className = 'history-run-export-menu save-menu dropdown-surface';
+  menu.setAttribute('role', 'menu');
+  [
+    ['txt', 'Plain text (.txt)'],
+    ['html', 'Styled HTML (.html)'],
+    ['pdf', 'PDF document (.pdf)'],
+  ].forEach(([format, label]) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'dropdown-item dropdown-item-compact';
+    item.dataset.historyRunExport = format;
     item.setAttribute('role', 'menuitem');
     item.textContent = label;
     menu.appendChild(item);
@@ -827,6 +881,10 @@ function _renderHistoryRunModal() {
   const run = _historyRunPrimary();
   const subtitle = overlay.querySelector('#history-run-subtitle');
   if (subtitle) subtitle.textContent = _historyRunDisplay(run);
+  const headerExport = overlay.querySelector('#history-run-header-export');
+  if (headerExport && !headerExport.childElementCount) {
+    headerExport.replaceChildren(_historyRunExportMenu());
+  }
   overlay.querySelectorAll('[data-history-run-tab]').forEach((tab) => {
     const active = String(tab.dataset.historyRunTab || '') === _historyRunModalState.activeTab;
     tab.classList.toggle('is-active', active);
@@ -1056,6 +1114,165 @@ function _setHistoryRunEntitiesPage(direction) {
     : Math.min(maxOffset, currentOffset + limit);
   if (nextOffset === currentOffset) return;
   _loadHistoryRunEntities(run.id, _historyRunModalToken, { offset: nextOffset });
+}
+
+function _historyRunExportTimestamp() {
+  if (window.ExportHtmlUtils && typeof ExportHtmlUtils.exportTimestamp === 'function') {
+    return ExportHtmlUtils.exportTimestamp();
+  }
+  return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+}
+
+function _historyRunExportFilename(format) {
+  const appName = String(APP_CONFIG && APP_CONFIG.app_name || 'darklab_shell');
+  return `${appName}-${_historyRunExportTimestamp()}.${format}`;
+}
+
+function _historyRunExportCreatedText(run) {
+  return String(run && (run.started || run.created) || '');
+}
+
+function _historyRunExportLines(run) {
+  const lines = _historyRunOutputEntries(run);
+  if (run && run.preview_notice) {
+    lines.push({
+      text: String(run.preview_notice || ''),
+      kind: 'notice',
+      role: 'body',
+      cls: 'notice',
+    });
+  }
+  return lines.filter(line => line && typeof line.text === 'string');
+}
+
+async function _historyRunLoadExportRun() {
+  const run = _historyRunPrimary();
+  if (!run || !run.id) return run || {};
+  const resp = await apiFetch(`/history/${encodeURIComponent(run.id)}?json`, { cache: 'no-store' });
+  if (resp.ok === false) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  return { ...run, ...(data || {}) };
+}
+
+function _historyRunBuildExportModel(run) {
+  const exportLines = _historyRunExportLines(run);
+  const rawLines = typeof omitRawOnlyLineEntries === 'function'
+    ? omitRawOnlyLineEntries(exportLines)
+    : exportLines;
+  if (window.ExportHtmlUtils && typeof ExportHtmlUtils.buildExportDocumentModel === 'function') {
+    return ExportHtmlUtils.buildExportDocumentModel({
+      appName: APP_CONFIG && APP_CONFIG.app_name || 'darklab_shell',
+      title: String(run && (run.command || run.label || run.id) || ''),
+      label: run && (run.command || run.label || run.id),
+      createdText: _historyRunExportCreatedText(run),
+      runMeta: {
+        exitCode: run ? run.exit_code : null,
+        duration: null,
+        lines: `${rawLines.length.toLocaleString()} lines`,
+        version: APP_CONFIG && APP_CONFIG.version || null,
+      },
+      rawLines,
+    });
+  }
+  return {
+    appName: APP_CONFIG && APP_CONFIG.app_name || 'darklab_shell',
+    title: String(run && (run.command || run.label || run.id) || ''),
+    metaLine: `${run && (run.command || run.label || run.id) || ''} · ${_historyRunExportCreatedText(run)}`,
+    runMeta: {
+      exitCode: run ? run.exit_code : null,
+      duration: null,
+      lines: `${rawLines.length.toLocaleString()} lines`,
+      version: APP_CONFIG && APP_CONFIG.version || null,
+    },
+    rawLines,
+  };
+}
+
+function _historyRunPlainExportText(run) {
+  return _historyRunExportLines(run)
+    .map(line => String(line.text || '').replace(/\x1b\[[0-9;]*[A-Za-z]/g, ''))
+    .join('\n');
+}
+
+function _historyRunDownloadBlob(blob, filename) {
+  const downloader = typeof downloadBlobAsAttachment === 'function'
+    ? downloadBlobAsAttachment
+    : window.downloadBlobAsAttachment;
+  if (typeof downloader !== 'function') throw new Error('download unavailable');
+  downloader(blob, filename);
+}
+
+async function _exportHistoryRunTxt() {
+  const run = await _historyRunLoadExportRun();
+  const text = _historyRunPlainExportText(run);
+  if (!text.trim()) {
+    showToast('No output to export');
+    return;
+  }
+  _historyRunDownloadBlob(new Blob([text], { type: 'text/plain' }), _historyRunExportFilename('txt'));
+}
+
+async function _exportHistoryRunHtml() {
+  if (!window.ExportHtmlUtils) throw new Error('ExportHtmlUtils unavailable');
+  const run = await _historyRunLoadExportRun();
+  const exportModel = _historyRunBuildExportModel(run);
+  if (!exportModel.rawLines.length) {
+    showToast('No output to export');
+    return;
+  }
+  const ansiRenderer = typeof createAnsiUpRenderer === 'function' ? createAnsiUpRenderer() : null;
+  const { linesHtml, prefixWidth, summaryHtml } = ExportHtmlUtils.buildExportLinesHtml(exportModel.rawLines, {
+    getPrefix: () => '',
+    ansiToHtml: text => ansiRenderer ? ansiRenderer.ansi_to_html(text) : escapeHtml(String(text ?? '')),
+  });
+  const [fontFacesCss, exportCss] = await Promise.all([
+    ExportHtmlUtils.fetchVendorFontFacesCss().catch(() => ''),
+    ExportHtmlUtils.fetchTerminalExportCss().catch(() => ''),
+  ]);
+  const html = ExportHtmlUtils.buildTerminalExportHtml({
+    appName: exportModel.appName,
+    title: exportModel.title,
+    metaLine: exportModel.metaLine,
+    runMeta: exportModel.runMeta,
+    linesHtml,
+    summaryHtml,
+    prefixWidth,
+    fontFacesCss,
+    exportCss,
+  });
+  _historyRunDownloadBlob(new Blob([html], { type: 'text/html' }), _historyRunExportFilename('html'));
+}
+
+async function _exportHistoryRunPdf() {
+  if (!window.jspdf || !window.ExportPdfUtils) throw new Error('PDF library not loaded');
+  const run = await _historyRunLoadExportRun();
+  const exportModel = _historyRunBuildExportModel(run);
+  if (!exportModel.rawLines.length) {
+    showToast('No output to export');
+    return;
+  }
+  const ansiRenderer = typeof createAnsiUpRenderer === 'function' ? createAnsiUpRenderer() : null;
+  const doc = await ExportPdfUtils.buildTerminalExportPdf({
+    jsPDF: window.jspdf.jsPDF,
+    appName: exportModel.appName,
+    metaLine: exportModel.metaLine,
+    runMeta: exportModel.runMeta,
+    rawLines: exportModel.rawLines,
+    getPrefix: () => '',
+    ansiToHtml: text => ansiRenderer ? ansiRenderer.ansi_to_html(text) : escapeHtml(String(text ?? '')),
+  });
+  doc.save(_historyRunExportFilename('pdf'));
+}
+
+async function _handleHistoryRunExport(format) {
+  try {
+    if (format === 'txt') await _exportHistoryRunTxt();
+    else if (format === 'html') await _exportHistoryRunHtml();
+    else if (format === 'pdf') await _exportHistoryRunPdf();
+  } catch (_) {
+    const label = format === 'pdf' ? 'pdf' : format === 'html' ? 'html' : 'text';
+    showToast(`Failed to export ${label}`, 'error');
+  }
 }
 
 function _openHistoryRunEntityInAtlas(entityId) {

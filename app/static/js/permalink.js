@@ -40,7 +40,21 @@
 
   var lnMode = getCookie('pref_line_numbers') === 'on' ? 'on' : 'off';
   var tsMode = tsModes.includes(getCookie('pref_timestamps')) ? getCookie('pref_timestamps') : 'off';
+  var highlightMode = getCookie('pref_structured_highlights') === 'off' ? 'off' : 'on';
   if (!hasTimestampMetadata) tsMode = 'off';
+
+  function setCookie(name, value) {
+    document.cookie = name + '=' + encodeURIComponent(value) + '; path=/; max-age=31536000; SameSite=Lax';
+  }
+
+  function syncHighlightMode() {
+    document.body.classList.toggle('structured-highlights-off', highlightMode === 'off');
+    var highlightBtn = document.getElementById('toggle-highlights');
+    if (highlightBtn) {
+      highlightBtn.textContent = 'highlights: ' + highlightMode;
+      highlightBtn.setAttribute('aria-pressed', highlightMode === 'on' ? 'true' : 'false');
+    }
+  }
 
   // ── Prefix formatting ──────────────────────────────────────────────────────
   function timestampText(entry) {
@@ -85,7 +99,11 @@
 
       var contentEl = document.createElement('span');
       contentEl.className = 'perm-content';
-      if (ExportHtmlUtils.isPromptEchoEvent(lineEvent)) {
+      if (typeof ExportHtmlUtils.renderExportLineContent === 'function') {
+        contentEl.innerHTML = ExportHtmlUtils.renderExportLineContent(lineEvent, function (text) {
+          return ansiUp.ansi_to_html(text);
+        });
+      } else if (ExportHtmlUtils.isPromptEchoEvent(lineEvent)) {
         contentEl.innerHTML = ExportHtmlUtils.renderExportPromptEcho(lineEvent.text);
       } else if (ExportHtmlUtils.isPlainEvent(lineEvent)) {
         contentEl.textContent = lineEvent.text;
@@ -99,6 +117,7 @@
     document.getElementById('toggle-ln').textContent = 'line numbers: ' + lnMode;
     var tsBtn = document.getElementById('toggle-ts');
     tsBtn.textContent = hasTimestampMetadata ? 'timestamps: ' + tsMode : 'timestamps: unavailable';
+    syncHighlightMode();
   }
 
   // ── Toggle wiring ──────────────────────────────────────────────────────────
@@ -112,6 +131,15 @@
     tsMode = tsModes[(tsModes.indexOf(tsMode) + 1) % tsModes.length];
     renderOutput();
   });
+
+  var highlightToggle = document.getElementById('toggle-highlights');
+  if (highlightToggle) {
+    highlightToggle.addEventListener('click', function () {
+      highlightMode = highlightMode === 'on' ? 'off' : 'on';
+      setCookie('pref_structured_highlights', highlightMode);
+      syncHighlightMode();
+    });
+  }
 
   // ── Save dropdown ──────────────────────────────────────────────────────────
   (function () {
@@ -214,6 +242,7 @@
         prefixWidth: prefixWidth,
         fontFacesCss: fontFacesCss,
         exportCss: exportCss,
+        highlights: highlightMode,
       });
       downloadBlobAsAttachment(new Blob([html], {type: 'text/html'}), downloadName('html'));
     });

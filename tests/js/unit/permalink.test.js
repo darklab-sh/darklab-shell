@@ -44,6 +44,16 @@ function makeExportHtmlUtilsMock() {
     lineLegacyClass: vi.fn((line) => String(line?.cls || (line?.role && line.role !== 'body' ? line.role : line?.kind === 'notice' ? 'notice' : ''))),
     isPromptEchoEvent: vi.fn((line) => line?.role === 'prompt-echo'),
     isPlainEvent: vi.fn((line) => ['exit-ok', 'exit-fail', 'denied'].includes(line?.role) || line?.kind === 'notice'),
+    renderExportLineContent: vi.fn(function renderExportLineContent(line, ansiToHtml) {
+      if (this.isPromptEchoEvent(line)) return this.renderExportPromptEcho(line.text)
+      if (this.isPlainEvent(line)) {
+        return String(line.text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      }
+      const rendered = ansiToHtml(String(line.text || ''))
+      const entity = Array.isArray(line.entities) ? line.entities[0] : null
+      if (!entity) return rendered
+      return `<span class="line-severity-badge line-severity-finding">finding</span><span class="export-entity-token">${rendered}</span>`
+    }),
     normalizeExportRunMeta: vi.fn((runMeta) => {
       if (!runMeta) return null
       return {
@@ -111,6 +121,7 @@ function loadPermalink({
     <div id="output"></div>
     <button id="toggle-ln">line numbers: off</button>
     <button id="toggle-ts">timestamps: off</button>
+    <button id="toggle-highlights" aria-pressed="true">highlights: on</button>
     <div id="perm-save-wrap">
       <button id="perm-save-btn">save</button>
       <div class="save-menu">
@@ -181,6 +192,7 @@ function loadPermalink({
       output: document.getElementById('output'),
       toggleLn: document.getElementById('toggle-ln'),
       toggleTs: document.getElementById('toggle-ts'),
+      toggleHighlights: document.getElementById('toggle-highlights'),
       saveWrap: document.getElementById('perm-save-wrap'),
       saveBtn: document.getElementById('perm-save-btn'),
       saveMenu: document.querySelector('#perm-save-wrap .save-menu'),
@@ -251,6 +263,58 @@ describe('renderOutput — output element structure', () => {
     const lines = [{ text: '\x1b[32mgreen\x1b[0m', cls: '' }]
     const { mocks } = loadPermalink({ lines })
     expect(mocks.ansiUpInstance.ansi_to_html).toHaveBeenCalledWith('\x1b[32mgreen\x1b[0m')
+  })
+
+  it('renders structured finding and entity highlights on the permalink page', () => {
+    const lines = [{
+      text: 'https://tor-stats.darklab.sh/static/',
+      cls: '',
+      kind: 'info',
+      role: 'body',
+      signals: ['findings'],
+      entities: [{
+        type: 'domain',
+        canonical_value: 'tor-stats.darklab.sh',
+        start: 8,
+        end: 28,
+      }],
+    }]
+    const { el } = loadPermalink({ lines })
+    expect(el.output.querySelector('.line-severity-finding')?.textContent).toBe('finding')
+    expect(el.output.querySelector('.export-entity-token')?.textContent)
+      .toBe('https://tor-stats.darklab.sh/static/')
+  })
+
+  it('toggles structured finding and entity highlights without changing output text', () => {
+    const lines = [{
+      text: 'https://tor-stats.darklab.sh/static/',
+      cls: '',
+      kind: 'info',
+      role: 'body',
+      signals: ['findings'],
+      entities: [{
+        type: 'domain',
+        canonical_value: 'tor-stats.darklab.sh',
+        start: 8,
+        end: 28,
+      }],
+    }]
+    const { el } = loadPermalink({ lines })
+    expect(document.body.classList.contains('structured-highlights-off')).toBe(false)
+    expect(el.toggleHighlights.textContent).toBe('highlights: on')
+    expect(el.toggleHighlights.getAttribute('aria-pressed')).toBe('true')
+    expect(el.output.querySelector('.line-severity-finding')?.textContent).toBe('finding')
+    expect(el.output.querySelector('.export-entity-token')?.textContent)
+      .toBe('https://tor-stats.darklab.sh/static/')
+
+    el.toggleHighlights.click()
+
+    expect(document.body.classList.contains('structured-highlights-off')).toBe(true)
+    expect(el.toggleHighlights.textContent).toBe('highlights: off')
+    expect(el.toggleHighlights.getAttribute('aria-pressed')).toBe('false')
+    expect(el.output.querySelector('.line-severity-finding')?.textContent).toBe('finding')
+    expect(el.output.querySelector('.export-entity-token')?.textContent)
+      .toBe('https://tor-stats.darklab.sh/static/')
   })
 
   it('uses ExportHtmlUtils.renderExportPromptEcho for prompt-echo lines', () => {

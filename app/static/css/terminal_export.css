@@ -22,6 +22,30 @@
   gap: 4px;
   min-width: 0;
 }
+.export-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.export-highlight-toggle {
+  border: 1px solid var(--border-bright);
+  border-radius: 2px;
+  padding: 4px 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.export-highlight-toggle:hover,
+.export-highlight-toggle:focus-visible {
+  color: var(--text);
+  border-color: var(--green-dim);
+  outline: none;
+}
 .export-title {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: 20px;
@@ -98,6 +122,17 @@
   color: var(--green);
   border-color: var(--green-dim);
   text-decoration: none;
+}
+.structured-highlights-off .line-severity-badge {
+  display: none;
+}
+.structured-highlights-off .export-entity-token {
+  display: inline;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  line-height: inherit;
+  text-decoration: inherit;
 }
 .nice-scroll {
   scrollbar-width: thin;

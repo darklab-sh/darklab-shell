@@ -193,6 +193,9 @@ function _closeMajorOverlays() {
   if (typeof isAtlasOverlayOpen === 'function' && isAtlasOverlayOpen()) {
     if (typeof closeAtlas === 'function') closeAtlas({ refocus: false });
   }
+  if (typeof isHistoryRunOverlayOpen === 'function' && isHistoryRunOverlayOpen()) {
+    if (typeof closeHistoryRunOverlay === 'function') closeHistoryRunOverlay();
+  }
   if (isHistoryPanelOpen()) hideHistoryPanel();
   if (isWorkflowsOverlayOpen()) {
     if (typeof closeWorkflows === 'function') closeWorkflows();
