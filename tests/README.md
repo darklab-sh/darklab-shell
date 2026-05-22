@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,172
+- behavior tests: 3,176
 - docs/inventory meta-tests: 33
-- `pytest`: 1723 (1690 behavior + 33 meta)
+- `pytest`: 1727 (1694 behavior + 33 meta)
 - `vitest`: 1230
 - `playwright`: 252
-- total: 3,205
+- total: 3,209
 
 This document is organized in two parts:
 
@@ -490,6 +490,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWatchersFoundation.test_watcher_update_pause_resume_and_accept_baseline_update_owned_schedule` | Verifies watcher edit, pause, resume, and accept-baseline actions keep the watcher row and owned schedule aligned. |
 | `TestWatchersFoundation.test_watcher_schedule_fire_launches_run_and_records_pending_fire` | Verifies watcher-owned schedules launch through scheduler dispatch, mark the watcher as firing, and record a pending watcher fire. |
 | `TestWatchersFoundation.test_watcher_full_cycle_fires_detects_change_notifies_and_accepts_baseline` | Verifies a watcher can fire with no changes, fire again with a detected change, queue a notification, and promote the changed run as the new baseline. |
+| `TestWatchersFoundation.test_watcher_textual_diff_reports_entity_delta` | Verifies textual watcher diffs report added, removed, and unchanged structured entities when line metadata is available. |
 | `TestWatchersFoundation.test_watcher_finalize_changed_diff_updates_state_and_queues_notification` | Verifies completed watcher runs with a textual diff move to changed state and queue a watcher-changed notification. |
 | `TestWatchersFoundation.test_watcher_finalize_no_change_recovers_only_after_changed_state` | Verifies no-change watcher fires stay quiet from ok state and emit recovered only after a prior changed state. |
 | `TestWatchersFoundation.test_watcher_finalize_failed_run_disables_after_threshold` | Verifies failed watcher runs record error state, queue watcher-error notifications, and disable after the failure threshold. |
@@ -550,6 +551,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionWorkspace.test_write_read_list_delete_text_file` | Verifies the backend workspace text-file lifecycle for write, read, list, usage, and delete operations. |
 | `TestSessionWorkspace.test_prepare_workspace_file_for_command_uses_limited_write_mode` | Verifies that command output targets get limited group-write permissions without becoming world-readable. |
 | `TestSessionWorkspace.test_prepare_workspace_directory_for_command_does_not_temporarily_widen_mode` | Verifies that command-managed workspace directories go straight to the scanner-safe directory mode without a temporary world-readable chmod. |
+| `TestSessionWorkspace.test_scanner_owned_workspace_entry_with_scanner_group_needs_repair` | Verifies that scanner-owned workspace entries are repaired when their mode bits look correct but their group drifted away from the shared app group. |
 | `TestSessionWorkspace.test_list_repairs_command_created_workspace_modes` | Verifies that workspace listing repairs command-created folder/file modes so app-mediated reads can see tool config output. |
 | `TestSessionWorkspace.test_read_workspace_permission_denied_is_not_raw_os_error` | Verifies that unreadable workspace files raise an app-level permission error instead of a raw OS error. |
 | `TestSessionWorkspace.test_delete_workspace_file_falls_back_to_scanner_owner_for_nested_command_files` | Verifies that deleting scanner-owned nested workspace files falls back through the validated scanner sudo path when sticky directory permissions block direct unlink. |
@@ -673,6 +675,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_pid_reuse` | Checks that Redis-backed active-run metadata is pruned when a PID has been reused by a different process. |
 | `TestActiveRunMetadata.test_pid_pop_for_session_requires_matching_session` | Verifies that active-run PID lookup only pops processes owned by the requesting session. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_legacy_metadata_on_linux` | Checks that legacy Redis metadata without PID start-time tracking is pruned on Linux instead of trusting a reused PID. |
+| `TestActiveRunMetadata.test_cleanup_stale_active_run_metadata_removes_orphans_and_previous_container_rows` | Verifies startup active-run cleanup removes Redis metadata left by dead containers while preserving live rows for the current container. |
 | `TestActiveRunMetadata.test_active_run_resource_usage_reports_cumulative_cpu_and_memory` | Verifies that active-run resource telemetry reports process-tree CPU seconds and RSS memory for Status Monitor display. |
 | `TestInteractivePtyRegistry.test_live_registry_publishes_each_supported_interactive_tool` | Verifies that `commands.yaml` exposes the expected interactive PTY tools (`nc`, `telnet`, `mtr`, `ffuf`, `masscan`) with their trigger flag and runtime settings. |
 | `TestPtyBrokerService.test_pty_broker_is_available_with_redis_even_when_workers_are_not_sticky` | Verifies that Redis-backed PTY brokering works without requiring sticky Gunicorn workers. |
@@ -759,6 +762,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunOutputCapture.test_full_output_artifact_round_trips_lines` | Checks that full output artifact round trips lines. |
 | `TestRunOutputCapture.test_full_output_artifact_round_trips_signal_metadata` | Verifies that persisted full-output artifacts preserve backend signal metadata with each line. |
 | `TestRunOutputCapture.test_add_event_preserves_legacy_output_shape` | Verifies typed run-output events still write the legacy preview and artifact shape. |
+| `TestRunOutputCapture.test_replace_run_output_summary_tolerates_concurrent_backfill_insert` | Verifies structured output summary backfills tolerate another worker inserting the same summary key first. |
 | `TestRunOutputCapture.test_legacy_event_factory_matches_typed_add_event_bytes` | Verifies legacy line-event factory output and typed `add_event` output write matching event rows after the artifact header. |
 | `TestRunOutputCapture.test_full_output_artifact_respects_byte_cap` | Checks that full output artifact respects byte cap. |
 | `TestRunOutputCapture.test_full_output_artifact_cap_does_not_reopen_and_overwrite_prefix` | Verifies capped full-output artifacts keep the preserved prefix when later lines arrive after the byte cap is hit. |

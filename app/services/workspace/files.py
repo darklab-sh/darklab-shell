@@ -329,6 +329,13 @@ def _sudo_chmod_workspace_path(path: Path, mode: int) -> bool:
         return False
     try:
         subprocess.run(
+            [sudo_bin, "-u", "scanner", "-g", "appuser", "chgrp", "appuser", str(path)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+        subprocess.run(
             [sudo_bin, "-u", "scanner", "-g", "appuser", "chmod", f"{mode:o}", str(path)],
             check=True,
             stdout=subprocess.DEVNULL,
@@ -349,16 +356,29 @@ def _scanner_uid() -> int | None:
         return None
 
 
+@lru_cache(maxsize=1)
+def _appuser_gid() -> int | None:
+    try:
+        return int(pwd.getpwnam("appuser").pw_gid)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return None
+
+
 def _is_scanner_owned(path_stat: os.stat_result) -> bool:
     scanner_uid = _scanner_uid()
     return scanner_uid is not None and path_stat.st_uid == scanner_uid
+
+
+def _has_appuser_group(path_stat: os.stat_result) -> bool:
+    appuser_gid = _appuser_gid()
+    return appuser_gid is not None and path_stat.st_gid == appuser_gid
 
 
 def _workspace_child_dir_repair_mode(child_stat: os.stat_result) -> int | None:
     if not _is_scanner_owned(child_stat):
         return None
     current = stat.S_IMODE(child_stat.st_mode)
-    if current == WORKSPACE_COMMAND_DIR_MODE:
+    if current == WORKSPACE_COMMAND_DIR_MODE and _has_appuser_group(child_stat):
         return None
     return WORKSPACE_COMMAND_DIR_MODE
 
@@ -368,11 +388,14 @@ def _workspace_child_file_repair_mode(child_stat: os.stat_result) -> int | None:
         return None
     current = stat.S_IMODE(child_stat.st_mode)
     repaired = (current | 0o040) & ~0o007
-    return None if repaired == current else repaired
+    return None if repaired == current and _has_appuser_group(child_stat) else repaired
 
 
 def _chmod_workspace_entry(path: Path, mode: int) -> None:
     try:
+        appuser_gid = _appuser_gid()
+        if appuser_gid is not None:
+            os.chown(path, -1, appuser_gid)
         os.chmod(path, mode)
         return
     except PermissionError as exc:
@@ -488,6 +511,13 @@ def prepare_workspace_directory_for_command(path: Path, *, mode: str) -> None:
         if path.exists():
             try:
                 subprocess.run(
+                    [sudo_bin, "-u", "scanner", "-g", "appuser", "chgrp", "appuser", str(path)],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                )
+                subprocess.run(
                     [sudo_bin, "-u", "scanner", "-g", "appuser", "chmod", f"{WORKSPACE_COMMAND_DIR_MODE:o}", str(path)],
                     check=True,
                     stdout=subprocess.DEVNULL,
@@ -508,6 +538,13 @@ def prepare_workspace_directory_for_command(path: Path, *, mode: str) -> None:
             try:
                 subprocess.run(
                     [sudo_bin, "-u", "scanner", "-g", "appuser", "mkdir", "-p", str(path)],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                )
+                subprocess.run(
+                    [sudo_bin, "-u", "scanner", "-g", "appuser", "chgrp", "appuser", str(path)],
                     check=True,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,

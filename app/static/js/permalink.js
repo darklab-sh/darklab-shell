@@ -200,6 +200,7 @@
       ansiToHtml: function (text) { return ansiUp.ansi_to_html(text); },
     });
     var linesHtml = result.linesHtml;
+    var summaryHtml = result.summaryHtml;
     var prefixWidth = result.prefixWidth;
 
     ExportHtmlUtils.fetchTerminalExportCss().catch(function () { return ''; }).then(function (exportCss) {
@@ -209,6 +210,7 @@
         metaLine: exportModel.metaLine,
         runMeta: exportModel.runMeta,
         linesHtml: linesHtml,
+        summaryHtml: summaryHtml,
         prefixWidth: prefixWidth,
         fontFacesCss: fontFacesCss,
         exportCss: exportCss,

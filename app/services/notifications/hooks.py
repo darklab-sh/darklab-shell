@@ -28,12 +28,17 @@ def _redact_summary_fields(fields: dict[str, Any], *, cfg=None) -> dict[str, Any
 
 def _run_complete_summary(finalize_summary: dict[str, Any] | None) -> dict[str, Any]:
     summary = finalize_summary if isinstance(finalize_summary, dict) else {}
-    return {
+    payload: dict[str, Any] = {
         "artifact_count": int(summary.get("artifact_count") or 0),
         "finding_count": int(summary.get("finding_count") or 0),
         "atlas_entity_count": int(summary.get("atlas_entity_count") or 0),
         "project_target_count": int(summary.get("project_target_count") or 0),
     }
+    for key in ("output_kind_counts", "output_signal_counts", "output_entity_type_counts"):
+        value = summary.get(key)
+        if isinstance(value, dict) and value:
+            payload[key] = {str(item_key): int(item_value or 0) for item_key, item_value in value.items()}
+    return payload
 
 
 def enqueue_run_complete(

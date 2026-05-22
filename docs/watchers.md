@@ -84,7 +84,7 @@ Classifier order:
 2. **nmap ports and services** — detects added, removed, and changed port/service rows.
 3. **Host lists** — detects added and removed host/domain/subdomain-style values.
 4. **TLS certificate fields** — detects selected `openssl s_client` certificate changes.
-5. **Textual fallback** — compares bounded output lines when no structured classifier applies.
+5. **Textual fallback** — compares bounded output lines when no structured classifier applies. It ignores progress/status-line/PTY chrome and records added, removed, and unchanged entity counts when the structured output metadata is available.
 
 Diff summaries store bounded added, removed, and changed signals. If source output or changed-signal lists are capped, the fire row carries `truncated=true`.
 

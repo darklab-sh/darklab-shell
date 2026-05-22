@@ -270,7 +270,7 @@ def is_compare_chrome_line(event: LineEvent, text):
     stripped = str(text or "").strip()
     if not stripped:
         return True
-    if event.role.value == "prompt-echo":
+    if event.role.value in {"prompt-echo", "progress", "pty-marker", "status-line"}:
         return True
     if re.match(r"^\[(?:process exited with code|history\s+—\s+exit)\b", stripped, re.I):
         return True
@@ -302,6 +302,7 @@ def compare_entries_for_diff(run):
             "signals": [signal.value for signal in event.signals],
             "kind": event.kind.value,
             "role": event.role.value,
+            "entities": [entity.to_wire() for entity in event.entities],
         }
         compared.append(item)
         byte_count += encoded_len
@@ -338,7 +339,7 @@ def compare_line_payload(entry):
         "text": str(entry.get("text") or ""),
         "line_index": entry.get("line_index"),
     }
-    for key in ("kind", "role"):
+    for key in ("kind", "role", "signals", "entities"):
         if entry.get(key):
             payload[key] = entry[key]
     return payload
@@ -383,6 +384,75 @@ def compare_line_structural_payload(line):
     }
 
 
+_LINE_KIND_SEVERITY = {
+    "info": 0,
+    "notice": 1,
+    "warn": 2,
+    "error": 3,
+}
+
+
+def compare_line_severity_kind(lines):
+    best = ""
+    best_score = -1
+    for line in lines:
+        kind = str(line.get("kind") or "")
+        score = _LINE_KIND_SEVERITY.get(kind, -1)
+        if score > best_score:
+            best = kind
+            best_score = score
+    return best
+
+
+def compare_hunk_severity_kind(hunk):
+    lines = []
+    if hunk["op"] == "insert":
+        lines.extend(hunk.get("right", {}).get("lines", []))
+    elif hunk["op"] == "delete":
+        lines.extend(hunk.get("left", {}).get("lines", []))
+    elif hunk["op"] == "replace":
+        left_lines = hunk.get("left", {}).get("lines", [])
+        right_lines = hunk.get("right", {}).get("lines", [])
+        lines.extend(left_lines)
+        lines.extend(right_lines)
+    severity = compare_line_severity_kind(lines)
+    if severity:
+        hunk["severity_kind"] = severity
+    return hunk
+
+
+def compare_entity_sets(left_entries, right_entries):
+    def _entities_by_key(entries):
+        entities = {}
+        for entry in entries:
+            for entity in entry.get("entities") or []:
+                if not isinstance(entity, dict):
+                    continue
+                entity_type = str(entity.get("type") or "").strip()
+                canonical = str(entity.get("canonical_value") or entity.get("value") or "").strip()
+                if not entity_type or not canonical:
+                    continue
+                key = f"{entity_type}:{canonical}".casefold()
+                entities.setdefault(key, {
+                    "type": entity_type,
+                    "value": str(entity.get("value") or canonical),
+                    "canonical_value": canonical,
+                    "confidence": str(entity.get("confidence") or "medium"),
+                })
+        return entities
+
+    left_entities = _entities_by_key(left_entries)
+    right_entities = _entities_by_key(right_entries)
+    added_keys = sorted(set(right_entities) - set(left_entities))
+    removed_keys = sorted(set(left_entities) - set(right_entities))
+    unchanged_keys = set(left_entities).intersection(right_entities)
+    return {
+        "added": [right_entities[key] for key in added_keys],
+        "removed": [left_entities[key] for key in removed_keys],
+        "unchanged_count": len(unchanged_keys),
+    }
+
+
 def compare_line_events(left: Sequence[LineEvent], right: Sequence[LineEvent]):
     def _entry(event: LineEvent):
         return {
@@ -391,6 +461,7 @@ def compare_line_events(left: Sequence[LineEvent], right: Sequence[LineEvent]):
             "signals": [signal.value for signal in event.signals],
             "kind": event.kind.value,
             "role": event.role.value,
+            "entities": [entity.to_wire() for entity in event.entities],
         }
 
     return hunk_line_diff([_entry(event) for event in left], [_entry(event) for event in right])
@@ -687,6 +758,7 @@ def hunk_line_diff(
             }
         else:
             hunk = compare_replace_hunk(left_entries, right_entries, left_start, left_end, right_start, right_end)
+        hunk = compare_hunk_severity_kind(hunk)
 
         if emitted_change_hunks >= max_hunks or emitted_change_units >= max_changed_lines:
             hunks_omitted += 1

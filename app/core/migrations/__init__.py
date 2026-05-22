@@ -16,6 +16,7 @@ from . import (
     v0009_notification_channels,
     v0010_schedules,
     v0011_watchers,
+    v0012_run_output_summary,
 )
 from .runner import Migration
 
@@ -31,4 +32,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     v0009_notification_channels.MIGRATION,
     v0010_schedules.MIGRATION,
     v0011_watchers.MIGRATION,
+    v0012_run_output_summary.MIGRATION,
 )

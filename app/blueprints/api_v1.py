@@ -68,7 +68,18 @@ from services.runs.broker import (
     stream_run_events,
 )
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL
-from services.runs.output_store import load_run_output_entries_for_run
+from services.runs.output_model import LineEvent, to_wire
+from services.runs.output_store import load_run_output_events_for_run
+from services.runs.structured_filters import (
+    StructuredOutputFilters,
+    entity_run_exists_clause,
+    event_matches_structured_filters,
+    filters_have_summary_selectors,
+    filters_need_line_event_scan,
+    filter_events,
+    run_output_summary_exists_clause,
+    structured_filters_from_params,
+)
 from services.scheduler.commands import ScheduleCommandValidationError, validate_schedule_command
 from services.scheduler.cron import ScheduleCronError, next_fire
 from services.scheduler.dispatch import fire_schedule
@@ -520,7 +531,11 @@ def _history_where(
     return " WHERE " + " AND ".join(where), params
 
 
-def _history_search_candidate_runs(session_id: str, filters: dict[str, str]) -> list[dict[str, Any]]:
+def _history_search_candidate_runs(
+    session_id: str,
+    filters: dict[str, str],
+    structured_filters: StructuredOutputFilters,
+) -> list[dict[str, Any]]:
     offloaded_ids: list[str] = []
     if filters["q"]:
         with db_connect() as conn:
@@ -541,6 +556,14 @@ def _history_search_candidate_runs(session_id: str, filters: dict[str, str]) -> 
             offloaded_ids=offloaded_ids,
             search_scope="all",
         )
+        entity_sql, entity_params = entity_run_exists_clause(structured_filters, run_alias="r")
+        if entity_sql:
+            where_sql += entity_sql
+            params = [*params, *entity_params]
+        summary_sql, summary_params = run_output_summary_exists_clause(structured_filters, run_alias="r")
+        if summary_sql:
+            where_sql += summary_sql
+            params = [*params, *summary_params]
         rows = conn.execute(
             "SELECT r.*, ("  # nosec
             "SELECT art.rel_path FROM run_output_artifacts art "
@@ -553,18 +576,21 @@ def _history_search_candidate_runs(session_id: str, filters: dict[str, str]) -> 
     return [dict(row) for row in rows]
 
 
-def _entry_text(entry: object) -> str:
-    if isinstance(entry, dict):
-        return str(entry.get("text", ""))
-    return str(entry)
-
-
-def _run_output_search_matches(run: dict[str, Any], query: str, context: int) -> list[dict[str, Any]]:
+def _run_output_search_matches(
+    run: dict[str, Any],
+    query: str,
+    context: int,
+    structured_filters: StructuredOutputFilters,
+) -> list[dict[str, Any]]:
     needle = query.casefold()
-    lines = [_entry_text(entry) for entry in _run_output_entries(run)]
+    events = _run_output_events(run)
+    lines = [event.text for event in events]
     matches: list[dict[str, Any]] = []
-    for index, line in enumerate(lines):
-        if needle not in line.casefold():
+    for index, event in enumerate(events):
+        line = event.text
+        if needle and needle not in line.casefold():
+            continue
+        if structured_filters.active and not event_matches_structured_filters(event, structured_filters):
             continue
         before_start = max(0, index - context)
         after_end = min(len(lines), index + context + 1)
@@ -575,22 +601,48 @@ def _run_output_search_matches(run: dict[str, Any], query: str, context: int) ->
             "finished": run.get("finished"),
             "line_number": index + 1,
             "line": line,
+            "kind": event.kind.value,
+            "role": event.role.value,
+            "signals": [signal.value for signal in event.signals],
+            "entities": [entity.to_wire() for entity in event.entities],
             "context_before": lines[before_start:index],
             "context_after": lines[index + 1:after_end],
         })
     return matches
 
 
-def _history_output_search(session_id: str, query: str, context: int) -> list[dict[str, Any]]:
+def _history_output_search(
+    session_id: str,
+    query: str,
+    context: int,
+    structured_filters: StructuredOutputFilters,
+) -> list[dict[str, Any]]:
     filters = _history_filters()
     filters["q"] = query
     matches: list[dict[str, Any]] = []
-    for run in _history_search_candidate_runs(session_id, filters):
-        matches.extend(_run_output_search_matches(run, query, context))
+    for run in _history_search_candidate_runs(session_id, filters, structured_filters):
+        matches.extend(_run_output_search_matches(run, query, context, structured_filters))
     return matches
 
 
-def _history_rows(session_id: str, limit: int, offset: int, filters: dict[str, str]):
+def _structured_filters_payload(structured_filters: StructuredOutputFilters) -> dict[str, list[str]]:
+    return {
+        "signals": list(structured_filters.signals),
+        "kinds": list(structured_filters.kinds),
+        "exclude_kinds": list(structured_filters.exclude_kinds),
+        "roles": list(structured_filters.roles),
+        "entities": list(structured_filters.entities),
+        "entity_types": list(structured_filters.entity_types),
+    }
+
+
+def _history_rows(
+    session_id: str,
+    limit: int,
+    offset: int,
+    filters: dict[str, str],
+    structured_filters: StructuredOutputFilters | None = None,
+):
     offloaded_ids: list[str] = []
     if filters["q"]:
         with db_connect() as conn:
@@ -606,17 +658,59 @@ def _history_rows(session_id: str, limit: int, offset: int, filters: dict[str, s
             )
     with db_connect() as conn:
         where_sql, params = _history_where(session_id, filters, offloaded_ids=offloaded_ids)
-        total_row = conn.execute("SELECT COUNT(*) AS count FROM runs r" + where_sql, params).fetchone()  # nosec B608
-        total = int(total_row["count"] or 0) if total_row else 0
-        rows = conn.execute(
-            "SELECT r.id, r.run_kind, r.command, r.started, r.finished, r.exit_code, "  # nosec
-            "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated "
-            "FROM runs r"
-            + where_sql
-            + " ORDER BY r.started DESC LIMIT ? OFFSET ?",
-            (*params, limit, offset),
-        ).fetchall()
-        runs = [dict(row) for row in rows]
+        if structured_filters and structured_filters.active:
+            entity_sql, entity_params = entity_run_exists_clause(structured_filters, run_alias="r")
+            if entity_sql:
+                where_sql += entity_sql
+                params = [*params, *entity_params]
+            summary_sql, summary_params = run_output_summary_exists_clause(structured_filters, run_alias="r")
+            if summary_sql:
+                where_sql += summary_sql
+                params = [*params, *summary_params]
+            needs_line_scan = filters_need_line_event_scan(structured_filters) or (
+                filters_have_summary_selectors(structured_filters) and not summary_sql
+            )
+            if needs_line_scan:
+                rows = conn.execute(
+                    "SELECT r.*, ("  # nosec
+                    "SELECT art.rel_path FROM run_output_artifacts art "
+                    "WHERE art.run_id = r.id ORDER BY art.created DESC LIMIT 1"
+                    ") AS rel_path FROM runs r"
+                    + where_sql
+                    + " ORDER BY r.started DESC LIMIT 2000",
+                    params,
+                ).fetchall()
+                matching_runs = [dict(row) for row in rows]
+                matching_runs = [
+                    run for run in matching_runs
+                    if any(event_matches_structured_filters(event, structured_filters) for event in _run_output_events(run))
+                ]
+                total = len(matching_runs)
+                runs = matching_runs[offset:offset + limit]
+            else:
+                total_row = conn.execute("SELECT COUNT(*) AS count FROM runs r" + where_sql, params).fetchone()  # nosec B608
+                total = int(total_row["count"] or 0) if total_row else 0
+                rows = conn.execute(
+                    "SELECT r.id, r.run_kind, r.command, r.started, r.finished, r.exit_code, "  # nosec
+                    "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated "
+                    "FROM runs r"
+                    + where_sql
+                    + " ORDER BY r.started DESC LIMIT ? OFFSET ?",
+                    (*params, limit, offset),
+                ).fetchall()
+                runs = [dict(row) for row in rows]
+        else:
+            total_row = conn.execute("SELECT COUNT(*) AS count FROM runs r" + where_sql, params).fetchone()  # nosec B608
+            total = int(total_row["count"] or 0) if total_row else 0
+            rows = conn.execute(
+                "SELECT r.id, r.run_kind, r.command, r.started, r.finished, r.exit_code, "  # nosec
+                "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated "
+                "FROM runs r"
+                + where_sql
+                + " ORDER BY r.started DESC LIMIT ? OFFSET ?",
+                (*params, limit, offset),
+            ).fetchall()
+            runs = [dict(row) for row in rows]
         run_ids = [str(run["id"]) for run in runs]
         artifacts = _run_file_artifacts_by_run(conn, run_ids)
         metadata = _run_metadata_counts_by_run(conn, run_ids)
@@ -654,15 +748,15 @@ def _load_run_detail(session_id: str, run_id: str) -> dict[str, Any] | None:
     return run
 
 
-def _run_output_entries(run: dict[str, Any], *, full: bool = True) -> list[dict[str, Any]]:
-    result = load_run_output_entries_for_run(
+def _run_output_events(run: dict[str, Any], *, full: bool = True) -> list[LineEvent]:
+    result = load_run_output_events_for_run(
         run,
         prefer_full=full,
         log_event="API_FULL_OUTPUT_LOAD_FAILED",
     )
     run["_output_source"] = result.source
     run["_output_fallback"] = result.fallback
-    return result.entries
+    return result.events
 
 
 def _parse_output_range(value: object) -> tuple[int, int] | None:
@@ -687,6 +781,13 @@ def _slice_output_lines(lines: list[str], line_range: tuple[int, int] | None) ->
         return lines
     start, end = line_range
     return lines[start - 1:end]
+
+
+def _slice_output_events(events: list[LineEvent], line_range: tuple[int, int] | None) -> list[LineEvent]:
+    if line_range is None:
+        return events
+    start, end = line_range
+    return events[start - 1:end]
 
 
 def _artifact_for_run(session_id: str, run_id: str, artifact_id: str) -> dict[str, Any] | None:
@@ -803,21 +904,26 @@ def api_history():
     session_id = _require_session_id()
     limit = normalize_page_limit(request.args.get("limit"), 50, 100)
     offset = normalize_page_offset(request.args.get("offset"))
-    runs, total = _history_rows(session_id, limit, offset, _history_filters())
+    filters = _history_filters()
+    filters["q"], structured_filters = structured_filters_from_params(request.args, query=filters["q"])
+    runs, total = _history_rows(session_id, limit, offset, filters, structured_filters)
     return jsonify(page_payload("runs", [run_summary(run) for run in runs], total, limit, offset))
 
 
 @api_v1_bp.route("/history/search")
 @require_api_auth
 def api_history_search():
-    query = _normalize_history_filter_text(request.args.get("q"))
-    if not query:
+    query, structured_filters = structured_filters_from_params(
+        request.args,
+        query=_normalize_history_filter_text(request.args.get("q")),
+    )
+    if not query and not structured_filters.active:
         return _api_json_error("missing_query", "q is required.", 400)
     session_id = _require_session_id()
     limit = normalize_page_limit(request.args.get("limit"), 50, 100)
     offset = normalize_page_offset(request.args.get("offset"))
     context = _parse_int(request.args.get("context"), 2, minimum=0, maximum=10)
-    matches = _history_output_search(session_id, query, context)
+    matches = _history_output_search(session_id, query, context, structured_filters)
     page = matches[offset:offset + limit]
     return jsonify(page_payload(
         "matches",
@@ -825,7 +931,11 @@ def api_history_search():
         len(matches),
         limit,
         offset,
-        extra={"query": query, "context": context},
+        extra={
+            "query": query,
+            "context": context,
+            "filters": _structured_filters_payload(structured_filters),
+        },
     ))
 
 
@@ -944,13 +1054,16 @@ def api_history_run_output(run_id):
     run = _load_run_detail(_require_session_id(), run_id)
     if run is None:
         return _api_json_error("not_found", "Run not found.", 404)
-    entries = _run_output_entries(run)
+    _, structured_filters = structured_filters_from_params(request.args)
+    events = _run_output_events(run)
     try:
         line_range = _parse_output_range(request.args.get("range"))
     except ApiAuthError as exc:
         return _api_json_error(exc.code, exc.message, exc.status_code)
-    all_lines = [str(entry.get("text", "")) if isinstance(entry, dict) else str(entry) for entry in entries]
-    lines = _slice_output_lines(all_lines, line_range)
+    ranged_events = _slice_output_events(events, line_range)
+    filtered_events = filter_events(ranged_events, structured_filters)
+    all_lines = [event.text for event in events]
+    lines = [event.text for event in filtered_events]
     if str(request.args.get("format") or "text").lower() == "json":
         payload = {
             "run_id": run_id,
@@ -958,10 +1071,14 @@ def api_history_run_output(run_id):
             "full_output_available": bool(run.get("full_output_available")),
             "truncated": bool(run.get("preview_truncated") or run.get("full_output_truncated")),
             "line_count": len(all_lines),
+            "returned": len(lines),
             "lines": lines,
+            "entries": [to_wire(event) for event in filtered_events],
         }
         if line_range is not None:
             payload["range"] = {"start": line_range[0], "end": line_range[1], "returned": len(lines)}
+        if structured_filters.active:
+            payload["filters"] = _structured_filters_payload(structured_filters)
         return jsonify(payload)
     return Response("\n".join(lines), mimetype="text/plain; charset=utf-8")
 

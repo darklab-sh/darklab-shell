@@ -201,6 +201,8 @@ function _historyRunOutputEntries(run) {
       cls: String(entry && typeof entry === 'object' ? entry.cls || '' : ''),
       kind: String(entry && typeof entry === 'object' ? entry.kind || '' : ''),
       role: String(entry && typeof entry === 'object' ? entry.role || '' : ''),
+      signals: Array.isArray(entry && entry.signals) ? entry.signals.map(signal => String(signal || '')).filter(Boolean) : [],
+      entities: Array.isArray(entry && entry.entities) ? entry.entities : [],
     }));
   }
   if (Array.isArray(run.output)) {
@@ -514,6 +516,63 @@ function _renderHistoryRunSummary(body, run) {
   body.appendChild(actions);
 }
 
+function _historyOutputSummaryChips(values, emptyLabel) {
+  const wrap = document.createElement('div');
+  wrap.className = 'history-run-chip-row';
+  const entries = Object.entries(values && typeof values === 'object' ? values : {})
+    .filter(([, count]) => Number(count || 0) > 0)
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  entries.forEach(([key, count]) => {
+    const chip = document.createElement('span');
+    chip.className = 'badge badge-tone-muted';
+    chip.textContent = `${key} ${Number(count || 0).toLocaleString()}`;
+    wrap.appendChild(chip);
+  });
+  if (!entries.length) {
+    const empty = document.createElement('span');
+    empty.className = 'history-run-muted';
+    empty.textContent = emptyLabel;
+    wrap.appendChild(empty);
+  }
+  return wrap;
+}
+
+function _renderHistoryOutputSummary(body, run) {
+  const summary = run && run.output_summary && typeof run.output_summary === 'object'
+    ? run.output_summary
+    : null;
+  if (!summary) return;
+  const section = document.createElement('div');
+  section.className = 'history-run-output-summary';
+  const counts = document.createElement('div');
+  counts.className = 'history-run-section history-run-output-summary-card';
+  counts.appendChild(_historyRunSectionHeader('Output summary'));
+  const fields = document.createElement('div');
+  fields.className = 'history-run-field-list history-run-output-summary-fields';
+  fields.appendChild(_historyRunField('Kinds', _historyOutputSummaryChips(summary.kinds, 'No typed output rows.')));
+  fields.appendChild(_historyRunField('Signals', _historyOutputSummaryChips(summary.signals, 'No structured signals.')));
+  fields.appendChild(_historyRunField('Entities', _historyOutputSummaryChips(summary.entity_types, 'No entity tokens.')));
+  counts.appendChild(fields);
+  section.appendChild(counts);
+
+  const outlineItems = Array.isArray(summary.outline) ? summary.outline : [];
+  const signalItems = Array.isArray(summary.signal_toc) ? summary.signal_toc : [];
+  if (outlineItems.length || signalItems.length) {
+    const outline = document.createElement('div');
+    outline.className = 'history-run-section history-run-output-outline-card';
+    outline.appendChild(_historyRunSectionHeader('Output outline'));
+    const list = document.createElement('div');
+    list.className = 'history-run-field-list history-run-output-outline-list';
+    [...outlineItems.slice(0, 8), ...signalItems.slice(0, 8)].slice(0, 12).forEach((item) => {
+      const label = `L${Number(item.line_number || 0).toLocaleString()} · ${item.signal || item.role || 'line'}`;
+      list.appendChild(_historyRunField(label, String(item.text || '')));
+    });
+    outline.appendChild(list);
+    section.appendChild(outline);
+  }
+  body.appendChild(section);
+}
+
 function _renderHistoryRunOutput(body, run) {
   const output = _historyRunOutputEntries(run);
   if (!output.length && _historyRunModalState.loadingDetails) {
@@ -530,9 +589,21 @@ function _renderHistoryRunOutput(body, run) {
     body.appendChild(empty);
     return;
   }
+  _renderHistoryOutputSummary(body, run);
   const pre = document.createElement('pre');
   pre.className = 'history-run-output';
-  pre.textContent = output.map(entry => entry.text).join('\n');
+  output.forEach((entry, index) => {
+    const line = document.createElement('span');
+    line.className = 'history-run-output-line';
+    const text = String(entry.text || '');
+    if (typeof _renderAnsiWithEntityTokens === 'function') {
+      _renderAnsiWithEntityTokens(line, text, Array.isArray(entry.entities) ? entry.entities : [], '');
+    } else {
+      line.textContent = text;
+    }
+    pre.appendChild(line);
+    if (index < output.length - 1) pre.appendChild(document.createTextNode('\n'));
+  });
   body.appendChild(pre);
   if (run.preview_notice) {
     const notice = document.createElement('div');

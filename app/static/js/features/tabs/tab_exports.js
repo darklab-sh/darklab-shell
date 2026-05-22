@@ -177,7 +177,7 @@ async function exportTabHtml(id) {
   try {
     const exportModel = _buildTabExportModel(t, { omitRawOnly: true });
     const ansiRenderer = typeof createAnsiUpRenderer === 'function' ? createAnsiUpRenderer() : null;
-    const { linesHtml, prefixWidth } = ExportHtmlUtils.buildExportLinesHtml(exportModel.rawLines, {
+    const { linesHtml, prefixWidth, summaryHtml } = ExportHtmlUtils.buildExportLinesHtml(exportModel.rawLines, {
       getPrefix: (line, i) => _exportPrefix(line, i),
       ansiToHtml: (text) => ansiRenderer ? ansiRenderer.ansi_to_html(text) : escapeHtml(String(text ?? '')),
     });
@@ -191,6 +191,7 @@ async function exportTabHtml(id) {
       metaLine: exportModel.metaLine,
       runMeta: exportModel.runMeta,
       linesHtml,
+      summaryHtml,
       prefixWidth,
       fontFacesCss,
       exportCss,

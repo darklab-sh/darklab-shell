@@ -597,8 +597,23 @@
             },
             "type": "array"
           },
+          "entities": {
+            "items": {
+              "$ref": "#/components/schemas/RunStreamEntity"
+            },
+            "type": "array"
+          },
           "finished": {
             "nullable": true,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "info",
+              "notice",
+              "warn",
+              "error"
+            ],
             "type": "string"
           },
           "line": {
@@ -608,8 +623,17 @@
             "minimum": 1,
             "type": "integer"
           },
+          "role": {
+            "type": "string"
+          },
           "run_id": {
             "type": "string"
+          },
+          "signals": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "started": {
             "nullable": true,
@@ -632,6 +656,10 @@
         "properties": {
           "context": {
             "type": "integer"
+          },
+          "filters": {
+            "additionalProperties": true,
+            "type": "object"
           },
           "has_more": {
             "type": "boolean"
@@ -1696,6 +1724,16 @@
       },
       "RunOutput": {
         "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/RunStreamEvent"
+            },
+            "type": "array"
+          },
+          "filters": {
+            "additionalProperties": true,
+            "type": "object"
+          },
           "full_output_available": {
             "type": "boolean"
           },
@@ -1729,6 +1767,9 @@
               "returned"
             ],
             "type": "object"
+          },
+          "returned": {
+            "type": "integer"
           },
           "run_id": {
             "type": "string"
@@ -3282,6 +3323,96 @@
             }
           },
           {
+            "description": "Filter output lines by structured signal, such as findings.",
+            "explode": true,
+            "in": "query",
+            "name": "signal",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by typed kind.",
+            "explode": true,
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "items": {
+                "enum": [
+                  "info",
+                  "notice",
+                  "warn",
+                  "error"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Exclude output lines with this typed kind.",
+            "explode": true,
+            "in": "query",
+            "name": "not_kind",
+            "schema": {
+              "items": {
+                "enum": [
+                  "info",
+                  "notice",
+                  "warn",
+                  "error"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by structural role.",
+            "explode": true,
+            "in": "query",
+            "name": "role",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by entity value or type:value.",
+            "explode": true,
+            "in": "query",
+            "name": "entity",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by captured entity type, such as domain, ip, url, hash, or cve.",
+            "explode": true,
+            "in": "query",
+            "name": "entity_type",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
             "in": "query",
             "name": "project_id",
             "schema": {
@@ -3382,7 +3513,7 @@
             }
           },
           {
-            "description": "Literal text to locate in saved run output.",
+            "description": "Literal text to locate in saved run output. Structured selector tokens such as signal:findings are also accepted.",
             "in": "query",
             "name": "q",
             "required": true,
@@ -3399,6 +3530,96 @@
               "minimum": 0,
               "type": "integer"
             }
+          },
+          {
+            "description": "Filter output lines by structured signal, such as findings.",
+            "explode": true,
+            "in": "query",
+            "name": "signal",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by typed kind.",
+            "explode": true,
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "items": {
+                "enum": [
+                  "info",
+                  "notice",
+                  "warn",
+                  "error"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Exclude output lines with this typed kind.",
+            "explode": true,
+            "in": "query",
+            "name": "not_kind",
+            "schema": {
+              "items": {
+                "enum": [
+                  "info",
+                  "notice",
+                  "warn",
+                  "error"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by structural role.",
+            "explode": true,
+            "in": "query",
+            "name": "role",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by entity value or type:value.",
+            "explode": true,
+            "in": "query",
+            "name": "entity",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by captured entity type, such as domain, ip, url, hash, or cve.",
+            "explode": true,
+            "in": "query",
+            "name": "entity_type",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
           },
           {
             "in": "query",
@@ -3711,6 +3932,96 @@
               "pattern": "^[1-9][0-9]*-[1-9][0-9]*$",
               "type": "string"
             }
+          },
+          {
+            "description": "Filter output lines by structured signal, such as findings.",
+            "explode": true,
+            "in": "query",
+            "name": "signal",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by typed kind.",
+            "explode": true,
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "items": {
+                "enum": [
+                  "info",
+                  "notice",
+                  "warn",
+                  "error"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Exclude output lines with this typed kind.",
+            "explode": true,
+            "in": "query",
+            "name": "not_kind",
+            "schema": {
+              "items": {
+                "enum": [
+                  "info",
+                  "notice",
+                  "warn",
+                  "error"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by structural role.",
+            "explode": true,
+            "in": "query",
+            "name": "role",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by entity value or type:value.",
+            "explode": true,
+            "in": "query",
+            "name": "entity",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by captured entity type, such as domain, ip, url, hash, or cve.",
+            "explode": true,
+            "in": "query",
+            "name": "entity_type",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
           }
         ],
         "responses": {
@@ -5017,6 +5328,96 @@
               "pattern": "^[1-9][0-9]*-[1-9][0-9]*$",
               "type": "string"
             }
+          },
+          {
+            "description": "Filter output lines by structured signal, such as findings.",
+            "explode": true,
+            "in": "query",
+            "name": "signal",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by typed kind.",
+            "explode": true,
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "items": {
+                "enum": [
+                  "info",
+                  "notice",
+                  "warn",
+                  "error"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Exclude output lines with this typed kind.",
+            "explode": true,
+            "in": "query",
+            "name": "not_kind",
+            "schema": {
+              "items": {
+                "enum": [
+                  "info",
+                  "notice",
+                  "warn",
+                  "error"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by structural role.",
+            "explode": true,
+            "in": "query",
+            "name": "role",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by entity value or type:value.",
+            "explode": true,
+            "in": "query",
+            "name": "entity",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Filter output lines by captured entity type, such as domain, ip, url, hash, or cve.",
+            "explode": true,
+            "in": "query",
+            "name": "entity_type",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
           }
         ],
         "responses": {

@@ -207,11 +207,12 @@ Saved output can also be searched across runs:
 
 ```bash
 darklab grep "open port" --context 2
+darklab grep "" --signal findings --entity-type cve --not-kind info
 curl -H "Authorization: Bearer $DARKLAB_TOKEN" \
   "$DARKLAB_API_URL/api/v1/history/search?q=open%20port&context=2"
 ```
 
-Search responses are paged by match row and include `run_id`, `line_number`, the matching `line`, and nearby `context_before` / `context_after` lines. Candidate runs use the same backend-aware history search clauses as the browser, including SQLite FTS, Postgres trigram search, and offloaded-output fallback.
+Search responses are paged by match row and include `run_id`, `line_number`, the matching `line`, typed `kind`/`role`, `signals`, `entities`, and nearby `context_before` / `context_after` lines. Candidate runs use the same backend-aware history search clauses as the browser, including SQLite FTS, Postgres trigram search, and offloaded-output fallback. Structured selector tokens can live in `q` (`signal:findings`, `kind:error`, `kind!=info`, `role:exit-fail`, `entity:darklab.sh`, `entity_type:cve`) or in repeated query parameters (`signal`, `kind`, `not_kind`, `role`, `entity`, `entity_type`). The same selector parameters work on `GET /api/v1/runs/<run_id>/output` and `GET /api/v1/history/<run_id>/output`; JSON output includes both plain `lines` and typed `entries`.
 
 ---
 
@@ -380,9 +381,9 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab tail <run_id> [--format text\|ndjson] [--after EVENT_ID]` | Follow an existing run stream. Exits with code `2` if the stream closes before a terminal event. |
 | `darklab cancel <run_id>` | Cancel an active run in the same token session. |
 | `darklab history [--project PROJECT_ID] [--since ISO] [--until ISO] [--limit N] [--offset N] [--format text\|json\|ndjson]` | Read paged history. `--limit` defaults to 50 and caps at 100. CLI output includes each run's finished timestamp and prints the newest item last. |
-| `darklab grep <pattern> [--context N] [--project PROJECT_ID] [--since ISO] [--until ISO] [--limit N] [--offset N] [--format text\|json\|ndjson]` | Search saved run output across runs and print line-context matches. `--limit` defaults to 50 and caps at 100; `--context` defaults to 2 and caps at 10. |
+| `darklab grep <pattern> [--context N] [--project PROJECT_ID] [--since ISO] [--until ISO] [--signal NAME] [--kind KIND] [--not-kind KIND] [--role ROLE] [--entity VALUE] [--entity-type TYPE] [--limit N] [--offset N] [--format text\|json\|ndjson]` | Search saved run output across runs and print line-context matches. `--limit` defaults to 50 and caps at 100; `--context` defaults to 2 and caps at 10. Structured selectors can be repeated. |
 | `darklab show <run_id> [--lines N] [--format text\|json]` | Show run metadata and optional tail lines. |
-| `darklab output <run_id> [--range N-M] [--format text\|json]` | Print stored output, optionally sliced to a 1-based line range. |
+| `darklab output <run_id> [--range N-M] [--signal NAME] [--kind KIND] [--not-kind KIND] [--role ROLE] [--entity VALUE] [--entity-type TYPE] [--format text\|json]` | Print stored output, optionally sliced to a 1-based line range and filtered by structured line metadata. Structured selectors can be repeated. |
 | `darklab artifacts <run_id>` | List run artifacts. |
 | `darklab atlas summary [--run-id RUN_ID] [--orphan-filter hide\|all\|only] [--suppression-filter hide\|all\|only] [--format text\|json]` | Print Atlas summary counts. |
 | `darklab atlas runs [--q TEXT] [--run-id RUN_ID] [--limit N] [--format text\|json\|ndjson]` | List recent Atlas source runs. `--limit` defaults to 30 and caps at 50. |

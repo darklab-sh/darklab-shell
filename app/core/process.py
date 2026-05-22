@@ -13,6 +13,8 @@ import threading
 import logging
 import json
 import time
+from functools import lru_cache
+import fnmatch
 from typing import Any, cast
 
 from config import CFG
@@ -125,6 +127,18 @@ class _FakeRedisClient:
                 self._expires_at.pop(key, None)
                 removed += int(existed)
         return removed
+
+    def scan_iter(self, match: str | None = None, count: int | None = None):
+        del count
+        pattern = match or "*"
+        with self._lock:
+            keys = set(self._values) | set(self._sets)
+            for key in list(keys):
+                self._purge_key(key)
+            keys = sorted((set(self._values) | set(self._sets)))
+        for key in keys:
+            if fnmatch.fnmatch(key, pattern):
+                yield key
 
     def xadd(
         self,
@@ -299,6 +313,16 @@ def _pid_start_time(pid: int) -> str | None:
     return fields[19]
 
 
+@lru_cache(maxsize=1)
+def _process_namespace_id() -> str:
+    """Stable identifier for this app container's process namespace."""
+    try:
+        host = os.uname().nodename
+    except OSError:
+        host = str(os.environ.get("HOSTNAME") or "unknown-host")
+    return f"{host}:{_pid_start_time(1) or 'unknown'}"
+
+
 def _active_run_resource_usage(run_id: str, pid: int) -> dict[str, object] | None:
     """Return best-effort CPU and RSS memory stats for an active run."""
     del run_id
@@ -390,6 +414,15 @@ def _redis_smembers_strings(key: str) -> list[str]:
     return [str(member) for member in raw_members]
 
 
+def _redis_scan_strings(pattern: str) -> list[str]:
+    if not redis_client:
+        return []
+    try:
+        return [str(key) for key in redis_client.scan_iter(match=pattern, count=100)]
+    except Exception:
+        return []
+
+
 def pid_register(run_id: str, pid: int) -> None:
     """Register an active process PID — visible to all Gunicorn workers."""
     if redis_client:
@@ -462,6 +495,7 @@ def active_run_register(
         "owner_tab_id": owner_tab_id,
         "owner_last_seen": time.time() if owner_client_id else None,
         "run_type": run_type,
+        "process_namespace_id": _process_namespace_id(),
     }
     if redis_client:
         meta_key = f"procmeta:{run_id}"
@@ -634,6 +668,52 @@ def active_run_remove(run_id: str) -> None:
                 _session_run_ids.pop(session_id, None)
     if meta:
         app_metrics.record_run_removed(run_type)
+
+
+def cleanup_stale_active_run_metadata() -> dict[str, int]:
+    """Remove Redis active-run metadata left behind by dead app containers."""
+    if not redis_client:
+        return {"metadata_removed": 0, "session_members_removed": 0}
+
+    current_namespace = _process_namespace_id()
+    removed_meta = 0
+    removed_members = 0
+    session_member_removals: dict[str, set[str]] = {}
+
+    for meta_key in _redis_scan_strings("procmeta:*"):
+        raw = redis_client.get(meta_key)
+        payload = _load_active_run_payload(raw)
+        run_id = str((payload or {}).get("run_id", "") or meta_key.split(":", 1)[-1])
+        if not run_id:
+            continue
+        proc_key = f"proc:{run_id}"
+        session_id = str((payload or {}).get("session_id", "") or "")
+        namespace = str((payload or {}).get("process_namespace_id", "") or "")
+        stale = (
+            not payload
+            or (namespace and namespace != current_namespace)
+            or redis_client.get(proc_key) is None
+            or not _active_run_is_alive(payload)
+        )
+        if not stale:
+            continue
+        redis_client.delete(meta_key, proc_key)
+        removed_meta += 1
+        if session_id:
+            session_member_removals.setdefault(f"sessionprocs:{session_id}", set()).add(run_id)
+
+    for session_key in _redis_scan_strings("sessionprocs:*"):
+        stale_members = session_member_removals.setdefault(session_key, set())
+        for run_id in _redis_smembers_strings(session_key):
+            if redis_client.get(f"procmeta:{run_id}") is None or redis_client.get(f"proc:{run_id}") is None:
+                stale_members.add(run_id)
+
+    for session_key, run_ids in session_member_removals.items():
+        if not run_ids:
+            continue
+        removed_members += int(cast(int, redis_client.srem(session_key, *sorted(run_ids))) or 0)
+
+    return {"metadata_removed": removed_meta, "session_members_removed": removed_members}
 
 
 def _active_run_public_item(item: dict[str, Any], source: str, client_id: str = "") -> dict[str, object]:

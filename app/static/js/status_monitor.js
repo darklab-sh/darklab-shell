@@ -2423,8 +2423,15 @@
       const ageDays = Math.max(0, (now - started) / 86400000);
       const opacity = Math.max(0.28, 1 - (ageDays / 34));
       const ageGlow = 0.24 + (opacity * 0.56);
-      const radius = Math.max(1.8, Math.min(7, 2 + Math.sqrt(Number(star.output_line_count || 0) + 1) * 0.18));
-      const tone = _categoryTone(star.category);
+      const findingCount = Number(star.finding_count || 0);
+      const radiusSource = Math.max(Number(star.output_line_count || 0), findingCount * 40);
+      const radius = Math.max(1.8, Math.min(8.5, 2 + Math.sqrt(radiusSource + 1) * 0.18));
+      const maxKind = String(star.max_kind || 'info');
+      const tone = maxKind === 'error'
+        ? { hue: 0, saturation: 100 }
+        : maxKind === 'warn'
+          ? { hue: 42, saturation: 100 }
+          : _categoryTone(star.category);
       const starStyle = `--star-hue:${tone.hue};--star-saturation:${tone.saturation}%;--star-age-glow:${ageGlow.toFixed(2)}`;
       const failed = _isFailedExitCode(star.exit_code);
       return {
@@ -2435,6 +2442,8 @@
         radius,
         opacity,
         tone,
+        maxKind,
+        findingCount,
         starStyle,
         failed,
         offScale,
@@ -2463,7 +2472,7 @@
         }));
       });
     });
-    plottedStars.forEach(({ star, x, y, radius, opacity, starStyle, failed, offScale }, index) => {
+    plottedStars.forEach(({ star, x, y, radius, opacity, starStyle, failed, offScale, maxKind, findingCount }, index) => {
       const starId = String(star.id || `${star.root || 'run'}:${star.started || ''}:${index}`);
       starsByNodeId.set(starId, { star, x, y });
       const node = _svgEl('g', {
@@ -2472,7 +2481,7 @@
           : 'status-monitor-star-node',
         tabindex: '0',
         role: 'button',
-        'aria-label': `${star.root || 'run'} ${_formatStarStarted(star.started)}`,
+        'aria-label': `${star.root || 'run'} ${_formatStarStarted(star.started)}${findingCount ? `, ${findingCount} findings` : ''}`,
         'data-star-id': starId,
         'data-run-id': star.id || '',
       });
@@ -2491,7 +2500,12 @@
         opacity,
       }) : null;
       const circle = _svgEl('circle', {
-        class: failed ? 'status-monitor-star status-monitor-star-failed' : 'status-monitor-star',
+        class: [
+          'status-monitor-star',
+          failed ? 'status-monitor-star-failed' : '',
+          maxKind === 'error' ? 'status-monitor-star-kind-error' : '',
+          maxKind === 'warn' ? 'status-monitor-star-kind-warn' : '',
+        ].filter(Boolean).join(' '),
         cx: x,
         cy: y,
         r: radius,

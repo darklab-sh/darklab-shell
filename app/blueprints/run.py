@@ -76,6 +76,7 @@ from services.runs.output_model import (
     to_legacy_output_event,
     to_wire,
 )
+from services.runs.structured_summary import replace_run_output_summary
 from services.storage.body_store import inline_threshold_bytes, maybe_store_text_body
 from services.atlas.materializer import materialize_run_entities
 from services.secrets.audit import emit_secret_event
@@ -453,6 +454,37 @@ def _run_finalize_savepoint(conn, name, callback):
     return result
 
 
+def _structured_output_summary_fields(entries):
+    kind_counts: dict[str, int] = {}
+    signal_counts: dict[str, int] = {}
+    entity_type_counts: dict[str, int] = {}
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        kind = str(entry.get("kind") or "")
+        if kind:
+            kind_counts[kind] = kind_counts.get(kind, 0) + 1
+        signals = entry.get("signals")
+        if isinstance(signals, list):
+            for signal in signals:
+                value = str(signal or "")
+                if value:
+                    signal_counts[value] = signal_counts.get(value, 0) + 1
+        entities = entry.get("entities")
+        if isinstance(entities, list):
+            for entity in entities:
+                if not isinstance(entity, dict):
+                    continue
+                entity_type = str(entity.get("type") or "")
+                if entity_type:
+                    entity_type_counts[entity_type] = entity_type_counts.get(entity_type, 0) + 1
+    return {
+        "output_kind_counts": kind_counts,
+        "output_signal_counts": signal_counts,
+        "output_entity_type_counts": entity_type_counts,
+    }
+
+
 def _save_completed_run(
     run_id,
     session_id,
@@ -532,6 +564,7 @@ def _save_completed_run(
                     truncated=capture.full_output_truncated,
                     created=finished_iso,
                 )
+            replace_run_output_summary(conn, run_id, persisted_entries)
             if link_project_id:
                 try:
                     active_project_link = _run_finalize_savepoint(
@@ -714,6 +747,7 @@ def _save_completed_run(
                 "finding_count": len(recorded_findings),
                 "atlas_entity_count": len(recorded_entities),
                 "project_target_count": len(recorded_targets),
+                **_structured_output_summary_fields(persisted_entries),
             })
         return active_project_link
     except Exception:
@@ -948,6 +982,7 @@ def save_client_side_run():
             full_output_truncated=False,
             output_search_text=stored_output_search_text,
         )
+        replace_run_output_summary(conn, run_id, lines)
         conn.commit()
 
     elapsed = round((finished - started).total_seconds(), 1)

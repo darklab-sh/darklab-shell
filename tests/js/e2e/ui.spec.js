@@ -552,9 +552,15 @@ test.describe('project workspace modal', () => {
     const projectId = await createActiveProject(page, projectName)
 
     await page.locator('#project-labels-input').fill('e2e, client')
+    const labelsSaveResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST'
+        && url.pathname === `/entities/project/${projectId}/labels`
+    })
     await page.locator('#project-labels-save-btn').click()
-    await expect(page.locator('#project-labels-save-status')).toBeVisible()
+    expect((await labelsSaveResponse).ok()).toBe(true)
     await expect(page.locator('.project-label-chips')).toContainText('e2e')
+    await expect(page.locator('.project-label-chips')).toContainText('client')
     await page.locator('#project-notes-input').fill('Project notes from Playwright')
     await switchProjectTab(page, 'runs')
     await expect.poll(async () => page.evaluate(async (id) => {

@@ -23,6 +23,7 @@ import random
 import re
 import shlex
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
@@ -651,6 +652,7 @@ class TestPostgresMigrations:
     CORE_SCHEMA_TABLES = (
         "runs",
         "run_output_artifacts",
+        "run_output_summary",
         "snapshots",
         "session_tokens",
         "session_preferences",
@@ -736,10 +738,12 @@ class TestPostgresMigrations:
             "0009",
             "0010",
             "0011",
+            "0012",
         ]
         for table_name in (
             "runs",
             "run_output_artifacts",
+            "run_output_summary",
             "snapshots",
             "session_tokens",
             "session_preferences",
@@ -914,6 +918,7 @@ class TestPostgresMigrations:
         class FakePostgresConnection:
             def __init__(self):
                 self.committed = False
+                self.calls = []
 
             def __enter__(self):
                 return self
@@ -923,6 +928,10 @@ class TestPostgresMigrations:
 
             def commit(self):
                 self.committed = True
+
+            def execute(self, sql, params=()):
+                self.calls.append((sql, params))
+                return SimpleNamespace(fetchall=lambda: [])
 
         fake_conn = FakePostgresConnection()
         fake_app_conn = FakePostgresConnection()
@@ -944,6 +953,7 @@ class TestPostgresMigrations:
         assert fake_conn.committed is True
         assert fake_app_conn.committed is True
         migration_runner.assert_called_once()
+        assert any(call[0] == "SELECT pg_advisory_xact_lock(?)" for call in fake_app_conn.calls)
         prune_retention.assert_called_once_with(fake_app_conn)
 
 
@@ -1975,6 +1985,54 @@ class TestWatchersFoundation:
         assert accepted.baseline_run_id == "run_changed"
         assert accepted.state == "ok"
         assert accepted.consecutive_changed == 0
+
+    def test_watcher_textual_diff_reports_entity_delta(self):
+        from services.watchers.classifiers import textual
+
+        baseline_run = {
+            "id": "run_base",
+            "session_id": "tok_watchers",
+            "output_preview": json.dumps([
+                {
+                    "text": "https://old.darklab.sh",
+                    "kind": "info",
+                    "role": "body",
+                    "entities": [
+                        {"type": "domain", "value": "old.darklab.sh", "canonical_value": "old.darklab.sh"},
+                    ],
+                },
+            ]),
+        }
+        current_run = {
+            "id": "run_current",
+            "session_id": "tok_watchers",
+            "output_preview": json.dumps([
+                {
+                    "text": "https://old.darklab.sh",
+                    "kind": "info",
+                    "role": "body",
+                    "entities": [
+                        {"type": "domain", "value": "old.darklab.sh", "canonical_value": "old.darklab.sh"},
+                    ],
+                },
+                {
+                    "text": "https://new.darklab.sh",
+                    "kind": "warn",
+                    "role": "body",
+                    "entities": [
+                        {"type": "domain", "value": "new.darklab.sh", "canonical_value": "new.darklab.sh"},
+                    ],
+                },
+            ]),
+        }
+
+        diff = textual.diff(baseline_run, current_run, None, None)
+
+        assert diff.kind == "textual"
+        assert diff.summary["entity_added_count"] == 1
+        assert diff.summary["entity_removed_count"] == 0
+        assert diff.summary["entity_unchanged_count"] == 1
+        assert diff.summary["entities"]["added"][0]["canonical_value"] == "new.darklab.sh"
 
     def test_watcher_finalize_changed_diff_updates_state_and_queues_notification(self, monkeypatch, tmp_path):
         from services.notifications.models import TRIGGER_WATCHER_CHANGED
@@ -4337,8 +4395,40 @@ class TestSessionWorkspace:
 
             commands = [call.args[0] for call in run.call_args_list]
             assert commands == [
+                ["/usr/bin/sudo", "-u", "scanner", "-g", "appuser", "chgrp", "appuser", str(path)],
                 ["/usr/bin/sudo", "-u", "scanner", "-g", "appuser", "chmod", "3770", str(path)],
             ]
+
+    def test_scanner_owned_workspace_entry_with_scanner_group_needs_repair(self):
+        fake_dir_stat = os.stat_result((
+            stat.S_IFDIR | workspace_module.WORKSPACE_COMMAND_DIR_MODE,
+            0,
+            0,
+            0,
+            995,
+            995,
+            0,
+            0,
+            0,
+            0,
+        ))
+        fake_file_stat = os.stat_result((
+            stat.S_IFREG | workspace_module.WORKSPACE_FILE_MODE,
+            0,
+            0,
+            0,
+            995,
+            995,
+            0,
+            0,
+            0,
+            0,
+        ))
+
+        with mock.patch("services.workspace.files._scanner_uid", return_value=995), \
+                mock.patch("services.workspace.files._appuser_gid", return_value=996):
+            assert workspace_module._workspace_child_dir_repair_mode(fake_dir_stat) == workspace_module.WORKSPACE_COMMAND_DIR_MODE
+            assert workspace_module._workspace_child_file_repair_mode(fake_file_stat) == workspace_module.WORKSPACE_FILE_MODE
 
     def test_list_repairs_command_created_workspace_modes(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -7178,6 +7268,54 @@ class TestActiveRunMetadata:
 
             assert fake_redis.get("procmeta:run-legacy") is None
 
+    def test_cleanup_stale_active_run_metadata_removes_orphans_and_previous_container_rows(self):
+        fake_redis = process._FakeRedisClient()
+        missing_proc = {
+            "run_id": "run-missing-proc",
+            "pid": 11111,
+            "session_id": "session-1",
+            "command": "subfinder -d darklab.sh",
+            "started": "2026-01-01T00:00:00Z",
+            "process_namespace_id": "container-current",
+        }
+        previous_container = {
+            "run_id": "run-old-container",
+            "pid": 22222,
+            "session_id": "session-1",
+            "command": "katana -u http://tor-stats.darklab.sh",
+            "started": "2026-01-01T00:00:01Z",
+            "process_namespace_id": "container-old",
+        }
+        live = {
+            "run_id": "run-live",
+            "pid": 33333,
+            "session_id": "session-1",
+            "command": "ping darklab.sh",
+            "started": "2026-01-01T00:00:02Z",
+            "process_namespace_id": "container-current",
+        }
+        with (
+            mock.patch.object(process, "redis_client", fake_redis),
+            mock.patch.object(process, "_process_namespace_id", return_value="container-current"),
+            mock.patch.object(process, "_active_run_is_alive", return_value=True),
+        ):
+            fake_redis.set("procmeta:run-missing-proc", process.json.dumps(missing_proc))
+            fake_redis.set("procmeta:run-old-container", process.json.dumps(previous_container))
+            fake_redis.set("proc:run-old-container", 22222)
+            fake_redis.set("procmeta:run-live", process.json.dumps(live))
+            fake_redis.set("proc:run-live", 33333)
+            fake_redis.sadd("sessionprocs:session-1", "run-missing-proc", "run-old-container", "run-live")
+
+            result = process.cleanup_stale_active_run_metadata()
+
+        assert result == {"metadata_removed": 2, "session_members_removed": 2}
+        assert fake_redis.get("procmeta:run-missing-proc") is None
+        assert fake_redis.get("procmeta:run-old-container") is None
+        assert fake_redis.get("proc:run-old-container") is None
+        assert fake_redis.get("procmeta:run-live") is not None
+        assert fake_redis.get("proc:run-live") == 33333
+        assert fake_redis.smembers("sessionprocs:session-1") == {"run-live"}
+
     def test_active_run_resource_usage_reports_cumulative_cpu_and_memory(self):
         class FakeTimes:
             def __init__(self, user, system):
@@ -8792,6 +8930,48 @@ class TestRunOutputCapture:
         assert list(capture.preview_lines) == expected
         assert capture.artifact_rel_path is not None
         assert load_full_output_entries(capture.artifact_rel_path) == expected
+
+    def test_replace_run_output_summary_tolerates_concurrent_backfill_insert(self):
+        from services.runs.structured_summary import replace_run_output_summary
+
+        sqlite_conn = sqlite3.connect(":memory:")
+        sqlite_conn.row_factory = sqlite3.Row
+        sqlite_conn.execute(
+            "CREATE TABLE run_output_summary ("
+            "run_id TEXT NOT NULL, "
+            "family TEXT NOT NULL, "
+            "value TEXT NOT NULL, "
+            "count INTEGER NOT NULL, "
+            "PRIMARY KEY (run_id, family, value)"
+            ")"
+        )
+        sqlite_conn.execute(
+            "INSERT INTO run_output_summary (run_id, family, value, count) VALUES (?, ?, ?, ?)",
+            ("run-race", "kind", "info", 1),
+        )
+
+        class DeleteRaceConnection:
+            def execute(self, sql, params=()):
+                if sql.startswith("DELETE FROM run_output_summary"):
+                    return None
+                return sqlite_conn.execute(sql, params)
+
+            def executemany(self, sql, rows):
+                return sqlite_conn.executemany(sql, rows)
+
+        replace_run_output_summary(DeleteRaceConnection(), "run-race", [
+            {"text": "one", "cls": "", "tsC": "", "tsE": ""},
+            {"text": "two", "cls": "", "tsC": "", "tsE": ""},
+        ])
+
+        rows = sqlite_conn.execute(
+            "SELECT family, value, count FROM run_output_summary WHERE run_id = ? ORDER BY family, value",
+            ("run-race",),
+        ).fetchall()
+        assert [dict(row) for row in rows] == [
+            {"family": "kind", "value": "info", "count": 2},
+            {"family": "role", "value": "body", "count": 2},
+        ]
 
     def test_legacy_event_factory_matches_typed_add_event_bytes(self):
         legacy_capture = RunOutputCapture(

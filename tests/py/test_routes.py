@@ -1690,7 +1690,13 @@ class TestProjectRoutes:
                     session_id,
                     "nmap darklab.sh",
                     json.dumps([
-                        {"text": "443/tcp open https", "cls": "", "line_index": 0},
+                        {
+                            "text": "443/tcp open https",
+                            "cls": "",
+                            "line_index": 0,
+                            "signals": ["findings"],
+                            "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
+                        },
                         {"text": "scan completed", "cls": "", "line_index": 1},
                     ]),
                     2,
@@ -2175,6 +2181,7 @@ class TestProjectRoutes:
             "core_entries_ms",
             "artifacts_ms",
             "run_pages_ms",
+            "manifest_ms",
             "findings_ms",
             "targets_ms",
             "notes_ms",
@@ -2221,6 +2228,11 @@ class TestProjectRoutes:
         assert downloaded_manifest["package"]["id"] == package["id"]
         assert downloaded_manifest["manifest"]["counts"]["runs"] == 1
         assert downloaded_manifest["manifest"]["counts"]["artifacts"] == 2
+        assert downloaded_manifest["transcripts"][0]["run_id"] == run_id
+        assert downloaded_manifest["transcripts"][0]["archive_path"] == f"runs/{run_id}.html"
+        assert downloaded_manifest["transcripts"][0]["lines"][0]["line_index"] == 0
+        assert downloaded_manifest["transcripts"][0]["lines"][0]["signals"] == ["findings"]
+        assert downloaded_manifest["transcripts"][0]["lines"][0]["entities"][0]["canonical_value"] == "darklab.sh"
         assert findings_json["count"] == 1
         assert findings_json["findings"][0]["raw_line"] == "443/tcp open https"
         assert findings_json["findings"][0]["run_page"] == f"runs/{run_id}.html#L1"
@@ -6303,6 +6315,12 @@ class TestAtlasRoutes:
                     "project_name": "External Test",
                     "run_id": "run_0123456789abcdef",
                     "run_label": "katana -u https://darklab.sh",
+                    "signals": ["findings", "findings"],
+                    "kinds": ["error"],
+                    "exclude_kinds": ["info"],
+                    "roles": ["body"],
+                    "entities": ["darklab.sh"],
+                    "entity_types": ["domain"],
                 },
             },
             headers={"X-Session-ID": session_id},
@@ -6340,6 +6358,9 @@ class TestAtlasRoutes:
         assert view["filters"]["finding_status"] == "important"
         assert view["filters"]["run_id"] == "run_0123456789abcdef"
         assert view["filters"]["run_label"] == "katana -u https://darklab.sh"
+        assert view["filters"]["signals"] == ["findings"]
+        assert view["filters"]["exclude_kinds"] == ["info"]
+        assert view["filters"]["entity_types"] == ["domain"]
         assert json.loads(list_resp.data)["views"][0]["id"] == view["id"]
         assert json.loads(isolated_resp.data)["views"] == []
         assert preferences_resp.status_code == 200

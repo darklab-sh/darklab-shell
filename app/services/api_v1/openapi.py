@@ -65,6 +65,57 @@ PAGE_PARAMS = [
     {"name": "offset", "in": "query", "schema": {"type": "integer", "default": 0, "minimum": 0}},
 ]
 
+STRUCTURED_OUTPUT_PARAMS = [
+    {
+        "name": "signal",
+        "in": "query",
+        "description": "Filter output lines by structured signal, such as findings.",
+        "schema": {"type": "array", "items": {"type": "string"}},
+        "style": "form",
+        "explode": True,
+    },
+    {
+        "name": "kind",
+        "in": "query",
+        "description": "Filter output lines by typed kind.",
+        "schema": {"type": "array", "items": {"type": "string", "enum": ["info", "notice", "warn", "error"]}},
+        "style": "form",
+        "explode": True,
+    },
+    {
+        "name": "not_kind",
+        "in": "query",
+        "description": "Exclude output lines with this typed kind.",
+        "schema": {"type": "array", "items": {"type": "string", "enum": ["info", "notice", "warn", "error"]}},
+        "style": "form",
+        "explode": True,
+    },
+    {
+        "name": "role",
+        "in": "query",
+        "description": "Filter output lines by structural role.",
+        "schema": {"type": "array", "items": {"type": "string"}},
+        "style": "form",
+        "explode": True,
+    },
+    {
+        "name": "entity",
+        "in": "query",
+        "description": "Filter output lines by entity value or type:value.",
+        "schema": {"type": "array", "items": {"type": "string"}},
+        "style": "form",
+        "explode": True,
+    },
+    {
+        "name": "entity_type",
+        "in": "query",
+        "description": "Filter output lines by captured entity type, such as domain, ip, url, hash, or cve.",
+        "schema": {"type": "array", "items": {"type": "string"}},
+        "style": "form",
+        "explode": True,
+    },
+]
+
 RUN_ID_PARAM = _path_param("run_id", "Run id")
 PROJECT_ID_PARAM = _path_param("project_id", "Project id")
 ARTIFACT_ID_PARAM = _path_param("artifact_id", "Artifact id")
@@ -201,6 +252,10 @@ OPENAPI_SPEC: dict = {
                     "finished": {"type": "string", "nullable": True},
                     "line_number": {"type": "integer", "minimum": 1},
                     "line": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["info", "notice", "warn", "error"]},
+                    "role": {"type": "string"},
+                    "signals": {"type": "array", "items": {"type": "string"}},
+                    "entities": {"type": "array", "items": _ref("RunStreamEntity")},
                     "context_before": {"type": "array", "items": {"type": "string"}},
                     "context_after": {"type": "array", "items": {"type": "string"}},
                 },
@@ -216,6 +271,7 @@ OPENAPI_SPEC: dict = {
                     "has_more": {"type": "boolean"},
                     "query": {"type": "string"},
                     "context": {"type": "integer"},
+                    "filters": {"type": "object", "additionalProperties": True},
                 },
             },
             "RunDetail": {
@@ -244,6 +300,7 @@ OPENAPI_SPEC: dict = {
                     "full_output_available": {"type": "boolean"},
                     "truncated": {"type": "boolean"},
                     "line_count": {"type": "integer"},
+                    "returned": {"type": "integer"},
                     "range": {
                         "type": "object",
                         "required": ["start", "end", "returned"],
@@ -254,6 +311,8 @@ OPENAPI_SPEC: dict = {
                         },
                     },
                     "lines": {"type": "array", "items": {"type": "string"}},
+                    "entries": {"type": "array", "items": _ref("RunStreamEvent")},
+                    "filters": {"type": "object", "additionalProperties": True},
                 },
             },
             "AtlasSummary": {
@@ -1231,6 +1290,7 @@ OPENAPI_SPEC: dict = {
                 "parameters": [
                     *PAGE_PARAMS,
                     {"name": "q", "in": "query", "schema": {"type": "string"}},
+                    *STRUCTURED_OUTPUT_PARAMS,
                     {"name": "project_id", "in": "query", "schema": {"type": "string"}},
                     {
                         "name": "run_kind",
@@ -1255,7 +1315,10 @@ OPENAPI_SPEC: dict = {
                         "name": "q",
                         "in": "query",
                         "required": True,
-                        "description": "Literal text to locate in saved run output.",
+                        "description": (
+                            "Literal text to locate in saved run output. Structured selector tokens such as "
+                            "signal:findings are also accepted."
+                        ),
                         "schema": {"type": "string"},
                     },
                     {
@@ -1263,6 +1326,7 @@ OPENAPI_SPEC: dict = {
                         "in": "query",
                         "schema": {"type": "integer", "default": 2, "minimum": 0, "maximum": 10},
                     },
+                    *STRUCTURED_OUTPUT_PARAMS,
                     {"name": "project_id", "in": "query", "schema": {"type": "string"}},
                     {
                         "name": "run_kind",
@@ -1420,6 +1484,7 @@ OPENAPI_SPEC: dict = {
                         "description": "1-based inclusive line range, such as 10-40.",
                         "schema": {"type": "string", "pattern": "^[1-9][0-9]*-[1-9][0-9]*$"},
                     },
+                    *STRUCTURED_OUTPUT_PARAMS,
                 ],
                 "responses": {
                     "200": {
@@ -1449,6 +1514,7 @@ OPENAPI_SPEC: dict = {
                         "description": "1-based inclusive line range, such as 10-40.",
                         "schema": {"type": "string", "pattern": "^[1-9][0-9]*-[1-9][0-9]*$"},
                     },
+                    *STRUCTURED_OUTPUT_PARAMS,
                 ],
                 "responses": {
                     "200": {

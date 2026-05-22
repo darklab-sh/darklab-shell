@@ -37,6 +37,16 @@ MIGRATION = Migration(
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS run_output_summary (
+            run_id TEXT NOT NULL,
+            family TEXT NOT NULL,
+            value TEXT NOT NULL,
+            count BIGINT NOT NULL DEFAULT 0,
+            PRIMARY KEY (run_id, family, value),
+            CHECK (family IN ('kind', 'role', 'signal'))
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS snapshots (
             id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
@@ -395,6 +405,7 @@ MIGRATION = Migration(
         "CREATE INDEX IF NOT EXISTS idx_runs_session_command_started ON runs (session_id, command, started DESC)",
         "CREATE INDEX IF NOT EXISTS idx_runs_session_kind_started ON runs (session_id, run_kind, started DESC)",
         "CREATE INDEX IF NOT EXISTS idx_run_output_artifacts_created ON run_output_artifacts (created)",
+        "CREATE INDEX IF NOT EXISTS idx_run_output_summary_lookup ON run_output_summary (family, value, run_id)",
         "CREATE INDEX IF NOT EXISTS idx_snapshots_session ON snapshots (session_id)",
         "CREATE INDEX IF NOT EXISTS idx_snapshots_session_created ON snapshots (session_id, created DESC)",
         "CREATE INDEX IF NOT EXISTS idx_starred_commands_session ON starred_commands (session_id)",

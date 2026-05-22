@@ -827,9 +827,13 @@ def record_run_findings(conn, session_id, run_id, entries):
     for fallback_index, entry in enumerate(entry_items):
         if not isinstance(entry, dict):
             continue
+        role = str(entry.get("role") or "")
+        if role in {"section-header", "kv", "help-row", "progress", "status-line", "pty-marker"}:
+            continue
         signals = entry.get("signals")
         signal_values = {str(signal) for signal in signals} if isinstance(signals, list) else set()
-        if "findings" not in signal_values:
+        kind = str(entry.get("kind") or "")
+        if "findings" not in signal_values and kind != "error":
             continue
         raw_line = strip_ansi_codes(str(entry.get("text") or "")).strip()
         if not raw_line:
@@ -843,6 +847,8 @@ def record_run_findings(conn, session_id, run_id, entries):
         seen_fingerprints.add(fingerprint)
         title = _trim_text(raw_line, MAX_FINDING_TITLE_LEN)
         severity = _finding_severity_from_text(raw_line)
+        if kind == "error" and not severity:
+            severity = "high"
         entity_id, entity_sig = _entry_primary_entity(conn, session_id, entry, created)
         signal_key = _normalize_finding_signal_key(raw_line)
         subject_key = entity_sig if entity_id else f"unscoped:{tool_root}:{signal_key}"

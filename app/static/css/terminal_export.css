@@ -63,6 +63,42 @@
   background: var(--theme-panel-bg, var(--surface));
   border: 1px solid var(--theme-panel-border, var(--border));
 }
+.export-findings-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--theme-panel-border, var(--border));
+  background: var(--theme-panel-bg, var(--surface));
+}
+.export-findings-summary span,
+.line-severity-badge,
+.export-entity-token {
+  display: inline-block;
+  border: 1px solid var(--border-bright);
+  border-radius: 2px;
+  padding: 0 5px;
+  line-height: 1.35;
+}
+.export-findings-summary span,
+.line-severity-badge {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.line-severity-badge {
+  margin-right: 8px;
+}
+.line-severity-error { color: var(--red); border-color: var(--red); }
+.line-severity-warn { color: var(--amber); border-color: var(--amber); }
+.line-severity-finding { color: var(--green); border-color: var(--green-dim); }
+.export-entity-token {
+  color: var(--green);
+  border-color: var(--green-dim);
+  text-decoration: none;
+}
 .nice-scroll {
   scrollbar-width: thin;
   scrollbar-color: var(--theme-scrollbar-thumb, color-mix(in srgb, var(--muted) 44%, var(--border-bright))) var(--theme-scrollbar-track, color-mix(in srgb, var(--surface) 72%, transparent));

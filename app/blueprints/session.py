@@ -151,6 +151,22 @@ def _normalize_atlas_saved_views(value):
         finding_status = str(filters.get("finding_status") or "").strip().lower()
         if finding_status not in {"", "new", "reviewed", "important", "false_positive", "needs_followup"}:
             finding_status = ""
+
+        def _saved_view_list(key):
+            raw_values = filters.get(key)
+            raw_items = raw_values if isinstance(raw_values, list) else [raw_values]
+            values = []
+            seen_values = set()
+            for raw_item in raw_items:
+                normalized = str(raw_item or "").strip().lower()
+                if not normalized or normalized in seen_values:
+                    continue
+                seen_values.add(normalized)
+                values.append(normalized[:120])
+                if len(values) >= 12:
+                    break
+            return values
+
         views.append({
             "id": view_id,
             "name": name,
@@ -162,7 +178,15 @@ def _normalize_atlas_saved_views(value):
                 "finding_status": finding_status,
                 "project_id": str(filters.get("project_id") or "").strip()[:80],
                 "project_name": str(filters.get("project_name") or "").strip()[:120],
+                "run_id": str(filters.get("run_id") or "").strip()[:120],
+                "run_label": str(filters.get("run_label") or "").strip()[:240],
                 "sort": str(filters.get("sort") or "").strip()[:80],
+                "signals": _saved_view_list("signals"),
+                "kinds": _saved_view_list("kinds"),
+                "exclude_kinds": _saved_view_list("exclude_kinds"),
+                "roles": _saved_view_list("roles"),
+                "entities": _saved_view_list("entities"),
+                "entity_types": _saved_view_list("entity_types"),
             },
             "updated_at": str(item_data.get("updated_at") or "")[:40],
         })

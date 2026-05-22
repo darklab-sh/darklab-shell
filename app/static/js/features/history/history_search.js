@@ -10,6 +10,18 @@ let _histSearchFetchTimer = null;
 
 function isHistSearchMode() { return _histSearchMode; }
 
+function _histSearchRequest(query) {
+  const raw = String(query || '');
+  const findingsMatch = raw.match(/^findings(?::|\s+)(.*)$/i);
+  if (findingsMatch) {
+    return {
+      query: findingsMatch[1].trim(),
+      scope: 'findings',
+    };
+  }
+  return { query: raw, scope: 'command' };
+}
+
 function _histSearchMatches() {
   if (!_histSearchQuery) return [];
   // Always include client-side matches from the in-memory recents so the
@@ -18,8 +30,11 @@ function _histSearchMatches() {
   // i-search, which searches in-memory history. Server results extend this
   // list with older runs beyond the recents cap; both lists are re-filtered
   // against the current query to guard against race conditions.
-  const q = _histSearchQuery.toLowerCase();
-  const fromClient = cmdHistory.filter(c => c.toLowerCase().includes(q));
+  const request = _histSearchRequest(_histSearchQuery);
+  const q = request.query.toLowerCase();
+  const fromClient = request.scope === 'command'
+    ? cmdHistory.filter(c => c.toLowerCase().includes(q))
+    : [];
   const seen = new Set();
   const merged = [];
   for (const cmd of fromClient) {
@@ -27,7 +42,7 @@ function _histSearchMatches() {
   }
   if (_histSearchRuns !== null) {
     for (const cmd of _histSearchRuns) {
-      if (!seen.has(cmd) && cmd.toLowerCase().includes(q)) {
+      if (!seen.has(cmd) && (!q || cmd.toLowerCase().includes(q) || request.scope === 'findings')) {
         merged.push(cmd);
         seen.add(cmd);
       }
@@ -42,9 +57,10 @@ function _histSearchMatches() {
 // scope=command keeps this bash-like: match typed command text only, not
 // output text (which FTS would otherwise mix in and surface unrelated runs).
 function _histSearchFetch(q) {
-  const url = q
-    ? `/history?type=runs&q=${encodeURIComponent(q)}&scope=command`
-    : '/history?type=runs&scope=command';
+  const request = _histSearchRequest(q);
+  const params = new URLSearchParams({ type: 'runs', scope: request.scope });
+  if (request.query) params.set('q', request.query);
+  const url = `/history?${params.toString()}`;
   apiFetch(url).then(r => r.json()).then(data => {
     if (!_histSearchMode) return;
     _histSearchRuns = Array.isArray(data.runs)

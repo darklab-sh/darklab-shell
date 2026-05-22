@@ -348,6 +348,23 @@
     const prefixColW = longestPrefix ? doc.getTextWidth(longestPrefix) + 10 : 0;
 
     let y = headerH + outputBoxPadTop + fontSize;
+    const summary = window.ExportHtmlUtils && typeof window.ExportHtmlUtils.buildExportLineSummary === 'function'
+      ? window.ExportHtmlUtils.buildExportLineSummary(rawLines)
+      : null;
+    if (summary) {
+      const summaryParts = [];
+      if (summary.findings) summaryParts.push(`findings ${summary.findings}`);
+      if (summary.errors) summaryParts.push(`errors ${summary.errors}`);
+      if (summary.warnings) summaryParts.push(`warnings ${summary.warnings}`);
+      Object.entries(summary.entityTypes || {}).slice(0, 6).forEach(([type, count]) => summaryParts.push(`${type} ${count}`));
+      if (summaryParts.length) {
+        doc.setFont(monoFontFamily, 'bold');
+        doc.setTextColor(...colors.muted);
+        doc.text(summaryParts.join('  ·  '), outputBoxPadX, y);
+        doc.setFont(monoFontFamily, 'normal');
+        y += leading * 1.4;
+      }
+    }
     const newPage = () => {
       doc.addPage();
       fillBg();

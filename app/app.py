@@ -77,6 +77,7 @@ from blueprints.secrets import secrets_bp  # noqa: E402
 from blueprints.watchers import watchers_bp  # noqa: E402
 from blueprints.workspace import workspace_bp  # noqa: E402
 from blueprints.projects import projects_bp  # noqa: E402
+from core.process import cleanup_stale_active_run_metadata  # noqa: E402
 from services.workspace.files import cleanup_inactive_workspaces  # noqa: E402
 from services import metrics as app_metrics  # noqa: E402
 from services.api_v1.serialization import json_error  # noqa: E402
@@ -87,6 +88,24 @@ limiter.init_app(app)
 
 _WORKSPACE_CLEANUP_INTERVAL_SECONDS = 300
 _last_workspace_cleanup_monotonic = 0.0
+
+
+def _cleanup_active_run_metadata_on_startup():
+    try:
+        result = cleanup_stale_active_run_metadata()
+    except Exception:
+        log.exception("ACTIVE_RUN_METADATA_STARTUP_CLEANUP_ERROR")
+        return
+    removed = int(result.get("metadata_removed", 0) or 0)
+    members = int(result.get("session_members_removed", 0) or 0)
+    if removed or members:
+        log.info("ACTIVE_RUN_METADATA_STARTUP_CLEANUP", extra={
+            "metadata_removed": removed,
+            "session_members_removed": members,
+        })
+
+
+_cleanup_active_run_metadata_on_startup()
 
 
 @app.errorhandler(429)

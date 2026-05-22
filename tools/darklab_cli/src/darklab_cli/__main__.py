@@ -73,6 +73,12 @@ def _parser() -> argparse.ArgumentParser:
     grep.add_argument("--until")
     grep.add_argument("--limit", type=int, default=50, help="Matches to return; default 50, max 100.")
     grep.add_argument("--offset", type=int, default=0)
+    grep.add_argument("--signal", action="append", default=[], help="Only return lines with this structured signal.")
+    grep.add_argument("--kind", action="append", default=[], help="Only return lines with this severity kind.")
+    grep.add_argument("--not-kind", action="append", default=[], help="Exclude lines with this severity kind.")
+    grep.add_argument("--role", action="append", default=[], help="Only return lines with this structural role.")
+    grep.add_argument("--entity", action="append", default=[], help="Only return lines with this entity value.")
+    grep.add_argument("--entity-type", action="append", default=[], help="Only return lines with this entity type.")
     grep.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
     show = sub.add_parser("show", help="Show one completed run summary.")
@@ -83,6 +89,12 @@ def _parser() -> argparse.ArgumentParser:
     output = sub.add_parser("output", help="Print stored run output.")
     output.add_argument("run_id")
     output.add_argument("--range", dest="line_range", help="1-based line range to fetch, such as 10-40.")
+    output.add_argument("--signal", action="append", default=[], help="Only return lines with this structured signal.")
+    output.add_argument("--kind", action="append", default=[], help="Only return lines with this severity kind.")
+    output.add_argument("--not-kind", action="append", default=[], help="Exclude lines with this severity kind.")
+    output.add_argument("--role", action="append", default=[], help="Only return lines with this structural role.")
+    output.add_argument("--entity", action="append", default=[], help="Only return lines with this entity value.")
+    output.add_argument("--entity-type", action="append", default=[], help="Only return lines with this entity type.")
     output.add_argument("--format", choices=("text", "json"), default="text")
 
     artifacts = sub.add_parser("artifacts", help="List artifacts for one completed run.")
@@ -377,7 +389,7 @@ def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
                 reverse=True,
             )
         case "grep":
-            params = {**_page_params(args), "q": args.pattern, "context": args.context}
+            params = {**_page_params(args), **_structured_selector_params(args), "q": args.pattern, "context": args.context}
             payload = client.request("GET", "/history/search", params=params)
             return _print_search_matches(payload, args.format)
         case "show":
@@ -392,7 +404,11 @@ def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
                     print(line)
             return 0
         case "output":
-            params = {"format": args.format, "range": args.line_range}
+            params = {
+                **_structured_selector_params(args),
+                "format": args.format,
+                "range": args.line_range,
+            }
             if args.format == "json":
                 return _print_payload(client.request("GET", f"/runs/{args.run_id}/output", params=params), "json")
             text = client.request("GET", f"/runs/{args.run_id}/output", params=params)
@@ -1066,6 +1082,19 @@ def _page_params(args: argparse.Namespace) -> dict[str, Any]:
         "limit": getattr(args, "limit", None),
         "offset": getattr(args, "offset", None),
     }
+
+
+def _structured_selector_params(args: argparse.Namespace) -> dict[str, Any]:
+    params = {}
+    for key in ("signal", "kind", "role", "entity"):
+        value = getattr(args, key, None)
+        if value:
+            params[key] = value
+    if getattr(args, "not_kind", None):
+        params["not_kind"] = args.not_kind
+    if getattr(args, "entity_type", None):
+        params["entity_type"] = args.entity_type
+    return params
 
 
 def _page_window_params(args: argparse.Namespace) -> dict[str, Any]:

@@ -131,6 +131,21 @@ def _normalize_saved_view_filter(value, default="hide"):
     return normalized if normalized in ATLAS_SAVED_VIEW_FILTER_VALUES else default
 
 
+def _normalize_saved_view_list(value, *, limit=12):
+    raw_values = value if isinstance(value, list) else [value]
+    values = []
+    seen = set()
+    for item in raw_values:
+        normalized = str(item or "").strip().lower()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        values.append(normalized[:120])
+        if len(values) >= limit:
+            break
+    return values
+
+
 def _normalize_saved_view_payload(data, *, view_id=""):
     payload: dict[str, object] = dict(data) if isinstance(data, dict) else {}
     name = _normalize_saved_view_name(payload.get("name"))
@@ -160,6 +175,12 @@ def _normalize_saved_view_payload(data, *, view_id=""):
         "run_id": str(filter_or_payload("run_id") or "").strip()[:120],
         "run_label": str(filter_or_payload("run_label") or "").strip()[:240],
         "sort": str(filter_or_payload("sort") or "").strip()[:80],
+        "signals": _normalize_saved_view_list(filter_or_payload("signals")),
+        "kinds": _normalize_saved_view_list(filter_or_payload("kinds")),
+        "exclude_kinds": _normalize_saved_view_list(filter_or_payload("exclude_kinds")),
+        "roles": _normalize_saved_view_list(filter_or_payload("roles")),
+        "entities": _normalize_saved_view_list(filter_or_payload("entities")),
+        "entity_types": _normalize_saved_view_list(filter_or_payload("entity_types")),
     }
 
 
@@ -178,6 +199,12 @@ def _stored_saved_view(view, *, updated):
             "run_id": view["run_id"],
             "run_label": view["run_label"],
             "sort": view["sort"],
+            "signals": view["signals"],
+            "kinds": view["kinds"],
+            "exclude_kinds": view["exclude_kinds"],
+            "roles": view["roles"],
+            "entities": view["entities"],
+            "entity_types": view["entity_types"],
         },
         "updated_at": updated,
     }

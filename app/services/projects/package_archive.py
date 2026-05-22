@@ -10,11 +10,14 @@ import os
 import tempfile
 import time
 import zipfile
+from collections.abc import Mapping, Sequence
+from typing import cast
 
 from core.database import DB_BACKEND, db_connect
 from core.database_backend import dialect_for_backend
 from core.helpers import get_log_session_id
-from core.redaction import apply_redaction_rules
+from core.redaction import apply_redaction_rules, line_entries_from_events, redact_line_entries
+from services.runs.output_model import LineEvent
 from services.projects.artifacts import (
     artifact_snapshot_mismatch_reason as _artifact_snapshot_mismatch_reason,
     row_to_run_file_artifact as _row_to_run_file_artifact,
@@ -140,6 +143,48 @@ def _evidence_package_estimated_archive_bytes(manifest):
     return 0
 
 
+def _package_transcript_manifest_entry(run, entries, archive_path, text_archive_path=""):
+    run_id = str(run.get("id") or "")
+    lines = []
+    for fallback_index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            continue
+        raw_signals = entry.get("signals")
+        signals: list[object] = raw_signals if isinstance(raw_signals, list) else []
+        raw_entities = entry.get("entities")
+        entities: list[object] = raw_entities if isinstance(raw_entities, list) else []
+        try:
+            raw_line_index = entry.get("line_index")
+            line_index = fallback_index if raw_line_index is None else int(raw_line_index)
+        except (TypeError, ValueError):
+            line_index = fallback_index
+        line = {
+            "line_index": line_index,
+            "signals": [str(signal) for signal in signals if str(signal or "").strip()],
+            "entities": [
+                {
+                    "type": str(entity.get("type") or ""),
+                    "value": str(entity.get("value") or entity.get("canonical_value") or ""),
+                    "canonical_value": str(entity.get("canonical_value") or entity.get("value") or ""),
+                }
+                for entity in entities
+                if isinstance(entity, dict)
+                and str(entity.get("type") or "").strip()
+                and str(entity.get("canonical_value") or entity.get("value") or "").strip()
+            ],
+        }
+        if entry.get("cls"):
+            line["cls"] = str(entry.get("cls") or "")
+        lines.append(line)
+    return {
+        "run_id": run_id,
+        "archive_path": archive_path,
+        "text_archive_path": text_archive_path,
+        "line_count": len(lines),
+        "lines": lines,
+    }
+
+
 def _raise_if_estimated_archive_too_large(manifest, max_uncompressed_archive_bytes):
     if not max_uncompressed_archive_bytes:
         return
@@ -223,7 +268,6 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
         "package": export_package,
         "manifest": render_manifest,
     }
-    manifest_bytes = json.dumps(export_manifest, indent=2, sort_keys=True).encode("utf-8") + b"\n"
     max_compressed_archive_bytes = _cfg_mb_bytes("evidence_package_max_mb", 25, cfg=cfg)
     max_uncompressed_archive_bytes = _cfg_mb_bytes("evidence_package_max_uncompressed_mb", 500, cfg=cfg)
     _raise_if_estimated_archive_too_large(manifest, max_uncompressed_archive_bytes)
@@ -244,21 +288,13 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
     try:
         with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             core_started = time.perf_counter()
-            _progress("core", "Writing package manifest")
-            projected_bytes = _write_bounded_archive_entry(
-                archive,
-                "manifest.json",
-                manifest_bytes,
-                0,
-                max_uncompressed_archive_bytes,
-                "evidence package manifest exceeds configured size limit",
-            )
+            _progress("core", "Writing package assets")
             css_bytes = (_package_css() + "\n").encode("utf-8")
             projected_bytes = _write_bounded_archive_entry(
                 archive,
                 "assets/package.css",
                 css_bytes,
-                projected_bytes,
+                0,
                 max_uncompressed_archive_bytes,
                 "evidence package CSS snapshot exceeds configured size limit",
             )
@@ -375,6 +411,7 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
             _progress("runs", "Rendering run transcripts")
             run_pages = {}
             run_text_paths = {}
+            transcript_manifest_entries = []
             run_ids = []
             transcript_run_ids = []
             selected_entity_ids = manifest.get("selected_entity_ids")
@@ -443,6 +480,16 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                 run_page_bytes = run_page.encode("utf-8")
                 run_path = f"runs/{run_id}.html"
                 run_pages[run_id] = run_path
+                line_entries = cast(Sequence[LineEvent | Mapping[str, object] | str], entries)
+                manifest_entries = line_entries_from_events(
+                    redact_line_entries(line_entries, redaction_rules)
+                ) if redaction_rules else entries
+                transcript_manifest_entries.append(_package_transcript_manifest_entry(
+                    run,
+                    manifest_entries,
+                    run_path,
+                    transcript_text_path,
+                ))
                 projected_bytes = _write_bounded_archive_entry(
                     archive,
                     run_path,
@@ -451,6 +498,21 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                     max_uncompressed_archive_bytes,
                 )
             _record_timing("run_pages", run_pages_started)
+
+            manifest_started = time.perf_counter()
+            _progress("manifest", "Writing package manifest")
+            if transcript_manifest_entries:
+                export_manifest["transcripts"] = transcript_manifest_entries
+            manifest_bytes = json.dumps(export_manifest, indent=2, sort_keys=True).encode("utf-8") + b"\n"
+            projected_bytes = _write_bounded_archive_entry(
+                archive,
+                "manifest.json",
+                manifest_bytes,
+                projected_bytes,
+                max_uncompressed_archive_bytes,
+                "evidence package manifest exceeds configured size limit",
+            )
+            _record_timing("manifest", manifest_started)
 
             findings_started = time.perf_counter()
             _progress("findings", "Writing findings exports")

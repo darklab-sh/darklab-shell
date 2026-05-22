@@ -160,6 +160,10 @@ def test_api_v1_history_is_token_scoped_and_uses_page_envelope():
         "finished": "2026-05-19T00:00:01+00:00",
         "line_number": 2,
         "line": "api scoped output",
+        "kind": "info",
+        "role": "body",
+        "signals": [],
+        "entities": [],
         "context_before": ["before"],
         "context_after": ["after"],
     }]
@@ -178,11 +182,64 @@ def test_api_v1_history_is_token_scoped_and_uses_page_envelope():
 
 
 def test_api_v1_history_detail_output_and_cross_session_404():
+    import blueprints.history as history_blueprint
+    from services.runs.structured_summary import replace_run_output_summary
+
     client = get_client()
     token = _token(client)
     other_token = _token(client)
     run_id = _seed_run(token, output=["line one", "line two", "line three"])
     with sqlite3.connect(DB_PATH) as conn:
+        structured_preview = [
+            {"text": "line one", "cls": "", "tsC": "", "tsE": "", "kind": "info", "role": "body"},
+            {
+                "text": "line two",
+                "cls": "",
+                "tsC": "",
+                "tsE": "",
+                "kind": "error",
+                "role": "body",
+                "signals": ["findings"],
+                "entities": [{"type": "domain", "value": "darklab.sh", "canonical_value": "darklab.sh"}],
+            },
+            {
+                "text": "line three",
+                "cls": "",
+                "tsC": "",
+                "tsE": "",
+                "kind": "warn",
+                "role": "body",
+                "entities": [{"type": "url", "value": "https://darklab.sh", "canonical_value": "https://darklab.sh"}],
+            },
+        ]
+        conn.execute(
+            "UPDATE runs SET output_preview = ?, output_search_text = ? WHERE id = ?",
+            (
+                json.dumps(structured_preview),
+                "line one\nline two\nline three",
+                run_id,
+            ),
+        )
+        replace_run_output_summary(conn, run_id, structured_preview)
+        domain_entity_id = "ent_" + uuid.uuid4().hex[:16]
+        url_entity_id = "ent_" + uuid.uuid4().hex[:16]
+        for entity_id, entity_type, canonical_value in (
+            (domain_entity_id, "domain", "darklab.sh"),
+            (url_entity_id, "url", "https://darklab.sh"),
+        ):
+            conn.execute(
+                "INSERT INTO entities "
+                "(id, session_id, type, canonical_value, signature_hash, first_seen_at, last_seen_at, created) "
+                "VALUES (?, ?, ?, ?, ?, '2026-05-19T00:00:00+00:00', "
+                "'2026-05-19T00:00:00+00:00', '2026-05-19T00:00:00+00:00')",
+                (entity_id, token, entity_type, canonical_value, "sig_" + entity_id),
+            )
+            conn.execute(
+                "INSERT INTO entity_run_links "
+                "(entity_id, run_id, first_seen_at, last_seen_at, occurrence_count) "
+                "VALUES (?, ?, '2026-05-19T00:00:00+00:00', '2026-05-19T00:00:00+00:00', 1)",
+                (entity_id, run_id),
+            )
         conn.execute(
             "INSERT INTO entity_labels (id, session_id, entity_type, entity_id, label, source, created) "
             "VALUES (?, ?, 'run', ?, 'baseline', 'manual', '2026-05-19T00:00:00+00:00')",
@@ -199,6 +256,28 @@ def test_api_v1_history_detail_output_and_cross_session_404():
     output = client.get(f"/api/v1/history/{run_id}/output", headers=_headers(token))
     output_json = client.get(f"/api/v1/history/{run_id}/output?format=json", headers=_headers(token))
     output_range = client.get(f"/api/v1/runs/{run_id}/output?range=2-3&format=json", headers=_headers(token))
+    output_structured = client.get(
+        f"/api/v1/runs/{run_id}/output?kind=error&entity=darklab.sh&format=json",
+        headers=_headers(token),
+    )
+    output_entity_type = client.get(
+        f"/api/v1/runs/{run_id}/output?entity_type=url&not_kind=info&format=json",
+        headers=_headers(token),
+    )
+    structured_history = client.get("/api/v1/history?q=signal:findings", headers=_headers(token))
+    structured_entity_history = client.get("/api/v1/history?q=entity_type:url", headers=_headers(token))
+    structured_search = client.get("/api/v1/history/search?q=signal:findings", headers=_headers(token))
+    structured_type_search = client.get(
+        "/api/v1/history/search?q=kind%21%3Dinfo&entity_type=url",
+        headers=_headers(token),
+    )
+    with mock.patch.object(
+        history_blueprint,
+        "load_run_output_events_for_run",
+        side_effect=AssertionError("summary-backed history filters should not load transcript events"),
+    ):
+        browser_entity_history = client.get("/history?q=entity_type:url", headers={"X-Session-ID": token})
+        browser_kind_history = client.get("/history?q=kind:error", headers={"X-Session-ID": token})
     invalid_range = client.get(f"/api/v1/runs/{run_id}/output?range=3-2", headers=_headers(token))
     cross_session = client.get(f"/api/v1/history/{run_id}", headers=_headers(other_token))
 
@@ -212,6 +291,16 @@ def test_api_v1_history_detail_output_and_cross_session_404():
     assert json.loads(output_json.data)["lines"] == ["line one", "line two", "line three"]
     assert json.loads(output_range.data)["lines"] == ["line two", "line three"]
     assert json.loads(output_range.data)["range"] == {"start": 2, "end": 3, "returned": 2}
+    assert json.loads(output_structured.data)["lines"] == ["line two"]
+    assert json.loads(output_structured.data)["entries"][0]["kind"] == "error"
+    assert json.loads(output_entity_type.data)["lines"] == ["line three"]
+    assert [item["id"] for item in json.loads(structured_history.data)["runs"]] == [run_id]
+    assert [item["id"] for item in json.loads(structured_entity_history.data)["runs"]] == [run_id]
+    assert [item["id"] for item in json.loads(browser_entity_history.data)["runs"]] == [run_id]
+    assert [item["id"] for item in json.loads(browser_kind_history.data)["runs"]] == [run_id]
+    structured_matches = json.loads(structured_search.data)["matches"]
+    assert [(item["line_number"], item["kind"], item["signals"]) for item in structured_matches] == [(2, "error", ["findings"])]
+    assert [item["line_number"] for item in json.loads(structured_type_search.data)["matches"]] == [3]
     assert invalid_range.status_code == 400
     assert json.loads(invalid_range.data)["error"]["code"] == "invalid_range"
     assert cross_session.status_code == 404

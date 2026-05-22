@@ -49,7 +49,21 @@ from services.projects.contracts import (
 from core.redaction import line_entries_from_events, omit_raw_only_line_entries, redact_line_entries
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, builtin_command_roots_for_storage
 from services.runs.output_model import LineKind, line_event_from_legacy, to_legacy_entry
-from services.runs.output_store import load_run_output_entries_for_run, preview_output_entries_from_run
+from services.runs.output_store import (
+    load_run_output_entries_for_run,
+    load_run_output_events_for_run,
+    preview_output_entries_from_run,
+)
+from services.runs.structured_filters import (
+    StructuredOutputFilters,
+    entity_run_exists_clause,
+    filters_have_summary_selectors,
+    filters_need_line_event_scan,
+    merge_structured_filters,
+    run_output_summary_exists_clause,
+    run_matches_structured_filters,
+    structured_filters_from_params,
+)
 from services.scheduler.service import schedule_ids_by_run
 from services.storage.body_store import inline_threshold_bytes, load_text_body, maybe_store_text_body, stored_body_pointer
 from services import metrics as app_metrics
@@ -355,6 +369,33 @@ def _history_base_clause(
     return sql, params, fts_q
 
 
+def _history_structured_filter_run_ids(conn, run_sql, run_params, structured_filters):
+    summary_sql, _summary_params = run_output_summary_exists_clause(structured_filters, run_alias="r")
+    summary_available = bool(summary_sql) and _history_table_exists(conn, "run_output_summary")
+    needs_summary_fallback = filters_have_summary_selectors(structured_filters) and not summary_available
+    if not filters_need_line_event_scan(structured_filters) and not needs_summary_fallback:
+        return None
+    rows = conn.execute(
+        "SELECT r.*, ("  # nosec
+        "SELECT art.rel_path FROM run_output_artifacts art "
+        "WHERE art.run_id = r.id ORDER BY art.created DESC LIMIT 1"
+        ") AS rel_path "
+        + run_sql
+        + " ORDER BY r.started DESC, r.id DESC LIMIT 2000",
+        run_params,
+    ).fetchall()
+    run_ids: list[str] = []
+    for row in rows:
+        run = dict(row)
+        result = load_run_output_events_for_run(
+            run,
+            log_event="HISTORY_STRUCTURED_OUTPUT_LOAD_FAILED",
+        )
+        if run_matches_structured_filters(result.events, structured_filters):
+            run_ids.append(str(run.get("id") or ""))
+    return run_ids
+
+
 def _history_snapshot_base_clause(session_id, query, date_range, project_id=""):
     sql = " FROM snapshots s WHERE s.session_id = ?"
     params: list[Any] = [session_id]
@@ -503,6 +544,22 @@ def _history_run_elapsed_seconds(row) -> float | None:
     return max(0.0, (finished - started).total_seconds())
 
 
+def _history_run_max_output_kind(row) -> str:
+    order = {"error": 3, "warn": 2, "notice": 1, "info": 0}
+    best = "info"
+    try:
+        entries = json.loads(str(row["output_preview"] or "[]"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return best
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        kind = str(entry.get("kind") or "").strip()
+        if order.get(kind, -1) > order.get(best, -1):
+            best = kind
+    return best
+
+
 def _history_insights(conn, session_id: str, *, days: int | None = None) -> dict[str, Any]:
     today = datetime.now(timezone.utc).date()
     first_row = conn.execute(
@@ -522,7 +579,11 @@ def _history_insights(conn, session_id: str, *, days: int | None = None) -> dict
     cutoff = datetime.combine(fetch_start_date, datetime.min.time()).isoformat()
     rows = conn.execute(
         """
-        SELECT id, run_kind, command, started, finished, exit_code, output_line_count
+        SELECT id, run_kind, command, started, finished, exit_code, output_line_count, output_preview,
+               (
+                 SELECT COUNT(*) FROM findings_occurrences fo
+                  WHERE fo.run_id = runs.id
+               ) AS finding_count
           FROM runs
          WHERE session_id = ? AND started >= ?
          ORDER BY started ASC, id ASC
@@ -556,6 +617,8 @@ def _history_insights(conn, session_id: str, *, days: int | None = None) -> dict
             "category": category,
             "elapsed": elapsed,
             "exit_code": exit_code,
+            "finding_count": int(row["finding_count"] or 0),
+            "max_kind": _history_run_max_output_kind(row),
             "started_dt": started_dt,
             "started_date": started_dt.date() if started_dt else None,
         })
@@ -636,6 +699,8 @@ def _history_insights(conn, session_id: str, *, days: int | None = None) -> dict
             "elapsed_seconds": record["elapsed"],
             "exit_code": record["exit_code"],
             "output_line_count": int(row["output_line_count"] or 0),
+            "finding_count": int(record.get("finding_count") or 0),
+            "max_kind": str(record.get("max_kind") or "info"),
         })
 
     command_mix = []
@@ -732,6 +797,39 @@ def _preview_notice(run):
         f"but the full output had {total} lines. "
         "Full output persistence is disabled or unavailable]"
     )
+
+
+def _run_output_structured_summary(events):
+    summary = {
+        "kinds": {},
+        "signals": {},
+        "entity_types": {},
+        "outline": [],
+        "signal_toc": [],
+    }
+    seen_signal_lines = set()
+    for fallback_index, event in enumerate(events):
+        line_number = event.line_index if isinstance(event.line_index, int) else fallback_index
+        summary["kinds"][event.kind.value] = summary["kinds"].get(event.kind.value, 0) + 1
+        for signal in event.signals:
+            summary["signals"][signal.value] = summary["signals"].get(signal.value, 0) + 1
+            signal_key = (signal.value, line_number)
+            if signal_key not in seen_signal_lines and len(summary["signal_toc"]) < 25:
+                seen_signal_lines.add(signal_key)
+                summary["signal_toc"].append({
+                    "line_number": line_number + 1,
+                    "signal": signal.value,
+                    "text": event.text[:160],
+                })
+        for entity in event.entities:
+            summary["entity_types"][entity.type] = summary["entity_types"].get(entity.type, 0) + 1
+        if event.role.value in {"section-header", "kv"} and len(summary["outline"]) < 25:
+            summary["outline"].append({
+                "line_number": line_number + 1,
+                "role": event.role.value,
+                "text": event.text[:160],
+            })
+    return summary
 
 
 def _run_file_artifacts_by_run(conn, run_ids):
@@ -1011,7 +1109,10 @@ def get_history():
     """Return the most recent completed runs for this session."""
     # History is isolated per anonymous browser session, not shared globally.
     session_id = get_session_id()
-    query = _normalize_history_filter_text(request.args.get("q"))
+    query, structured_filters = structured_filters_from_params(
+        request.args,
+        query=_normalize_history_filter_text(request.args.get("q")),
+    )
     command_root = _normalize_history_filter_text(request.args.get("command_root")).lower()
     exit_code_filter = _normalize_history_filter_text(request.args.get("exit_code")).lower()
     date_range = _normalize_history_filter_text(request.args.get("date_range")).lower()
@@ -1025,6 +1126,11 @@ def get_history():
     # column. Reverse-i-search uses this to behave like bash i-search — matching
     # on typed command text, not on output text that FTS would otherwise pull in.
     scope = _normalize_history_filter_text(request.args.get("scope")).lower()
+    if scope == "findings":
+        structured_filters = merge_structured_filters(
+            structured_filters,
+            StructuredOutputFilters(signals=("findings",)),
+        )
     if type_filter not in {"all", "runs", "runs_builtin", "runs_external", "snapshots"}:
         type_filter = "all"
     run_kind = {
@@ -1060,7 +1166,7 @@ def get_history():
                 command_root,
                 exit_code_filter,
                 date_range,
-                scope,
+                "all" if scope == "findings" else scope,
                 project_id,
                 starred_only=starred_only,
                 run_kind=run_kind,
@@ -1068,6 +1174,23 @@ def get_history():
                 force_like=force_like,
                 offloaded_match_run_ids=offloaded_match_run_ids,
             )
+            if structured_filters.active:
+                entity_sql, entity_params = entity_run_exists_clause(structured_filters, run_alias="r")
+                if entity_sql:
+                    run_sql += entity_sql
+                    run_params = [*run_params, *entity_params]
+                summary_sql, summary_params = run_output_summary_exists_clause(structured_filters, run_alias="r")
+                if summary_sql and _history_table_exists(conn, "run_output_summary"):
+                    run_sql += summary_sql
+                    run_params = [*run_params, *summary_params]
+                structured_ids = _history_structured_filter_run_ids(conn, run_sql, run_params, structured_filters)
+                if structured_ids is not None:
+                    if structured_ids:
+                        placeholders = ", ".join("?" for _ in structured_ids)
+                        run_sql += f" AND r.id IN ({placeholders})"
+                        run_params = [*run_params, *structured_ids]
+                    else:
+                        run_sql += " AND 1 = 0"
             root_command_rows = conn.execute(
                 "SELECT r.command, MAX(r.started) AS latest_started"
                 + run_sql
@@ -1085,6 +1208,7 @@ def get_history():
             or exit_code_filter not in {"", "all"}
             or starred_only
             or scope == "command"
+            or structured_filters.active
         )
         if (
             snapshots_available
@@ -1495,6 +1619,7 @@ def compare_history_runs():
         "objects": {
             "findings": finding_objects,
             "artifacts": artifact_objects,
+            "entities": run_comparison.compare_entity_sets(left_entries, right_entries),
         },
         "hunks": diff["hunks"],
         "density_buckets": density_buckets,
@@ -1616,6 +1741,7 @@ def get_run(run_id):
     run["full_output_fallback"] = output_result.fallback
     run["output_entries"] = output_result.entries
     run["output"] = [entry["text"] for entry in run["output_entries"]]
+    run["output_summary"] = _run_output_structured_summary(output_result.events)
     if is_full_view:
         if run["full_output_truncated"]:
             truncated_mb = CFG.get("full_output_max_mb", 0)

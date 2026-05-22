@@ -45,6 +45,8 @@
       role: String(line && line.role || (['prompt-echo', 'denied', 'exit-ok', 'exit-fail'].includes(cls) ? cls : 'body')),
       tsC: String(line && line.tsC || ''),
       tsE: String(line && line.tsE || ''),
+      signals: Array.isArray(line && line.signals) ? line.signals.map(signal => String(signal || '')).filter(Boolean) : [],
+      entities: Array.isArray(line && line.entities) ? line.entities : [],
       line_number: Number.isInteger(line && line.line_number) ? line.line_number : undefined,
     };
   }
@@ -56,6 +58,8 @@
       event.cls = lineLegacyClass(event);
       event.tsC = event.ts_clock || '';
       event.tsE = event.ts_elapsed || '';
+      event.signals = Array.isArray(event.signals) ? event.signals : [];
+      event.entities = Array.isArray(event.entities) ? event.entities : [];
       if (Number.isInteger(line && line.line_number)) event.line_number = line.line_number;
       return event;
     }
@@ -94,6 +98,95 @@
     const remainder = firstSpace === -1 ? '' : raw.slice(firstSpace + 1);
     return '<span class="prompt-prefix">' + escapeExportHtml(prefix) + '</span>'
       + (remainder ? escapeExportHtml(' ' + remainder) : '');
+  }
+
+  function exportEntityRanges(text, entities) {
+    const length = String(text || '').length;
+    return (Array.isArray(entities) ? entities : [])
+      .map((entity) => {
+        const start = Number(entity && entity.start);
+        const end = Number(entity && entity.end);
+        if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > length) {
+          return null;
+        }
+        return { start, end, entity };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.start - b.start || a.end - b.end)
+      .reduce((ranges, range) => {
+        const previous = ranges[ranges.length - 1];
+        if (previous && range.start < previous.end) return ranges;
+        ranges.push(range);
+        return ranges;
+      }, []);
+  }
+
+  function renderExportEntityContent(text, entities, ansiToHtml) {
+    const raw = String(text || '');
+    const ranges = exportEntityRanges(raw, entities);
+    if (!ranges.length) return ansiToHtml(raw);
+    let cursor = 0;
+    let html = '';
+    ranges.forEach((range) => {
+      if (range.start > cursor) html += ansiToHtml(raw.slice(cursor, range.start));
+      const entity = range.entity || {};
+      const entityType = String(entity.type || '');
+      const entityValue = String(entity.canonical_value || entity.value || raw.slice(range.start, range.end));
+      const tokenText = raw.slice(range.start, range.end);
+      html += '<a class="export-entity-token"'
+        + ' href="#entity-' + encodeURIComponent(entityType + '-' + entityValue) + '"'
+        + ' title="Entity: ' + escapeExportHtml(entityValue) + '">'
+        + ansiToHtml(tokenText)
+        + '</a>';
+      cursor = range.end;
+    });
+    if (cursor < raw.length) html += ansiToHtml(raw.slice(cursor));
+    return html;
+  }
+
+  function exportLineBadgeHtml(line) {
+    const kind = String(line && line.kind || 'info');
+    const signals = Array.isArray(line && line.signals) ? line.signals.map(String) : [];
+    if (kind === 'error') return '<span class="line-severity-badge line-severity-error">error</span>';
+    if (kind === 'warn') return '<span class="line-severity-badge line-severity-warn">warn</span>';
+    if (signals.includes('findings')) return '<span class="line-severity-badge line-severity-finding">finding</span>';
+    return '';
+  }
+
+  function buildExportLineSummary(rawLines) {
+    const summary = {
+      findings: 0,
+      warnings: 0,
+      errors: 0,
+      entityTypes: {},
+    };
+    rawLines.forEach((rawLine) => {
+      const line = lineEventFromWire(rawLine);
+      const signals = Array.isArray(line.signals) ? line.signals.map(String) : [];
+      if (signals.includes('findings')) summary.findings += 1;
+      if (line.kind === 'warn') summary.warnings += 1;
+      if (line.kind === 'error') summary.errors += 1;
+      (Array.isArray(line.entities) ? line.entities : []).forEach((entity) => {
+        const type = String(entity && entity.type || '').trim();
+        if (type) summary.entityTypes[type] = (summary.entityTypes[type] || 0) + 1;
+      });
+    });
+    return summary;
+  }
+
+  function buildExportSummaryHtml(summary) {
+    const chips = [];
+    if (summary.findings) chips.push(`findings ${summary.findings}`);
+    if (summary.errors) chips.push(`errors ${summary.errors}`);
+    if (summary.warnings) chips.push(`warnings ${summary.warnings}`);
+    Object.entries(summary.entityTypes || {})
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .slice(0, 8)
+      .forEach(([type, count]) => chips.push(`${type} ${count}`));
+    if (!chips.length) return '';
+    return '<section class="export-findings-summary">'
+      + chips.map(chip => `<span>${escapeExportHtml(chip)}</span>`).join('')
+      + '</section>';
   }
 
   function exportTimestamp() {
@@ -202,6 +295,7 @@
   function buildExportLinesHtml(rawLines, { getPrefix = () => '', ansiToHtml }) {
     const prefixes = rawLines.map((line, i) => getPrefix(line, i));
     const prefixWidth = Math.max(0, ...prefixes.map(p => p.length));
+    const summary = buildExportLineSummary(rawLines);
     const linesHtml = rawLines.map((rawLine, i) => {
       const line = lineEventFromWire(rawLine);
       const text = String(line.text || '');
@@ -216,11 +310,11 @@
       } else if (isPlainEvent(line)) {
         content = escapeExportHtml(text);
       } else {
-        content = ansiToHtml(text);
+        content = renderExportEntityContent(text, line.entities, ansiToHtml);
       }
-      return `<span class="line${cls ? ' ' + cls : ''}">${prefixSpan}<span class="perm-content">${content}</span></span>`;
+      return `<span class="line${cls ? ' ' + cls : ''}">${prefixSpan}<span class="perm-content">${exportLineBadgeHtml(line)}${content}</span></span>`;
     }).join('');
-    return { linesHtml, prefixWidth };
+    return { linesHtml, prefixWidth, summary, summaryHtml: buildExportSummaryHtml(summary) };
   }
 
   // ── Header / run-meta model ───────────────────────────────────────────────
@@ -323,6 +417,7 @@ ${themeDecls}
     metaLine = '',
     runMeta = null,
     linesHtml = '',
+    summaryHtml = '',
     prefixWidth = 0,
     fontFacesCss = '',
     exportCss = '',
@@ -342,6 +437,7 @@ ${styles}
 </head>
 <body>
 ${buildTerminalExportHeaderHtml(headerModel)}
+${summaryHtml || ''}
 <main class="export-output nice-scroll">
 ${linesHtml}
 </main>
@@ -402,6 +498,7 @@ ${linesHtml}
     escapeExportHtml,
     renderExportPromptEcho,
     buildExportLinesHtml,
+    buildExportLineSummary,
     buildExportRunMetaItems,
     buildExportHeaderModel,
     buildExportRunMetaHtml,

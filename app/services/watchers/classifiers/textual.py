@@ -30,6 +30,7 @@ def diff(
         inline_context=run_comparison.COMPARE_INLINE_EQUAL_CONTEXT,
     )
     totals = dict(hunk_diff.get("totals") or {})
+    entity_delta = run_comparison.compare_entity_sets(left_entries, right_entries)
     added = int(totals.get("added_line_count") or 0)
     removed = int(totals.get("removed_line_count") or 0)
     changed = int(totals.get("changed_line_count") or 0)
@@ -44,6 +45,7 @@ def diff(
         or omitted_total
     )
     effective_removed = 0 if bool((options or {}).get("suppress_removals")) else removed
+    effective_entity_removed = 0 if bool((options or {}).get("suppress_removals")) else len(entity_delta["removed"])
     summary = {
         "classifier": "textual",
         "added_line_count": added,
@@ -57,6 +59,13 @@ def diff(
         "hunks_omitted": int(truncated_info.get("hunks_omitted") or 0),
         "lines_omitted": omitted_total,
         "suppressed_removed_line_count": removed - effective_removed,
+        "entity_added_count": len(entity_delta["added"]),
+        "entity_removed_count": len(entity_delta["removed"]),
+        "suppressed_removed_entity_count": len(entity_delta["removed"]) - effective_entity_removed,
+        "entity_unchanged_count": int(entity_delta.get("unchanged_count") or 0),
     }
-    kind = DIFF_KIND_TEXTUAL if added or effective_removed or changed else DIFF_KIND_NONE
+    if entity_delta["added"] or entity_delta["removed"]:
+        summary["entities"] = entity_delta
+    has_entity_change = bool(entity_delta["added"] or effective_entity_removed)
+    kind = DIFF_KIND_TEXTUAL if added or effective_removed or changed or has_entity_change else DIFF_KIND_NONE
     return WatcherDiff(summary=summary, kind=kind, truncated=is_truncated)

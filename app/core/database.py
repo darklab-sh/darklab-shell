@@ -26,10 +26,12 @@ from core.database_backend import (
     connect_postgres,
     connect_postgres_sqlite_compat,
     connect_sqlite,
+    postgres_advisory_lock_id,
     sqlite_table_columns,
     sqlite_table_exists,
 )
 from services.runs.output_store import delete_artifact_file, ensure_run_output_dir, load_full_output_entries
+from services.runs.structured_summary import replace_run_output_summary
 from services.runs.kinds import RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL, builtin_command_roots_for_storage
 from services.atlas.recalculation import recalculate_atlas_entities, recalculate_atlas_findings
 from services.storage.body_store import delete_text_body
@@ -141,6 +143,16 @@ def _create_schema(conn):
             line_count  INTEGER NOT NULL DEFAULT 0,
             truncated   INTEGER NOT NULL DEFAULT 0,
             created     TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS run_output_summary (
+            run_id TEXT NOT NULL,
+            family TEXT NOT NULL,
+            value TEXT NOT NULL,
+            count INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (run_id, family, value),
+            CHECK (family IN ('kind', 'role', 'signal'))
         )
     """)
     conn.execute("""
@@ -549,6 +561,10 @@ def _create_indexes(conn):
         "ON runs (session_id, run_kind, started DESC)"
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_run_output_artifacts_created ON run_output_artifacts (created)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_run_output_summary_lookup "
+        "ON run_output_summary (family, value, run_id)"
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_session ON snapshots (session_id)")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_snapshots_session_created "
@@ -827,6 +843,46 @@ def _populate_output_search_text(conn):
             )
         except Exception:  # noqa: BLE001
             continue
+
+
+def _populate_run_output_summary(conn):
+    """Backfill structured run-output summary rows for existing runs."""
+    if not hasattr(conn, "execute"):
+        return
+    if DB_BACKEND == DatabaseBackend.SQLITE and not sqlite_table_exists(conn, "run_output_summary"):
+        return
+    try:
+        rows = conn.execute(
+            "SELECT r.id, r.output_preview, art.rel_path "
+            "FROM runs r "
+            "LEFT JOIN run_output_artifacts art ON art.run_id = r.id "
+            "WHERE NOT EXISTS ("
+            "SELECT 1 FROM run_output_summary s WHERE s.run_id = r.id)"
+        ).fetchall()
+    except SQLiteOperationalError:
+        return
+    populated = 0
+    failed = 0
+    for row in rows:
+        run_id = str(row["id"] or "")
+        entries = None
+        rel_path = str(row["rel_path"] or "").strip()
+        if rel_path:
+            try:
+                entries = load_full_output_entries(rel_path)
+            except Exception:  # noqa: BLE001
+                failed += 1
+        if entries is None:
+            try:
+                parsed = json.loads(str(row["output_preview"] or "[]"))
+                entries = parsed if isinstance(parsed, list) else []
+            except (TypeError, ValueError, json.JSONDecodeError):
+                failed += 1
+                entries = []
+        replace_run_output_summary(conn, run_id, entries)
+        populated += 1
+    if populated or failed:
+        log.info("RUN_OUTPUT_SUMMARY_BACKFILLED", extra={"runs": populated, "failed": failed})
 
 
 def _create_fts_schema(conn):
@@ -1178,6 +1234,13 @@ def delete_run_artifacts(conn, run_ids):
         f"DELETE FROM run_output_artifacts WHERE run_id IN ({placeholders})",  # nosec
         ids,
     )
+    try:
+        conn.execute(
+            f"DELETE FROM run_output_summary WHERE run_id IN ({placeholders})",  # nosec
+            ids,
+        )
+    except SQLiteOperationalError:
+        pass
     for row in rows:
         delete_artifact_file(row["rel_path"])
     for row in search_text_rows:
@@ -1279,6 +1342,11 @@ def db_init():
     if DB_BACKEND == DatabaseBackend.POSTGRES:
         _postgres_db_init()
         with db_connect() as conn:
+            conn.execute(
+                "SELECT pg_advisory_xact_lock(?)",
+                (postgres_advisory_lock_id("darklab_shell_db_init"),),
+            )
+            _populate_run_output_summary(conn)
             _prune_retention(conn)
             conn.commit()
         return
@@ -1290,6 +1358,7 @@ def db_init():
             _create_fts_schema(conn)
             if needs_fts_rebuild:
                 conn.execute("INSERT INTO runs_fts(runs_fts) VALUES ('rebuild')")
+            _populate_run_output_summary(conn)
             _prune_retention(conn)
             conn.commit()
 
