@@ -29,7 +29,7 @@ log = logging.getLogger("shell")
 
 TERMINAL_EVENT_TYPES = {"exit", "error"}
 REPLAY_TRIM_NOTICE = "[live replay starts here; earlier output was trimmed due to size]"
-LINE_BOUNDED_REPLAY_TYPES = {"output", "notice"}
+LINE_BOUNDED_REPLAY_TYPES = {"output", "output_batch", "notice"}
 LINE_EVENT_TYPES = {"output", "notice"}
 REDIS_STREAM_DISCONNECT_ERRORS = (RedisConnectionError, RedisTimeoutError)
 BROKER_RESERVED_PAYLOAD_KEYS = {"type", "event", "created_at", "event_id"}
@@ -113,11 +113,29 @@ def _is_trim_notice(event: "BrokerEvent") -> bool:
 
 
 def _line_bounded_replay_event_count(events: list["BrokerEvent"]) -> int:
-    return sum(
-        1
-        for event in events
-        if event.payload.get("type") in LINE_BOUNDED_REPLAY_TYPES and not _is_trim_notice(event)
-    )
+    count = 0
+    for event in events:
+        count += _line_bounded_replay_event_count_for_event(event)
+    return count
+
+
+def _line_bounded_replay_event_count_for_event(event: "BrokerEvent") -> int:
+    event_type = event.payload.get("type")
+    if event_type not in LINE_BOUNDED_REPLAY_TYPES or _is_trim_notice(event):
+        return 0
+    if event_type == "output_batch":
+        lines = event.payload.get("lines")
+        return len(lines) if isinstance(lines, list) else 1
+    return 1
+
+
+def _batch_event_with_last_lines(event: "BrokerEvent", count: int) -> "BrokerEvent":
+    lines = event.payload.get("lines")
+    if event.payload.get("type") != "output_batch" or not isinstance(lines, list):
+        return event
+    payload = dict(event.payload)
+    payload["lines"] = lines[-max(0, int(count)):]
+    return BrokerEvent(event.event_id, payload)
 
 
 def _make_trim_notice_event() -> "BrokerEvent":
@@ -162,10 +180,15 @@ def _bounded_replay_events(events: list["BrokerEvent"]) -> list["BrokerEvent"]:
     bounded: list[BrokerEvent] = []
     remaining = max_events
     for event in reversed(events):
-        if event.payload.get("type") in LINE_BOUNDED_REPLAY_TYPES and not _is_trim_notice(event):
+        line_count = _line_bounded_replay_event_count_for_event(event)
+        if line_count:
             if remaining <= 0:
                 continue
-            remaining -= 1
+            if line_count > remaining:
+                bounded.append(_batch_event_with_last_lines(event, remaining))
+                remaining = 0
+                continue
+            remaining -= line_count
         bounded.append(event)
     bounded.reverse()
     if not bounded or not _is_trim_notice(bounded[0]):
@@ -301,8 +324,18 @@ class _MemoryRunBrokerStore:
         max_events = _max_replay_events()
         while max_events > 0 and len(events) > 1 and _line_bounded_replay_event_count(events) > max_events:
             remove_index = 1 if events and _is_trim_notice(events[0]) else 0
-            removed = events.pop(remove_index)
-            self._bytes[run_id] -= _event_size(removed)
+            removed = events[remove_index]
+            lines = removed.payload.get("lines")
+            if removed.payload.get("type") == "output_batch" and isinstance(lines, list) and len(lines) > 1:
+                original_size = _event_size(removed)
+                payload = dict(removed.payload)
+                payload["lines"] = lines[1:]
+                trimmed_event = BrokerEvent(removed.event_id, payload)
+                events[remove_index] = trimmed_event
+                self._bytes[run_id] -= original_size - _event_size(trimmed_event)
+            else:
+                removed = events.pop(remove_index)
+                self._bytes[run_id] -= _event_size(removed)
             trimmed = True
 
         already_marked = bool(events and _is_trim_notice(events[0]))

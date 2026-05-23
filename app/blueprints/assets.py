@@ -26,6 +26,7 @@ from services.diagnostics.storage import (
     storage_snapshot,
     table_storage_breakdown,
 )
+from services.diagnostics.classifier_drift import classifier_drift_report
 from core.output_signals import OutputSignalClassifier, strip_ansi_codes
 from core.helpers import (
     FONT_FILES,
@@ -959,6 +960,24 @@ def diag():
 def diag_classifier_inspector():
     _require_diag_access()
     return jsonify(_diag_classifier_inspector(request.args))
+
+
+@assets_bp.route("/diag/classifier-drift")
+def diag_classifier_drift():
+    _require_diag_access()
+    try:
+        with db_connect() as conn:
+            report = classifier_drift_report(
+                conn,
+                run_limit=request.args.get("runs"),
+                line_limit=request.args.get("lines"),
+                command_root_filter=request.args.get("root"),
+                include_full=request.args.get("include_full"),
+            )
+    except Exception as exc:
+        log.warning("CLASSIFIER_DRIFT_REPORT_FAILED", exc_info=True, extra={"reason": type(exc).__name__})
+        report = {"ok": False, "error": str(exc)}
+    return jsonify(report)
 
 
 @assets_bp.route("/metrics")

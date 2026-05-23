@@ -145,6 +145,43 @@
   </section>
   {%- endmacro %}
 
+  {% macro classifier_drift_section() -%}
+  <section class="diag-section s-classifier-drift diag-drift-report" data-diag-drift-report>
+    <div class="diag-section-title">Classifier Drift Report</div>
+    <form class="diag-drift-form" data-diag-drift-form>
+      <div class="diag-classifier-grid">
+        <label class="diag-field">
+          <span>Recent runs</span>
+          <input type="number" name="runs" min="1" max="200" value="50">
+        </label>
+        <label class="diag-field">
+          <span>Lines per run</span>
+          <input type="number" name="lines" min="1" max="1000" value="200">
+        </label>
+      </div>
+      <div class="diag-classifier-grid">
+        <label class="diag-field">
+          <span>Command root</span>
+          <input type="text" name="root" placeholder="optional, e.g. nmap">
+        </label>
+        <label class="diag-field diag-checkbox-field">
+          <span>Full artifacts</span>
+          <label class="diag-checkbox-control">
+            <input type="checkbox" name="include_full" value="1">
+            <span>include full output when available</span>
+          </label>
+        </label>
+      </div>
+      <div class="diag-classifier-actions">
+        <button class="btn btn-primary btn-compact" type="submit">Run report</button>
+      </div>
+    </form>
+    <div class="diag-drift-result-region" aria-live="polite">
+      <div class="diag-empty">Run the report to sample recent saved output.</div>
+    </div>
+  </section>
+  {%- endmacro %}
+
   {# ── Health Summary ────────────────────────────────────────────────────── #}
   <section class="diag-section diag-summary-card s-app">
     <div class="diag-section-title">App</div>
@@ -220,6 +257,7 @@
   </section>
 
   {{ classifier_inspector_section(inspector, inspector_result) }}
+  {{ classifier_drift_section() }}
 
   {# ── Database Details ──────────────────────────────────────────────────── #}
   <section class="diag-section s-db-details">
@@ -695,11 +733,14 @@
 
     function shouldDeferDiagRefresh() {
       if (document.visibilityState !== 'visible') return true;
-      if (document.querySelector('.diag-classifier-form.is-dirty, .diag-classifier-form.is-loading')) return true;
+      if (document.querySelector(
+        '.diag-classifier-form.is-dirty, .diag-classifier-form.is-loading, '
+        + '.diag-drift-report.is-loading, .diag-drift-form.is-dirty'
+      )) return true;
       return !!(
         document.activeElement
         && document.activeElement.closest
-        && document.activeElement.closest('.diag-classifier-form')
+        && document.activeElement.closest('.diag-classifier-form, .diag-drift-form')
       );
     }
 
@@ -718,7 +759,12 @@
         var doc = new DOMParser().parseFromString(html, 'text/html');
         var newMain = doc.querySelector('.diag-main');
         var oldMain = document.querySelector('.diag-main');
-        if (newMain && oldMain) oldMain.replaceWith(newMain);
+        if (newMain && oldMain) {
+          var oldDrift = oldMain.querySelector('[data-diag-drift-report].has-results');
+          var newDrift = newMain.querySelector('[data-diag-drift-report]');
+          if (oldDrift && newDrift) newDrift.replaceWith(oldDrift);
+          oldMain.replaceWith(newMain);
+        }
         var newGen = doc.querySelector('.diag-refreshed-at time');
         var oldGen = document.querySelector('.diag-refreshed-at time');
         if (newGen && oldGen) {
@@ -742,7 +788,7 @@
     });
     document.addEventListener('input', function (event) {
       var form = event.target && event.target.closest
-        ? event.target.closest('.diag-classifier-form')
+        ? event.target.closest('.diag-classifier-form, .diag-drift-form')
         : null;
       if (form) form.classList.add('is-dirty');
     });
@@ -916,6 +962,165 @@
       var advanced = form.querySelector('.diag-classifier-advanced');
       if (advanced) advanced.open = false;
       syncClassifierUrl(form, true);
+    });
+  })();
+
+  // Classifier drift report: run the heavier recent-output sampling only when
+  // an operator asks for it, then let samples jump back into the inspector.
+  (function () {
+    function appendText(parent, tag, className, text) {
+      var el = document.createElement(tag);
+      if (className) el.className = className;
+      el.textContent = text == null || text === '' ? '—' : String(text);
+      parent.appendChild(el);
+      return el;
+    }
+
+    function appendCountItem(parent, name, value) {
+      var item = document.createElement('span');
+      item.className = 'diag-count-item';
+      appendText(item, 'span', 'diag-count-name', name);
+      appendText(item, 'span', 'diag-count-value', value);
+      parent.appendChild(item);
+    }
+
+    function eventSummaryText(summary) {
+      if (!summary) return '—';
+      var entities = Array.isArray(summary.entities) ? summary.entities : [];
+      var signals = Array.isArray(summary.signals) ? summary.signals : [];
+      var parts = [
+        'kind=' + (summary.kind || '—'),
+        'role=' + (summary.role || '—'),
+        'signals=' + (signals.length ? signals.join(',') : 'none'),
+      ];
+      if (entities.length) {
+        parts.push('entities=' + entities.map(function (entity) {
+          return [entity.type, entity.canonical_value].filter(Boolean).join(':');
+        }).join(','));
+      }
+      if (summary.target) parts.push('target=' + summary.target);
+      return parts.join(' · ');
+    }
+
+    function renderDriftReport(region, payload) {
+      if (!region) return;
+      region.replaceChildren();
+      if (!payload || !payload.ok) {
+        appendText(region, 'div', 'diag-empty diag-fail', payload && payload.error ? payload.error : 'Classifier drift report failed.');
+        return;
+      }
+      var wrap = document.createElement('div');
+      wrap.className = 'diag-drift-result';
+
+      var summary = document.createElement('div');
+      summary.className = 'diag-classifier-summary';
+      appendCountItem(summary, 'runs', payload.runs_scanned || 0);
+      appendCountItem(summary, 'lines', payload.lines_sampled || 0);
+      appendCountItem(summary, 'issues', payload.issue_count || 0);
+      appendCountItem(summary, 'truncated', payload.truncated_runs || 0);
+      wrap.appendChild(summary);
+
+      if (!payload.issue_count) {
+        appendText(wrap, 'div', 'diag-empty diag-ok', 'No classifier drift found in the sampled output.');
+        region.appendChild(wrap);
+        return;
+      }
+
+      var bucketsWrap = document.createElement('div');
+      bucketsWrap.className = 'diag-drift-buckets';
+      (Array.isArray(payload.buckets) ? payload.buckets : []).forEach(function (bucket) {
+        var details = document.createElement('details');
+        details.className = 'diag-drift-bucket';
+        details.open = true;
+        var summaryRow = document.createElement('summary');
+        appendText(summaryRow, 'span', '', bucket.label || bucket.key);
+        appendText(summaryRow, 'span', 'diag-count-value', bucket.count || 0);
+        details.appendChild(summaryRow);
+
+        var table = document.createElement('table');
+        table.className = 'diag-table';
+        (Array.isArray(bucket.samples) ? bucket.samples : []).forEach(function (sample) {
+          var row = document.createElement('tr');
+          var textCell = document.createElement('td');
+          textCell.className = 'diag-drift-sample-text';
+          appendText(textCell, 'div', '', sample.text || '—');
+          appendText(textCell, 'div', 'diag-muted', sample.command || '—');
+          row.appendChild(textCell);
+
+          var storedCell = document.createElement('td');
+          appendText(storedCell, 'div', 'diag-muted', 'stored');
+          appendText(storedCell, 'div', '', eventSummaryText(sample.stored));
+          row.appendChild(storedCell);
+
+          var currentCell = document.createElement('td');
+          appendText(currentCell, 'div', 'diag-muted', 'current');
+          appendText(currentCell, 'div', '', eventSummaryText(sample.current));
+          row.appendChild(currentCell);
+
+          var actionCell = document.createElement('td');
+          var inspect = document.createElement('button');
+          inspect.className = 'btn btn-secondary btn-compact';
+          inspect.type = 'button';
+          inspect.textContent = 'Inspect';
+          inspect.dataset.diagDriftInspect = 'true';
+          inspect.dataset.command = sample.command || '';
+          inspect.dataset.line = sample.text || '';
+          actionCell.appendChild(inspect);
+          row.appendChild(actionCell);
+          table.appendChild(row);
+        });
+        details.appendChild(table);
+        bucketsWrap.appendChild(details);
+      });
+      wrap.appendChild(bucketsWrap);
+      region.appendChild(wrap);
+    }
+
+    document.addEventListener('submit', async function (event) {
+      var form = event.target && event.target.matches && event.target.matches('[data-diag-drift-form]')
+        ? event.target
+        : null;
+      if (!form) return;
+      event.preventDefault();
+      var card = form.closest('[data-diag-drift-report]');
+      var region = card ? card.querySelector('.diag-drift-result-region') : null;
+      var submit = form.querySelector('[type="submit"]');
+      if (card) card.classList.add('is-loading');
+      if (submit) submit.disabled = true;
+      try {
+        var params = new URLSearchParams(new FormData(form));
+        var resp = await fetch('/diag/classifier-drift?' + params.toString(), {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' },
+        });
+        if (!resp.ok) throw new Error(String(resp.status));
+        renderDriftReport(region, await resp.json());
+        if (card) card.classList.add('has-results');
+        form.classList.remove('is-dirty');
+      } catch (_) {
+        if (region) appendText(region, 'div', 'diag-empty diag-fail', 'Classifier drift report failed.');
+      } finally {
+        if (card) card.classList.remove('is-loading');
+        if (submit) submit.disabled = false;
+      }
+    });
+
+    document.addEventListener('click', function (event) {
+      var button = event.target && event.target.closest
+        ? event.target.closest('[data-diag-drift-inspect]')
+        : null;
+      if (!button) return;
+      var form = document.querySelector('[data-diag-classifier-form]');
+      if (!form) return;
+      event.preventDefault();
+      if (form.elements.classifier_command) form.elements.classifier_command.value = button.dataset.command || '';
+      if (form.elements.classifier_line) form.elements.classifier_line.value = button.dataset.line || '';
+      if (form.elements.classifier_cls) form.elements.classifier_cls.value = '';
+      if (form.elements.classifier_cmd_type) form.elements.classifier_cmd_type.value = 'real';
+      form.classList.add('is-dirty');
+      form.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     });
   })();
 

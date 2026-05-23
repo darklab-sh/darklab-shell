@@ -540,10 +540,14 @@ def test_api_v1_ndjson_stream_adapts_sse_heartbeat_comments():
 def test_api_v1_ndjson_stream_preserves_sse_event_name():
     import blueprints.api_v1 as api_blueprint
 
-    chunks = ['id: 7-0\nevent: output\ndata: {"type":"output","text":"hello"}\n\n']
+    chunks = [
+        'id: 7-0\nevent: output\ndata: {"type":"output","text":"hello"}\n\n',
+        'id: 8-0\nevent: output_batch\ndata: {"type":"output_batch","lines":[{"text":"batched"}]}\n\n',
+    ]
 
     assert list(api_blueprint._ndjson_from_sse_chunks(chunks)) == [
         '{"type":"output","text":"hello","event":"output","event_id":"7-0"}\n',
+        '{"type":"output_batch","lines":[{"text":"batched"}],"event":"output_batch","event_id":"8-0"}\n',
     ]
 
 
@@ -746,11 +750,11 @@ def test_api_v1_run_stream_and_cancel_are_token_scoped(monkeypatch):
     )
     monkeypatch.setattr(
         api_blueprint,
-        "pid_pop_for_session",
+        "pid_for_session",
         lambda requested_run_id, session_id: 4321 if requested_run_id == run_id and session_id == token else None,
     )
     monkeypatch.setattr(api_blueprint, "publish_run_event", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(api_blueprint.os, "killpg", lambda pid, sig: killed.update({"pid": pid, "sig": sig}))
+    monkeypatch.setattr(api_blueprint, "_signal_process_group", lambda pid: killed.update({"pid": pid}))
 
     owner_active = client.get("/api/v1/runs", headers=_headers(token))
     cross_active = client.get("/api/v1/runs", headers=_headers(other_token))
@@ -1209,6 +1213,17 @@ def test_api_v1_notification_channels_crud_masks_secrets_and_lists_events(monkey
     )["channel"]
     assert updated["label"] == "Muted Hook"
     assert updated["muted"] is True
+
+    muted_tested = client.post(f"/api/v1/notification-channels/{created['id']}/test", headers=_headers(token))
+    muted_test_payload = json.loads(muted_tested.data)
+
+    assert muted_tested.status_code == 200
+    assert muted_test_payload["queued"] == 1
+    assert muted_test_payload["events"] == [
+        {"event_id": muted_test_payload["event_ids"][0], "status": "sent", "last_error": ""}
+    ]
+    assert sent_payloads[-1][1]["trigger"] == "test"
+    assert sent_payloads[-1][1]["channel_id"] == created["id"]
 
     deleted = json.loads(client.delete(f"/api/v1/notification-channels/{created['id']}", headers=_headers(token)).data)
     assert deleted == {"removed": True}
@@ -2278,6 +2293,9 @@ def test_darklab_cli_tail_text_does_not_double_space_output(capsys):
             yield b'data: {"type":"output","text":"row two\\r\\n"}\n'
             yield b'\n'
             yield b'id: 3-0\n'
+            yield b'data: {"type":"output_batch","lines":[{"text":"row three"},{"text":"row four\\n"}]}\n'
+            yield b'\n'
+            yield b'id: 4-0\n'
             yield b'data: {"type":"exit","code":0}\n'
             yield b'\n'
 
@@ -2290,7 +2308,7 @@ def test_darklab_cli_tail_text_does_not_double_space_output(capsys):
             return FakeResponse()
 
     assert cli_main._tail(FakeClient(), "run_cli_tail", "text") == 0
-    assert capsys.readouterr().out == "row one\nrow two\n"
+    assert capsys.readouterr().out == "row one\nrow two\nrow three\nrow four\n"
 
 
 def test_darklab_cli_tail_handles_keyboard_interrupt(capsys):

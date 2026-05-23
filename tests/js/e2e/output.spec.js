@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { ensurePromptReady, runCommand } from './helpers.js'
 
-const CMD = 'curl http://localhost:5001/health'
+const CMD = 'hostname'
 
 test.describe('output actions', () => {
   test.beforeEach(async ({ page }) => {
@@ -103,7 +103,7 @@ test.describe('output actions', () => {
     for await (const chunk of stream) chunks.push(chunk)
     const html = Buffer.concat(chunks).toString('utf8')
 
-    expect(html).toContain('curl http://localhost:5001/health')
+    expect(html).toContain(CMD)
     expect(html).toContain('data:font/ttf;base64,')
     expect(html).not.toContain('/vendor/fonts/')
     expect(html).not.toContain('fonts.googleapis.com')

@@ -483,6 +483,7 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | `GET` | `/health` | Returns Docker/load-balancer health with DB and optional Redis checks; degraded dependencies return 503. |
 | `GET` | `/status` | Returns lightweight HUD status data for uptime, DB, Redis, and server time; always responds 200. |
 | `GET` | `/diag` | Serves IP-gated operator diagnostics as HTML or JSON; returns 404 outside `diagnostics_allowed_cidrs`. |
+| `GET` | `/diag/classifier-drift` | Runs the IP-gated classifier drift sampler used by `/diag` without reloading the full diagnostics page. |
 | `GET` | `/diag/classifier-inspector` | Runs the same IP-gated one-line classifier check used by the `/diag` inspector without loading the full diagnostics page. |
 | `GET` | `/metrics` | Serves IP-gated Prometheus text metrics; returns 404 when metrics are disabled or the caller is outside `diagnostics_allowed_cidrs`. |
 
@@ -1810,12 +1811,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,206
+- behavior tests: 3,210
 - docs/inventory meta-tests: 33
-- `pytest`: 1744 (1711 behavior + 33 meta)
-- `vitest`: 1243
+- `pytest`: 1748 (1715 behavior + 33 meta)
+- `vitest`: 1244
 - `playwright`: 252
-- total: 3,239
+- total: 3,244
 
 ### Testing Architecture
 

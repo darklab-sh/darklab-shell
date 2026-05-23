@@ -89,7 +89,7 @@ def _loads_json_dict(value: Any) -> dict[str, Any]:
 def _channel_rows(conn, session_token: str) -> list[Any]:
     return conn.execute(
         "SELECT id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated "
-        "FROM notification_channels WHERE session_token = ? ORDER BY updated DESC",
+        "FROM notification_channels WHERE session_token = ? ORDER BY lower(label) ASC, created ASC, id ASC",
         (session_token,),
     ).fetchall()
 
@@ -447,6 +447,7 @@ def send_test_notification(session_token: str, channel_id: str) -> dict[str, Any
             conn=conn,
             dispatch_sync=True,
             channel_ids=[channel_id],
+            include_muted=True,
         )
         events = _test_event_statuses(conn, event_ids)
         conn.commit()

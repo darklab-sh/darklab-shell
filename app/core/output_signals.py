@@ -8,6 +8,7 @@ can agree on what counts as a finding, warning, error, or summary line.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 import ipaddress
 import re
 from urllib.parse import urlparse
@@ -552,6 +553,7 @@ def tokenize_command(command: str) -> list[str]:
     return tokens
 
 
+@lru_cache(maxsize=512)
 def _is_help_output_command(command: str, root: str | None = None) -> bool:
     if not str(command or "").strip():
         return False
@@ -723,6 +725,7 @@ class OutputSignalClassifier:
             root=self.root,
             previous_text=self.previous_text,
             include_signals=self.cmd_type not in {"builtin"} and not self.is_help_output,
+            is_help_output=self.is_help_output,
         )
         metadata: dict[str, object] = {
             "line_index": self.line_index,
@@ -735,7 +738,12 @@ class OutputSignalClassifier:
         role = classify_line_role(text, root=self.root, command=self.command)
         if role is not None:
             metadata["role"] = role.value
-        if self.cmd_type not in {"builtin"} and not self.is_help_output:
+        can_extract_entities = (
+            role not in {LineRole.progress, LineRole.status_line}
+            and self.cmd_type not in {"builtin"}
+            and not self.is_help_output
+        )
+        if can_extract_entities:
             entities = _extract_entities_for_command(self.root, text, source_line=self.line_index)
             if entities:
                 metadata["entities"] = entities
@@ -752,6 +760,7 @@ def classify_line(
     root: str | None = None,
     previous_text: str = "",
     include_signals: bool = True,
+    is_help_output: bool | None = None,
 ) -> list[str]:
     if not include_signals:
         return []
@@ -762,7 +771,8 @@ def classify_line(
         return []
     scopes: list[str] = []
     root = root if root is not None else command_root(command)
-    if _is_help_output_command(command, root):
+    help_output = is_help_output if is_help_output is not None else _is_help_output_command(command, root)
+    if help_output:
         return scopes
     if _is_command_scoped_signal_noise(root, stripped):
         return scopes

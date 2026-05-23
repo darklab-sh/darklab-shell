@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import signal
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -13,10 +12,10 @@ from typing import Any, Iterable
 
 from flask import Blueprint, Response, jsonify, request, send_file
 
-from config import CFG, SCANNER_PREFIX
+from config import CFG
 from core.database import DB_BACKEND, db_connect
 from core.helpers import get_client_ip, get_log_session_id
-from core.process import active_runs_for_session, pid_pop_for_session
+from core.process import active_runs_for_session, pid_for_session
 from extensions import limiter
 from services.api_v1.auth import ApiAuthError, current_api_session, require_api_auth
 from services.api_v1.openapi import openapi_spec
@@ -93,11 +92,19 @@ from services.runs.structured_filters import (
 )
 from services.scheduler.commands import ScheduleCommandValidationError, validate_schedule_command
 from services.scheduler.cron import ScheduleCronError, next_fire
-from services.scheduler.dispatch import fire_schedule
+from services.scheduler.route_helpers import (
+    RouteBaselineRunNotCompleted,
+    RouteBaselineRunNotFound,
+    fire_schedule_now,
+    fire_watcher_now,
+    normalize_schedule_create_payload,
+    normalize_schedule_update_payload,
+    normalize_watcher_create_payload,
+    normalize_watcher_update_payload,
+)
 from services.scheduler.serialization import get_user_schedule_for_session, schedule_fire_payload, schedule_payload
 from services.scheduler.service import (
     ScheduleError,
-    coerce_schedule_bool,
     create_schedule,
     delete_schedule,
     get_schedule,
@@ -124,8 +131,6 @@ from services.watchers.service import (
 from services.workspace.files import WorkspaceError, open_workspace_file_for_download
 
 from blueprints.run import (  # noqa: PLC0415
-    KILL_BIN,
-    SUDO_BIN,
     _RunPreparationError,
     _RunSpawnError,
     _brokered_real_run_worker,
@@ -135,6 +140,7 @@ from blueprints.run import (  # noqa: PLC0415
     _prepare_command_input,
     _prepare_real_command,
     _run_belongs_to_session,
+    _signal_process_group,
     _start_real_command_process,
     _workspace_cwd_value,
     _workspace_artifacts_from_validation,
@@ -294,32 +300,6 @@ def _watcher_for_api_session(watcher_id: str, session_id: str, *, conn=None):
     return watcher
 
 
-def _baseline_run_for_api_session(run_id: str, session_id: str, *, conn=None) -> dict[str, Any]:
-    baseline_id = str(run_id or "").strip()
-    if not baseline_id:
-        raise ApiAuthError("not_found", "Baseline run not found.", status_code=404)
-    assert conn is not None
-    row = conn.execute(
-        "SELECT id, session_id, command, finished FROM runs WHERE id = ? AND session_id = ?",
-        (baseline_id, session_id),
-    ).fetchone()
-    if row is None:
-        raise ApiAuthError("not_found", "Baseline run not found.", status_code=404)
-    finished = str(row["finished"] if isinstance(row, dict) else row["finished"] or "").strip()
-    if not finished:
-        raise WatcherError("baseline run must be completed")
-    return dict(row)
-
-
-def _api_baseline_mode_from_create(data: dict[str, Any]) -> str:
-    requested = str(data.get("baseline_mode") or "").strip().lower().replace("-", "_")
-    if requested in {"first_run", "first"}:
-        return "first_run"
-    if requested in {"existing_run", "existing", "run"}:
-        return "existing_run"
-    return "existing_run" if str(data.get("baseline_run_id") or "").strip() else "first_run"
-
-
 def _api_watcher_error_shape(exc: Exception) -> tuple[str, str, int]:
     if isinstance(exc, ApiAuthError):
         return exc.code, exc.message, exc.status_code
@@ -329,6 +309,10 @@ def _api_watcher_error_shape(exc: Exception) -> tuple[str, str, int]:
         return "invalid_command", str(exc), 400
     if isinstance(exc, SessionVariableError):
         return "invalid_command", str(exc), 400
+    if isinstance(exc, RouteBaselineRunNotFound):
+        return "not_found", "Baseline run not found.", 404
+    if isinstance(exc, RouteBaselineRunNotCompleted):
+        return "invalid_watcher", str(exc), 400
     if isinstance(exc, WatcherError):
         status = 409 if "quota" in str(exc).lower() else 400
         return "invalid_watcher", str(exc), status
@@ -1272,19 +1256,14 @@ def api_schedule_create():
     session_id = _require_session_id()
     try:
         data = _json_body()
-        command = validate_schedule_command(
-            data.get("command", data.get("command_text")),
+        payload = normalize_schedule_create_payload(
+            data,
             session_id,
-            workspace_cwd=str(data.get("workspace_cwd") or ""),
+            command_validator=validate_schedule_command,
         )
         schedule = create_schedule(
             session_id,
-            command_text=command,
-            cron_expr=data.get("cron_expr"),
-            cadence_preset=data.get("cadence_preset"),
-            timezone_name=data.get("timezone", data.get("timezone_name")),
-            label=str(data.get("label") or ""),
-            enabled=coerce_schedule_bool(data.get("enabled"), default=True),
+            **payload,
         )
     except (
         ApiAuthError,
@@ -1316,15 +1295,11 @@ def api_schedule_update(schedule_id):
     session_id = _require_session_id()
     try:
         schedule = _schedule_for_api_session(schedule_id, session_id)
-        updates = dict(_json_body())
-        if "command" in updates or "command_text" in updates:
-            updates["command_text"] = validate_schedule_command(
-                updates.get("command", updates.get("command_text")),
-                session_id,
-                workspace_cwd=str(updates.get("workspace_cwd") or ""),
-            )
-        if "timezone_name" in updates and "timezone" not in updates:
-            updates["timezone"] = updates.pop("timezone_name")
+        updates = normalize_schedule_update_payload(
+            _json_body(),
+            session_id,
+            command_validator=validate_schedule_command,
+        )
         updated = update_schedule(schedule.id, updates)
     except (
         ApiAuthError,
@@ -1364,10 +1339,8 @@ def api_schedule_run_now(schedule_id):
     session_id = _require_session_id()
     try:
         schedule = _schedule_for_api_session(schedule_id, session_id)
-        fired_at = datetime.now(timezone.utc).isoformat()
         with db_connect() as conn:
-            status = fire_schedule(conn, schedule, fired_at=fired_at)
-            refreshed = get_schedule(schedule.id, conn=conn)
+            status, refreshed, fired_at = fire_schedule_now(conn, schedule)
             conn.commit()
     except (ApiAuthError, ScheduleError, ScheduleCronError, ValueError) as exc:
         return _schedule_api_error(exc)
@@ -1376,13 +1349,13 @@ def api_schedule_run_now(schedule_id):
         session_id=session_id,
         status=status,
         fired_at=fired_at,
-        run_id=(refreshed or schedule).last_run_id,
-        last_error=(refreshed or schedule).last_error,
+        run_id=refreshed.last_run_id,
+        last_error=refreshed.last_error,
     ))
     return jsonify({
         "status": status,
         "fired_at": fired_at,
-        "schedule": schedule_payload(refreshed or schedule),
+        "schedule": schedule_payload(refreshed),
     })
 
 
@@ -1443,26 +1416,15 @@ def api_watcher_create():
     try:
         data = _json_body()
         with db_connect() as conn:
-            baseline_mode = _api_baseline_mode_from_create(data)
-            baseline: dict[str, Any] = {}
-            if baseline_mode == "existing_run":
-                baseline = _baseline_run_for_api_session(str(data.get("baseline_run_id") or ""), session_id, conn=conn)
-            command_text = str(data.get("command") or data.get("command_text") or baseline.get("command") or "")
-            command = validate_schedule_command(
-                command_text,
+            payload = normalize_watcher_create_payload(
+                data,
                 session_id,
-                workspace_cwd=str(data.get("workspace_cwd") or ""),
+                conn=conn,
+                command_validator=validate_schedule_command,
             )
             watcher = create_watcher(
                 session_id,
-                command_text=command,
-                baseline_run_id=str(baseline.get("id") or ""),
-                cron_expr=data.get("cron_expr"),
-                cadence_preset=data.get("cadence_preset"),
-                timezone_name=data.get("timezone", data.get("timezone_name")),
-                label=str(data.get("label") or ""),
-                options=data.get("options"),
-                enabled=coerce_schedule_bool(data.get("enabled"), default=True),
+                **payload,
                 conn=conn,
             )
             schedule = get_schedule(watcher.schedule_id, conn=conn)
@@ -1502,33 +1464,17 @@ def api_watcher_update(watcher_id):
         data = _json_body()
         with db_connect() as conn:
             watcher = _watcher_for_api_session(watcher_id, session_id, conn=conn)
-            updates = dict(data)
-            if "command" in updates or "command_text" in updates:
-                updates["command_text"] = validate_schedule_command(
-                    updates.get("command", updates.get("command_text")),
-                    session_id,
-                    workspace_cwd=str(updates.get("workspace_cwd") or ""),
-                )
-            if "timezone_name" in updates and "timezone" not in updates:
-                updates["timezone"] = updates.pop("timezone_name")
-            state = str(updates.pop("state", "") or "").strip().lower()
-            enabled_value = updates.get("enabled")
-            enabled_update = coerce_schedule_bool(enabled_value) if enabled_value is not None else None
-            pause_requested = state == "paused" or updates.pop("pause", False) is True or enabled_update is False
-            resume_requested = (
-                state in {"ok", "resume", "active"}
-                or updates.pop("resume", False) is True
-                or enabled_update is True
+            route_update = normalize_watcher_update_payload(
+                data,
+                session_id,
+                command_validator=validate_schedule_command,
             )
-            updates.pop("enabled", None)
-            updates.pop("workspace_cwd", None)
-            updates.pop("reason", None)
-            updated = update_watcher(watcher.id, updates, conn=conn) if updates else watcher
+            updated = update_watcher(watcher.id, route_update.updates, conn=conn) if route_update.updates else watcher
             if updated is None:
                 raise ApiAuthError("not_found", "Watcher not found.", status_code=404)
-            if pause_requested:
-                updated = pause_watcher(updated.id, str(data.get("reason") or "operator paused"), conn=conn)
-            elif resume_requested:
+            if route_update.pause_requested:
+                updated = pause_watcher(updated.id, route_update.reason, conn=conn)
+            elif route_update.resume_requested:
                 updated = resume_watcher(updated.id, conn=conn)
             if updated is None:
                 raise ApiAuthError("not_found", "Watcher not found.", status_code=404)
@@ -1571,16 +1517,10 @@ def api_watcher_delete(watcher_id):
 @require_api_auth
 def api_watcher_run_now(watcher_id):
     session_id = _require_session_id()
-    fired_at = datetime.now(timezone.utc).isoformat()
     try:
         with db_connect() as conn:
             watcher = _watcher_for_api_session(watcher_id, session_id, conn=conn)
-            schedule = get_schedule(watcher.schedule_id, conn=conn)
-            if schedule is None:
-                raise WatcherError("watcher schedule not found")
-            status = fire_schedule(conn, schedule, fired_at=fired_at)
-            refreshed = get_watcher(watcher.id, conn=conn) or watcher
-            refreshed_schedule = get_schedule(schedule.id, conn=conn) or schedule
+            status, refreshed, refreshed_schedule, fired_at = fire_watcher_now(conn, watcher)
             conn.commit()
     except (ApiAuthError, WatcherError, ScheduleError, ScheduleCronError, ValueError) as exc:
         return _watcher_api_error(exc)
@@ -1936,19 +1876,24 @@ def api_run_cancel(run_id):
     )
     if not active_run:
         return _api_json_error("not_found", "Run not found.", 404)
-    pid = pid_pop_for_session(run_id, session_id)
+    pid = pid_for_session(run_id, session_id)
     if not pid:
         return _api_json_error("not_found", "No active process found for run.", 404)
-    publish_run_event(run_id, "killed", {"api": True})
     try:
-        if SCANNER_PREFIX:
-            subprocess.run([SUDO_BIN, "-u", "scanner", KILL_BIN, "-TERM", f"-{pid}"], timeout=5)
-        else:
-            os.killpg(pid, signal.SIGTERM)
-    except (ProcessLookupError, subprocess.TimeoutExpired, OSError) as exc:
+        _signal_process_group(pid)
+        publish_run_event(run_id, "killed", {"api": True})
+    except ProcessLookupError as exc:
+        publish_run_event(run_id, "killed", {"api": True})
         log.warning("API_RUN_CANCEL_SIGNAL_FAILED", extra={
             "run_id": run_id,
             "session": get_log_session_id(session_id),
             "error": str(exc),
         })
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        log.warning("API_RUN_CANCEL_SIGNAL_FAILED", extra={
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+            "error": str(exc),
+        })
+        return _api_json_error("cancel_failed", "Failed to signal process.", 500)
     return jsonify({"killed": True, "id": run_id})

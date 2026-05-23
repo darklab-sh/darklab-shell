@@ -365,9 +365,10 @@ class TestInteractivePtyRuns:
 
     def test_completed_pty_transcript_modes_shape_saved_output(self):
         entries = [
+            {"text": "anon@darklab:/ $ ffuf -u https://darklab.sh/FUZZ", "role": "prompt-echo"},
             {"text": "scrolled finding", "cls": ""},
             {"text": "rate:  0.00-kpps, 100.00% done, found=1", "cls": ""},
-            {"text": "", "cls": "pty-marker"},
+            {"text": "", "role": "pty-marker"},
             {"text": "final frame", "cls": ""},
         ]
 
@@ -557,7 +558,7 @@ class TestInteractivePtyRuns:
                  "run_id": "pty-run-kill",
                  "run_type": "pty",
              }]), \
-             mock.patch("blueprints.run.pid_pop_for_session", return_value=4242), \
+             mock.patch("blueprints.run.pid_for_session", return_value=4242), \
              mock.patch("blueprints.run.notify_pty_killed_event") as notify_pty, \
              mock.patch("blueprints.run.publish_run_event") as publish_run, \
              mock.patch("blueprints.run.os.killpg"):

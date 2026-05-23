@@ -120,18 +120,21 @@ def _channel_rows_for_trigger(
     trigger: str,
     *,
     channel_ids: Iterable[str] | None = None,
+    include_muted: bool = False,
 ) -> list[Any]:
     selected_channel_ids = {str(channel_id) for channel_id in channel_ids or () if str(channel_id or "").strip()}
     rows = conn.execute(
         "SELECT id, session_token, kind, label, secrets_json, config_json, triggers_json, muted, created, updated "
-        "FROM notification_channels WHERE session_token = ? AND muted = ? ORDER BY updated DESC",
-        (session_token, dialect_for_backend(database.DB_BACKEND).boolean_param(False)),
+        "FROM notification_channels WHERE session_token = ? ORDER BY lower(label) ASC, created ASC, id ASC",
+        (session_token,),
     ).fetchall()
     channels = []
     for row in rows:
         if selected_channel_ids and str(row["id"]) not in selected_channel_ids:
             continue
         channel = NotificationChannel.from_row(row)
+        if channel.muted and not include_muted:
+            continue
         if trigger in channel.triggers:
             channels.append(row)
     return channels
@@ -146,6 +149,7 @@ def enqueue(
     dispatch_sync: bool = False,
     run_id: str | None = None,
     channel_ids: Iterable[str] | None = None,
+    include_muted: bool = False,
 ) -> list[str]:
     """Queue one notification event for every matching channel."""
     normalized_trigger = _normalize_trigger(trigger)
@@ -158,6 +162,7 @@ def enqueue(
             session_token,
             normalized_trigger,
             channel_ids=channel_ids,
+            include_muted=include_muted,
         ):
             event_id = _event_id()
             queued_ids.append(event_id)
@@ -183,7 +188,11 @@ def enqueue(
                 ),
             )
         if dispatch_sync and queued_ids:
-            dispatch_due_events(conn=active_conn, event_ids=queued_ids)
+            dispatch_due_events(
+                conn=active_conn,
+                event_ids=queued_ids,
+                include_muted_channel_ids=channel_ids if include_muted else None,
+            )
         if owns_conn:
             active_conn.commit()
     log.info(
@@ -354,10 +363,11 @@ def _defer_event(conn, event: NotificationEvent, now: str, *, reason: str, delay
     )
 
 
-def _dispatch_event(conn, row: Any, *, now: str) -> bool:
+def _dispatch_event(conn, row: Any, *, now: str, include_muted_channel_ids: set[str] | None = None) -> bool:
     event = NotificationEvent.from_row(row)
     channel = _load_channel(conn, event.channel_id)
-    if channel is None or channel.muted:
+    muted_allowed = channel is not None and channel.id in (include_muted_channel_ids or set())
+    if channel is None or (channel.muted and not muted_allowed):
         _mark_failed(conn, event, ChannelResult.terminal("notification channel is unavailable"), now)
         return False
     if _do_not_disturb():
@@ -410,15 +420,26 @@ def _dispatch_event(conn, row: Any, *, now: str) -> bool:
     return False
 
 
-def dispatch_due_events(conn=None, *, limit: int = 100, event_ids: list[str] | None = None) -> int:
+def dispatch_due_events(
+    conn=None,
+    *,
+    limit: int = 100,
+    event_ids: list[str] | None = None,
+    include_muted_channel_ids: Iterable[str] | None = None,
+) -> int:
     """Deliver due notification events and return the number sent successfully."""
     now = _utc_now()
     delivered = 0
+    muted_channel_ids = {
+        str(channel_id)
+        for channel_id in include_muted_channel_ids or ()
+        if str(channel_id or "").strip()
+    }
     with _managed_connection(conn) as (active_conn, owns_conn):
         for row in _due_event_rows(active_conn, limit=limit, event_ids=event_ids, now=now):
             if not _claim_event(active_conn, row["id"], now=now):
                 continue
-            if _dispatch_event(active_conn, row, now=now):
+            if _dispatch_event(active_conn, row, now=now, include_muted_channel_ids=muted_channel_ids):
                 delivered += 1
         if owns_conn:
             active_conn.commit()

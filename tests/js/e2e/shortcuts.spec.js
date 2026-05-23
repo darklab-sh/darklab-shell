@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { ensurePromptReady, runCommand, waitForHistoryRuns } from './helpers.js'
 
-const CMD = 'curl http://localhost:5001/health'
+const CMD = 'hostname'
 
 async function dispatchMacOptionKey(page, selector, init) {
   await page.locator(selector).evaluate((el, eventInit) => {

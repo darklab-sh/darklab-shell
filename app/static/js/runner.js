@@ -9,6 +9,8 @@ const _stalledRuns = new Set();
 const _runStreamStateByTabId = new Map();
 const _streamRecoveryTimers = new Map();
 const _runnerCore = typeof DarklabRunnerCore !== 'undefined' ? DarklabRunnerCore : null;
+const _RUN_STREAM_MESSAGE_BATCH_LIMIT = 750;
+const _RUN_STREAM_MESSAGE_BATCH_MS = 12;
 let _runnerPersistence = null;
 let _activeRunPollTimer = null;
 
@@ -678,6 +680,7 @@ function _handleRunKilled(msg, tabId) {
   const killedByThisTab = killedByThisBrowser && killerTabId && killerTabId === tabId;
   t.killed = true;
   t.pendingKill = false;
+  if (typeof discardPendingOutputBatch === 'function') discardPendingOutputBatch(tabId);
   if (!killedByThisTab) {
     appendLine(
       killedByThisBrowser ? '[killed from another tab]' : '[killed by another browser]',
@@ -707,6 +710,7 @@ function _markTabKilledByUser(tabId, secs, { suppressTranscript = false } = {}) 
   t.streamRecoveryAttempts = 0;
   t.streamRecoveryNoticeRunId = '';
   stopTimer();
+  if (typeof discardPendingOutputBatch === 'function') discardPendingOutputBatch(tabId);
   if (!t.closing && !suppressTranscript) {
     appendLine(`[killed by user${secs != null ? ' after ' + _formatElapsed(secs) : ''}]`, 'exit-fail', tabId);
   }
@@ -851,6 +855,134 @@ function _appendStreamLine(text, cls, tabId, msg, options = {}) {
   else appendLine(text, cls, tabId);
 }
 
+function _forEachStreamTextLine(text, callback) {
+  const raw = String(text ?? '');
+  if (raw === '') {
+    callback('');
+    return;
+  }
+  const lines = raw.split('\n');
+  if (lines.length && lines[lines.length - 1] === '') lines.pop();
+  lines.forEach(line => callback(line));
+}
+
+function _recordRunOutputCoalescing(msg, tabId) {
+  const count = Math.max(0, Number(msg && msg.coalesced_line_count || 0));
+  if (count && typeof recordLiveOutputCoalescedLines === 'function') {
+    recordLiveOutputCoalescedLines(tabId, count);
+  }
+}
+
+function _batchedStreamLineEntry(msg, lineText, streamState) {
+  const lineMsg = _typedRunStreamLineMessage({
+    ...msg,
+    type: 'output',
+    text: lineText,
+  }, streamState);
+  if (APP_CONFIG && APP_CONFIG.high_volume_output_line_threshold) {
+    lineMsg.live_output = true;
+  }
+  return lineMsg;
+}
+
+function _handleRunOutputBatch(msg, tabId, streamState = null) {
+  const t = getTab(tabId);
+  if (t && t.killed) return;
+  _recordRunOutputCoalescing(msg, tabId);
+  const lines = Array.isArray(msg.lines) ? msg.lines : [];
+  if (!lines.length) return;
+  const entries = [];
+  lines.forEach(rawLine => {
+    if (!rawLine || typeof rawLine !== 'object') return;
+    const lineMsg = _typedRunStreamLineMessage({ ...rawLine, type: 'output' }, streamState);
+    if (t && typeof lineMsg.text === 'string' && /^Unsupported built-in command: /.test(lineMsg.text)) {
+      t.unknownCommand = true;
+    }
+    _forEachStreamTextLine(lineMsg.text, line => {
+      if (!_shouldSuppressStreamOutputLine(t, line)) {
+        entries.push(_batchedStreamLineEntry(lineMsg, line, streamState));
+      }
+    });
+  });
+  if (entries.length && typeof appendLines === 'function') {
+    appendLines(entries, tabId);
+  }
+}
+
+function _runStreamQueueLength(streamState) {
+  if (!streamState || !Array.isArray(streamState.messageQueue)) return 0;
+  return streamState.messageQueue.length - Number(streamState.messageQueueIndex || 0);
+}
+
+function _runStreamNow() {
+  if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+    return performance.now();
+  }
+  return Date.now();
+}
+
+function _finishRunStreamIfQueueDrained(tabId, streamState) {
+  if (!streamState || !streamState.readDone || _runStreamQueueLength(streamState) > 0) return false;
+  if (streamState.messageQueueScheduled || streamState.messageQueueDraining) return false;
+  if (_finishPausedRunStream(tabId, streamState)) return true;
+  _runStreamStateByTabId.delete(tabId);
+  if (!streamState.sawTerminalEvent) _handleStreamEndedWithoutExit(tabId);
+  return true;
+}
+
+function _scheduleRunStreamMessageDrain(tabId, streamState, { defer = false } = {}) {
+  if (!streamState || streamState.messageQueueScheduled) return;
+  streamState.messageQueueScheduled = true;
+  const run = () => _drainRunStreamMessageQueue(tabId, streamState);
+  if (defer) setTimeout(run, 0);
+  else Promise.resolve().then(run);
+}
+
+function _enqueueRunStreamMessages(messages, tabId, streamState) {
+  if (!streamState || !Array.isArray(messages) || !messages.length) return;
+  if (!Array.isArray(streamState.messageQueue)) {
+    streamState.messageQueue = [];
+    streamState.messageQueueIndex = 0;
+  }
+  streamState.messageQueue.push(...messages);
+  _scheduleRunStreamMessageDrain(tabId, streamState);
+}
+
+function _drainRunStreamMessageQueue(tabId, streamState) {
+  if (!streamState) return;
+  streamState.messageQueueScheduled = false;
+  streamState.messageQueueDraining = true;
+  const queue = Array.isArray(streamState.messageQueue) ? streamState.messageQueue : [];
+  const started = _runStreamNow();
+  let index = Number(streamState.messageQueueIndex || 0);
+  let processed = 0;
+
+  while (index < queue.length) {
+    const msg = queue[index];
+    index += 1;
+    processed += 1;
+    if (msg && ['exit', 'error'].includes(String(msg.type || msg.event || ''))) {
+      streamState.sawTerminalEvent = true;
+    }
+    _handleRunStreamMessage(msg, tabId, streamState);
+    if (processed >= _RUN_STREAM_MESSAGE_BATCH_LIMIT) break;
+    if (_runStreamNow() - started >= _RUN_STREAM_MESSAGE_BATCH_MS) break;
+  }
+
+  streamState.messageQueueIndex = index;
+  if (index >= queue.length) {
+    streamState.messageQueue = [];
+    streamState.messageQueueIndex = 0;
+  }
+  streamState.messageQueueDraining = false;
+
+  if (_runStreamQueueLength(streamState) > 0) {
+    _scheduleRunStreamMessageDrain(tabId, streamState, { defer: true });
+    return;
+  }
+  _finishRunStreamIfQueueDrained(tabId, streamState);
+}
+
 function appendCommandEcho(cmd, tabId) {
   appendLine(cmd, 'prompt-echo', tabId);
 }
@@ -952,14 +1084,18 @@ function _handleRunStreamMessage(msg, tabId, streamState = null) {
     clearTab(tabId);
     const t = getTab(tabId);
     if (t) t.syntheticClear = true;
+  } else if (msg.type === 'output_batch') {
+    _handleRunOutputBatch(msg, tabId, streamState);
   } else if (msg.type === 'output') {
+    _recordRunOutputCoalescing(msg, tabId);
     msg = _typedRunStreamLineMessage(msg, streamState);
     const t = getTab(tabId);
+    if (t && t.killed) return;
     if (t && typeof msg.text === 'string' && /^Unsupported built-in command: /.test(msg.text)) {
       t.unknownCommand = true;
     }
-    String(msg.text || '').split('\n').forEach((line, i, arr) => {
-      if ((i < arr.length - 1 || line) && !_shouldSuppressStreamOutputLine(t, line)) {
+    _forEachStreamTextLine(msg.text, line => {
+      if (!_shouldSuppressStreamOutputLine(t, line)) {
         _appendStreamLine(line, msg.cls || '', tabId, msg, { liveOutput: true });
       }
     });
@@ -983,6 +1119,7 @@ function _handleRunStreamMessage(msg, tabId, streamState = null) {
     // If already killed by user, ignore the subsequent -15 exit code.
     if (t && t.killed) {
       t.killed = false;
+      if (typeof discardPendingOutputBatch === 'function') discardPendingOutputBatch(tabId);
       _appendHighVolumeOutputFinalSummary(tabId);
       stopTimer();
       _setRunButtonDisabled(false); hideTabKillBtn(tabId);
@@ -1182,9 +1319,9 @@ function _streamRunResponse(res, tabId, state = null) {
   function read() {
     reader.read().then(({ done, value }) => {
       if (done) {
-        if (_finishPausedRunStream(tabId, streamState)) return;
-        _runStreamStateByTabId.delete(tabId);
-        _handleStreamEndedWithoutExit(tabId);
+        streamState.readDone = true;
+        streamState.reader = null;
+        _finishRunStreamIfQueueDrained(tabId, streamState);
         return;
       }
       _recoverStalledRun(tabId);
@@ -1192,12 +1329,14 @@ function _streamRunResponse(res, tabId, state = null) {
       buffer += decoder.decode(value, { stream: true });
       const parts = buffer.split('\n\n');
       buffer = parts.pop();
+      const messages = [];
       parts.forEach(part => {
         try {
           const msg = _sseMessageFromChunk(part);
-          if (msg) _handleRunStreamMessage(msg, tabId, streamState);
+          if (msg) messages.push(msg);
         } catch(e) {}
       });
+      _enqueueRunStreamMessages(messages, tabId, streamState);
       read();
     }).catch(err => {
       if (_finishPausedRunStream(tabId, streamState)) return;

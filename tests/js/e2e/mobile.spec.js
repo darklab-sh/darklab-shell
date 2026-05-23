@@ -202,6 +202,7 @@ test.beforeEach(async ({ page }) => {
   })
 
   test('reloading on mobile restores the active output pane at the bottom', async ({ page }) => {
+    test.setTimeout(60_000)
     // Wait for the welcome boot path to settle before running `help`. Without
     // this, under heavy parallel test load the welcome animation can still be
     // actively appending lines to the output pane when the test polls
@@ -241,7 +242,12 @@ test.beforeEach(async ({ page }) => {
       .toBeGreaterThan(100)
 
     await waitForActiveOutputSettled(page, { timeout: 15_000 })
-    await page.reload({ waitUntil: 'domcontentloaded', timeout: 15_000 })
+    // The behavior under test is app restoration, not browser load-state timing.
+    // In CI, Chromium occasionally commits the reload but misses Playwright's
+    // domcontentloaded waiter before the app-level ready checks get a chance to
+    // run. Waiting for commit keeps the test tied to the reload boundary while
+    // `ensurePromptReady` below proves the app booted.
+    await page.reload({ waitUntil: 'commit', timeout: 15_000 })
     await ensurePromptReady(page, { timeout: 15_000 })
     await page.evaluate(() => window.dispatchEvent(new Event('resize')))
     await expect

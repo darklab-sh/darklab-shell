@@ -12,6 +12,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import time
 import uuid
 from collections import deque
 from collections.abc import Sequence
@@ -53,8 +54,8 @@ from core.process import (
     active_run_remove,
     active_run_touch_owner,
     active_runs_for_session,
+    pid_for_session,
     pid_pop,
-    pid_pop_for_session,
     pid_register,
 )
 from services.runs.broker import (
@@ -190,6 +191,7 @@ def _workspace_notice_lines(validation: CommandValidationResult) -> list[str]:
 
 
 SHELL_BIN = shutil.which("sh") or "/bin/sh"
+STDBUF_BIN = shutil.which("stdbuf")
 SUDO_BIN  = shutil.which("sudo") or "/usr/bin/sudo"
 KILL_BIN  = shutil.which("kill") or "/bin/kill"
 
@@ -318,13 +320,7 @@ def _prepare_run_child() -> None:
 
 def _terminate_process_group(proc) -> None:
     pgid = os.getpgid(proc.pid)
-    if SCANNER_PREFIX:
-        subprocess.run(
-            [SUDO_BIN, "-u", "scanner", KILL_BIN, "-TERM", f"-{pgid}"],
-            timeout=5
-        )
-    else:
-        os.killpg(pgid, signal.SIGTERM)
+    _signal_process_group(pgid)
 
 
 # ── Run output helpers ────────────────────────────────────────────────────────
@@ -376,6 +372,142 @@ def _capture_event_with_signals(
 def _broker_output_payload(_event_type, text: str = "", *, cls: str = "", event: LineEvent | None = None):
     payload_event = event or line_event_from_legacy(text, cls)
     return to_wire(payload_event)
+
+
+_RUN_OUTPUT_LIVE_BATCH_SIZE = 200
+_RUN_OUTPUT_LIVE_BATCH_MAX_AGE_SECONDS = 0.75
+_RUN_OUTPUT_LIVE_BATCH_MAX_LATENCY_SECONDS = 0.075
+_RUN_OUTPUT_POLL_SECONDS = 0.05
+_RUN_OUTPUT_LIVE_BATCH_COALESCED_ROLES = {LineRole.progress, LineRole.status_line}
+_KILL_PROCESS_GROUP_GONE_DELAYS = (0.0, 0.05, 0.15, 0.3, 0.5)
+
+
+class _BrokerOutputBatcher:
+    def __init__(self, run_id: str, capture, signal_classifier, *, run_started_dt):
+        self.run_id = run_id
+        self.capture = capture
+        self.signal_classifier = signal_classifier
+        self.run_started_dt = run_started_dt
+        self.events: list[LineEvent] = []
+        self.first_event_monotonic = 0.0
+        self.last_flush_monotonic = 0.0
+        self.coalesced_line_count = 0
+
+    def add(self, text: str, *, cls: str = "", kind: LineKind | str | None = None, event: LineEvent | None = None) -> None:
+        now = time.monotonic()
+        line_dt = datetime.now(timezone.utc)
+        base_event = event or line_event_from_legacy(
+            text,
+            cls,
+            kind=kind,
+            ts_clock=line_dt.strftime("%H:%M:%S"),
+            ts_elapsed=f"+{(line_dt - self.run_started_dt).total_seconds():.1f}s",
+        )
+        _metadata, captured_event = _capture_event_with_signals(
+            self.capture,
+            self.signal_classifier,
+            event=base_event,
+        )
+        self._append_live_event(captured_event, now=now)
+        if (
+            len(self.events) >= _RUN_OUTPUT_LIVE_BATCH_SIZE
+            or self._is_due(now=now)
+            or self._should_flush_for_latency(now)
+        ):
+            self.flush()
+
+    def _append_live_event(self, event: LineEvent, *, now: float) -> None:
+        if not self.events:
+            self.first_event_monotonic = now
+        if (
+            event.role in _RUN_OUTPUT_LIVE_BATCH_COALESCED_ROLES
+            and self.events
+            and self.events[-1].role == event.role
+        ):
+            self.events[-1] = event
+            self.coalesced_line_count += 1
+            return
+        self.events.append(event)
+
+    def _is_due(self, *, now: float | None = None) -> bool:
+        current = time.monotonic() if now is None else now
+        return bool(
+            self.events
+            and self.first_event_monotonic
+            and current - self.first_event_monotonic >= _RUN_OUTPUT_LIVE_BATCH_MAX_AGE_SECONDS
+        )
+
+    def _should_flush_for_latency(self, now: float) -> bool:
+        if not self.events:
+            return False
+        if not self.last_flush_monotonic:
+            return True
+        return now - self.last_flush_monotonic >= self._max_latency_seconds()
+
+    def _max_latency_seconds(self) -> float:
+        if self.events and all(event.role in _RUN_OUTPUT_LIVE_BATCH_COALESCED_ROLES for event in self.events):
+            return _RUN_OUTPUT_LIVE_BATCH_MAX_AGE_SECONDS
+        return _RUN_OUTPUT_LIVE_BATCH_MAX_LATENCY_SECONDS
+
+    def flush_due(self) -> None:
+        if self._is_due():
+            self.flush()
+
+    def flush(self) -> None:
+        if not self.events:
+            return
+        events = self.events
+        coalesced_line_count = self.coalesced_line_count
+        self.events = []
+        self.first_event_monotonic = 0.0
+        self.last_flush_monotonic = time.monotonic()
+        self.coalesced_line_count = 0
+        if len(events) == 1:
+            payload = _broker_output_payload("output", event=events[0])
+            if coalesced_line_count:
+                payload["coalesced_line_count"] = coalesced_line_count
+            publish_run_event(
+                self.run_id,
+                "output",
+                payload,
+            )
+            return
+        payload: dict[str, object] = {"lines": [to_wire(event) for event in events]}
+        if coalesced_line_count:
+            payload["coalesced_line_count"] = coalesced_line_count
+        publish_run_event(
+            self.run_id,
+            "output_batch",
+            payload,
+        )
+
+
+def _process_group_is_gone(pgid: int) -> bool:
+    for delay in _KILL_PROCESS_GROUP_GONE_DELAYS:
+        if delay:
+            time.sleep(delay)
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            return False
+        except OSError:
+            return False
+    return False
+
+
+def _signal_process_group(pgid: int) -> None:
+    if SCANNER_PREFIX:
+        result = subprocess.run(
+            [SUDO_BIN, "-u", "scanner", KILL_BIN, "-TERM", "--", f"-{pgid}"],
+            timeout=5,
+        )
+        if result.returncode != 0 and not _process_group_is_gone(pgid):
+            raise OSError(f"sudo kill exited with status {result.returncode}")
+        return
+
+    os.killpg(pgid, signal.SIGTERM)
 
 
 _SEARCH_ENTITY_MAX_BYTES = 4096
@@ -1499,11 +1631,15 @@ def _real_command_popen_argv(prepared_real: _PreparedRealCommand) -> list[str]:
     if scanner_prefix and prepared_real.secret_env_names and scanner_prefix[0] == "sudo":
         scanner_prefix.insert(1, "--preserve-env=" + ",".join(prepared_real.secret_env_names))
     command = _secret_aware_shell_command(prepared_real)
-    return scanner_prefix + [SHELL_BIN, "-c", command] if scanner_prefix else [
-        SHELL_BIN,
-        "-c",
-        command,
-    ]
+    command_argv = _line_buffered_shell_argv(command)
+    return scanner_prefix + command_argv if scanner_prefix else command_argv
+
+
+def _line_buffered_shell_argv(command: str) -> list[str]:
+    shell_argv = [SHELL_BIN, "-c", command]
+    if not STDBUF_BIN:
+        return shell_argv
+    return [STDBUF_BIN, "-oL", "-eL", *shell_argv]
 
 
 def _secret_aware_shell_command(prepared_real: _PreparedRealCommand) -> str:
@@ -1774,6 +1910,19 @@ def _brokered_real_run_worker(
         if proc.stdout is None:
             raise RuntimeError("Process stdout pipe was not created")
         stream_reader = _make_nonblocking_stream_reader(proc.stdout)
+        output_batcher = _BrokerOutputBatcher(
+            run_id,
+            capture,
+            signal_classifier,
+            run_started_dt=run_started_dt,
+        )
+        stream_fd = stream_reader.get("fd")
+        stream_is_nonblocking = stream_fd is not None
+        stream_poll_target = stream_fd if stream_is_nonblocking else proc.stdout
+        if stream_poll_target is None:
+            raise RuntimeError("Process stdout pipe was not created")
+        heartbeat_seconds = max(_RUN_OUTPUT_POLL_SECONDS, float(heartbeat_interval or 0))
+        next_heartbeat_monotonic = time.monotonic() + heartbeat_seconds
         while True:
             if command_timeout:
                 now_dt = datetime.now(timezone.utc)
@@ -1793,56 +1942,46 @@ def _brokered_real_run_worker(
                         "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
                         "timeout": command_timeout, "cmd": original_command,
                     })
+                    output_batcher.flush()
                     _publish_broker_captured_line(
                         run_id, capture, signal_classifier, "notice", timeout_msg,
                         kind=LineKind.notice, run_started_dt=run_started_dt,
                     )
                     break
 
-            if _stdout_ready(proc.stdout, heartbeat_interval):
+            stdout_ready = _stdout_ready(stream_poll_target, _RUN_OUTPUT_POLL_SECONDS)
+            if stdout_ready or stream_is_nonblocking:
                 lines, eof = _read_available_stream_lines(stream_reader)
                 if not lines and eof:
                     break
                 if not lines:
                     if proc.poll() is not None:
                         break
-                    publish_run_event(run_id, "heartbeat", {})
+                    now_monotonic = time.monotonic()
+                    if now_monotonic >= next_heartbeat_monotonic:
+                        publish_run_event(run_id, "heartbeat", {})
+                        next_heartbeat_monotonic = now_monotonic + heartbeat_seconds
                     continue
                 for line in lines:
                     for filtered_line in _process_real_output_line(line):
-                        _publish_broker_captured_line(
-                            run_id,
-                            capture,
-                            signal_classifier,
-                            "output",
-                            filtered_line,
-                            run_started_dt=run_started_dt,
-                        )
+                        output_batcher.add(filtered_line)
+                output_batcher.flush_due()
             else:
+                output_batcher.flush_due()
                 if proc.poll() is not None:
                     break
-                publish_run_event(run_id, "heartbeat", {})
+                now_monotonic = time.monotonic()
+                if now_monotonic >= next_heartbeat_monotonic:
+                    publish_run_event(run_id, "heartbeat", {})
+                    next_heartbeat_monotonic = now_monotonic + heartbeat_seconds
 
         trailing_lines, _ = _read_available_stream_lines(stream_reader, finalize=True)
         for line in trailing_lines:
             for filtered_line in _process_real_output_line(line):
-                _publish_broker_captured_line(
-                    run_id,
-                    capture,
-                    signal_classifier,
-                    "output",
-                    filtered_line,
-                    run_started_dt=run_started_dt,
-                )
+                output_batcher.add(filtered_line)
         for filtered_line in postfilter.finalize_output_lines():
-            _publish_broker_captured_line(
-                run_id,
-                capture,
-                signal_classifier,
-                "output",
-                filtered_line,
-                run_started_dt=run_started_dt,
-            )
+            output_batcher.add(filtered_line)
+        output_batcher.flush()
         exit_code = _wait_for_proc_exit_code(proc)
         finalize_info = _finalize_completed_run(
             run_id,
@@ -2264,7 +2403,7 @@ def kill_command():
         {},
     )
     run_type = str(active_run.get("run_type", "command") or "command").lower()
-    pid       = pid_pop_for_session(run_id, session_id)
+    pid       = pid_for_session(run_id, session_id)
     if not pid:
         log.debug("KILL_MISS", extra={
             "ip": client_ip,
@@ -2276,10 +2415,6 @@ def kill_command():
         "killer_client_id": killer_client_id,
         "killer_tab_id": killer_tab_id,
     }
-    if run_type == "pty":
-        notify_pty_killed_event(run_id, session_id, killed_payload)
-    else:
-        publish_run_event(run_id, "killed", killed_payload)
     try:
         # Subprocesses call os.setsid() during child setup, which makes PGID
         # == PID at creation time. Use the stored PID directly as the
@@ -2291,16 +2426,11 @@ def kill_command():
         # no longer exists the signal fails with ESRCH instead of hitting
         # an unrelated process.
         pgid = pid
-        if SCANNER_PREFIX:
-            # Processes run as scanner — appuser can't signal them directly.
-            # Use sudo kill to send SIGTERM to the entire process group.
-            subprocess.run(
-                [SUDO_BIN, "-u", "scanner", KILL_BIN, "-TERM", f"-{pgid}"],
-                timeout=5
-            )
+        _signal_process_group(pgid)
+        if run_type == "pty":
+            notify_pty_killed_event(run_id, session_id, killed_payload)
         else:
-            # Local dev — same user, can kill directly
-            os.killpg(pgid, signal.SIGTERM)
+            publish_run_event(run_id, "killed", killed_payload)
         log.info("RUN_KILL", extra={
             "run_id": run_id,
             "ip": client_ip,
@@ -2308,8 +2438,17 @@ def kill_command():
             "pid": pid,
             "pgid": pgid,
         })
-    except (ProcessLookupError, subprocess.TimeoutExpired, OSError) as e:
+    except ProcessLookupError as e:
+        if run_type == "pty":
+            notify_pty_killed_event(run_id, session_id, killed_payload)
+        else:
+            publish_run_event(run_id, "killed", killed_payload)
         log.warning("KILL_FAILED", extra={
             "run_id": run_id, "ip": client_ip, "pid": pid, "error": str(e),
         })
+    except (subprocess.TimeoutExpired, OSError) as e:
+        log.warning("KILL_FAILED", extra={
+            "run_id": run_id, "ip": client_ip, "pid": pid, "error": str(e),
+        })
+        return jsonify({"error": "Failed to signal process"}), 500
     return jsonify({"killed": True})

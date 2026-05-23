@@ -1048,7 +1048,11 @@ def _tail(client: DarklabClient, run_id: str, output_format: str, *, after: str 
         exit_code = 0
         terminal_seen = False
         for event in iter_sse_events(response):
-            if event.get("type") in {"output", "notice"} and event.get("text") is not None:
+            if event.get("type") == "output_batch" and isinstance(event.get("lines"), list):
+                for line_event in event["lines"]:
+                    if isinstance(line_event, dict) and line_event.get("text") is not None:
+                        sys.stdout.write(str(line_event.get("text")).rstrip("\r\n") + "\n")
+            elif event.get("type") in {"output", "notice"} and event.get("text") is not None:
                 sys.stdout.write(str(event.get("text")).rstrip("\r\n") + "\n")
             exit_code = _exit_code_from_event(event, exit_code)
             terminal_seen = terminal_seen or _is_terminal_event(event)

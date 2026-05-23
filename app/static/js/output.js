@@ -339,8 +339,18 @@ function _replaceLastRenderedLineIfCoalescible(out, entry) {
   if (!role) return false;
   const previous = _lastRenderedOutputLine(out);
   if (!previous || _coalescedOutputRoleForLine(previous) !== role) return false;
+  const previousLineNumber = previous.dataset?.lineNumber || '';
   _updateRenderedOutputLineInPlace(previous, entry.span);
+  if (previousLineNumber) previous.dataset.lineNumber = previousLineNumber;
   return true;
+}
+
+function _coalescedReplacementLineNumber(out, entry) {
+  const role = String(entry && entry.coalesceRole || '');
+  if (!role) return 0;
+  const previous = _lastRenderedOutputLine(out);
+  if (!previous || _coalescedOutputRoleForLine(previous) !== role) return 0;
+  return Number(previous.dataset?.lineNumber || 0);
 }
 
 function _updateRenderedOutputLineInPlace(current, next) {
@@ -452,6 +462,10 @@ function _cancelPendingOutputBatch(tabId) {
 function hasPendingOutputBatch(tabId) {
   const state = _pendingOutputBatches.get(tabId);
   return !!(state && (state.scheduled || state.items.length > 0 || state.rawLines.length > 0));
+}
+
+function discardPendingOutputBatch(tabId) {
+  _cancelPendingOutputBatch(tabId);
 }
 
 function _schedulePendingOutputFlush(tabId) {
@@ -799,6 +813,7 @@ function _ensureHighVolumeOutputState(tab) {
       active: false,
       receivedLines: 0,
       skippedLines: 0,
+      coalescedLines: 0,
       lastNoticeLine: 0,
       resumeRequested: false,
       resumeDisabled: false,
@@ -808,6 +823,7 @@ function _ensureHighVolumeOutputState(tab) {
   if (typeof tab.highVolumeOutput.finalSummaryShown !== 'boolean') {
     tab.highVolumeOutput.finalSummaryShown = false;
   }
+  tab.highVolumeOutput.coalescedLines = Math.max(0, Number(tab.highVolumeOutput.coalescedLines || 0));
   return tab.highVolumeOutput;
 }
 
@@ -1069,6 +1085,7 @@ function resetHighVolumeOutputState(tabId) {
     active: false,
     receivedLines: 0,
     skippedLines: 0,
+    coalescedLines: 0,
     lastNoticeLine: 0,
     resumeRequested: false,
     resumeDisabled: false,
@@ -1079,16 +1096,32 @@ function resetHighVolumeOutputState(tabId) {
 function appendHighVolumeOutputFinalSummary(tabId) {
   const tab = getTab(tabId);
   const state = _ensureHighVolumeOutputState(tab);
-  if (!tab || !state || state.finalSummaryShown || !state.skippedLines) return false;
+  if (!tab || !state || state.finalSummaryShown || (!state.skippedLines && !state.coalescedLines)) return false;
   state.finalSummaryShown = true;
-  const count = _formatHighVolumeCount(state.skippedLines);
-  const lineWord = Number(state.skippedLines) === 1 ? 'line was' : 'lines were';
+  const parts = [];
+  if (state.skippedLines) {
+    const count = _formatHighVolumeCount(state.skippedLines);
+    const lineWord = Number(state.skippedLines) === 1 ? 'line was' : 'lines were';
+    parts.push(`${count} ${lineWord} not rendered live in this tab`);
+  }
+  if (state.coalescedLines) {
+    parts.push('progress/status updates were collapsed in this tab, so live line numbers may differ from the saved transcript');
+  }
   appendLine(
-    `[high-volume output summary: ${count} ${lineWord} not rendered live in this tab; retained output follows the normal saved preview and full-output settings]`,
+    `[live output summary: ${parts.join('; ')}; full transcript output is preserved in saved output, permalinks, and exports]`,
     'notice',
     tabId,
   );
   return true;
+}
+
+function recordLiveOutputCoalescedLines(tabId, count) {
+  const value = Math.max(0, Number(count || 0));
+  if (!value) return;
+  const tab = getTab(tabId);
+  const state = _ensureHighVolumeOutputState(tab);
+  if (!state) return;
+  state.coalescedLines = Math.max(0, Number(state.coalescedLines || 0) + value);
 }
 
 function disableHighVolumeOutputResumeControls(tabId) {
@@ -1252,6 +1285,7 @@ function _buildOutputLine(event, tabId, now, runStart, metadata = null) {
   const cls = _legacyClsForLineEvent(event);
   const span = document.createElement('span');
   span.className = 'line' + (cls ? ' ' + cls : '');
+  if (text === '') span.classList.add('is-blank');
   const coalesceRole = _coalescedOutputRoleForEvent(event);
   if (event && event.role) span.dataset.outputRole = String(event.role || '');
   const content = document.createElement('span');
@@ -1414,6 +1448,7 @@ function _appendRestoredOutputSpan(out, rawLine, tabId) {
   const cls = _legacyClsForLineEvent(event);
   const coalesceRole = _coalescedOutputRoleForEvent(event);
   span.className = 'line' + (cls ? ' ' + cls : '');
+  if (String(event && event.text || '') === '') span.classList.add('is-blank');
   if (event && event.role) span.dataset.outputRole = String(event.role || '');
   span.dataset.tsC = String(rawLine && rawLine.tsC || '');
   if (rawLine && rawLine.tsE) span.dataset.tsE = String(rawLine.tsE);
@@ -1505,6 +1540,12 @@ function _flushPendingOutputBatch(tabId) {
   const batch = state.items.splice(0, _OUTPUT_BATCH_SIZE);
   const rawBatch = state.rawLines.splice(0, _OUTPUT_BATCH_SIZE);
   const mountBatch = batch.slice();
+  mountBatch.forEach((entry, index) => {
+    const replacementLineNumber = index === 0 ? _coalescedReplacementLineNumber(out, entry) : 0;
+    const lineNumber = replacementLineNumber || _assignOutputLineNumber(out, tab, entry.span);
+    if (replacementLineNumber > 0) entry.span.dataset.lineNumber = String(replacementLineNumber);
+    if (lineNumber > 0) entry.rawLine.line_number = lineNumber;
+  });
   mountBatch.forEach(entry => {
     entry.span.dataset.prefix = _isPrefixExcludedLine(entry.span) ? '' : _lineTimestampPrefix(entry.span);
   });
@@ -1635,8 +1676,12 @@ function appendLine(text, cls, tabId, metadata = null) {
   const shouldBatch = state.scheduled || state.items.length > 0 || state.burstCount >= _OUTPUT_SYNC_BURST_LIMIT;
   const entry = _buildOutputLine(event, id, now, runStart, normalized.metadata);
   const { span, rawLine } = entry;
-  const lineNumber = _assignOutputLineNumber(out, tab, span);
-  if (lineNumber > 0) rawLine.line_number = lineNumber;
+  if (!shouldBatch) {
+    const replacementLineNumber = _coalescedReplacementLineNumber(out, entry);
+    const lineNumber = replacementLineNumber || _assignOutputLineNumber(out, tab, span);
+    if (replacementLineNumber > 0) span.dataset.lineNumber = String(replacementLineNumber);
+    if (lineNumber > 0) rawLine.line_number = lineNumber;
+  }
 
   if (shouldBatch) {
     _queuePendingOutputEntry(state, entry);
@@ -1697,8 +1742,6 @@ function appendLines(lines, tabId) {
           continue;
         }
         const outputEntry = _buildOutputLine(entry.event, id, now, runStart, entry.metadata);
-        const lineNumber = _assignOutputLineNumber(out, tab, outputEntry.span);
-        if (lineNumber > 0) outputEntry.rawLine.line_number = lineNumber;
         _queuePendingOutputEntry(state, outputEntry);
         state.rawLines.push(outputEntry.rawLine);
       }

@@ -1905,7 +1905,7 @@
       },
       "RunStreamEvent": {
         "additionalProperties": true,
-        "description": "Broker event object. Streams start with a schema row ({type=schema,event=schema,v=1,kind=line_event}); output and notice rows use the versioned line-event payload while preserving type and legacy cls for older clients. Idle streams may emit type=heartbeat events.",
+        "description": "Broker event object. Streams start with a schema row ({type=schema,event=schema,v=1,kind=line_event}); output and notice rows use the versioned line-event payload while preserving type and legacy cls for older clients. High-volume live streams may emit output_batch rows with a lines array of line events. Idle streams may emit type=heartbeat events.",
         "properties": {
           "cls": {
             "type": "string"
@@ -1934,6 +1934,13 @@
           "line_index": {
             "nullable": true,
             "type": "integer"
+          },
+          "lines": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
           },
           "role": {
             "type": "string"

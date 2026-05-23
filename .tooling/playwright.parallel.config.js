@@ -79,7 +79,7 @@ const projects = specGroups
       testMatch: specs,
       use: {
         ...devices['Desktop Chrome'],
-        baseURL: `http://localhost:${basePort + index}`,
+        baseURL: `http://127.0.0.1:${basePort + index}`,
         trace: 'on-first-retry',
       },
     }

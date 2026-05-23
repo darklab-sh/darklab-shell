@@ -466,6 +466,35 @@ def pid_pop(run_id: str) -> int | None:
             return _pid_map.pop(run_id, None)
 
 
+def _coerce_pid(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def pid_for_session(run_id: str, session_id: str) -> int | None:
+    """Return a PID only when the active run belongs to session_id."""
+    if not run_id or not session_id:
+        return None
+
+    if redis_client:
+        meta_key = f"procmeta:{run_id}"
+        raw = redis_client.get(meta_key)
+        payload = _load_active_run_payload(raw, meta_key)
+        if not payload or str(payload.get("session_id", "")) != session_id:
+            return None
+        return _coerce_pid(payload.get("pid") or redis_client.get(f"proc:{run_id}"))
+
+    with _pid_lock:
+        meta = _active_run_meta.get(run_id)
+        if not meta or str(meta.get("session_id", "")) != session_id:
+            return None
+        return _coerce_pid(meta.get("pid") or _pid_map.get(run_id))
+
+
 def pid_pop_for_session(run_id: str, session_id: str) -> int | None:
     """Remove and return a PID only when the active run belongs to session_id."""
     if not run_id or not session_id:

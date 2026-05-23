@@ -670,6 +670,7 @@ function loadRunnerFns({
   addToHistory = () => {},
   addToRecentPreview = () => {},
   appendLine = () => {},
+  appendLines = undefined,
   appendCommandEcho = () => {},
   getComposerValue: getComposerValueOverride = null,
   getVisibleComposerInput: getVisibleComposerInputOverride = null,
@@ -714,6 +715,7 @@ function loadRunnerFns({
   notifyProjectWorkspaceChanged: notifyProjectWorkspaceChangedOverride = undefined,
   emitUiEvent: emitUiEventOverride = undefined,
   disableHighVolumeOutputResumeControls = () => {},
+  discardPendingOutputBatch = () => {},
   appendHighVolumeOutputFinalSummary = () => {},
   resetHighVolumeOutputState = () => {},
   logClientError = () => {},
@@ -821,6 +823,7 @@ function loadRunnerFns({
       setTabStatus,
       activateTab,
       appendLine,
+      ...(appendLines ? { appendLines } : {}),
       appendCommandEcho,
       apiFetch,
       localStorage: storage,
@@ -897,6 +900,7 @@ function loadRunnerFns({
       ...(notifyProjectWorkspaceChangedOverride ? { notifyProjectWorkspaceChanged: notifyProjectWorkspaceChangedOverride } : {}),
       ...(emitUiEventOverride ? { emitUiEvent: emitUiEventOverride } : {}),
       disableHighVolumeOutputResumeControls,
+      discardPendingOutputBatch,
       appendHighVolumeOutputFinalSummary,
       resetHighVolumeOutputState,
       ...(NotificationOverride !== undefined ? { Notification: NotificationOverride } : {}),
@@ -985,14 +989,19 @@ describe('runner helpers', () => {
   it('doKill sends /kill immediately when runId is already known', async () => {
     const apiFetch = vi.fn(() => Promise.resolve({ ok: true, status: 200 }))
     const maybeMountDeferredPrompt = vi.fn()
-    const { doKill, tabs, runBtn, status } = loadRunnerFns({
+    const appendLine = vi.fn()
+    const discardPendingOutputBatch = vi.fn()
+    const { doKill, tabs, runBtn, status, _handleRunStreamMessage } = loadRunnerFns({
       tabs: [{ id: 'tab-1', st: 'running', runId: 'run-123', killed: false, pendingKill: false }],
       apiFetch,
       maybeMountDeferredPrompt,
+      appendLine,
+      discardPendingOutputBatch,
     })
 
     doKill('tab-1')
     await flushPromises()
+    _handleRunStreamMessage({ type: 'output', text: 'late buffered line' }, 'tab-1', {})
 
     expect(apiFetch).toHaveBeenCalledWith(
       '/kill',
@@ -1009,6 +1018,14 @@ describe('runner helpers', () => {
     expect(status.className).toBe('status-pill killed')
     expect(runBtn.disabled).toBe(false)
     expect(maybeMountDeferredPrompt).toHaveBeenCalledWith('tab-1')
+    expect(discardPendingOutputBatch).toHaveBeenCalledWith('tab-1')
+    expect(appendLine).not.toHaveBeenCalledWith(
+      'late buffered line',
+      '',
+      'tab-1',
+      expect.anything(),
+      expect.anything(),
+    )
   })
 
   it('doKill keeps an attached run active when the server denies the kill request', async () => {
@@ -2210,13 +2227,16 @@ describe('runner helpers', () => {
     }))
   })
 
-  it('runCommand preserves output classes from streamed events', async () => {
+  it('runCommand preserves output classes and blank streamed lines', async () => {
     const appendLine = vi.fn()
+    const appendLines = vi.fn(() => Promise.resolve())
     const apiFetch = brokerApiFetch(
       [
         'data: {"type":"started","run_id":"run-faq"}',
         'data: {"type":"output","text":"Q  Example question\\n","cls":"builtin-faq-q"}',
+        'data: {"type":"output","text":"","cls":"builtin-faq-spacer"}',
         'data: {"type":"output","text":"A  Example answer\\n","cls":"builtin-faq-a"}',
+        'data: {"type":"output_batch","lines":[{"text":"batched one","v":1,"kind":"info","role":"body"},{"text":"","v":1,"kind":"info","role":"body"},{"text":"batched two","v":1,"kind":"info","role":"body"}]}',
         'data: {"type":"exit","code":0,"elapsed":0.1}',
       ].join('\n\n') + '\n\n',
       { runId: 'run-faq' },
@@ -2226,13 +2246,25 @@ describe('runner helpers', () => {
       tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
       apiFetch,
       appendLine,
+      appendLines,
     })
 
     loaded.runCommand()
-    await flushPromises()
 
-    expect(appendLine).toHaveBeenCalledWith('Q  Example question', 'builtin-faq-q', 'tab-1')
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith('Q  Example question', 'builtin-faq-q', 'tab-1'))
+    expect(appendLine).toHaveBeenCalledWith('', 'builtin-faq-spacer', 'tab-1')
     expect(appendLine).toHaveBeenCalledWith('A  Example answer', 'builtin-faq-a', 'tab-1')
+    await vi.waitFor(() =>
+      expect(appendLines).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ text: 'batched one', role: 'body' }),
+          expect.objectContaining({ text: '', role: 'body' }),
+          expect.objectContaining({ text: 'batched two', role: 'body' }),
+        ]),
+        'tab-1',
+      ),
+    )
   })
 
   it('marks brokered output as live when high-volume output handling is configured', async () => {

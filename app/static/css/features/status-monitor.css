@@ -513,12 +513,36 @@
 
 .status-monitor-constellation-streak {
   fill: none;
-  stroke: hsl(var(--star-hue, 120) var(--star-saturation, 100%) 62% / 0.4);
+  stroke: var(--star-streak-color, hsl(var(--star-hue, 120) var(--star-saturation, 100%) 62% / 0.4));
   stroke-width: 1.1;
   stroke-dasharray: 2.5 7;
   stroke-linecap: round;
-  filter: drop-shadow(0 0 6px hsl(var(--star-hue, 120) var(--star-saturation, 100%) 58% / 0.25));
+  filter: drop-shadow(0 0 6px var(--star-streak-glow-color, hsl(var(--star-hue, 120) var(--star-saturation, 100%) 58% / 0.25)));
   pointer-events: none;
+}
+
+.status-monitor-star-node-kind-error,
+.status-monitor-constellation-streak-kind-error {
+  --star-fill-color: var(--red);
+  --star-glow-color: color-mix(in srgb, var(--red) 62%, transparent);
+  --star-ring-color: color-mix(in srgb, var(--red) 80%, transparent);
+  --star-ring-glow-color: color-mix(in srgb, var(--red) 62%, transparent);
+  --star-streak-color: color-mix(in srgb, var(--red) 72%, transparent);
+  --star-streak-glow-color: color-mix(in srgb, var(--red) 36%, transparent);
+  --star-tick-color: color-mix(in srgb, var(--red) 82%, transparent);
+  --star-tick-glow-color: color-mix(in srgb, var(--red) 54%, transparent);
+}
+
+.status-monitor-star-node-kind-warn,
+.status-monitor-constellation-streak-kind-warn {
+  --star-fill-color: var(--amber);
+  --star-glow-color: color-mix(in srgb, var(--amber) 62%, transparent);
+  --star-ring-color: color-mix(in srgb, var(--amber) 82%, transparent);
+  --star-ring-glow-color: color-mix(in srgb, var(--amber) 62%, transparent);
+  --star-streak-color: color-mix(in srgb, var(--amber) 74%, transparent);
+  --star-streak-glow-color: color-mix(in srgb, var(--amber) 34%, transparent);
+  --star-tick-color: color-mix(in srgb, var(--amber) 84%, transparent);
+  --star-tick-glow-color: color-mix(in srgb, var(--amber) 52%, transparent);
 }
 
 .status-monitor-constellation-guide {
@@ -551,15 +575,15 @@
 }
 
 .status-monitor-star {
-  fill: hsl(var(--star-hue, 120) var(--star-saturation, 100%) 58%);
+  fill: var(--star-fill-color, hsl(var(--star-hue, 120) var(--star-saturation, 100%) 58%));
   stroke: color-mix(in srgb, var(--text) 58%, transparent);
   stroke-width: 0.5;
-  filter: drop-shadow(0 0 6px hsl(var(--star-hue, 120) var(--star-saturation, 100%) 58% / var(--star-age-glow, 0.72)));
+  filter: drop-shadow(0 0 6px var(--star-glow-color, hsl(var(--star-hue, 120) var(--star-saturation, 100%) 58% / var(--star-age-glow, 0.72))));
 }
 
 .status-monitor-star-failed {
   filter:
-    drop-shadow(0 0 5px hsl(var(--star-hue, 120) var(--star-saturation, 100%) 54% / var(--star-age-glow, 0.72)))
+    drop-shadow(0 0 5px var(--star-glow-color, hsl(var(--star-hue, 120) var(--star-saturation, 100%) 54% / var(--star-age-glow, 0.72))))
     drop-shadow(0 0 7px color-mix(in srgb, var(--red) 58%, transparent));
 }
 
@@ -581,10 +605,10 @@
 
 .status-monitor-star-ring {
   fill: none;
-  stroke: hsl(var(--star-hue, 120) var(--star-saturation, 100%) 62%);
+  stroke: var(--star-ring-color, hsl(var(--star-hue, 120) var(--star-saturation, 100%) 62%));
   stroke-width: 1.2;
   opacity: 0;
-  filter: drop-shadow(0 0 8px hsl(var(--star-hue, 120) var(--star-saturation, 100%) 58%));
+  filter: drop-shadow(0 0 8px var(--star-ring-glow-color, hsl(var(--star-hue, 120) var(--star-saturation, 100%) 58%)));
   pointer-events: none;
 }
 
@@ -594,11 +618,11 @@
 }
 
 .status-monitor-star-offscale-tick {
-  stroke: hsl(var(--star-hue, 120) var(--star-saturation, 100%) 70%);
+  stroke: var(--star-tick-color, hsl(var(--star-hue, 120) var(--star-saturation, 100%) 70%));
   stroke-width: 1.1;
   stroke-linecap: round;
   pointer-events: none;
-  filter: drop-shadow(0 0 3px hsl(var(--star-hue, 120) var(--star-saturation, 100%) 60%));
+  filter: drop-shadow(0 0 3px var(--star-tick-glow-color, hsl(var(--star-hue, 120) var(--star-saturation, 100%) 60%)));
 }
 
 .status-monitor-star-node:hover .status-monitor-star-ring,

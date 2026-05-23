@@ -271,6 +271,10 @@ body.ln-on.ts-clock .output .shell-prompt-wrap::before {
   overflow-wrap: normal;
 }
 
+.output .line.is-blank .line-content::before {
+  content: ' ';
+}
+
 .output .line.progress,
 .output .line.status-line {
   animation: none;

@@ -100,7 +100,7 @@ class TestKillRoute:
     def test_kill_returns_404_when_run_missing(self):
         client = get_client()
 
-        with mock.patch("blueprints.run.pid_pop_for_session", return_value=None):
+        with mock.patch("blueprints.run.pid_for_session", return_value=None):
             resp = client.post("/kill", json={"run_id": "missing-run"})
 
         assert resp.status_code == 404
@@ -110,7 +110,7 @@ class TestKillRoute:
     def test_kill_scopes_pid_lookup_to_request_session(self):
         client = get_client()
 
-        with mock.patch("blueprints.run.pid_pop_for_session", return_value=None) as pid_pop:
+        with mock.patch("blueprints.run.pid_for_session", return_value=None) as pid_lookup:
             resp = client.post(
                 "/kill",
                 json={"run_id": "run-123"},
@@ -118,12 +118,12 @@ class TestKillRoute:
             )
 
         assert resp.status_code == 404
-        pid_pop.assert_called_once_with("run-123", "owner-session")
+        pid_lookup.assert_called_once_with("run-123", "owner-session")
 
     def test_kill_sends_sigterm_to_process_group(self):
         client = get_client()
 
-        with mock.patch("blueprints.run.pid_pop_for_session", return_value=1234), \
+        with mock.patch("blueprints.run.pid_for_session", return_value=1234), \
              mock.patch("blueprints.run.os.getpgid", return_value=1234), \
              mock.patch("blueprints.run.os.killpg") as killpg:
             resp = client.post("/kill", json={"run_id": "run-123"})
@@ -136,8 +136,8 @@ class TestKillRoute:
     def test_kill_still_returns_true_when_process_lookup_fails(self):
         client = get_client()
 
-        with mock.patch("blueprints.run.pid_pop_for_session", return_value=1234), \
-             mock.patch("blueprints.run.os.getpgid", side_effect=ProcessLookupError):
+        with mock.patch("blueprints.run.pid_for_session", return_value=1234), \
+             mock.patch("blueprints.run.os.killpg", side_effect=ProcessLookupError):
             resp = client.post("/kill", json={"run_id": "run-404"})
 
         assert resp.status_code == 200
@@ -147,9 +147,9 @@ class TestKillRoute:
     def test_kill_uses_scanner_sudo_path_when_configured(self):
         client = get_client()
 
-        with mock.patch("blueprints.run.pid_pop_for_session", return_value=1234), \
+        with mock.patch("blueprints.run.pid_for_session", return_value=1234), \
              mock.patch("blueprints.run.SCANNER_PREFIX", ["sudo", "-u", "scanner", "env", "HOME=/tmp"]), \
-             mock.patch("blueprints.run.subprocess.run") as run_cmd, \
+             mock.patch("blueprints.run.subprocess.run", return_value=mock.Mock(returncode=0)) as run_cmd, \
              mock.patch("blueprints.run.os.killpg") as killpg:
             resp = client.post("/kill", json={"run_id": "run-scan"})
 
@@ -158,10 +158,24 @@ class TestKillRoute:
         assert data["killed"] is True
         # pgid == pid because setsid guarantees PGID == PID at spawn time
         run_cmd.assert_called_once_with(
-            [shell_app.SUDO_BIN, "-u", "scanner", shell_app.KILL_BIN, "-TERM", "-1234"],
+            [shell_app.SUDO_BIN, "-u", "scanner", shell_app.KILL_BIN, "-TERM", "--", "-1234"],
             timeout=5,
         )
         killpg.assert_not_called()
+
+    def test_kill_treats_missing_scanner_process_group_as_success_after_sudo_race(self):
+        client = get_client()
+
+        with mock.patch("blueprints.run.pid_for_session", return_value=1234), \
+             mock.patch("blueprints.run.SCANNER_PREFIX", ["sudo", "-u", "scanner", "env", "HOME=/tmp"]), \
+             mock.patch("blueprints.run.subprocess.run", return_value=mock.Mock(returncode=1)), \
+             mock.patch("blueprints.run.time.sleep"), \
+             mock.patch("blueprints.run.os.killpg", side_effect=ProcessLookupError):
+            resp = client.post("/kill", json={"run_id": "run-scan-race"})
+
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["killed"] is True
 
     def test_kill_rejects_non_object_json(self):
         client = get_client()

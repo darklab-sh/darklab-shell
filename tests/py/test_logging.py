@@ -690,7 +690,7 @@ class TestRunLifecycleEvents:
         client = get_client()
 
         with mock.patch.object(shell_app.log, "info") as mock_info, \
-             mock.patch("blueprints.run.pid_pop_for_session", return_value=1234), \
+             mock.patch("blueprints.run.pid_for_session", return_value=1234), \
              mock.patch("blueprints.run.os.getpgid", return_value=4321), \
              mock.patch("blueprints.run.os.killpg"):
             resp = client.post("/kill", json={"run_id": "run-123"})
@@ -703,7 +703,7 @@ class TestRunLifecycleEvents:
         client = get_client()
 
         with mock.patch.object(shell_app.log, "debug") as mock_debug, \
-             mock.patch("blueprints.run.pid_pop_for_session", return_value=None):
+             mock.patch("blueprints.run.pid_for_session", return_value=None):
             resp = client.post("/kill", json={"run_id": "missing-run"})
 
         assert resp.status_code == 404
@@ -1027,7 +1027,7 @@ class TestKillFailedEvent:
 
     def test_kill_failed_emits_warning_on_os_error(self):
         client = get_client()
-        with mock.patch("blueprints.run.pid_pop_for_session", return_value=99999):
+        with mock.patch("blueprints.run.pid_for_session", return_value=99999):
             with mock.patch("blueprints.run.os.killpg", side_effect=ProcessLookupError("no such process")):
                 with mock.patch.object(shell_app.log, "warning") as mock_warn:
                     client.post("/kill", json={"run_id": "fake-run-id"})
@@ -1036,7 +1036,7 @@ class TestKillFailedEvent:
 
     def test_kill_failed_extra_has_run_id(self):
         client = get_client()
-        with mock.patch("blueprints.run.pid_pop_for_session", return_value=99999):
+        with mock.patch("blueprints.run.pid_for_session", return_value=99999):
             with mock.patch("blueprints.run.os.killpg", side_effect=ProcessLookupError("no such process")):
                 with mock.patch.object(shell_app.log, "warning") as mock_warn:
                     client.post("/kill", json={"run_id": "test-run-xyz"})

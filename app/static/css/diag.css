@@ -131,6 +131,7 @@ body.diag-page::before { display: none; }
   grid-template-areas:
     "app      db       redis    assets"
     "classify classify classify classify"
+    "drift    drift    drift    drift"
     "dbd      dbd      redisd   redisd"
     "storage  storage  storage  storage"
     "cfg      cfg      cfg      cfg"
@@ -161,6 +162,7 @@ body.diag-page::before { display: none; }
 .diag-section.s-storage { grid-area: storage; }
 .diag-section.s-config   { grid-area: cfg; }
 .diag-section.s-classifier { grid-area: classify; }
+.diag-section.s-classifier-drift { grid-area: drift; }
 .diag-section.s-usage    { grid-area: usage; }
 .diag-section.s-outcomes { grid-area: outcomes; }
 .diag-section.s-cmds     { grid-area: cmds; }
@@ -425,14 +427,16 @@ body.diag-page::before { display: none; }
 }
 
 /* ── Classifier inspector ─────────────────────────────────────────────────── */
-.diag-classifier-form {
+.diag-classifier-form,
+.diag-drift-form {
   display: grid;
   gap: 12px;
   padding: 16px 18px;
   border-bottom: 1px solid var(--theme-panel-border);
 }
 
-.diag-classifier-form.is-loading {
+.diag-classifier-form.is-loading,
+.diag-drift-report.is-loading {
   opacity: 0.74;
 }
 
@@ -470,6 +474,24 @@ body.diag-page::before { display: none; }
   resize: vertical;
 }
 
+.diag-checkbox-field {
+  align-content: end;
+}
+
+.diag-checkbox-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  color: var(--fg);
+  font-size: 12px;
+  text-transform: none;
+}
+
+.diag-checkbox-control input {
+  width: auto;
+}
+
 .diag-field input:focus,
 .diag-field select:focus,
 .diag-field textarea:focus {
@@ -492,8 +514,41 @@ body.diag-page::before { display: none; }
   padding: 16px 18px 18px;
 }
 
-.diag-classifier-result-region:empty {
+.diag-classifier-result-region:empty,
+.diag-drift-result-region:empty {
   display: none;
+}
+
+.diag-drift-result {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px 18px;
+}
+
+.diag-drift-buckets {
+  display: grid;
+  gap: 10px;
+}
+
+.diag-drift-bucket {
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.diag-drift-bucket summary {
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  color: var(--fg);
+  background: var(--theme-terminal-bar-bg);
+}
+
+.diag-drift-sample-text {
+  max-width: 520px;
+  white-space: normal;
 }
 
 .diag-classifier-advanced {

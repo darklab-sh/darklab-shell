@@ -539,6 +539,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   └── wordlists.py    # SecLists catalog loader and filtering helpers for wordlist command/autocomplete
 │   │   ├── diagnostics/
 │   │   │   ├── __init__.py     # Diagnostics service package marker
+│   │   │   ├── classifier_drift.py # Recent-output classifier drift sampler for /diag
 │   │   │   └── storage.py      # Shared cached database storage snapshot for /diag and Prometheus
 │   │   ├── history/
 │   │   │   ├── __init__.py     # History service package marker
@@ -642,6 +643,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── dispatch.py     # Schedule fire dispatch, broker launch, skip handling, and fire audit rows
 │   │   │   ├── models.py       # Schedule and schedule-fire dataclasses, constants, and allowed values
 │   │   │   ├── recovery.py     # Scheduler startup recovery for missed fire windows
+│   │   │   ├── route_helpers.py # Shared browser/API schedule and watcher route normalization helpers
 │   │   │   ├── serialization.py # Shared schedule payload shaping and ownership lookup helpers
 │   │   │   ├── service.py      # Backend-agnostic schedule CRUD, due-row, and fire-audit helpers
 │   │   │   └── worker.py       # Dedicated scheduler worker entrypoint and deployment-wide lock

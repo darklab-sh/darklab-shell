@@ -62,7 +62,7 @@ test.describe('permalink / share', () => {
 
     await page
       .context()
-      .addCookies([{ name: 'pref_theme_name', value: 'apricot_sand', url: 'http://localhost:5001' }])
+      .addCookies([{ name: 'pref_theme_name', value: 'apricot_sand', url: 'http://127.0.0.1:5001' }])
     await page.goto(data.url)
 
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'apricot_sand')
@@ -192,8 +192,8 @@ test.describe('permalink / share', () => {
     const data = await shareResp.json()
 
     await page.context().addCookies([
-      { name: 'pref_line_numbers', value: 'on', url: 'http://localhost:5001' },
-      { name: 'pref_timestamps', value: 'elapsed', url: 'http://localhost:5001' },
+      { name: 'pref_line_numbers', value: 'on', url: 'http://127.0.0.1:5001' },
+      { name: 'pref_timestamps', value: 'elapsed', url: 'http://127.0.0.1:5001' },
     ])
 
     await page.goto(data.url)

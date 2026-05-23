@@ -27,6 +27,7 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {}, AnsiUpCtor = null } 
     appendLine,
     appendLines,
     appendHighVolumeOutputFinalSummary,
+    recordLiveOutputCoalescedLines,
     disableHighVolumeOutputResumeControls,
     renderRestoredTabOutput,
     resetHighVolumeOutputState,
@@ -246,11 +247,15 @@ describe('appendLine', () => {
     const { appendLine } = loadOutputFns()
 
     appendLine('hello', '', 'tab-1')
+    appendLine('', '', 'tab-1')
 
     const line = document.querySelector('.line')
+    const blankLine = document.querySelectorAll('.line')[1]
     expect(line.querySelector('.line-content')).not.toBeNull()
     expect(line.firstElementChild?.classList.contains('line-content')).toBe(true)
     expect(line.querySelector('.line-content').innerHTML).toContain('<em>hello</em>')
+    expect(blankLine.classList.contains('is-blank')).toBe(true)
+    expect(blankLine.querySelector('.line-content')?.textContent).toBe('')
   })
 
   it('renders builtin help and FAQ rows as structured terminal content', () => {
@@ -308,7 +313,7 @@ describe('appendLine', () => {
     expect(lines).toHaveLength(3)
     expect(lines[0]).toBe(firstProgressLine)
     expect(lines[0].textContent).toContain('20%')
-    expect(lines[0].dataset.lineNumber).toBe('2')
+    expect(lines[0].dataset.lineNumber).toBe('1')
     expect(lines[1].textContent).toContain('done')
     expect(lines[2].textContent).toContain('index 1')
     expect(_getTabs()[0].rawLines.map(line => line.text)).toEqual(['10%', '20%', 'done', 'index 1'])
@@ -329,8 +334,8 @@ describe('appendLine', () => {
     const lines = Array.from(document.querySelectorAll('.line'))
     expect(lines).toHaveLength(3)
     expect(lines.map(line => line.textContent.trim())).toEqual(['phase 2', 'body', 'phase 4'])
-    expect(lines[0].dataset.lineNumber).toBe('2')
-    expect(lines[2].dataset.lineNumber).toBe('5')
+    expect(lines[0].dataset.lineNumber).toBe('1')
+    expect(lines[2].dataset.lineNumber).toBe('3')
     expect(_getTabs()[0].rawLines.map(line => line.text)).toEqual(['phase 1', 'phase 2', 'body', 'phase 3', 'phase 4'])
   })
 
@@ -346,7 +351,7 @@ describe('appendLine', () => {
     const lines = Array.from(document.querySelectorAll('.line'))
     expect(lines).toHaveLength(2)
     expect(lines[0].textContent).toContain('loading 2')
-    expect(lines[0].dataset.lineNumber).toBe('2')
+    expect(lines[0].dataset.lineNumber).toBe('1')
     expect(lines[1].textContent).toContain('finished')
     expect(_getTabs()[0].rawLines.map(line => line.text)).toEqual(['loading 1', 'loading 2', 'finished'])
   })
@@ -851,9 +856,24 @@ describe('appendLine', () => {
 
     const renderedText = Array.from(document.querySelectorAll('.line')).map(line => line.textContent).join('\n')
     expect(renderedText).toContain('[process exited with code 0]')
-    expect(renderedText).toContain('high-volume output summary: 1 line was not rendered live in this tab')
-    expect(renderedText).toContain('retained output follows the normal saved preview and full-output settings')
+    expect(renderedText).toContain('live output summary: 1 line was not rendered live in this tab')
+    expect(renderedText).toContain('full transcript output is preserved in saved output, permalinks, and exports')
     expect(renderedText).not.toContain('line 2')
+  })
+
+  it('adds a final live summary when progress rows were collapsed', () => {
+    const { appendLine, appendHighVolumeOutputFinalSummary, recordLiveOutputCoalescedLines } = loadOutputFns({
+      appConfig: { max_output_lines: 20 },
+    })
+
+    appendLine('line 1', '', 'tab-1')
+    recordLiveOutputCoalescedLines('tab-1', 12)
+
+    expect(appendHighVolumeOutputFinalSummary('tab-1')).toBe(true)
+
+    const renderedText = Array.from(document.querySelectorAll('.line')).map(line => line.textContent).join('\n')
+    expect(renderedText).toContain('progress/status updates were collapsed in this tab')
+    expect(renderedText).toContain('live line numbers may differ from the saved transcript')
   })
 
   it('resets high-volume counters for a new run', () => {

@@ -565,6 +565,16 @@ class TestNotificationChannelRoutes:
                 },
             )
             second = second_resp.get_json()["channel"]
+            listed_before_update = client.get("/session/notification-channels", headers={"X-Session-ID": session_id})
+            assert [channel["id"] for channel in listed_before_update.get_json()["channels"]] == [first["id"], second["id"]]
+            muted_second = client.patch(
+                f"/session/notification-channels/{second['id']}",
+                headers={"X-Session-ID": session_id},
+                json={"muted": True},
+            )
+            assert muted_second.status_code == 200
+            listed_after_update = client.get("/session/notification-channels", headers={"X-Session-ID": session_id})
+            assert [channel["id"] for channel in listed_after_update.get_json()["channels"]] == [first["id"], second["id"]]
 
             resp = client.post(
                 f"/session/notification-channels/{second['id']}/test",
@@ -4071,6 +4081,22 @@ class TestDiagRoute:
                 "/diag/classifier-inspector",
                 query_string={key: value for key, value in query.items() if key != "format"},
             ).data)
+            with mock.patch(
+                "blueprints.assets.classifier_drift_report",
+                return_value={
+                    "ok": True,
+                    "runs_scanned": 0,
+                    "lines_sampled": 0,
+                    "truncated_runs": 0,
+                    "issue_count": 0,
+                    "buckets": [],
+                    "runs": [],
+                },
+            ) as drift_report:
+                drift_data = json.loads(client.get(
+                    "/diag/classifier-drift",
+                    query_string={"runs": "2", "lines": "10", "root": "nmap"},
+                ).data)
             body = client.get(
                 "/diag",
                 query_string={key: value for key, value in query.items() if key != "format"},
@@ -4078,15 +4104,65 @@ class TestDiagRoute:
 
         inspector = data["classifier_inspector"]
         assert fast_data == inspector
+        assert drift_data["ok"] is True
+        assert drift_data["runs_scanned"] == 0
+        drift_report.assert_called_once()
+        assert drift_report.call_args.kwargs["run_limit"] == "2"
+        assert drift_report.call_args.kwargs["line_limit"] == "10"
+        assert drift_report.call_args.kwargs["command_root_filter"] == "nmap"
         assert inspector["submitted"] is True
         assert inspector["result"]["kind"] == "info"
         assert inspector["result"]["role"] == "progress"
         assert inspector["result"]["command_root"] == "masscan"
         assert inspector["result"]["signals"] == []
         assert "Classifier Inspector" in body
+        assert "Classifier Drift Report" in body
         assert "progress" in body
         assert "diag-classifier-form" in body
+        assert "diag-drift-form" in body
         assert body.index("Classifier Inspector") < body.index("Database Details")
+        assert body.index("Classifier Drift Report") < body.index("Database Details")
+
+        from services.diagnostics.classifier_drift import classifier_drift_report
+        from services.runs.output_model import line_event_from_legacy
+
+        class DriftRows:
+            def fetchall(self):
+                return [{
+                    "id": "run-drift",
+                    "session_id": "sess-drift",
+                    "command": "masscan -p 80 192.168.1.3",
+                    "run_kind": "external",
+                    "output": "[]",
+                    "output_preview": "",
+                    "preview_truncated": False,
+                    "full_output_available": False,
+                    "full_output_truncated": False,
+                    "rel_path": None,
+                }]
+
+        class DriftConn:
+            def execute(self, *_args, **_kwargs):
+                return DriftRows()
+
+        stored_event = line_event_from_legacy(
+            "rate:  0.10-kpps, 49.90% done,   0:00:09 remaining, found=2",
+            "",
+            line_index=0,
+        )
+        with mock.patch(
+            "services.diagnostics.classifier_drift.load_run_output_events_for_run",
+            return_value=mock.Mock(events=[stored_event]),
+        ):
+            report = classifier_drift_report(DriftConn(), run_limit=5, line_limit=10)
+        assert report["runs_scanned"] == 1
+        assert report["lines_sampled"] == 1
+        drift_buckets = report["buckets"]
+        assert isinstance(drift_buckets, list)
+        assert any(
+            isinstance(bucket, dict) and bucket["key"] == "metadata_changed"
+            for bucket in drift_buckets
+        )
 
     def test_every_config_key_belongs_to_a_group(self):
         """Drift guard: every key emitted into result['config'] must be
@@ -7610,6 +7686,7 @@ class TestRunRoute:
              mock.patch("blueprints.run.pid_register") as pid_register, \
              mock.patch("blueprints.run.active_run_register") as active_register, \
              mock.patch("blueprints.run.publish_run_event") as publish, \
+             mock.patch("blueprints.run.STDBUF_BIN", "/usr/bin/stdbuf"), \
              mock.patch("services.runs.start.threading", mock.Mock(Thread=_CapturedThread)), \
              mock.patch("blueprints.run.uuid.uuid4", return_value="run-real"):
             resp = client.post(
@@ -7624,6 +7701,7 @@ class TestRunRoute:
             "stream": "/runs/run-real/stream",
         }
         launched = popen.call_args.args[0]
+        assert launched[:3] == ["/usr/bin/stdbuf", "-oL", "-eL"]
         assert launched[-2:] == ["-c", "ping darklab.sh"]
         pid_register.assert_called_once_with("run-real", 8765)
         active_register.assert_called_once()
@@ -7741,7 +7819,7 @@ class TestRunRoute:
 
     def test_kill_allows_same_session_attached_client_and_publishes_killer(self):
         client = get_client()
-        with mock.patch("blueprints.run.pid_pop_for_session", return_value=4321) as pop_pid, \
+        with mock.patch("blueprints.run.pid_for_session", return_value=4321) as pid_lookup, \
              mock.patch("blueprints.run.publish_run_event") as publish, \
              mock.patch("blueprints.run.SCANNER_PREFIX", ""), \
              mock.patch("blueprints.run.os.killpg") as killpg:
@@ -7752,7 +7830,7 @@ class TestRunRoute:
             )
         assert resp.status_code == 200
         assert json.loads(resp.data) == {"killed": True}
-        pop_pid.assert_called_once_with("run-1", "session-1")
+        pid_lookup.assert_called_once_with("run-1", "session-1")
         publish.assert_called_once_with("run-1", "killed", {
             "killer_client_id": "client-2",
             "killer_tab_id": "tab-2",
@@ -7761,7 +7839,7 @@ class TestRunRoute:
 
     def test_kill_rejects_runs_outside_session(self):
         client = get_client()
-        with mock.patch("blueprints.run.pid_pop_for_session", return_value=None) as pop_pid, \
+        with mock.patch("blueprints.run.pid_for_session", return_value=None) as pid_lookup, \
              mock.patch("blueprints.run.publish_run_event") as publish:
             resp = client.post(
                 "/kill",
@@ -7770,7 +7848,7 @@ class TestRunRoute:
             )
         assert resp.status_code == 404
         assert json.loads(resp.data) == {"error": "No such process"}
-        pop_pid.assert_called_once_with("run-1", "session-1")
+        pid_lookup.assert_called_once_with("run-1", "session-1")
         publish.assert_not_called()
 
     def test_disallowed_command_returns_403(self):

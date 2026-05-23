@@ -6823,17 +6823,27 @@ class TestRunBrokerMemoryStore:
         store = run_broker._MemoryRunBrokerStore()
         with mock.patch.dict(run_broker.CFG, {"max_output_lines": 2, "run_broker_max_replay_bytes": 0}):
             store.publish("run-1", "started", {"run_id": "run-1"})
-            store.publish("run-1", "output", {"text": "line 1"})
-            store.publish("run-1", "output", {"text": "line 2"})
-            store.publish("run-1", "output", {"text": "line 3"})
+            store.publish("run-1", "output_batch", {
+                "lines": [{"text": "line 1"}],
+            })
+            store.publish("run-1", "output_batch", {
+                "lines": [
+                    {"text": "line 2"},
+                    {"text": "line 3"},
+                ],
+            })
             events = store.events_after("run-1", after_id="0-0", limit=10)
 
-        visible_text = [str(event.payload.get("text", "")) for event in events]
         assert events[0].payload["type"] == "notice"
         assert events[0].payload["text"] == run_broker.REPLAY_TRIM_NOTICE
+        visible_text = []
+        for event in events:
+            lines = event.payload.get("lines")
+            if not isinstance(lines, list):
+                continue
+            visible_text.extend(str(line.get("text", "")) for line in lines if isinstance(line, dict))
         assert "line 1" not in visible_text
-        assert "line 2" in visible_text
-        assert "line 3" in visible_text
+        assert visible_text == ["line 2", "line 3"]
 
     def test_trim_notice_sse_does_not_advance_resume_cursor(self):
         notice = run_broker._make_trim_notice_event()
@@ -7273,6 +7283,8 @@ class TestActiveRunMetadata:
             process.pid_register("run-owned", 12345)
 
         assert process.pid_pop_for_session("run-owned", "session-2") is None
+        assert process.pid_for_session("run-owned", "session-2") is None
+        assert process.pid_for_session("run-owned", "session-1") == 12345
         assert process.pid_pop_for_session("run-owned", "session-1") == 12345
 
         with process._pid_lock:
@@ -7330,6 +7342,8 @@ class TestActiveRunMetadata:
             )
 
         assert process.pid_pop_for_session("run-owned", "session-2") is None
+        assert process.pid_for_session("run-owned", "session-2") is None
+        assert process.pid_for_session("run-owned", "session-1") == 12345
         assert process.pid_pop_for_session("run-owned", "session-1") == 12345
         assert process.pid_pop("run-owned") is None
         assert process.active_runs_for_session("session-1") == []
@@ -8693,6 +8707,21 @@ class TestOutputSignals:
         assert "signals" not in masscan_waiting
         assert "signals" not in ffuf_progress
 
+        import core.output_signals as output_signals
+
+        classifier = OutputSignalClassifier("ffuf -u https://darklab.sh/FUZZ -w words.txt")
+        with mock.patch.object(
+            output_signals,
+            "_is_help_output_command",
+            wraps=output_signals._is_help_output_command,
+        ) as is_help:
+            classifier.classify_line(
+                ":: Progress: [17778/87664] :: Job [1/1] :: 921 req/sec :: Duration: [0:00:19] :: Errors: 0 ::"
+            )
+            classifier.classify_line("admin [Status: 200, Size: 123, Words: 4, Lines: 1, Duration: 10ms]")
+
+        is_help.assert_not_called()
+
         capture = RunOutputCapture(
             "test-run-output-scanner-progress-role",
             preview_limit=5,
@@ -8706,6 +8735,63 @@ class TestOutputSignals:
         )
 
         assert capture.preview_lines[0]["cls"] == LineRole.progress.value
+
+    def test_live_output_batcher_coalesces_progress_without_dropping_saved_lines(self):
+        import blueprints.run as run_blueprint
+
+        capture = RunOutputCapture(
+            "test-run-output-live-progress-coalescing",
+            preview_limit=10,
+            persist_full_output=False,
+            full_output_max_bytes=0,
+        )
+        batcher = run_blueprint._BrokerOutputBatcher(
+            "run-progress-coalesce",
+            capture,
+            OutputSignalClassifier("ffuf -u https://darklab.sh/FUZZ -w words.txt"),
+            run_started_dt=datetime.now(timezone.utc),
+        )
+        batcher.last_flush_monotonic = run_blueprint.time.monotonic()
+
+        batcher.add(":: Progress: [1/100] :: Job [1/1] :: 900 req/sec :: Duration: [0:00:01] :: Errors: 0 ::")
+        batcher.add(":: Progress: [2/100] :: Job [1/1] :: 910 req/sec :: Duration: [0:00:02] :: Errors: 0 ::")
+        batcher.add(":: Progress: [3/100] :: Job [1/1] :: 920 req/sec :: Duration: [0:00:03] :: Errors: 0 ::")
+
+        assert len(capture.preview_lines) == 3
+        assert len(batcher.events) == 1
+        assert "[3/100]" in batcher.events[0].text
+
+    def test_live_output_batcher_flushes_sparse_output_by_age(self):
+        import blueprints.run as run_blueprint
+
+        capture = RunOutputCapture(
+            "test-run-output-live-age-flush",
+            preview_limit=10,
+            persist_full_output=False,
+            full_output_max_bytes=0,
+        )
+        batcher = run_blueprint._BrokerOutputBatcher(
+            "run-age-flush",
+            capture,
+            OutputSignalClassifier("ffuf -u https://darklab.sh/FUZZ -w words.txt"),
+            run_started_dt=datetime.now(timezone.utc),
+        )
+
+        with mock.patch("blueprints.run.publish_run_event") as publish:
+            batcher.add("admin [Status: 200, Size: 123, Words: 4, Lines: 1, Duration: 10ms]")
+
+        publish.assert_called_once()
+        assert batcher.events == []
+
+        batcher.last_flush_monotonic = (
+            run_blueprint.time.monotonic() - run_blueprint._RUN_OUTPUT_LIVE_BATCH_MAX_LATENCY_SECONDS - 0.01
+        )
+
+        with mock.patch("blueprints.run.publish_run_event") as publish:
+            batcher.add("backup [Status: 200, Size: 456, Words: 8, Lines: 2, Duration: 20ms]")
+
+        publish.assert_called_once()
+        assert batcher.events == []
 
     def test_signal_matching_uses_ansi_normalized_text(self):
         examples = [

@@ -1203,6 +1203,7 @@ OPENAPI_SPEC: dict = {
                     "Broker event object. Streams start with a schema row "
                     "({type=schema,event=schema,v=1,kind=line_event}); output and notice rows use the "
                     "versioned line-event payload while preserving type and legacy cls for older clients. "
+                    "High-volume live streams may emit output_batch rows with a lines array of line events. "
                     "Idle streams may emit type=heartbeat events."
                 ),
                 "properties": {
@@ -1214,6 +1215,10 @@ OPENAPI_SPEC: dict = {
                     "cls": {"type": "string"},
                     "event_id": {"type": "string"},
                     "text": {"type": "string"},
+                    "lines": {
+                        "type": "array",
+                        "items": {"type": "object", "additionalProperties": True},
+                    },
                     "tsC": {"type": "string"},
                     "tsE": {"type": "string"},
                     "code": {"type": "integer"},

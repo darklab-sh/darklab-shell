@@ -11,16 +11,18 @@ from flask import Blueprint, jsonify, request
 from config import CFG
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from extensions import limiter
-from services.scheduler.commands import ScheduleCommandValidationError, validate_schedule_command
+from services.scheduler.commands import ScheduleCommandValidationError
 from services.scheduler.cron import ScheduleCronError, default_timezone, next_fire, normalize_cron, validate_timezone
-from services.scheduler.dispatch import fire_schedule
+from services.scheduler.route_helpers import (
+    fire_schedule_now,
+    normalize_schedule_create_payload,
+    normalize_schedule_update_payload,
+)
 from services.scheduler.serialization import get_user_schedule_for_session, schedule_fire_payload, schedule_payload
 from services.scheduler.service import (
     ScheduleError,
-    coerce_schedule_bool,
     create_schedule,
     delete_schedule,
-    get_schedule,
     list_schedule_fires,
     list_for_session,
     update_schedule,
@@ -228,19 +230,10 @@ def schedules_create():
     if data is None:
         return jsonify({"error": "Request body must be a JSON object"}), 400
     try:
-        command = validate_schedule_command(
-            data.get("command"),
-            session_id,
-            workspace_cwd=str(data.get("workspace_cwd") or ""),
-        )
+        payload = normalize_schedule_create_payload(data, session_id)
         schedule = create_schedule(
             session_id,
-            command_text=command,
-            cron_expr=data.get("cron_expr"),
-            cadence_preset=data.get("cadence_preset"),
-            timezone_name=data.get("timezone"),
-            label=str(data.get("label") or ""),
-            enabled=coerce_schedule_bool(data.get("enabled"), default=True),
+            **payload,
         )
     except (
         ScheduleError,
@@ -272,16 +265,8 @@ def schedules_update(schedule_id):
         return body_error
     if data is None:
         return jsonify({"error": "Request body must be a JSON object"}), 400
-    updates = dict(data)
     try:
-        if "command" in updates or "command_text" in updates:
-            updates["command_text"] = validate_schedule_command(
-                updates.get("command", updates.get("command_text")),
-                session_id,
-                workspace_cwd=str(updates.get("workspace_cwd") or ""),
-            )
-        if "timezone_name" in updates and "timezone" not in updates:
-            updates["timezone"] = updates.pop("timezone_name")
+        updates = normalize_schedule_update_payload(data, session_id)
         updated = update_schedule(schedule.id, updates)
     except (
         ScheduleError,
@@ -331,13 +316,11 @@ def schedules_run_now(schedule_id):
         schedule = _schedule_for_session_or_404(schedule_id, session_id)
     except ScheduleNotFound as exc:
         return _schedule_error_response(exc)
-    fired_at = datetime.now(timezone.utc).isoformat()
     try:
         from core import database
 
         with database.db_connect() as conn:
-            status = fire_schedule(conn, schedule, fired_at=fired_at)
-            refreshed = get_schedule(schedule.id, conn=conn)
+            status, refreshed, fired_at = fire_schedule_now(conn, schedule)
             conn.commit()
     except (ScheduleError, ScheduleCronError, ValueError) as exc:
         response = _schedule_error_response(exc)
@@ -348,11 +331,11 @@ def schedules_run_now(schedule_id):
         session_id=session_id,
         status=status,
         fired_at=fired_at,
-        run_id=(refreshed or schedule).last_run_id,
-        last_error=(refreshed or schedule).last_error,
+        run_id=refreshed.last_run_id,
+        last_error=refreshed.last_error,
     ))
     return jsonify({
         "status": status,
-        "schedule": schedule_payload(refreshed or schedule),
+        "schedule": schedule_payload(refreshed),
         "fired_at": fired_at,
     })

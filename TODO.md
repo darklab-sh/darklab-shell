@@ -7,7 +7,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
-  - [Structured output model — feature enhancement opportunities](#structured-output-model--feature-enhancement-opportunities)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
 - [Feature Enhancements](#feature-enhancements)
@@ -41,20 +40,7 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-### Structured output model — feature enhancement opportunities
-
-Now that per-line `kind`, `role`, `signals`, `entities`, and `line_index` flow end-to-end on the run-output envelope (and are durable on artifacts via lazy upgrade-on-read), these lower-priority follow-ups can keep moving consumers away from text/`cls` heuristics.
-
-**Smaller wins / quality**
-
-- **Classifier drift report.** Add a developer-only report that samples recent stored lines by `kind`/`role`/`signals` and highlights unknown or low-value buckets. This would make classifier regressions visible before they show up as noisy findings, watchers, or exports.
-- **PTY scrollback findings.** `app/services/pty/transcript.py:60` already has a `scrollback_findings` mode; filtering out `role=prompt-echo`/`pty-marker` would tighten its false-positive rate.
-- **Ctrl+R findings search discoverability.** Find a clearer way to surface findings-output search from reverse search without making normal command-history recall feel surprising.
-
-**Explicitly out of scope (for now)**
-
-- Re-keying the SQLite FTS index on structured columns — current FTS-over-text already works; defer until structured query patterns show that loaded-envelope filtering is too slow.
-- Client-side redaction overlays based on `entities` — redaction already happens at canonical-value level on the backend; doing it again client-side would duplicate logic.
+No open TODOs are currently tracked.
 
 ## Known Issues
 
@@ -64,10 +50,6 @@ No known issues are currently tracked.
 
 ## Technical Debt
 
-- **Shared schedule/watcher route helpers.**
-  - Browser and API routes for schedules and watchers both handle create/update normalization, pause/resume semantics, run-now calls, fire-audit paging, and error mapping. Extract thin command/query helpers so the browser and API envelopes can stay different at the edge without duplicating route glue.
-- **Status Monitor constellation color helpers.**
-  - Move constellation severity colors onto semantic theme tokens and compose shared helpers for repeated `--star-hue` / `--star-saturation` style strings. The domain category palette can stay distinct, but error and warning tones should follow the app-wide color contract.
 - **Watcher CLI command parsing cleanup.**
   - Replace the `darklab watch create` argv preprocessor with the same `argparse.REMAINDER` shape used by `darklab schedule create`, then validate the optional command override inside dispatch. This keeps command-tail parsing consistent across the paired features.
 - **Notification channel secret-field contract.**

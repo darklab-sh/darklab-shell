@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,206
+- behavior tests: 3,210
 - docs/inventory meta-tests: 33
-- `pytest`: 1744 (1711 behavior + 33 meta)
-- `vitest`: 1243
+- `pytest`: 1748 (1715 behavior + 33 meta)
+- `vitest`: 1244
 - `playwright`: 252
-- total: 3,239
+- total: 3,244
 
 This document is organized in two parts:
 
@@ -748,6 +748,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestOutputSignals.test_classifies_tls_scanner_findings_by_command` | Verifies that TLS scanner posture, certificate, cipher, and compliance lines classify into findings or errors. |
 | `TestOutputSignals.test_classifies_projectdiscovery_and_port_scanner_findings` | Verifies that ProjectDiscovery and port scanner outputs classify command-scoped findings and summaries. |
 | `TestOutputSignals.test_classifies_scanner_progress_lines_as_progress_role` | Verifies that regular scanner progress updates carry the progress role without becoming findings, warnings, errors, or summaries. |
+| `TestOutputSignals.test_live_output_batcher_coalesces_progress_without_dropping_saved_lines` | Verifies that live progress rows coalesce for display while saved output still captures each original line. |
+| `TestOutputSignals.test_live_output_batcher_flushes_sparse_output_by_age` | Verifies that sparse live output flushes promptly instead of waiting for a large batch. |
 | `TestOutputSignals.test_signal_matching_uses_ansi_normalized_text` | Verifies that backend signal matching strips ANSI formatting before classifying output while preserving the original line elsewhere. |
 | `TestOutputSignals.test_classifies_nuclei_findings_by_command` | Verifies that common Nuclei template result lines classify as command-scoped findings. |
 | `TestOutputSignals.test_classifies_warning_error_and_summary_lines` | Verifies that backend output-signal classification separates warning, error, and summary-style lines. |
@@ -862,6 +864,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `test_parse_compose_port_output` | Checks that parse compose port output. |
 | `test_compose_projects_from_container_names_filters_smoke_projects` | Verifies that stale-container cleanup extracts only smoke-test Compose project names from Docker container names. |
 | `test_post_run_kills_early_when_stop_text_is_seen` | Checks that post run kills early when stop text is seen. |
+| `test_post_run_reads_batched_output_for_stop_text` | Verifies the smoke stream parser treats output batches as visible command output when checking stop text. |
 | `test_needs_nuclei_template_warmup` | Checks that the smoke suite warms nuclei templates only when scan-style nuclei commands are in the selected corpus. |
 | `test_force_smoke_image_build_reads_wrapper_env` | Verifies that the smoke fixture only forces a cache-image rebuild when the wrapper sets `RUN_CONTAINER_SMOKE_TEST_FORCE_BUILD=1`. |
 | `test_smoke_image_cache_key_tracks_docker_runtime_inputs` | Verifies that Dockerfile, Python requirements, and entrypoint changes refresh the stable smoke cache image. |
@@ -1222,6 +1225,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestKillRoute.test_kill_sends_sigterm_to_process_group` | Checks that kill sends sigterm to process group. |
 | `TestKillRoute.test_kill_still_returns_true_when_process_lookup_fails` | Checks that kill still returns true when process lookup fails. |
 | `TestKillRoute.test_kill_uses_scanner_sudo_path_when_configured` | Checks that kill uses scanner sudo path when configured. |
+| `TestKillRoute.test_kill_treats_missing_scanner_process_group_as_success_after_sudo_race` | Verifies that kill treats an already-exited scanner process group as a successful race after sudo reports failure. |
 | `TestKillRoute.test_kill_rejects_non_object_json` | Checks that kill rejects non object JSON. |
 | `TestKillRoute.test_kill_rejects_non_string_run_id` | Checks that kill rejects non string run id. |
 | `TestWelcomeLoadingEdges.test_valid_yaml_is_normalized` | Checks that valid YAML is normalized. |
@@ -2607,6 +2611,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `resumes live rendering for new high-volume output when requested` | Verifies that the high-volume output resume action renders later live output again. |
 | `disables high-volume resume controls once the run is no longer active` | Verifies that stale high-volume resume controls are disabled after a run leaves the running state. |
 | `adds a final high-volume summary for skipped live-rendered lines` | Verifies that completed high-volume runs print a one-time summary of lines that were retained but not rendered live. |
+| `adds a final live summary when progress rows were collapsed` | Verifies that completed runs explain when progress/status rows were collapsed in the live terminal while the full transcript remains preserved. |
 | `resets high-volume counters for a new run` | Verifies that high-volume output counters reset before a fresh brokered run starts in the same tab. |
 | `queues multi-line appends in chunks and updates raw lines once flushed` | Verifies that bulk output replay queues multi-line output through the batch flusher and syncs raw lines after flush. |
 | `uses delayed tail restore for large mobile output bursts` | Verifies that large mobile output bursts keep the transcript pinned to the prompt after delayed layout growth. |
@@ -2779,7 +2784,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line` | Verifies that runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line. |
 | `runCommand appends a count-aware preview truncation notice on exit` | Verifies that runCommand appends a count-aware preview truncation notice on exit. |
 | `runCommand refreshes and broadcasts project context after successful project built-ins` | Verifies that successful terminal project commands refresh local project context and notify passive same-session tabs. |
-| `runCommand preserves output classes from streamed events` | Verifies that runCommand preserves output classes from streamed events. |
+| `runCommand preserves output classes and blank streamed lines` | Verifies that runCommand preserves output classes and blank streamed lines. |
 | `marks brokered output as live when high-volume output handling is configured` | Verifies that brokered stream output carries the live-output marker used by high-volume browser rendering. |
 | `runCommand suppresses nc inverse-host-lookup noise while keeping the open-port result` | Verifies that `nc` reverse-DNS warning noise is filtered while the meaningful open-port line remains visible. |
 | `doKill shows a notice when the kill request fails` | Verifies that doKill shows a notice when the kill request fails. |

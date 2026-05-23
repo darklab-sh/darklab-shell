@@ -173,6 +173,26 @@
     return tone;
   }
 
+  function _constellationToneStyle(tone, extraVars = {}) {
+    const style = [];
+    const hue = Number(tone?.hue);
+    const saturation = Number(tone?.saturation);
+    if (Number.isFinite(hue)) style.push(`--star-hue:${hue}`);
+    if (Number.isFinite(saturation)) style.push(`--star-saturation:${saturation}%`);
+    Object.entries(extraVars).forEach(([key, value]) => {
+      if (!key || value === undefined || value === null) return;
+      style.push(`${key}:${value}`);
+    });
+    return style.join(';');
+  }
+
+  function _constellationKindClass(kind, prefix) {
+    const normalized = String(kind || '').trim().toLowerCase();
+    if (normalized === 'error') return `${prefix}-kind-error`;
+    if (normalized === 'warn') return `${prefix}-kind-warn`;
+    return '';
+  }
+
   function _categoryLegendLabel(category) {
     const normalized = String(category || '').trim().toLowerCase();
     if (normalized.includes('vulner')) return 'Vuln';
@@ -2427,12 +2447,8 @@
       const radiusSource = Math.max(Number(star.output_line_count || 0), findingCount * 40);
       const radius = Math.max(1.8, Math.min(8.5, 2 + Math.sqrt(radiusSource + 1) * 0.18));
       const maxKind = String(star.max_kind || 'info');
-      const tone = maxKind === 'error'
-        ? { hue: 0, saturation: 100 }
-        : maxKind === 'warn'
-          ? { hue: 42, saturation: 100 }
-          : _categoryTone(star.category);
-      const starStyle = `--star-hue:${tone.hue};--star-saturation:${tone.saturation}%;--star-age-glow:${ageGlow.toFixed(2)}`;
+      const tone = _categoryTone(star.category);
+      const starStyle = _constellationToneStyle(tone, { '--star-age-glow': ageGlow.toFixed(2) });
       const failed = _isFailedExitCode(star.exit_code);
       return {
         star,
@@ -2465,20 +2481,27 @@
       segments.forEach((segment) => {
         const path = _constellationStreakPath(segment);
         if (!path) return;
+        const kindClass = _constellationKindClass(segment[0].maxKind, 'status-monitor-constellation-streak');
         svg.appendChild(_svgEl('path', {
-          class: 'status-monitor-constellation-streak',
+          class: [
+            'status-monitor-constellation-streak',
+            kindClass,
+          ].filter(Boolean).join(' '),
           d: path,
-          style: `--star-hue:${tone.hue};--star-saturation:${tone.saturation}%`,
+          style: _constellationToneStyle(tone),
         }));
       });
     });
     plottedStars.forEach(({ star, x, y, radius, opacity, starStyle, failed, offScale, maxKind, findingCount }, index) => {
       const starId = String(star.id || `${star.root || 'run'}:${star.started || ''}:${index}`);
       starsByNodeId.set(starId, { star, x, y });
+      const nodeKindClass = _constellationKindClass(maxKind, 'status-monitor-star-node');
       const node = _svgEl('g', {
-        class: offScale
-          ? 'status-monitor-star-node status-monitor-star-node-offscale'
-          : 'status-monitor-star-node',
+        class: [
+          'status-monitor-star-node',
+          offScale ? 'status-monitor-star-node-offscale' : '',
+          nodeKindClass,
+        ].filter(Boolean).join(' '),
         tabindex: '0',
         role: 'button',
         'aria-label': `${star.root || 'run'} ${_formatStarStarted(star.started)}${findingCount ? `, ${findingCount} findings` : ''}`,

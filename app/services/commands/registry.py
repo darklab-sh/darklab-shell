@@ -13,7 +13,7 @@ import logging
 import os
 import re
 import shlex
-from typing import cast
+from typing import Any, cast
 import yaml
 from urllib.parse import urlparse
 
@@ -74,6 +74,18 @@ APP_HINTS_MOBILE_FILE = os.path.join(_CONF, "app_hints_mobile.txt")
 AMASS_DEFAULT_WORKSPACE_DIR = "tools/amass"
 RESTRICTABLE_VALUE_TYPES = {"cidr", "domain", "host", "ip", "target", "url"}
 PROJECT_TARGET_VALUE_TYPES = RESTRICTABLE_VALUE_TYPES | {"port_set"}
+_COMMANDS_REGISTRY_CACHE: dict[str, Any] = {
+    "signature": None,
+    "registry": None,
+}
+_COMMANDS_POLICY_CACHE: dict[str, Any] = {
+    "signature": None,
+    "policy": None,
+}
+_COMMANDS_GROUPING_CACHE: dict[str, Any] = {
+    "signature": None,
+    "grouping": None,
+}
 
 @dataclass(frozen=True)
 class CommandValidationResult:
@@ -645,14 +657,53 @@ def _merge_commands_registry(base: dict, overlay: dict) -> dict:
     )
 
 
+def _commands_registry_signature(path: str) -> tuple[tuple[str, int | None, int | None], ...]:
+    root, ext = os.path.splitext(path)
+    candidates = (path, f"{root}.local{ext}")
+    signature = []
+    for candidate in candidates:
+        normalized = os.path.abspath(candidate)
+        try:
+            stat = os.stat(normalized)
+        except OSError:
+            signature.append((normalized, None, None))
+            continue
+        signature.append((normalized, stat.st_mtime_ns, stat.st_size))
+    return tuple(signature)
+
+
 def load_commands_registry():
     """Read commands.yaml plus optional commands.local.yaml overlays."""
-    return registry_loader.load_commands_registry(
+    signature = _commands_registry_signature(COMMANDS_REGISTRY_FILE)
+    if _COMMANDS_REGISTRY_CACHE["signature"] == signature and isinstance(_COMMANDS_REGISTRY_CACHE["registry"], dict):
+        return deepcopy(_COMMANDS_REGISTRY_CACHE["registry"])
+
+    registry = registry_loader.load_commands_registry(
         COMMANDS_REGISTRY_FILE,
         _normalize_registry_autocomplete,
         _empty_autocomplete_context_entry,
         _merge_autocomplete_context,
     )
+    _COMMANDS_REGISTRY_CACHE["signature"] = signature
+    _COMMANDS_REGISTRY_CACHE["registry"] = deepcopy(registry)
+    return registry
+
+
+_NATIVE_LOAD_COMMANDS_REGISTRY = load_commands_registry
+
+
+def _commands_registry_loader_is_native() -> bool:
+    return load_commands_registry is _NATIVE_LOAD_COMMANDS_REGISTRY
+
+
+def clear_commands_registry_cache() -> None:
+    """Clear cached command registry data for tests or live diagnostics."""
+    _COMMANDS_REGISTRY_CACHE["signature"] = None
+    _COMMANDS_REGISTRY_CACHE["registry"] = None
+    _COMMANDS_POLICY_CACHE["signature"] = None
+    _COMMANDS_POLICY_CACHE["policy"] = None
+    _COMMANDS_GROUPING_CACHE["signature"] = None
+    _COMMANDS_GROUPING_CACHE["grouping"] = None
 
 
 def required_secrets_for_command(command: str) -> list[dict[str, object]]:
@@ -970,6 +1021,15 @@ def load_builtin_autocomplete_registry():
 
 def load_command_policy():
     """Return allow/deny prefixes from commands.yaml."""
+    signature = _commands_registry_signature(COMMANDS_REGISTRY_FILE)
+    cached = _COMMANDS_POLICY_CACHE.get("policy")
+    cache_enabled = _commands_registry_loader_is_native()
+    if cache_enabled and _COMMANDS_POLICY_CACHE["signature"] == signature and isinstance(cached, tuple):
+        cached_allow, cached_deny = cached
+        allow_copy = list(cached_allow) if isinstance(cached_allow, list) else None
+        deny_copy = list(cached_deny) if isinstance(cached_deny, list) else []
+        return allow_copy, deny_copy
+
     registry = load_commands_registry()
     allow_prefixes: list[str] = []
     deny_prefixes: list[str] = []
@@ -983,11 +1043,28 @@ def load_command_policy():
 
     allow_prefixes = _dedupe_preserve_order(allow_prefixes)
     deny_prefixes = _dedupe_preserve_order(deny_prefixes)
-    return (allow_prefixes if allow_prefixes else None), deny_prefixes
+    policy = (allow_prefixes if allow_prefixes else None), deny_prefixes
+    if cache_enabled:
+        _COMMANDS_POLICY_CACHE["signature"] = signature
+        _COMMANDS_POLICY_CACHE["policy"] = (
+            list(policy[0]) if isinstance(policy[0], list) else None,
+            list(policy[1]),
+        )
+    return policy
 
 
 def load_allow_grouping_flags() -> dict[str, set[str]]:
     """Return short flags that may be grouped for allow-prefix matching."""
+    signature = _commands_registry_signature(COMMANDS_REGISTRY_FILE)
+    cached = _COMMANDS_GROUPING_CACHE.get("grouping")
+    cache_enabled = _commands_registry_loader_is_native()
+    if cache_enabled and _COMMANDS_GROUPING_CACHE["signature"] == signature and isinstance(cached, dict):
+        return {
+            str(root): set(flags)
+            for root, flags in cached.items()
+            if isinstance(flags, set)
+        }
+
     registry = load_commands_registry()
     grouped: dict[str, set[str]] = {}
     for entry in registry.get("commands", []) or []:
@@ -1003,6 +1080,12 @@ def load_allow_grouping_flags() -> dict[str, set[str]]:
         }
         if flags:
             grouped.setdefault(root, set()).update(flags)
+    if cache_enabled:
+        _COMMANDS_GROUPING_CACHE["signature"] = signature
+        _COMMANDS_GROUPING_CACHE["grouping"] = {
+            root: set(flags)
+            for root, flags in grouped.items()
+        }
     return grouped
 
 

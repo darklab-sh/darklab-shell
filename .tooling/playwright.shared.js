@@ -17,7 +17,7 @@ export function buildIsolatedWebServer(port, slot) {
   return {
     command: `/bin/bash ${resolve(rootDir, 'scripts/playwright/run_e2e_server.sh')} ${port} ${slot}`,
     cwd: rootDir,
-    url: `http://localhost:${port}/health`,
+    url: `http://127.0.0.1:${port}/health`,
     reuseExistingServer: false,
     gracefulShutdown: { signal: 'SIGTERM', timeout: 5_000 },
     stdout: showWebServerLogs ? 'pipe' : 'ignore',

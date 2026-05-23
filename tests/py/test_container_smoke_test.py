@@ -447,6 +447,66 @@ def test_post_run_kills_early_when_stop_text_is_seen(monkeypatch: pytest.MonkeyP
     assert waited == [("http://example.test", "session-123", "run-123")]
 
 
+def test_post_run_reads_batched_output_for_stop_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeResponse:
+        def __init__(self, lines: list[str] | None = None, body: str = ""):
+            self._lines = [line.encode("utf-8") for line in lines or []]
+            self._body = body.encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def readline(self):
+            if not self._lines:
+                return b""
+            return self._lines.pop(0)
+
+        def read(self):
+            return self._body
+
+    killed: list[tuple[str, str, str]] = []
+
+    def _fake_urlopen(req, timeout=0):
+        del timeout
+        if req.full_url == "http://example.test/runs":
+            return _FakeResponse(body='{"run_id":"run-123","stream":"/runs/run-123/stream"}')
+        assert req.full_url == "http://example.test/runs/run-123/stream"
+        return _FakeResponse([
+            'id: 1-0\n',
+            'data: {"type":"started","run_id":"run-123"}\n',
+            '\n',
+            'id: 2-0\n',
+            'data: {"type":"output_batch","lines":[{"text":"Usage: ping [options]\\n"},{"text":"more help\\n"}]}\n',
+            '\n',
+            'id: 3-0\n',
+            'data: {"type":"exit","code":0}\n',
+            '\n',
+        ])
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "_post_kill",
+        lambda base_url, session_id, run_id: killed.append((base_url, session_id, run_id)),
+    )
+    monkeypatch.setattr(sys.modules[__name__], "_wait_for_run_to_stop", lambda *args, **kwargs: None)
+
+    events, killed_early = _post_run(
+        "http://example.test",
+        "ping -h",
+        "session-123",
+        timeout=10,
+        stop_text=["Usage"],
+    )
+
+    assert killed_early is True
+    assert _collect_visible_lines(events, "ping -h") == ["Usage: ping [options]", "more help"]
+    assert killed == [("http://example.test", "session-123", "run-123")]
+
+
 @pytest.mark.parametrize(
     ("cases", "expected"),
     [
@@ -597,12 +657,8 @@ def _normalize_line(command: str, line: str) -> str:
 
 def _collect_visible_lines(events: list[dict[str, object]], command: str) -> list[str]:
     lines: list[str] = []
-    for event in events:
-        if event.get("type") not in {"output", "notice"}:
-            continue
-        text = event.get("text")
-        if not isinstance(text, str):
-            continue
+
+    def _append_text(text: str) -> None:
         for raw_line in text.splitlines():
             line = strip_ansi_codes(raw_line).rstrip()
             if not line:
@@ -614,6 +670,20 @@ def _collect_visible_lines(events: list[dict[str, object]], command: str) -> lis
             if line.startswith("# note:"):
                 continue
             lines.append(_normalize_line(command, line))
+
+    for event in events:
+        event_type = event.get("type")
+        if event_type == "output_batch":
+            batch_lines = event.get("lines")
+            if isinstance(batch_lines, Sequence) and not isinstance(batch_lines, (str, bytes, bytearray)):
+                for item in batch_lines:
+                    text = item.get("text") if isinstance(item, Mapping) else None
+                    if isinstance(text, str):
+                        _append_text(text)
+            continue
+        text = event.get("text")
+        if event_type in {"output", "notice"} and isinstance(text, str):
+            _append_text(text)
     return lines
 
 
@@ -965,7 +1035,7 @@ def _post_run(
                 run_id = str(event.get("run_id", ""))
             if event.get("type") == "exit":
                 break
-            if (stop_text or stop_patterns) and event.get("type") in {"output", "notice"}:
+            if (stop_text or stop_patterns) and event.get("type") in {"output", "output_batch", "notice"}:
                 if _is_output_satisfied(events, command, stop_text, stop_patterns):
                     if run_id:
                         _post_kill(base_url, session_id, run_id)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import logging
 from typing import Any
 
@@ -13,10 +12,17 @@ from core import database
 from core.helpers import get_client_ip, get_log_session_id, get_session_id
 from extensions import limiter
 from services.projects.utils import normalize_page_limit, normalize_page_offset, page_payload
-from services.scheduler.commands import ScheduleCommandValidationError, validate_schedule_command
+from services.scheduler.commands import ScheduleCommandValidationError
 from services.scheduler.cron import ScheduleCronError
-from services.scheduler.dispatch import fire_schedule
-from services.scheduler.service import ScheduleError, coerce_schedule_bool, get_schedule
+from services.scheduler.route_helpers import (
+    RouteBaselineRunNotCompleted,
+    RouteBaselineRunNotFound,
+    fire_watcher_now,
+    normalize_watcher_create_payload,
+    normalize_watcher_update_payload,
+    schedule_for_watcher,
+)
+from services.scheduler.service import ScheduleError, get_schedule
 from services.session.variables import SessionVariableError
 from services.watchers.serialization import watcher_fire_payload, watcher_payload
 from services.watchers.service import (
@@ -43,14 +49,6 @@ class WatcherRouteError(ValueError):
 
 class WatcherNotFound(WatcherRouteError):
     """Raised when a watcher is not visible to the current session."""
-
-
-class BaselineRunNotFound(WatcherRouteError):
-    """Raised when a baseline run is not visible to the current session."""
-
-
-class BaselineRunNotCompleted(WatcherRouteError):
-    """Raised when a baseline run is not complete enough to watch."""
 
 
 def _watcher_write_limit():
@@ -103,9 +101,9 @@ def _watcher_log_payload(watcher=None, *, session_id: str = "", source: str = "b
 def _watcher_error_response(exc):
     if isinstance(exc, WatcherNotFound):
         return jsonify({"error": "watcher_not_found"}), 404
-    if isinstance(exc, BaselineRunNotFound):
+    if isinstance(exc, RouteBaselineRunNotFound):
         return jsonify({"error": "baseline_run_not_found"}), 404
-    if isinstance(exc, BaselineRunNotCompleted):
+    if isinstance(exc, RouteBaselineRunNotCompleted):
         return jsonify({"error": "invalid_baseline", "message": str(exc)}), 400
     if isinstance(exc, WatcherError):
         status = 409 if "quota" in str(exc).lower() else 400
@@ -138,39 +136,6 @@ def _watcher_for_session_or_404(watcher_id: str, session_id: str, *, conn=None):
     if watcher is None or watcher.session_token != session_id:
         raise WatcherNotFound("watcher not found")
     return watcher
-
-
-def _baseline_run_for_session_or_error(run_id: str, session_id: str, *, conn=None) -> dict[str, Any]:
-    baseline_id = str(run_id or "").strip()
-    if not baseline_id:
-        raise BaselineRunNotFound("baseline run not found")
-    assert conn is not None
-    row = conn.execute(
-        "SELECT id, session_id, command, finished FROM runs WHERE id = ? AND session_id = ?",
-        (baseline_id, session_id),
-    ).fetchone()
-    if row is None:
-        raise BaselineRunNotFound("baseline run not found")
-    finished = str(row["finished"] if isinstance(row, dict) else row["finished"] or "").strip()
-    if not finished:
-        raise BaselineRunNotCompleted("baseline run must be completed")
-    return dict(row)
-
-
-def _baseline_mode_from_create(data: dict[str, Any]) -> str:
-    requested = str(data.get("baseline_mode") or "").strip().lower().replace("-", "_")
-    if requested in {"first_run", "first"}:
-        return "first_run"
-    if requested in {"existing_run", "existing", "run"}:
-        return "existing_run"
-    return "existing_run" if str(data.get("baseline_run_id") or "").strip() else "first_run"
-
-
-def _schedule_for_watcher(watcher, *, conn=None):
-    schedule = get_schedule(watcher.schedule_id, conn=conn)
-    if schedule is None:
-        raise WatcherError("watcher schedule not found")
-    return schedule
 
 
 @watchers_bp.route("/watchers")
@@ -211,33 +176,17 @@ def watchers_create():
         return jsonify({"error": "Request body must be a JSON object"}), 400
     try:
         with database.db_connect() as conn:
-            baseline_mode = _baseline_mode_from_create(data)
-            baseline: dict[str, Any] = {}
-            if baseline_mode == "existing_run":
-                baseline = _baseline_run_for_session_or_error(str(data.get("baseline_run_id") or ""), session_id, conn=conn)
-            command_text = str(data.get("command") or data.get("command_text") or baseline.get("command") or "")
-            command = validate_schedule_command(
-                command_text,
-                session_id,
-                workspace_cwd=str(data.get("workspace_cwd") or ""),
-            )
+            payload = normalize_watcher_create_payload(data, session_id, conn=conn)
             watcher = create_watcher(
                 session_id,
-                command_text=command,
-                baseline_run_id=str(baseline.get("id") or ""),
-                cron_expr=data.get("cron_expr"),
-                cadence_preset=data.get("cadence_preset"),
-                timezone_name=data.get("timezone"),
-                label=str(data.get("label") or ""),
-                options=data.get("options"),
-                enabled=coerce_schedule_bool(data.get("enabled"), default=True),
+                **payload,
                 conn=conn,
             )
-            schedule = _schedule_for_watcher(watcher, conn=conn)
+            schedule = schedule_for_watcher(watcher, conn=conn)
             conn.commit()
     except (
-        BaselineRunNotFound,
-        BaselineRunNotCompleted,
+        RouteBaselineRunNotFound,
+        RouteBaselineRunNotCompleted,
         WatcherError,
         ScheduleError,
         ScheduleCronError,
@@ -266,37 +215,17 @@ def watchers_update(watcher_id):
     try:
         with database.db_connect() as conn:
             watcher = _watcher_for_session_or_404(watcher_id, session_id, conn=conn)
-            updates = dict(data)
-            if "command" in updates or "command_text" in updates:
-                updates["command_text"] = validate_schedule_command(
-                    updates.get("command", updates.get("command_text")),
-                    session_id,
-                    workspace_cwd=str(updates.get("workspace_cwd") or ""),
-                )
-            if "timezone_name" in updates and "timezone" not in updates:
-                updates["timezone"] = updates.pop("timezone_name")
-            state = str(updates.pop("state", "") or "").strip().lower()
-            enabled_value = updates.get("enabled")
-            enabled_update = coerce_schedule_bool(enabled_value) if enabled_value is not None else None
-            pause_requested = state == "paused" or updates.pop("pause", False) is True or enabled_update is False
-            resume_requested = (
-                state in {"ok", "resume", "active"}
-                or updates.pop("resume", False) is True
-                or enabled_update is True
-            )
-            updates.pop("enabled", None)
-            updates.pop("workspace_cwd", None)
-            updates.pop("reason", None)
-            updated = update_watcher(watcher.id, updates, conn=conn) if updates else watcher
+            route_update = normalize_watcher_update_payload(data, session_id)
+            updated = update_watcher(watcher.id, route_update.updates, conn=conn) if route_update.updates else watcher
             if updated is None:
                 raise WatcherNotFound("watcher not found")
-            if pause_requested:
-                updated = pause_watcher(updated.id, str(data.get("reason") or "operator paused"), conn=conn)
-            elif resume_requested:
+            if route_update.pause_requested:
+                updated = pause_watcher(updated.id, route_update.reason, conn=conn)
+            elif route_update.resume_requested:
                 updated = resume_watcher(updated.id, conn=conn)
             if updated is None:
                 raise WatcherNotFound("watcher not found")
-            schedule = _schedule_for_watcher(updated, conn=conn)
+            schedule = schedule_for_watcher(updated, conn=conn)
             conn.commit()
     except (
         WatcherNotFound,
@@ -375,7 +304,7 @@ def watchers_accept_baseline(watcher_id):
             accepted = accept_baseline(watcher.id, run_id=data.get("run_id"), conn=conn)
             if accepted is None:
                 raise WatcherNotFound("watcher not found")
-            schedule = _schedule_for_watcher(accepted, conn=conn)
+            schedule = schedule_for_watcher(accepted, conn=conn)
             conn.commit()
     except (WatcherNotFound, WatcherError, ScheduleError, ValueError) as exc:
         response = _watcher_error_response(exc)
@@ -391,14 +320,10 @@ def watchers_run_now(watcher_id):
     session_id, error_response = _required_token_session()
     if error_response:
         return error_response
-    fired_at = datetime.now(timezone.utc).isoformat()
     try:
         with database.db_connect() as conn:
             watcher = _watcher_for_session_or_404(watcher_id, session_id, conn=conn)
-            schedule = _schedule_for_watcher(watcher, conn=conn)
-            status = fire_schedule(conn, schedule, fired_at=fired_at)
-            refreshed = get_watcher(watcher.id, conn=conn) or watcher
-            refreshed_schedule = get_schedule(schedule.id, conn=conn) or schedule
+            status, refreshed, refreshed_schedule, fired_at = fire_watcher_now(conn, watcher)
             conn.commit()
     except (WatcherNotFound, WatcherError, ScheduleError, ScheduleCronError, ValueError) as exc:
         response = _watcher_error_response(exc)

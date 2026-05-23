@@ -64,11 +64,9 @@ from services.runs.output_store import (
     preview_output_entries_from_run,
 )
 from services.runs.structured_filters import (
-    StructuredOutputFilters,
     entity_run_exists_clause,
     filters_have_summary_selectors,
     filters_need_line_event_scan,
-    merge_structured_filters,
     run_output_summary_exists_clause,
     run_matches_structured_filters,
     structured_filters_from_params,
@@ -880,11 +878,6 @@ def get_history():
     # column. Reverse-i-search uses this to behave like bash i-search — matching
     # on typed command text, not on output text that FTS would otherwise pull in.
     scope = _normalize_history_filter_text(request.args.get("scope")).lower()
-    if scope == "findings":
-        structured_filters = merge_structured_filters(
-            structured_filters,
-            StructuredOutputFilters(signals=("findings",)),
-        )
     if type_filter not in {"all", "runs", "runs_builtin", "runs_external", "snapshots"}:
         type_filter = "all"
     run_kind = {
@@ -920,7 +913,7 @@ def get_history():
                 command_root,
                 exit_code_filter,
                 date_range,
-                "all" if scope == "findings" else scope,
+                scope,
                 project_id,
                 starred_only=starred_only,
                 run_kind=run_kind,
