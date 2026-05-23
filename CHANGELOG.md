@@ -456,6 +456,8 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Tests:** extended existing History insights coverage to prove constellation rows use the summary-backed output kind without changing the suite count.
 - **Watcher CLI details match schedule details** — `darklab watch info` now uses the same sectioned detail rendering as `darklab schedule info`, including watcher state, baseline and last-run fields, cadence, health counters, options, and recent fire rows.
   - **Tests:** extended existing CLI watcher coverage without changing the suite count.
+- **darklab CLI installs shell completions** — `darklab completion bash|zsh|fish` now emits static completion scripts for CLI subcommands, nested command groups, option names, and fixed choices such as output formats, Atlas orphan filters, and notification channel kinds without requiring an API request. `darklab completion install --shell auto` writes the right script into the current user's shell-completion directory.
+  - **Tests:** extended existing CLI smoke coverage without changing the suite count.
 - **Workspace sudo fallback checks are cached** — workspace repair/delete/move paths now reuse cached sudo and scanner-user lookups instead of walking `PATH` and querying passwd data on every fallback operation.
   - **Tests:** reran the focused workspace backend coverage without changing the suite count.
 - **Share redaction rules reuse compiled regexes** — share/export redaction now compiles each effective rule set once and reuses the patterns across line, target, entity, notification, and evidence-package fields while still reporting invalid ad hoc patterns once per compiled rule set.

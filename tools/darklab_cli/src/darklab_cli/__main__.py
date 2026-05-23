@@ -6,6 +6,7 @@ import argparse
 from datetime import datetime
 import getpass
 import json
+import os
 from pathlib import Path
 import shlex
 import sys
@@ -16,6 +17,9 @@ from .client import DarklabClient, DarklabCliError, die, iter_sse_events, load_c
 
 STREAM_INCOMPLETE_EXIT_CODE = 2
 STREAM_INTERRUPTED_EXIT_CODE = 130
+COMPLETION_SHELLS = ("bash", "zsh", "fish")
+COMPLETION_INSTALL_SHELLS = ("auto", *COMPLETION_SHELLS)
+NOTIFICATION_CHANNEL_KIND_CHOICES = ("webhook", "slack", "discord", "telegram", "pushover", "email")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -27,6 +31,15 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--token", help="tok_ session token")
     parser.add_argument("--timeout", type=float, default=None, help="HTTP timeout in seconds")
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
+
+    completion = sub.add_parser("completion", help="Print or install shell completion for bash, zsh, or fish.")
+    completion.add_argument("completion_action", choices=(*COMPLETION_SHELLS, "install"), metavar="SHELL|install")
+    completion.add_argument(
+        "--shell",
+        choices=COMPLETION_INSTALL_SHELLS,
+        default="auto",
+        help="Shell to install for; default auto.",
+    )
 
     whoami = sub.add_parser("whoami", help="Show token metadata and last-auth timestamp.")
     whoami.add_argument("--format", choices=("text", "json"), default="text")
@@ -264,7 +277,11 @@ def _parser() -> argparse.ArgumentParser:
             "darklab watch create --first-run --every hourly -- nmap -sV darklab.sh"
         ),
     )
-    watch_create.add_argument("--first-run", action="store_true", help="Capture the first successful watcher run as the baseline.")
+    watch_create.add_argument(
+        "--first-run",
+        action="store_true",
+        help="Capture the first successful watcher run as the baseline.",
+    )
     watch_create.add_argument("--cron")
     watch_create.add_argument("--every", metavar="PRESET", help="Cadence preset: hourly, daily, or weekly.")
     watch_create.add_argument("--label")
@@ -363,11 +380,321 @@ def _add_atlas_common_filters(parser: argparse.ArgumentParser, *, include_entity
         parser.add_argument("--entity-type", choices=("domain", "ip", "url", "hash", "cve"))
 
 
+def _completion_subparsers(parser: argparse.ArgumentParser) -> dict[str, argparse.ArgumentParser]:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return dict(action.choices)
+    return {}
+
+
+def _completion_parser_paths(
+    parser: argparse.ArgumentParser,
+    path: tuple[str, ...] = (),
+) -> dict[tuple[str, ...], argparse.ArgumentParser]:
+    paths = {path: parser}
+    for name, child in _completion_subparsers(parser).items():
+        paths.update(_completion_parser_paths(child, (*path, name)))
+    return paths
+
+
+def _completion_option_data(parser: argparse.ArgumentParser) -> tuple[list[str], dict[str, list[str]]]:
+    options: list[str] = []
+    choices: dict[str, list[str]] = {}
+    for action in parser._actions:
+        option_strings = [str(option) for option in action.option_strings if option]
+        if not option_strings:
+            continue
+        options.extend(option_strings)
+        action_choices = getattr(action, "choices", None)
+        if action_choices:
+            values = [str(value) for value in action_choices]
+            for option in option_strings:
+                choices[option] = values
+    return sorted(set(options)), choices
+
+
+def _completion_static_argument_choices(path: tuple[str, ...]) -> list[str]:
+    if path == ("completion",):
+        return [*COMPLETION_SHELLS, "install"]
+    if path == ("notify", "create"):
+        return list(NOTIFICATION_CHANNEL_KIND_CHOICES)
+    return []
+
+
+def _completion_spec() -> dict[str, Any]:
+    parser = _parser()
+    paths = _completion_parser_paths(parser)
+    spec: dict[str, Any] = {}
+    for path, path_parser in paths.items():
+        options, option_choices = _completion_option_data(path_parser)
+        spec[":".join(path)] = {
+            "arguments": _completion_static_argument_choices(path),
+            "choices": option_choices,
+            "options": options,
+            "subcommands": sorted(_completion_subparsers(path_parser)),
+        }
+    return spec
+
+
+def _completion_words(values: list[str] | tuple[str, ...]) -> str:
+    return " ".join(str(value) for value in values)
+
+
+def _completion_shell_words(values: list[str] | tuple[str, ...]) -> str:
+    return " ".join(shlex.quote(str(value)) for value in values)
+
+
+def _completion_path_cases(spec: dict[str, Any], field: str) -> str:
+    lines: list[str] = []
+    for key in sorted(spec):
+        words = _completion_shell_words(spec[key].get(field) or [])
+        if not words:
+            continue
+        lines.append(f"    {shlex.quote(key)}) _darklab_comp_words {shlex.quote(words)} ;;")
+    return "\n".join(lines)
+
+
+def _completion_choice_cases(spec: dict[str, Any]) -> str:
+    lines: list[str] = []
+    for key in sorted(spec):
+        for option, choices in sorted((spec[key].get("choices") or {}).items()):
+            words = _completion_shell_words(choices)
+            if not words:
+                continue
+            lines.append(f"    {shlex.quote(f'{key}:{option}')}) _darklab_comp_words {shlex.quote(words)}; return ;;")
+    return "\n".join(lines)
+
+
+def _completion_nested_cases(spec: dict[str, Any]) -> str:
+    lines: list[str] = []
+    for key in sorted(spec):
+        if ":" in key or not key:
+            continue
+        subcommands = _completion_shell_words(spec[key].get("subcommands") or [])
+        if subcommands:
+            lines.append(
+                f"        {shlex.quote(key)}) _darklab_word_in \"$word\" {shlex.quote(subcommands)} && sub=\"$word\" ;;"
+            )
+    return "\n".join(lines)
+
+
+def _completion_bash(spec: dict[str, Any]) -> str:
+    top_commands = _completion_shell_words(spec[""].get("subcommands") or [])
+    return f"""# bash completion for darklab
+_darklab_completion() {{
+  local cur prev top sub word path_key
+  COMPREPLY=()
+  cur="${{COMP_WORDS[COMP_CWORD]}}"
+  prev="${{COMP_WORDS[COMP_CWORD-1]}}"
+
+  _darklab_word_in() {{ case " $2 " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }}
+  _darklab_comp_words() {{ COMPREPLY=( $(compgen -W "$1" -- "$cur") ); }}
+
+  top=""
+  sub=""
+  for ((i=1; i<COMP_CWORD; i++)); do
+    word="${{COMP_WORDS[i]}}"
+    [[ "$word" == -* ]] && continue
+    if [[ -z "$top" ]]; then
+      _darklab_word_in "$word" {shlex.quote(top_commands)} && top="$word"
+    elif [[ -z "$sub" ]]; then
+      case "$top" in
+{_completion_nested_cases(spec)}
+      esac
+    fi
+  done
+  path_key="$top"
+  [[ -n "$sub" ]] && path_key="$top:$sub"
+
+  case "$path_key:$prev" in
+{_completion_choice_cases(spec)}
+  esac
+
+  if [[ "$cur" == -* ]]; then
+    case "$path_key" in
+{_completion_path_cases(spec, "options")}
+    esac
+    return
+  fi
+
+  if [[ -z "$top" ]]; then
+    _darklab_comp_words {shlex.quote(top_commands)}
+    return
+  fi
+  if [[ -z "$sub" ]]; then
+    case "$top" in
+{_completion_path_cases(spec, "subcommands")}
+    esac
+  fi
+  case "$path_key" in
+{_completion_path_cases(spec, "arguments")}
+  esac
+}}
+complete -F _darklab_completion darklab"""
+
+
+def _completion_zsh(spec: dict[str, Any]) -> str:
+    top_commands = _completion_shell_words(spec[""].get("subcommands") or [])
+    return f"""#compdef darklab
+_darklab() {{
+  local cur prev top sub word path_key
+  cur="${{words[CURRENT]}}"
+  prev="${{words[CURRENT-1]}}"
+
+  _darklab_word_in() {{ case " $2 " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }}
+  _darklab_comp_words() {{ compadd -- ${{(z)1}}; }}
+
+  top=""
+  sub=""
+  for ((i=2; i<CURRENT; i++)); do
+    word="${{words[i]}}"
+    [[ "$word" == -* ]] && continue
+    if [[ -z "$top" ]]; then
+      _darklab_word_in "$word" {shlex.quote(top_commands)} && top="$word"
+    elif [[ -z "$sub" ]]; then
+      case "$top" in
+{_completion_nested_cases(spec)}
+      esac
+    fi
+  done
+  path_key="$top"
+  [[ -n "$sub" ]] && path_key="$top:$sub"
+
+  case "$path_key:$prev" in
+{_completion_choice_cases(spec)}
+  esac
+
+  if [[ "$cur" == -* ]]; then
+    case "$path_key" in
+{_completion_path_cases(spec, "options")}
+    esac
+    return
+  fi
+
+  if [[ -z "$top" ]]; then
+    _darklab_comp_words {shlex.quote(top_commands)}
+    return
+  fi
+  if [[ -z "$sub" ]]; then
+    case "$top" in
+{_completion_path_cases(spec, "subcommands")}
+    esac
+  fi
+  case "$path_key" in
+{_completion_path_cases(spec, "arguments")}
+  esac
+}}
+compdef _darklab darklab"""
+
+
+def _fish_option(option: str) -> str:
+    if option.startswith("--"):
+        return f"-l {shlex.quote(option[2:])}"
+    if option.startswith("-") and len(option) == 2:
+        return f"-s {shlex.quote(option[1:])}"
+    return f"-o {shlex.quote(option.lstrip('-'))}"
+
+
+def _fish_condition(path: tuple[str, ...], spec: dict[str, Any]) -> str:
+    if not path:
+        return "__fish_use_subcommand"
+    clauses = [f"__fish_seen_subcommand_from {shlex.quote(part)}" for part in path]
+    if len(path) == 1:
+        subcommands = spec[":".join(path)].get("subcommands") or []
+        if subcommands:
+            clauses.append("not __fish_seen_subcommand_from " + _completion_shell_words(subcommands))
+    return "; and ".join(clauses)
+
+
+def _completion_fish(spec: dict[str, Any]) -> str:
+    lines = [
+        "# fish completion for darklab",
+        "complete -c darklab -f",
+        f"complete -c darklab -f -n '__fish_use_subcommand' -a '{_completion_words(spec[''].get('subcommands') or [])}'",
+    ]
+    for key in sorted(spec):
+        path = tuple(part for part in key.split(":") if part)
+        condition = _fish_condition(path, spec)
+        subcommands = spec[key].get("subcommands") or []
+        if path and subcommands:
+            lines.append(
+                "complete -c darklab -f "
+                f"-n {shlex.quote(condition)} -a {shlex.quote(_completion_words(subcommands))}"
+            )
+        arguments = spec[key].get("arguments") or []
+        if arguments:
+            lines.append(
+                "complete -c darklab -f "
+                f"-n {shlex.quote(condition)} -a {shlex.quote(_completion_words(arguments))}"
+            )
+        choices_by_option = spec[key].get("choices") or {}
+        for option in spec[key].get("options") or []:
+            choice_words = _completion_words(choices_by_option.get(option) or [])
+            choice_arg = f" -xa {shlex.quote(choice_words)}" if choice_words else ""
+            lines.append(
+                "complete -c darklab -f "
+                f"-n {shlex.quote(condition)} {_fish_option(option)}{choice_arg}"
+            )
+    return "\n".join(lines)
+
+
+def _completion_script(shell: str) -> str:
+    spec = _completion_spec()
+    match shell:
+        case "bash":
+            return _completion_bash(spec)
+        case "zsh":
+            return _completion_zsh(spec)
+        case "fish":
+            return _completion_fish(spec)
+    raise DarklabCliError(f"unsupported completion shell: {shell}")
+
+
+def _detect_completion_shell() -> str:
+    shell = Path(os.environ.get("SHELL", "")).name
+    if shell in COMPLETION_SHELLS:
+        return shell
+    raise DarklabCliError("could not detect shell; pass --shell bash, --shell zsh, or --shell fish")
+
+
+def _completion_install_path(shell: str) -> Path:
+    if shell == "bash":
+        data_home = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+        return data_home / "bash-completion" / "completions" / "darklab"
+    if shell == "zsh":
+        return Path.home() / ".zfunc" / "_darklab"
+    if shell == "fish":
+        config_home = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+        return config_home / "fish" / "completions" / "darklab.fish"
+    raise DarklabCliError(f"unsupported completion shell: {shell}")
+
+
+def _install_completion(shell: str) -> str:
+    resolved_shell = _detect_completion_shell() if shell == "auto" else shell
+    path = _completion_install_path(resolved_shell)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_completion_script(resolved_shell) + "\n", encoding="utf-8")
+    message = f"Installed {resolved_shell} completion to {path}"
+    if resolved_shell == "zsh":
+        message += (
+            "\nIf completion is not already enabled, add this to your zsh startup file:\n"
+            "  fpath=(~/.zfunc $fpath)\n"
+            "  autoload -Uz compinit && compinit"
+        )
+    return message
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     raw_argv = sys.argv[1:] if argv is None else argv
     args = parser.parse_args(raw_argv)
     try:
+        if args.command == "completion":
+            if args.completion_action == "install":
+                print(_install_completion(args.shell))
+            else:
+                print(_completion_script(args.completion_action))
+            return 0
         client = DarklabClient(load_config(args))
         return _dispatch(client, args)
     except KeyboardInterrupt:

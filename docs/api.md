@@ -16,6 +16,12 @@ export DARKLAB_TOKEN=tok_your_session_token
 darklab whoami
 ```
 
+Shell completion does not need a live API connection. `darklab completion install --shell auto`
+installs completion for the detected shell, while `darklab completion bash`,
+`darklab completion zsh`, and `darklab completion fish` print the scripts without
+installing them. Completion covers CLI commands, nested command groups, option
+names, and fixed choices such as output formats and notification channel kinds.
+
 ---
 
 ## Auth
@@ -414,12 +420,30 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab watch accept <watcher_id> [--run-id RUN_ID]` | Promote the latest watcher fire, or the supplied run, to the new baseline. |
 | `darklab watch fires <watcher_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List watcher fire audit rows. `--limit` defaults to 50 and caps at 100. |
 | `darklab notify list\|create\|update\|mute\|unmute\|delete\|test\|events ...` | Manage outbound notification channels and read delivery audit rows. Most read and mutation commands accept `--format text\|json`; `notify events` also accepts `ndjson`, and `--limit` defaults to 50 and caps at 100. Channel secrets come from prompts or `--secret-file`, never command-line secret flags. |
+| `darklab completion bash\|zsh\|fish` | Print static shell completion for subcommands, nested subcommands, option names, and fixed choices. This command reads only the local CLI parser and does not require `DARKLAB_API_URL` or `DARKLAB_TOKEN`. |
+| `darklab completion install [--shell auto\|bash\|zsh\|fish]` | Install static shell completion into the current user's shell-completion directory. `auto` reads `$SHELL`; pass a shell explicitly when detection is not enough. |
 | `darklab download <run_id> --artifact ARTIFACT_ID --out DIR` | Download one artifact. |
 
 `darklab download` requires `--artifact`; without it, use `darklab artifacts <run_id>` first. Downloads use the server's attachment filename only after reducing it to a safe local basename, and the CLI refuses to overwrite an existing file. Workspace ZIP download is not exposed in API v1.
 
 Text list outputs include header rows and aligned columns. Use `--format json` or
 `--format ndjson` when you want a stable shape for scripts.
+
+Install completion automatically for your current shell:
+
+```bash
+darklab completion install --shell auto
+```
+
+Or write the generated scripts yourself:
+
+```bash
+darklab completion bash > ~/.local/share/bash-completion/completions/darklab
+darklab completion zsh > ~/.zfunc/_darklab
+darklab completion fish > ~/.config/fish/completions/darklab.fish
+```
+
+For zsh, make sure `~/.zfunc` is on `fpath` and `compinit` is loaded.
 
 ---
 

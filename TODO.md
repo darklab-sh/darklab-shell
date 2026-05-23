@@ -57,10 +57,6 @@ No technical debt items are currently tracked.
 ## Feature Enhancements
 
 ### API / CLI Enhancements
-- **CLI tab completion for `darklab`.**
-  - Add `darklab completion zsh|bash|fish` so operators can install shell completion without adding a runtime dependency.
-  - First slice should be static completion for subcommands, nested subcommands, option names, and fixed choices such as `--format text|json|ndjson`, `--orphan-filter hide|all|only`, and notification channel kinds.
-  - Later, consider quiet API-backed dynamic completion for high-value live values such as project names, active run ids, and notification channel ids. Dynamic completion should fail silently when the API is unavailable and avoid slow network calls on every tab press.
 - **Webhook receiver / `POST /api/v1/intel/<provider>` passthrough.**
   - Not for v1.1, but worth scoping — once outbound notifications land, the headless API becomes the natural place to receive `pull-request-merged` / `engagement-kicked-off` webhooks that auto-create projects.
 - **CLI: `darklab logs <run_id>`.**
