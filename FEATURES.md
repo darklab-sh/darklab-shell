@@ -374,12 +374,12 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 - Clicking a signal chip opens the search bar in that scope immediately. Re-clicking the same chip cycles to the next match in the same way as the search bar’s **↓** button.
 - The search bar now supports scope buttons for **text**, **findings**, **warnings**, **errors**, and **summaries**. Scope buttons show live counts, and findings-heavy output opens directly into the **findings** scope.
 - Findings are pattern-driven rather than command-whitelisted. Live `/runs` output is classified server-side and carries additive per-line signal metadata through history restore and share/permalink payloads; the browser uses that metadata as the source of truth for counts, scoped navigation, and summaries. The current server matcher is tuned for the tool output the shell already shows most often:
-  - open-port and service rows from scanners such as `nmap`, `naabu`, `rustscan`, and `nc`
-  - hit rows from `ffuf`, `gobuster`, and related directory fuzzers
-  - passive subdomain rows from `assetfinder`
+  - open-port, service, and reverse-DNS rows from scanners such as `nmap`, `naabu`, `rustscan`, and `nc`
+  - hit rows from `ffuf`, `gobuster`, and related directory fuzzers, with `ffuf` hits tied back to the full URL produced from the command's `FUZZ` template
+  - passive domain and IP rows from `assetfinder`
   - severity-tagged result rows from `nuclei`
-  - DNS answers from `dig`, `host`, and `nslookup`
-  - certificate and TLS verdict lines from `openssl s_client`, `sslscan`, `sslyze`, and `testssl`
+  - DNS answers and query outcomes from `dig`, `host`, and `nslookup`
+  - certificate and TLS verdict lines from `openssl s_client`, `sslscan`, `sslyze`, and `testssl`, including `s_client` certificate subjects, issuers, key details, validity windows, negotiated TLS details, and verification status without treating PEM bodies as findings
 - Noise-heavy lines are intentionally excluded from findings when they behave like banners, progress meters, or startup chatter instead of actionable results.
 - The same server pass also attaches structured entity metadata to external command output lines when it sees public IPs, hostnames, hashes, or CVE IDs. That metadata is kept with live streams, restored history, saved full-output artifacts, and the Session Entity Atlas without re-parsing transcripts.
 - User-killed runs are intentionally **not** counted as errors; the transcript still shows the kill line, but the signal counts stay focused on issues the operator may need to investigate.
@@ -806,7 +806,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - `intel cve <CVE-ID>` queries NVD and Vulners, then shows severity, score, publish/modified dates, summary, references, exploit counts, and exploitability context when provider data is available.
 - Each provider pane reports whether it came from cache, was rate-limited, hit quota backoff, or is missing a required encrypted secret.
 - Private, loopback, and other non-public IPs are blocked by default because vendor intel on those addresses is not useful. `--include-private` allows an explicit override.
-- The external `shodan`, `vt`, `greynoise`, `ipinfo`, `urlscan-cli`, and `chaos` CLI wrappers remain available for users who want provider-native output.
+- The external `shodan`, `vt`, `greynoise`, `ipinfo`, `urlscan-cli`, and `chaos` CLI wrappers remain available for users who want provider-native output. `shodan domain` and `shodan host` output also feeds structured findings for DNS records, host IPs, hostnames, open ports, and HTTP titles, with weak mail policy rows and private DNS addresses flagged as warnings. `ipinfo <ip>` highlights IP, hostname, and organization rows while keeping geography and timezone rows as context.
 
 **Limits:** Shodan, Censys, VirusTotal, GreyNoise, AlienVault OTX, AbuseIPDB, URLhaus, ThreatFox, Vulners, urlscan.io, and SecurityTrails require user-provided provider keys. SecurityTrails currently requires a paid account. Team Cymru, crt.sh, HIBP Pwned Passwords, NVD, and RouteViews work without saved keys but still use the app's per-session rate limiting and cache layer to avoid accidental bursts. Provider terms and quotas are still enforced by each vendor.
 
@@ -837,6 +837,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Loaded workspace file and folder names feed autocomplete for `file show`, `file edit`, `file download`, `file move`, `file delete`, `file rm`, `cat`, `ls`, `mv`, and `rm`.
 - Workspace-only external-tool examples and flags in `commands.yaml` are hidden from autocomplete unless Files are enabled, so operators can add discoverable file workflows without exposing unusable suggestions on instances that keep Files disabled.
 - Selected command flags declared in `commands.yaml` can consume or write session files. At execution time, user-facing names such as `targets.txt` are validated and rewritten to the session workspace path passed to the subprocess.
+- `wget` downloads default to the active Files folder when Files are enabled. Operators can still choose a subfolder with `-P downloads` or `--directory-prefix=downloads`.
 - Shell navigation and redirection remain blocked; all file access must go through the Files panel, workspace routes, the `file` built-in, or explicitly declared command flags.
 
 **Configuration:** Files use `workspace_*` settings in `conf/config.yaml` and per-command `workspace_flags` in `conf/commands.yaml`; see [CONFIGURATION.md](CONFIGURATION.md) for storage recipes.

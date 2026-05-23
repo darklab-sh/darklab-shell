@@ -210,7 +210,7 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `fping` | Fast parallel ICMP ping — sweep multiple hosts or a CIDR range simultaneously |
 | `hping3` | TCP/IP packet assembler — TCP ping, SYN probes, traceroute-style path analysis |
 | `masscan` | High-speed TCP port scanner; requires raw sockets (container has `NET_RAW`/`NET_ADMIN`) |
-| `assetfinder` | Fast passive subdomain discovery using public sources |
+| `assetfinder` | Fast passive domain and IP discovery using public sources |
 | `fierce` | DNS reconnaissance and subdomain brute-forcing |
 | `dnsenum` | DNS enumeration — zone transfers, subdomains, reverse lookups, Google scraping |
 | `ffuf` | Fast web fuzzer for directory, file, and vhost discovery. Wordlists at `/usr/share/wordlists/seclists/` |
@@ -256,6 +256,10 @@ naabu defaults to raw SYN packet scanning via libpcap/gopacket, which requires p
 #### masscan
 
 masscan is a raw-packet-only scanner with no TCP connect fallback. It requires `CAP_NET_RAW`/`CAP_NET_ADMIN` and libpcap access. These are granted via `setcap` in the Dockerfile and `cap_add` in `docker-compose.yml`, but deep packet injection may still be restricted by the host kernel or container runtime. If masscan fails with an interface error, `rustscan` is a good alternative — it uses TCP connect scanning and works without raw socket access.
+
+#### wget
+
+When Files are enabled, `wget` downloads go to the active Files folder by default. Use `-P downloads` or `--directory-prefix=downloads` when you want a specific session subfolder.
 
 #### nuclei
 

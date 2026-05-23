@@ -20,6 +20,7 @@ from services.intel.canonical import (
     canonical_domain,
     canonical_hash,
     canonical_ip,
+    canonical_url,
     detect_hash_algorithm,
 )
 
@@ -63,6 +64,8 @@ _SIGNAL_PATTERNS = {
         re.compile(r"\btimeout\b", re.I),
         re.compile(r"\bunreachable\b", re.I),
         re.compile(r"\brefused\b", re.I),
+        re.compile(r"\bcannot write\b", re.I),
+        re.compile(r"\bread-only file system\b", re.I),
         re.compile(r"no servers could be reached", re.I),
         re.compile(r"\bcould not\b", re.I),
         re.compile(r"\binvalid\b", re.I),
@@ -168,14 +171,132 @@ _RUSTSCAN_OPEN_RE = re.compile(r"^Open\s+[0-9a-f:.]+:\d+$", re.I)
 _NAABU_FOUND_PORTS_RE = re.compile(r"^\[INF\]\s+Found\s+\d+\s+ports?\s+on host\b", re.I)
 _NUCLEI_RESULT_RE = re.compile(r"^\[[^\]]+\]\s+\[[a-z0-9_-]+\]\s+\[(?:info|low|medium|high|critical)\]\s+\S+", re.I)
 _SCAN_COMPLETED_RE = re.compile(r"^\[INF\]\s+Scan completed\b.*\bmatches found\.", re.I)
+_MASSCAN_STARTUP_RE = re.compile(
+    r"^(?:Starting masscan\b|Initiating SYN Stealth Scan|Scanning\s+\d+\s+hosts?\s+\[\d+\s+ports/host\])",
+    re.I,
+)
 _MASSCAN_RATE_RE = re.compile(r"^rate:\s+.*\bdone\b.*\bfound=\d+\b", re.I)
 _FFUF_PROGRESS_RE = re.compile(r"^::\s*Progress:\s*\[\d+/\d+\]\s*::", re.I)
+_FFUF_PROGRESS_DETAIL_RE = re.compile(
+    r"^::\s*Progress:\s*\[(\d+)/(\d+)\]\s*::.*\bErrors:\s*(\d+)\s*::",
+    re.I,
+)
+_FFUF_RESULT_RE = re.compile(
+    r"^(.+?)\s+\[Status:\s*(\d{3}),\s*Size:\s*\d+,\s*Words:\s*\d+,\s*Lines:\s*\d+,\s*Duration:\s*[^\]]+\]$",
+    re.I,
+)
+_FFUF_CONFIG_RE = re.compile(
+    r"^::\s+(?:Method|URL|Wordlist|Follow redirects|Calibration|Timeout|Threads|Matcher)\s+:\s+\S",
+    re.I,
+)
+_FFUF_SEPARATOR_RE = re.compile(r"^_{8,}$")
+_FFUF_VERSION_RE = re.compile(r"^v\d+\.\d+\.\d+(?:[-.\w]*)?$", re.I)
+_FFUF_ASCII_BANNER_RE = re.compile(r"^[\\/\s_'.,{}()|]+$")
 _CLEAN_HTTP_URL_RE = re.compile(r"^https?://\S+$", re.I)
 _URL_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*://", re.I)
 _URL_TAIL_RE = re.compile(r"[/?#].*$")
 _SHELL_TEMPLATE_URL_NOISE_RE = re.compile(r"(?:'\+|\+'\$|/\$1\b)")
 _FIERCE_FINDING_RE = re.compile(r"^(?:Found:|NS:|SOA:)\s+\S+", re.I)
 _DNSRECON_FINDING_RE = re.compile(r"^\[\*\]\s+DNSSEC is configured for\s+\S+", re.I)
+_WHOIS_FINDING_RE = re.compile(
+    r"^(?:Domain Name|Registrar WHOIS Server|Registrar URL|Registrar|Registrar IANA ID|"
+    r"Registrar Abuse Contact (?:Email|Phone)|Domain Status|Name Server):\s+\S|"
+    r"^DNSSEC:\s+(?!unsigned\b)\S",
+    re.I,
+)
+_WHOIS_SUMMARY_RE = re.compile(
+    r"^(?:Updated Date|Creation Date|Registry Expiry Date|Expiry Date|Expiration Date|"
+    r"Registrar Registration Expiration Date):\s+\S|"
+    r"^>>>\s+Last update of WHOIS database:",
+    re.I,
+)
+_WHOIS_WARNING_RE = re.compile(
+    r"^DNSSEC:\s+unsigned\b|"
+    r"^Domain Status:\s+(?:clientHold|serverHold|redemptionPeriod|pendingDelete|inactive)\b",
+    re.I,
+)
+_WGET_FINDING_RE = re.compile(
+    r"^Resolving\s+\S+.*\.\.\.\s+\S|"
+    r"^\s*HTTP/\d(?:\.\d)?\s+\d{3}\b|"
+    r"^\s*(?:Server|Content-Type):\s+\S",
+    re.I,
+)
+_WGET_SUMMARY_RE = re.compile(
+    r"^Connecting to .*\.\.\. connected\.|"
+    r"^\s*Content-Length:\s*\d+\b|"
+    r"^Length:\s*\d+\s+\[[^\]]+\]",
+    re.I,
+)
+_SHODAN_DNS_RECORD_TYPES = {"A", "AAAA", "CNAME", "MX", "NS", "SOA", "TXT"}
+_SHODAN_DNS_FINDING_TYPES = {"A", "AAAA", "CNAME", "MX", "NS", "SOA"}
+_SHODAN_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", re.I)
+_SHODAN_HOST_IP_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")
+_SHODAN_HOSTNAME_RE = re.compile(r"^Hostnames:\s+\S", re.I)
+_SHODAN_PORT_RE = re.compile(r"^\s*\d+/(?:tcp|udp)(?:\s+\S.*)?$", re.I)
+_SHODAN_HTTP_TITLE_RE = re.compile(r"^\s*\|--\s+HTTP title:\s+\S", re.I)
+_SHODAN_HOST_SUMMARY_RE = re.compile(
+    r"^(?:(?:City|Country|Organization|Updated|Number of open ports):\s+\S|Ports:\s*$)",
+    re.I,
+)
+_SHODAN_WEAK_MAIL_POLICY_RE = re.compile(
+    r"\bv=DMARC1\b[^;\n]*(?:;\s*)?p=none\b|"
+    r"\bv=spf1\b.*(?:~all|\?all)\b",
+    re.I,
+)
+_SHODAN_HTTP_WARNING_RE = re.compile(
+    r"HTTP title:.*(?:\b5\d\d\b|Service Temporarily Unavailable|Index of /|Default Page)",
+    re.I,
+)
+_IPINFO_FINDING_RE = re.compile(r"^-\s+(?:IP|Hostname|Organization)\s+\S", re.I)
+_IPINFO_SUMMARY_RE = re.compile(
+    r"^-\s+(?:Anycast|City|Region|Country|Currency|Location|Postal|Timezone)\s+\S",
+    re.I,
+)
+_OPENSSL_FINDING_RE = re.compile(
+    r"^(?:Connecting to\s+\S+|"
+    r"depth=\d+\s+.*\bCN=|"
+    r"\s*(?:\d+\s+)?[is]:.+|"
+    r"\s*a:PKEY:\s+.+|"
+    r"\s*v:NotBefore:\s+.+\bNotAfter:\s+.+|"
+    r"subject=.+|"
+    r"issuer=.+|"
+    r"Peer signing digest:\s+\S+|"
+    r"Peer signature type:\s+\S+|"
+    r"Negotiated TLS[^\s]* group:\s+\S+|"
+    r"New,\s*TLS[^,]+,\s*Cipher is\s+\S+|"
+    r"Protocol:\s+\S+|"
+    r"Server public key is\s+\d+\s+bit|"
+    r"Verify return code:\s*0\b)",
+    re.I,
+)
+_OPENSSL_WARNING_RE = re.compile(
+    r"^(?:No ALPN negotiated|"
+    r"Verification error:.+|"
+    r"Verify return code:\s*(?!0\b)\d+|"
+    r"verify error:num=.+|"
+    r"Protocol:\s*(?:SSLv[^\s,]*|TLSv1(?:\.0|\.1)?\b(?!\.))|"
+    r"New,.*Cipher is.*(?:RC4|3DES|NULL|EXPORT|MD5|DES-CBC3)|"
+    r"Server public key is\s+(?:[1-9]\d{0,2}|10[0-1]\d|102[0-4])\s+bit|"
+    r"Compression:\s+(?!NONE\b)\S+)",
+    re.I,
+)
+_OPENSSL_SUMMARY_RE = re.compile(
+    r"^(?:Certificate chain|"
+    r"Server certificate|"
+    r"No client certificate CA names sent|"
+    r"verify return:1|"
+    r"SSL handshake has read\s+\d+\s+bytes and written\s+\d+\s+bytes|"
+    r"Verification:\s+OK|"
+    r"This TLS version forbids renegotiation\.|"
+    r"Compression:\s+NONE|"
+    r"Expansion:\s+NONE|"
+    r"Early data was not sent|"
+    r"DONE)$",
+    re.I,
+)
+_OPENSSL_PEM_BOUNDARY_RE = re.compile(r"^-{5}(?:BEGIN|END) CERTIFICATE-{5}$")
+_OPENSSL_PEM_BODY_RE = re.compile(r"^[A-Za-z0-9+/]{32,}={0,2}$")
+_OPENSSL_CONNECTED_RE = re.compile(r"^CONNECTED\([0-9A-Fa-f]+\)$")
 _NIKTO_PLUS_LINE_RE = re.compile(r"^\+\s+\S")
 _FLAG_ASSIGNMENT_RE = re.compile(r"^([^=]+)=(.+)$")
 _NSLOOKUP_SERVER_RE = re.compile(r"^server$", re.I)
@@ -184,12 +305,24 @@ _NMAP_OUTPUT_PREFIX_RE = re.compile(r"^-o[AGNX]$", re.I)
 _PORT_LIST_RE = re.compile(r"^\d+(?:,\d+)*$")
 _PORT_RANGE_RE = re.compile(r"^\d+(?:-\d+)?$")
 _NMAP_DONE_RE = re.compile(r"^Nmap done:\b", re.I)
+_NMAP_RDNS_RE = re.compile(r"^rDNS record for\s+\S+:\s+\S+", re.I)
+_NMAP_HOST_UP_RE = re.compile(r"^Host is up\b", re.I)
 _KILLED_BY_USER_RE = re.compile(r"^\[killed by user(?:\b|[^\w])", re.I)
 _DNS_MAIL_EXCHANGER_RE = re.compile(r"\bmail exchanger\s*=\s*\S+", re.I)
 _DNS_TEXT_RE = re.compile(r"\btext\s*=\s*.+", re.I)
 _DNS_CANONICAL_NAME_RE = re.compile(r"\bcanonical name\s*=\s*\S+", re.I)
 _DNS_ADDRESS_RE = re.compile(r"^Address(?:es)?:\s+[0-9a-f:.]+\b", re.I)
 _DNS_NAME_RE = re.compile(r"^Name:\s+\S+", re.I)
+_DIG_HEADER_RE = re.compile(r"^;;\s+->>HEADER<<-.*\bstatus:\s*(\S+)", re.I)
+_DIG_ZERO_ANSWER_RE = re.compile(r"^;;\s+flags:.*\bANSWER:\s*0\b", re.I)
+_DIG_SUMMARY_RE = re.compile(
+    r"^;;\s+(?:Query time:\s+\d+\s+msec|SERVER:\s+\S+|MSG SIZE\s+rcvd:\s+\d+)\b",
+    re.I,
+)
+_DIG_WARNING_STATUSES = {"NXDOMAIN", "SERVFAIL", "REFUSED", "FORMERR", "NOTIMP", "TIMEOUT"}
+_NSLOOKUP_SUMMARY_RE = re.compile(r"^(?:Server:\s+\S|Non-authoritative answer:|Name:\s+\S)", re.I)
+_NSLOOKUP_WARNING_RE = re.compile(r"^(?:\*\*\s+server can't find\b|;;\s+connection timed out\b)", re.I)
+_NSLOOKUP_ADDRESS_RE = re.compile(r"^Address(?:es)?:\s+([0-9a-f:.]+)\b", re.I)
 _CIDR_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}$")
 _DNS_BARE_IP_RE = re.compile(
     r"^(?:(?:\d{1,3}\.){3}\d{1,3}|[0-9a-f:]*[0-9a-f]+:[0-9a-f:]*[0-9a-f]+)$",
@@ -257,6 +390,13 @@ _ENTITY_FILELIKE_SUFFIXES = {
 def _is_public_ip(value: str) -> bool:
     try:
         return ipaddress.ip_address(value).is_global
+    except ValueError:
+        return False
+
+
+def _is_private_or_reserved_ip(value: str) -> bool:
+    try:
+        return not ipaddress.ip_address(value).is_global
     except ValueError:
         return False
 
@@ -464,15 +604,169 @@ def _looks_like_clean_url(value: str) -> bool:
     return not _SHELL_TEMPLATE_URL_NOISE_RE.search(raw)
 
 
+def _parse_shodan_dns_row(stripped: str) -> tuple[str, str, str] | None:
+    parts = str(stripped or "").strip().split(None, 2)
+    if len(parts) < 2:
+        return None
+    first = parts[0].upper()
+    if first in _SHODAN_DNS_RECORD_TYPES:
+        value = parts[1] if len(parts) == 2 else f"{parts[1]} {parts[2]}"
+        return "", first, value
+    if len(parts) >= 3 and parts[1].upper() in _SHODAN_DNS_RECORD_TYPES:
+        return parts[0], parts[1].upper(), parts[2]
+    return None
+
+
+def _is_shodan_dns_text_row(stripped: str) -> bool:
+    parsed = _parse_shodan_dns_row(stripped)
+    return bool(parsed and parsed[1] == "TXT")
+
+
+def _is_shodan_finding(stripped: str) -> bool:
+    parsed = _parse_shodan_dns_row(stripped)
+    if parsed:
+        _, record_type, _ = parsed
+        return record_type in _SHODAN_DNS_FINDING_TYPES
+    return (
+        (bool(_SHODAN_HOST_IP_RE.match(stripped)) and _is_public_ip(stripped))
+        or bool(_SHODAN_HOSTNAME_RE.search(stripped))
+        or bool(_SHODAN_PORT_RE.search(stripped))
+        or bool(_SHODAN_HTTP_TITLE_RE.search(stripped))
+    )
+
+
+def _is_shodan_warning(stripped: str) -> bool:
+    parsed = _parse_shodan_dns_row(stripped)
+    if parsed:
+        _, record_type, value = parsed
+        if record_type in {"A", "AAAA"} and _is_private_or_reserved_ip(value.split()[0] if value else ""):
+            return True
+        if record_type == "TXT" and _SHODAN_WEAK_MAIL_POLICY_RE.search(value):
+            return True
+    return bool(_SHODAN_HTTP_WARNING_RE.search(stripped))
+
+
+def _is_shodan_summary(stripped: str) -> bool:
+    return bool(_SHODAN_HOST_SUMMARY_RE.search(stripped))
+
+
+def _is_openssl_noise(stripped: str) -> bool:
+    return (
+        stripped == "---"
+        or bool(_OPENSSL_CONNECTED_RE.match(stripped))
+        or bool(_OPENSSL_PEM_BOUNDARY_RE.match(stripped))
+        or bool(_OPENSSL_PEM_BODY_RE.match(stripped))
+    )
+
+
+def _parse_ffuf_progress(stripped: str) -> tuple[int, int, int] | None:
+    match = _FFUF_PROGRESS_DETAIL_RE.match(stripped)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2)), int(match.group(3))
+
+
+def _is_ffuf_final_progress(stripped: str) -> bool:
+    parsed = _parse_ffuf_progress(stripped)
+    return bool(parsed and parsed[0] >= parsed[1] and parsed[1] > 0)
+
+
+def _is_ffuf_progress_warning(stripped: str) -> bool:
+    parsed = _parse_ffuf_progress(stripped)
+    return bool(parsed and parsed[2] > 0)
+
+
+def _parse_ffuf_result(stripped: str) -> tuple[str, int] | None:
+    match = _FFUF_RESULT_RE.match(stripped)
+    if not match:
+        return None
+    return match.group(1).strip(), int(match.group(2))
+
+
+def _is_ffuf_warning(stripped: str) -> bool:
+    if _is_ffuf_progress_warning(stripped):
+        return True
+    parsed = _parse_ffuf_result(stripped)
+    return bool(parsed and 500 <= parsed[1] <= 599)
+
+
+def _is_ffuf_noise(stripped: str) -> bool:
+    return (
+        bool(_FFUF_SEPARATOR_RE.match(stripped))
+        or bool(_FFUF_VERSION_RE.match(stripped))
+        or bool(_FFUF_ASCII_BANNER_RE.match(stripped))
+    )
+
+
+def _ffuf_result_url(command_target: str, result_path: str) -> str | None:
+    raw_path = str(result_path or "").strip()
+    if not raw_path:
+        return None
+    if _URL_SCHEME_RE.match(raw_path):
+        return raw_path
+    base = str(command_target or "").strip()
+    if not _URL_SCHEME_RE.match(base):
+        return None
+    if "FUZZ" in base:
+        return base.replace("FUZZ", raw_path.lstrip("/"), 1)
+    if raw_path.startswith("/"):
+        parsed = urlparse(base)
+        return f"{parsed.scheme}://{parsed.netloc}{raw_path}"
+    return f"{base.rstrip('/')}/{raw_path.lstrip('/')}"
+
+
+def _dig_status(stripped: str) -> str:
+    match = _DIG_HEADER_RE.match(stripped)
+    return match.group(1).strip().upper().rstrip(",") if match else ""
+
+
+def _is_dns_warning(root: str, stripped: str) -> bool:
+    if root == "nslookup":
+        return bool(_NSLOOKUP_WARNING_RE.search(stripped))
+    if root != "dig":
+        return False
+    status = _dig_status(stripped)
+    return status in _DIG_WARNING_STATUSES or bool(_DIG_ZERO_ANSWER_RE.search(stripped))
+
+
+def _is_dns_summary(root: str, stripped: str) -> bool:
+    if root == "nslookup":
+        return bool(_NSLOOKUP_SUMMARY_RE.search(stripped))
+    if root != "dig":
+        return False
+    return bool(_dig_status(stripped)) or bool(_DIG_SUMMARY_RE.search(stripped))
+
+
+def _is_nslookup_address_finding(stripped: str) -> bool:
+    match = _NSLOOKUP_ADDRESS_RE.match(stripped)
+    return bool(match and _is_public_ip(match.group(1)))
+
+
 def _is_command_scoped_finding(root: str, stripped: str) -> bool:
     if root in {"dnsx", "subfinder"}:
         return bool(_HOSTNAME_RE.search(stripped))
+    if root == "nslookup":
+        return _is_nslookup_address_finding(stripped)
+    if root == "ffuf":
+        return bool(_parse_ffuf_result(stripped))
     if root == "fierce":
         return bool(_FIERCE_FINDING_RE.match(stripped))
     if root == "dnsenum":
         return bool(_CIDR_RE.search(stripped))
     if root == "dnsrecon":
         return bool(_DNSRECON_FINDING_RE.match(stripped))
+    if root == "nmap":
+        return bool(_NMAP_RDNS_RE.search(stripped))
+    if root == "whois":
+        return bool(_WHOIS_FINDING_RE.search(stripped))
+    if root == "wget":
+        return bool(_WGET_FINDING_RE.search(stripped))
+    if root == "shodan":
+        return _is_shodan_finding(stripped)
+    if root == "ipinfo":
+        return bool(_IPINFO_FINDING_RE.search(stripped))
+    if root == "openssl":
+        return bool(_OPENSSL_FINDING_RE.search(stripped))
     if root == "httpx":
         return bool(_HTTPX_RESULT_RE.search(stripped))
     if root == "gobuster":
@@ -503,23 +797,56 @@ def _is_command_scoped_finding(root: str, stripped: str) -> bool:
 
 
 def _is_command_scoped_warning(root: str, stripped: str) -> bool:
+    if _is_dns_warning(root, stripped):
+        return True
+    if root == "ffuf":
+        return _is_ffuf_warning(stripped)
+    if root == "whois":
+        return bool(_WHOIS_WARNING_RE.search(stripped))
+    if root == "shodan":
+        return _is_shodan_warning(stripped)
+    if root == "openssl":
+        return bool(_OPENSSL_WARNING_RE.search(stripped))
     if root == "wpscan":
         return bool(_WPSCAN_API_TOKEN_WARNING_RE.search(stripped))
     return False
 
 
 def _is_command_scoped_summary(root: str, stripped: str) -> bool:
+    if _is_dns_summary(root, stripped):
+        return True
+    if root == "ffuf":
+        return bool(_FFUF_CONFIG_RE.search(stripped)) or _is_ffuf_final_progress(stripped)
+    if root == "whois":
+        return bool(_WHOIS_SUMMARY_RE.search(stripped))
+    if root == "wget":
+        return bool(_WGET_SUMMARY_RE.search(stripped))
+    if root == "shodan":
+        return _is_shodan_summary(stripped)
+    if root == "ipinfo":
+        return bool(_IPINFO_SUMMARY_RE.search(stripped))
+    if root == "openssl":
+        return bool(_OPENSSL_SUMMARY_RE.search(stripped))
     if root == "wafw00f":
         return bool(_WAFW00F_REQUESTS_RE.search(stripped))
     if root == "naabu":
         return bool(_NAABU_FOUND_PORTS_RE.search(stripped))
     if root == "nuclei":
         return bool(_SCAN_COMPLETED_RE.search(stripped))
+    if root == "nmap":
+        return bool(_NMAP_HOST_UP_RE.search(stripped))
     return False
 
 
 def _is_command_scoped_signal_noise(root: str, stripped: str) -> bool:
+    if root == "ffuf":
+        if _is_ffuf_noise(stripped):
+            return True
+        if _FFUF_PROGRESS_RE.search(stripped):
+            return not (_is_ffuf_final_progress(stripped) or _is_ffuf_progress_warning(stripped))
     if root == "gobuster" and _GOBUSTER_CONFIG_RE.search(stripped):
+        return True
+    if root == "openssl" and _is_openssl_noise(stripped):
         return True
     if _is_progress_role_line(root, stripped):
         return True
@@ -541,14 +868,82 @@ def _extract_entities_for_command(
     source_line: int | None = None,
     normalized_text: str | None = None,
     ansi_stripped_text: str | None = None,
+    command_target: str | None = None,
+    command_url_template: str | None = None,
 ) -> list[dict[str, object]]:
     stripped = normalized_text if normalized_text is not None else _normalize_signal_text(text)
     plain = ansi_stripped_text if ansi_stripped_text is not None else _strip_ansi_codes(str(text or "")).rstrip("\n\r")
     if root in _PROJECTDISCOVERY_ROOTS and _PROJECTDISCOVERY_ENTITY_NOISE_RE.search(plain):
         return []
+    if root == "masscan" and _MASSCAN_STARTUP_RE.search(stripped):
+        return []
     if root == "nmap" and _NMAP_ENTITY_NOISE_RE.search(stripped):
         return []
-    return extract_entities(text, source_line=source_line, normalized_text=stripped)
+    if root == "openssl" and _is_openssl_noise(stripped):
+        return []
+    if root == "ffuf" and (_is_ffuf_noise(stripped) or bool(_FFUF_CONFIG_RE.search(stripped))):
+        return []
+    entities = extract_entities(text, source_line=source_line, normalized_text=stripped)
+    if root == "ffuf" and (command_url_template or command_target):
+        parsed_result = _parse_ffuf_result(stripped)
+        if not parsed_result:
+            return entities
+        result_path, _ = parsed_result
+        result_url = _ffuf_result_url(command_url_template or str(command_target or ""), result_path)
+        if not result_url:
+            return entities
+        try:
+            canonical = canonical_url(result_url)
+        except CanonicalizationError:
+            return entities
+        seen = {
+            (str(item.get("type") or ""), str(item.get("canonical_value") or ""))
+            for item in entities
+            if isinstance(item, dict)
+        }
+        start = plain.find(result_path)
+        _add_entity(
+            entities,
+            seen,
+            entity_type="url",
+            value=result_url,
+            canonical_value=canonical,
+            source_line=source_line,
+            start=start if start >= 0 else None,
+            end=(start + len(result_path)) if start >= 0 else None,
+        )
+        return entities
+    if root != "shodan" or not command_target:
+        return entities
+
+    parsed = _parse_shodan_dns_row(stripped)
+    if not parsed:
+        return entities
+    label, record_type, _ = parsed
+    if not label or record_type not in _SHODAN_DNS_FINDING_TYPES or not _SHODAN_LABEL_RE.match(label):
+        return entities
+
+    fqdn = f"{label}.{str(command_target).strip().rstrip('.')}"
+    try:
+        canonical = canonical_domain(fqdn)
+    except CanonicalizationError:
+        return entities
+    seen = {
+        (str(item.get("type") or ""), str(item.get("canonical_value") or ""))
+        for item in entities
+        if isinstance(item, dict)
+    }
+    _add_entity(
+        entities,
+        seen,
+        entity_type="domain",
+        value=fqdn,
+        canonical_value=canonical,
+        source_line=source_line,
+        start=plain.find(label) if label in plain else None,
+        end=(plain.find(label) + len(label)) if label in plain else None,
+    )
+    return entities
 
 
 def tokenize_command(command: str) -> list[str]:
@@ -693,6 +1088,16 @@ def extract_target(command: str) -> str | None:
         target = next((token for token in positionals if "." in token), "")
         return _strip_url_target(target) if target else None
 
+    if root == "shodan" and len(tokens) >= 3 and tokens[1].lower() in {"domain", "host"}:
+        positionals = _positional_targets(tokens[1:], skip_values_after={"--fields", "--limit"})
+        target = positionals[0] if positionals else ""
+        return _strip_url_target(target) if target else None
+
+    if root == "ipinfo":
+        positionals = _positional_targets(tokens, skip_values_after={"--format", "--token"})
+        target = positionals[0] if positionals else ""
+        return _strip_url_target(target) if target else None
+
     if root in {"nmap", "rustscan", "naabu", "sslscan", "sslyze", "testssl"}:
         positionals = [
             token for token in _positional_targets(
@@ -730,6 +1135,9 @@ class OutputSignalClassifier:
     def __post_init__(self) -> None:
         self.root = command_root(self.command)
         self.target = extract_target(self.command)
+        self.url_template = ""
+        if self.root == "ffuf":
+            self.url_template = _find_flag_value(tokenize_command(self.command), {"-u", "--url"})
         self.is_help_output = _is_help_output_command(self.command, self.root)
         self.current_target: str | None = None
         self.line_index = 0
@@ -790,6 +1198,8 @@ class OutputSignalClassifier:
                 source_line=self.line_index,
                 normalized_text=normalized_text,
                 ansi_stripped_text=ansi_stripped,
+                command_target=self.target,
+                command_url_template=self.url_template,
             )
             if entities:
                 metadata["entities"] = entities
@@ -834,17 +1244,21 @@ def classify_line(
 
     if not any(pattern.search(stripped) for pattern in _FINDINGS_EXCLUDES):
         finding = False
-        if _DNS_MAIL_EXCHANGER_RE.search(stripped):
+        if root == "shodan" and _is_shodan_dns_text_row(stripped):
+            finding = False
+        elif _DNS_MAIL_EXCHANGER_RE.search(stripped):
             finding = True
         elif _DNS_TEXT_RE.search(stripped):
             finding = True
         elif _DNS_CANONICAL_NAME_RE.search(stripped):
             finding = True
         elif _DNS_ADDRESS_RE.search(stripped):
-            finding = bool(_DNS_NAME_RE.search(previous_text))
+            finding = bool(_DNS_NAME_RE.search(previous_text)) or (
+                root == "nslookup" and _is_nslookup_address_finding(stripped)
+            )
         elif root in _DNS_SIGNAL_ROOTS and (_DNS_BARE_IP_RE.search(stripped) or _DNS_SHORT_MX_RE.search(stripped)):
             finding = True
-        elif root == "assetfinder" and _HOSTNAME_RE.search(stripped):
+        elif root == "assetfinder" and (_HOSTNAME_RE.search(stripped) or _is_public_ip(stripped)):
             finding = True
         elif _is_command_scoped_finding(root, stripped):
             finding = True
@@ -853,12 +1267,20 @@ def classify_line(
         if finding:
             scopes.append("findings")
 
+    suppress_generic_summary = (
+        root == "ffuf"
+        and bool(_FFUF_PROGRESS_RE.search(stripped))
+        and not _is_ffuf_final_progress(stripped)
+    )
     for scope in ("warnings", "errors", "summaries"):
         command_scoped_match = (
             (scope == "warnings" and _is_command_scoped_warning(root, stripped))
             or (scope == "summaries" and _is_command_scoped_summary(root, stripped))
         )
-        if command_scoped_match or any(pattern.search(stripped) for pattern in _SIGNAL_PATTERNS[scope]):
+        generic_match = not (scope == "summaries" and suppress_generic_summary) and any(
+            pattern.search(stripped) for pattern in _SIGNAL_PATTERNS[scope]
+        )
+        if command_scoped_match or generic_match:
             scopes.append(scope)
 
     return list(dict.fromkeys(scopes))

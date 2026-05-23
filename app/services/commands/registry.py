@@ -73,6 +73,7 @@ ASCII_MOBILE_FILE     = os.path.join(_CONF, "ascii_mobile.txt")
 APP_HINTS_FILE        = os.path.join(_CONF, "app_hints.txt")
 APP_HINTS_MOBILE_FILE = os.path.join(_CONF, "app_hints_mobile.txt")
 AMASS_DEFAULT_WORKSPACE_DIR = "tools/amass"
+WGET_DIRECTORY_PREFIX_FLAGS = ("-P", "--directory-prefix")
 RESTRICTABLE_VALUE_TYPES = {"cidr", "domain", "host", "ip", "target", "url"}
 PROJECT_TARGET_VALUE_TYPES = RESTRICTABLE_VALUE_TYPES | {"port_set"}
 _COMMANDS_REGISTRY_CACHE: dict[str, Any] = {
@@ -2719,6 +2720,18 @@ def _workspace_flag_matches_token(token: str, spec: dict[str, object]) -> bool:
     return token.startswith(flag) and token != flag
 
 
+def _wget_has_directory_prefix(tokens: list[str]) -> bool:
+    for token in tokens[1:]:
+        for flag in WGET_DIRECTORY_PREFIX_FLAGS:
+            if token == flag:
+                return True
+            if flag == "-P" and token.startswith("-P") and token != "-P":
+                return True
+            if flag.startswith("--") and token.startswith(f"{flag}="):
+                return True
+    return False
+
+
 def _workspace_flag_value(tokens: list[str], index: int, spec: dict[str, object]) -> tuple[str | None, int | None, str | None]:
     flag = str(spec.get("flag") or "")
     value_kind = str(spec.get("value") or "required")
@@ -2790,6 +2803,33 @@ def _workspace_flag_absolute_passthrough(value: str, mode: str) -> bool:
     if raw == "/dev/null" and mode in {"write", "read_write"}:
         return True
     return mode in {"read", "read_write"} and raw.startswith("/usr/share/wordlists/")
+
+
+def _wget_default_directory_prefix(
+    session_id: str,
+    cfg: dict,
+    workspace_cwd: str,
+) -> tuple[str, str]:
+    if not session_id:
+        return "", ""
+    if not str(workspace_cwd or "").strip():
+        try:
+            resolved = ensure_session_workspace(session_id, cfg).resolve(strict=True)
+            prepare_workspace_directory_for_command(resolved, mode="write")
+        except (InvalidWorkspacePath, WorkspaceDisabled, WorkspaceFileNotFound) as exc:
+            return "", str(exc)
+        except OSError as exc:
+            return "", str(exc)
+        return str(resolved), ""
+    try:
+        workspace_value = _normalize_workspace_command_path(workspace_cwd)
+        resolved = resolve_workspace_path(session_id, workspace_value, cfg, ensure_parent=True)
+        prepare_workspace_directory_for_command(resolved, mode="write")
+    except (InvalidWorkspacePath, WorkspaceDisabled, WorkspaceFileNotFound) as exc:
+        return "", str(exc)
+    except OSError as exc:
+        return "", str(exc)
+    return str(resolved), ""
 
 
 def _restricted_command_networks(cfg: dict | None = None) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
@@ -3347,6 +3387,14 @@ def _rewrite_workspace_file_flags(
         if mode in {"write", "read_write"}:
             writes.append(workspace_value)
         index = value_index + 1
+
+    if root == "wget" and cfg.get("workspace_enabled") and not _wget_has_directory_prefix(rewritten_tokens):
+        default_prefix, default_prefix_error = _wget_default_directory_prefix(session_id, cfg, workspace_cwd)
+        if default_prefix_error:
+            return command, set(), [], [], [], default_prefix_error
+        if default_prefix:
+            rewritten_tokens.extend(["-P", default_prefix])
+            exec_paths.append(default_prefix)
 
     return shlex.join(rewritten_tokens), exempt_flags, reads, writes, exec_paths, ""
 

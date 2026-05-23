@@ -639,6 +639,8 @@ commands:
       deny:
         - wget -O
         - wget --output-document
+        - wget -P
+        - wget --directory-prefix
         - wget --input-file
         - wget -i
         - wget localhost
@@ -653,6 +655,14 @@ commands:
         mode: write
         value: separate_or_attached
         format: text
+      - flag: -P
+        mode: write
+        value: separate
+        kind: directory
+      - flag: --directory-prefix
+        mode: write
+        value: separate_or_attached
+        kind: directory
       - flag: -i
         mode: read
         value: separate
@@ -696,6 +706,20 @@ commands:
           suggest:
             - value: response.html
               description: Save response body for later viewing
+        - value: -P
+          description: Save downloads under a session folder
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: downloads
+              description: Save downloaded files under downloads/
+        - value: --directory-prefix
+          description: Save downloads under a session folder
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: downloads
+              description: Save downloaded files under downloads/
         - value: -i
           description: Read URLs from a session file
           takes_value: true

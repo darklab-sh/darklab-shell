@@ -95,7 +95,7 @@ from services.workspace.files import (
     expand_workspace_path_pattern,
     ensure_session_workspace, list_workspace_directories, list_workspace_files,
     prepare_workspace_directory_for_command, prepare_workspace_file_for_command, read_workspace_text_file, resolve_workspace_path,
-    session_workspace_name, workspace_usage,
+    session_workspace_dir, session_workspace_name, workspace_usage,
     touch_session_workspace, workspace_path_info, write_workspace_text_file, WORKSPACE_COMMAND_WRITE_FILE_MODE,
     WORKSPACE_DIR_MODE, WORKSPACE_FILE_MODE,
 )
@@ -5766,6 +5766,9 @@ class TestDerivedCommandRegistry:
                     ["nmap-script-args.txt"], [],
                 ),
                 "shodan download shodan-apache apache": ([], ["shodan-apache"]),
+                "wget --server-response https://ip.darklab.sh": ([], []),
+                "wget -P downloads https://ip.darklab.sh": ([], ["downloads"]),
+                "wget --directory-prefix=downloads https://ip.darklab.sh": ([], ["downloads"]),
             }
 
             registry = commands.load_commands_registry()
@@ -5790,6 +5793,18 @@ class TestDerivedCommandRegistry:
                         assert exec_tokens[1].startswith("XDG_CONFIG_HOME=")
                         assert exec_tokens[2] == "amass"
                         assert "-dir" in exec_tokens
+                    if command == "wget --server-response https://ip.darklab.sh":
+                        assert "-P" in exec_tokens
+                        assert exec_tokens[exec_tokens.index("-P") + 1] == str(
+                            session_workspace_dir(session_id, cfg).resolve(strict=True)
+                        )
+                    if command == "wget -P downloads https://ip.darklab.sh":
+                        assert "-P" in exec_tokens
+                        assert exec_tokens[exec_tokens.index("-P") + 1] == str(
+                            resolve_workspace_path(session_id, "downloads", cfg)
+                        )
+                    if command == "wget --directory-prefix=downloads https://ip.darklab.sh":
+                        assert f"--directory-prefix={resolve_workspace_path(session_id, 'downloads', cfg)}" in exec_tokens
                     for original in reads + writes:
                         if command.startswith("amass ") and original == commands.AMASS_DEFAULT_WORKSPACE_DIR:
                             continue
@@ -8584,6 +8599,11 @@ class TestOutputSignals:
         assert extract_target("nc -zv ip.darklab.sh 443 80") == "ip.darklab.sh"
         assert extract_target("dig @8.8.8.8 darklab.sh A") == "darklab.sh"
         assert extract_target("assetfinder -subs-only darklab.sh") == "darklab.sh"
+        assert extract_target("shodan domain darklab.sh") == "darklab.sh"
+        assert extract_target("shodan host 107.178.109.44") == "107.178.109.44"
+        assert extract_target("ipinfo 107.178.109.44") == "107.178.109.44"
+        assert extract_target("openssl s_client -connect ip.darklab.sh:443 -showcerts") == "ip.darklab.sh:443"
+        assert extract_target("ffuf -u https://tor-stats.darklab.sh/FUZZ -w common.txt") == "tor-stats.darklab.sh"
 
     def test_classifies_common_findings(self):
         assert classify_line("443/tcp open https", command="nmap ip.darklab.sh") == ["findings"]
@@ -8591,8 +8611,51 @@ class TestOutputSignals:
         assert classify_line("darklab.sh has address 104.21.4.35", command="host darklab.sh") == ["findings"]
         assert classify_line("104.21.4.35", command="dig darklab.sh +short") == ["findings"]
         assert classify_line("1 aspmx.l.google.com.", command="dig MX darklab.sh +short") == ["findings"]
+        assert classify_line(";; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 51553", command="dig A darklab.sh") == [
+            "summaries",
+        ]
+        assert classify_line(
+            ";; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 51553",
+            command="dig A missing.darklab.sh",
+        ) == ["warnings", "summaries"]
+        assert classify_line(
+            ";; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1",
+            command="dig A belial.darklab.sh",
+        ) == ["warnings"]
+        assert classify_line(
+            "darklab.sh.\t\t1800\tIN\tSOA\tfrank.ns.cloudflare.com. dns.cloudflare.com. 2404966550 10000 2400 604800 1800",
+            command="dig A belial.darklab.sh",
+        ) == ["findings"]
+        assert classify_line(
+            "darklab.sh.\t\t3600\tIN\tMX\t5 alt2.aspmx.l.google.com.",
+            command="dig MX darklab.sh",
+        ) == ["findings"]
+        assert classify_line(";; Query time: 44 msec", command="dig A belial.darklab.sh") == ["summaries"]
+        assert classify_line(";; SERVER: 127.0.0.11#53(127.0.0.11) (UDP)", command="dig A belial.darklab.sh") == [
+            "summaries",
+        ]
+        assert classify_line("Server:\t\t127.0.0.11", command="nslookup ip.darklab.sh") == ["summaries"]
+        assert classify_line("Non-authoritative answer:", command="nslookup ip.darklab.sh") == ["summaries"]
+        assert classify_line("Name:\tfw-vx2-vp1.darklab.sh", command="nslookup ip.darklab.sh") == ["summaries"]
+        assert classify_line(
+            "ip.darklab.sh\tcanonical name = fw-vx2-vp1.darklab.sh.",
+            command="nslookup ip.darklab.sh",
+        ) == ["findings"]
+        assert classify_line("Address: 107.178.109.44", command="nslookup ip.darklab.sh") == ["findings"]
+        assert classify_line("Address:\t127.0.0.11#53", command="nslookup ip.darklab.sh") == []
+        assert classify_line("** server can't find missing.darklab.sh: NXDOMAIN", command="nslookup missing.darklab.sh") == [
+            "warnings",
+        ]
         assert classify_line("fw-vx1.darklab.sh", command="assetfinder -subs-only darklab.sh") == ["findings"]
         assert classify_line("darklab.sh", command="assetfinder -subs-only darklab.sh") == ["findings"]
+        assert classify_line("205.185.122.149", command="assetfinder darklab.sh") == ["findings"]
+        assert classify_line(
+            "rDNS record for 107.178.109.44: we.love.servers.at.ioflood.net",
+            command="nmap -sT -sV ip.darklab.sh",
+        ) == ["findings"]
+        assert classify_line("Host is up, received syn-ack (0.048s latency).", command="nmap ip.darklab.sh") == [
+            "summaries",
+        ]
         assert classify_line("104.21.4.35", command="cat ips.txt") == []
         assert classify_line("fw-vx1.darklab.sh", command="cat hosts.txt") == []
 
@@ -8602,6 +8665,174 @@ class TestOutputSignals:
         assert classify_line("warning: retrying request", cls="notice", command="whois -h whois.iana.org darklab.sh") == [
             "warnings",
         ]
+        assert classify_line("Domain Name: darklab.sh", command="whois darklab.sh") == ["findings"]
+        assert classify_line("Registrar WHOIS Server: whois.namecheap.com", command="whois darklab.sh") == ["findings"]
+        assert classify_line("Registrar URL: https://www.namecheap.com/", command="whois darklab.sh") == ["findings"]
+        assert classify_line("Registrar Abuse Contact Email: abuse@namecheap.com", command="whois darklab.sh") == [
+            "findings",
+        ]
+        assert classify_line(
+            "Domain Status: clientTransferProhibited https://icann.org/epp#clientTransferProhibited",
+            command="whois darklab.sh",
+        ) == ["findings"]
+        assert classify_line("Name Server: ruth.ns.cloudflare.com", command="whois darklab.sh") == ["findings"]
+        assert classify_line("DNSSEC: signedDelegation", command="whois darklab.sh") == ["findings"]
+        assert classify_line("Registry Expiry Date: 2026-08-19T22:16:28Z", command="whois darklab.sh") == [
+            "summaries",
+        ]
+        assert classify_line(
+            ">>> Last update of WHOIS database: 2026-05-23T03:45:46Z <<<",
+            command="whois darklab.sh",
+        ) == [
+            "summaries",
+        ]
+        assert classify_line("DNSSEC: unsigned", command="whois darklab.sh") == ["warnings"]
+        assert classify_line(
+            "Domain Status: clientHold https://icann.org/epp#clientHold",
+            command="whois darklab.sh",
+        ) == [
+            "findings",
+            "warnings",
+        ]
+        assert classify_line("Registrant Name: REDACTED", command="whois darklab.sh") == []
+        assert classify_line(
+            "URL of the ICANN Whois Inaccuracy Complaint Form: https://icann.org/wicf/",
+            command="whois darklab.sh",
+        ) == []
+        assert classify_line(
+            "Resolving ip.darklab.sh (ip.darklab.sh)... 107.178.109.44",
+            command="wget --server-response https://ip.darklab.sh",
+        ) == ["findings"]
+        assert classify_line("  HTTP/1.1 200 OK", command="wget --server-response https://ip.darklab.sh") == [
+            "findings",
+        ]
+        assert classify_line("  Server: nginx", command="wget --server-response https://ip.darklab.sh") == [
+            "findings",
+        ]
+        assert classify_line("  Content-Type: text/plain", command="wget --server-response https://ip.darklab.sh") == [
+            "findings",
+        ]
+        assert classify_line(
+            "Connecting to ip.darklab.sh (ip.darklab.sh)|107.178.109.44|:443... connected.",
+            command="wget --server-response https://ip.darklab.sh",
+        ) == [
+            "summaries",
+        ]
+        assert classify_line("  Content-Length: 15", command="wget --server-response https://ip.darklab.sh") == [
+            "summaries",
+        ]
+        assert classify_line("Length: 15 [text/plain]", command="wget --server-response https://ip.darklab.sh") == [
+            "summaries",
+        ]
+        assert classify_line("index.html: Read-only file system", command="wget https://ip.darklab.sh") == ["errors"]
+        assert classify_line(
+            "Cannot write to 'index.html' (Read-only file system).",
+            command="wget https://ip.darklab.sh",
+        ) == ["errors"]
+        assert classify_line("                         A      104.21.4.35", command="shodan domain darklab.sh") == [
+            "findings",
+        ]
+        assert classify_line("fw-vx2-vp1               A      107.178.109.44", command="shodan domain darklab.sh") == [
+            "findings",
+        ]
+        assert classify_line("shell                    CNAME  fw-vx2-vp1.darklab.sh", command="shodan domain darklab.sh") == [
+            "findings",
+        ]
+        assert classify_line("h                        AAAA   fd12:3456:789a:2::1", command="shodan domain darklab.sh") == [
+            "findings",
+            "warnings",
+        ]
+        assert classify_line("_dmarc                   TXT    v=DMARC1; p=none", command="shodan domain darklab.sh") == [
+            "warnings",
+        ]
+        assert classify_line(
+            "                         TXT    v=spf1 include:_spf.protonmail.ch mx include:_spf.google.com ~all",
+            command="shodan domain darklab.sh",
+        ) == ["warnings"]
+        assert classify_line(
+            "                         TXT    google-site-verification=Ub8pVdniHvGtkcNi1D9kiqW_65mhSWcVlrsYRjmyIR0",
+            command="shodan domain darklab.sh",
+        ) == []
+        assert classify_line("107.178.109.44", command="shodan host 107.178.109.44") == ["findings"]
+        assert classify_line("Hostnames:               we.love.servers.at.ioflood.net", command="shodan host 107.178.109.44") == [
+            "findings",
+        ]
+        assert classify_line("Number of open ports:    2", command="shodan host 107.178.109.44") == [
+            "summaries",
+        ]
+        assert classify_line("Ports:", command="shodan host 107.178.109.44") == ["summaries"]
+        assert classify_line("     80/tcp nginx ", command="shodan host 107.178.109.44") == ["findings"]
+        assert classify_line(
+            "\t|-- HTTP title: 503 Service Temporarily Unavailable",
+            command="shodan host 107.178.109.44",
+        ) == [
+            "findings",
+            "warnings",
+        ]
+        assert classify_line("- IP           107.178.109.44", command="ipinfo 107.178.109.44") == ["findings"]
+        assert classify_line("- Hostname     we.love.servers.at.ioflood.net", command="ipinfo 107.178.109.44") == [
+            "findings",
+        ]
+        assert classify_line(
+            "- Organization AS53755 Input Output Flood LLC",
+            command="ipinfo 107.178.109.44",
+        ) == ["findings"]
+        assert classify_line("- Anycast      false", command="ipinfo 107.178.109.44") == ["summaries"]
+        assert classify_line("- City         Phoenix", command="ipinfo 107.178.109.44") == ["summaries"]
+        assert classify_line("- Region       Arizona", command="ipinfo 107.178.109.44") == ["summaries"]
+        assert classify_line("- Country      United States (US)", command="ipinfo 107.178.109.44") == ["summaries"]
+        assert classify_line("- Currency     USD ($)", command="ipinfo 107.178.109.44") == ["summaries"]
+        assert classify_line("- Location     33.4484,-112.0740", command="ipinfo 107.178.109.44") == ["summaries"]
+        assert classify_line("- Postal       85001", command="ipinfo 107.178.109.44") == ["summaries"]
+        assert classify_line("- Timezone     America/Phoenix", command="ipinfo 107.178.109.44") == ["summaries"]
+        openssl_command = "openssl s_client -connect ip.darklab.sh:443 -showcerts"
+        assert classify_line("Connecting to 107.178.109.44", command=openssl_command) == ["findings"]
+        assert classify_line("CONNECTED(00000003)", command=openssl_command) == []
+        assert classify_line("depth=0 CN=ip.darklab.sh", command=openssl_command) == ["findings"]
+        assert classify_line("verify return:1", command=openssl_command) == ["summaries"]
+        assert classify_line("Certificate chain", command=openssl_command) == ["summaries"]
+        assert classify_line(" 0 s:CN=ip.darklab.sh", command=openssl_command) == ["findings"]
+        assert classify_line("   i:C=US, O=Let's Encrypt, CN=R13", command=openssl_command) == ["findings"]
+        assert classify_line(
+            "   a:PKEY: RSA, 4096 (bit); sigalg: sha256WithRSAEncryption",
+            command=openssl_command,
+        ) == ["findings"]
+        assert classify_line(
+            "   v:NotBefore: May 16 09:23:14 2026 GMT; NotAfter: Aug 14 09:23:13 2026 GMT",
+            command=openssl_command,
+        ) == ["findings"]
+        assert classify_line("-----BEGIN CERTIFICATE-----", command=openssl_command) == []
+        assert classify_line("MIIF7TCCBNWgAwIBAgISBdN8qsf9MkA3z+akRWDg5O/3MA0GCSqGSIb3DQEBCwUA", command=openssl_command) == []
+        assert classify_line("-----END CERTIFICATE-----", command=openssl_command) == []
+        assert classify_line("subject=CN=ip.darklab.sh", command=openssl_command) == ["findings"]
+        assert classify_line("issuer=C=US, O=Let's Encrypt, CN=R13", command=openssl_command) == ["findings"]
+        assert classify_line("No client certificate CA names sent", command=openssl_command) == ["summaries"]
+        assert classify_line("Peer signing digest: SHA256", command=openssl_command) == ["findings"]
+        assert classify_line("Peer signature type: rsa_pss_rsae_sha256", command=openssl_command) == ["findings"]
+        assert classify_line("Negotiated TLS1.3 group: X25519MLKEM768", command=openssl_command) == ["findings"]
+        assert classify_line(
+            "SSL handshake has read 4719 bytes and written 1631 bytes",
+            command=openssl_command,
+        ) == ["summaries"]
+        assert classify_line("Verification: OK", command=openssl_command) == ["summaries"]
+        assert classify_line("New, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384", command=openssl_command) == ["findings"]
+        assert classify_line("Protocol: TLSv1.3", command=openssl_command) == ["findings"]
+        assert classify_line("Server public key is 4096 bit", command=openssl_command) == ["findings"]
+        assert classify_line("This TLS version forbids renegotiation.", command=openssl_command) == ["summaries"]
+        assert classify_line("Compression: NONE", command=openssl_command) == ["summaries"]
+        assert classify_line("Expansion: NONE", command=openssl_command) == ["summaries"]
+        assert classify_line("No ALPN negotiated", command=openssl_command) == ["warnings"]
+        assert classify_line("Early data was not sent", command=openssl_command) == ["summaries"]
+        assert classify_line("Verify return code: 0 (ok)", command=openssl_command) == ["findings"]
+        assert classify_line("DONE", command=openssl_command) == ["summaries"]
+        assert classify_line("Verify return code: 10 (certificate has expired)", command=openssl_command) == [
+            "warnings",
+        ]
+        assert classify_line("Protocol: TLSv1.0", command=openssl_command) == [
+            "findings",
+            "warnings",
+        ]
+        assert classify_line("Compression: zlib compression", command=openssl_command) == ["warnings"]
         assert classify_line("+ Server: nginx", command="nikto -h ip.darklab.sh -p 443 -ssl") == ["findings"]
         assert classify_line("+ Target Hostname: ip.darklab.sh", command="nikto -Help") == []
         assert classify_line(
@@ -8641,6 +8872,39 @@ class TestOutputSignals:
         ) == [
             "findings",
         ]
+        ffuf_command = "ffuf -u https://tor-stats.darklab.sh/FUZZ -w common.txt"
+        assert classify_line("        /'___\\  /'___\\           /'___\\", command=ffuf_command) == []
+        assert classify_line("       v2.1.0-dev", command=ffuf_command) == []
+        assert classify_line("________________________________________________", command=ffuf_command) == []
+        assert classify_line(" :: Method           : GET", command=ffuf_command) == ["summaries"]
+        assert classify_line(" :: URL              : https://tor-stats.darklab.sh/FUZZ", command=ffuf_command) == [
+            "summaries",
+        ]
+        assert classify_line(
+            " :: Wordlist         : FUZZ: /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt",
+            command=ffuf_command,
+        ) == ["summaries"]
+        assert classify_line(" :: Threads          : 40", command=ffuf_command) == ["summaries"]
+        assert classify_line(
+            "as                      [Status: 301, Size: 169, Words: 5, Lines: 8, Duration: 42ms]",
+            command=ffuf_command,
+        ) == ["findings"]
+        assert classify_line(
+            "index.html              [Status: 200, Size: 990209, Words: 99640, Lines: 36208, Duration: 84ms]",
+            command=ffuf_command,
+        ) == ["findings"]
+        assert classify_line(
+            "api                     [Status: 500, Size: 169, Words: 5, Lines: 8, Duration: 42ms]",
+            command=ffuf_command,
+        ) == ["findings", "warnings"]
+        assert classify_line(
+            ":: Progress: [4751/4751] :: Job [1/1] :: 917 req/sec :: Duration: [0:00:05] :: Errors: 0 ::",
+            command=ffuf_command,
+        ) == ["summaries"]
+        assert classify_line(
+            ":: Progress: [100/4751] :: Job [1/1] :: 917 req/sec :: Duration: [0:00:05] :: Errors: 2 ::",
+            command=ffuf_command,
+        ) == ["warnings"]
         assert classify_line("https://p.darklab.sh/js/'+t+'", command="katana -u https://p.darklab.sh") == []
         assert classify_line(
             "static               (Status: 301) [Size: 169] [--> https://tor-stats.darklab.sh/static/]",
@@ -8739,16 +9003,28 @@ class TestOutputSignals:
         masscan_waiting = masscan_classifier.classify_line(
             "rate:  0.00-kpps, 100.00% done, waiting 10-secs, found=4"
         )
+        masscan_finding = masscan_classifier.classify_line("Discovered open port 443/tcp on 192.168.1.3")
         ffuf_progress = ffuf_classifier.classify_line(
             ":: Progress: [17778/87664] :: Job [1/1] :: 921 req/sec :: Duration: [0:00:19] :: Errors: 0 ::"
+        )
+        ffuf_final_progress = ffuf_classifier.classify_line(
+            ":: Progress: [87664/87664] :: Job [1/1] :: 921 req/sec :: Duration: [0:01:35] :: Errors: 0 ::"
+        )
+        ffuf_error_progress = ffuf_classifier.classify_line(
+            ":: Progress: [18000/87664] :: Job [1/1] :: 921 req/sec :: Duration: [0:00:20] :: Errors: 2 ::"
         )
 
         assert masscan_progress["role"] == LineRole.progress.value
         assert masscan_waiting["role"] == LineRole.progress.value
+        assert masscan_finding["signals"] == ["findings"]
         assert ffuf_progress["role"] == LineRole.progress.value
+        assert ffuf_final_progress["role"] == LineRole.progress.value
+        assert ffuf_error_progress["role"] == LineRole.progress.value
         assert "signals" not in masscan_progress
         assert "signals" not in masscan_waiting
         assert "signals" not in ffuf_progress
+        assert ffuf_final_progress["signals"] == ["summaries"]
+        assert ffuf_error_progress["signals"] == ["warnings"]
 
         import core.output_signals as output_signals
 
@@ -8994,6 +9270,39 @@ class TestOutputSignals:
         assert "entities" in OutputSignalClassifier("curl https://projectdiscovery.io").classify_line(
             "https://projectdiscovery.io"
         )
+        shodan_classifier = OutputSignalClassifier("shodan domain darklab.sh")
+        shodan_metadata = shodan_classifier.classify_line("shell                    CNAME  fw-vx2-vp1.darklab.sh")
+        assert shodan_metadata["target"] == "darklab.sh"
+        shodan_entities = shodan_metadata["entities"]
+        assert isinstance(shodan_entities, list)
+        shodan_values = {(item["type"], item["canonical_value"]) for item in shodan_entities}
+        assert ("domain", "shell.darklab.sh") in shodan_values
+        assert ("domain", "fw-vx2-vp1.darklab.sh") in shodan_values
+        openssl_classifier = OutputSignalClassifier("openssl s_client -connect ip.darklab.sh:443 -showcerts")
+        openssl_metadata = openssl_classifier.classify_line("subject=CN=ip.darklab.sh")
+        assert openssl_metadata["target"] == "ip.darklab.sh:443"
+        openssl_entities = openssl_metadata["entities"]
+        assert isinstance(openssl_entities, list)
+        openssl_values = {(item["type"], item["canonical_value"]) for item in openssl_entities}
+        assert ("domain", "ip.darklab.sh") in openssl_values
+        assert "entities" not in openssl_classifier.classify_line("-----BEGIN CERTIFICATE-----")
+        assert "entities" not in openssl_classifier.classify_line(
+            "MIIF7TCCBNWgAwIBAgISBdN8qsf9MkA3z+akRWDg5O/3MA0GCSqGSIb3DQEBCwUA"
+        )
+        masscan_classifier = OutputSignalClassifier("masscan -p 1-1000 192.168.1.3")
+        assert "entities" not in masscan_classifier.classify_line(
+            "Starting masscan 1.3.2 (http://bit.ly/14GZzcT) at 2026-05-23 04:36:43 GMT"
+        )
+        ffuf_classifier = OutputSignalClassifier("ffuf -u https://tor-stats.darklab.sh/FUZZ -w common.txt")
+        assert "entities" not in ffuf_classifier.classify_line(" :: URL              : https://tor-stats.darklab.sh/FUZZ")
+        ffuf_metadata = ffuf_classifier.classify_line(
+            "contact                 [Status: 301, Size: 169, Words: 5, Lines: 8, Duration: 42ms]"
+        )
+        assert ffuf_metadata["target"] == "tor-stats.darklab.sh"
+        ffuf_entities = ffuf_metadata["entities"]
+        assert isinstance(ffuf_entities, list)
+        ffuf_values = {(item["type"], item["canonical_value"]) for item in ffuf_entities}
+        assert ("url", "https://tor-stats.darklab.sh/contact") in ffuf_values
 
     def test_nmap_input_file_sections_update_signal_target(self):
         classifier = OutputSignalClassifier("nmap -iL darklab_inputs.txt -sT")
