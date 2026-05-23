@@ -22,6 +22,11 @@ function openWorkflows() {
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   showWorkflowsOverlay();
+  if (typeof ensureWorkflowCatalogLoaded === 'function') {
+    ensureWorkflowCatalogLoaded().catch(err => {
+      logClientError('failed to load /workflows while opening modal', err);
+    });
+  }
   if (typeof markInteractionSurfaceReady === 'function') {
     markInteractionSurfaceReady('workflows', workflowsOverlay, document.getElementById('workflows-modal'));
   }

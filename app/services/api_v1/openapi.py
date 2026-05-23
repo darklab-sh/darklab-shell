@@ -1032,6 +1032,48 @@ OPENAPI_SPEC: dict = {
                     "configured": {"type": "boolean"},
                 },
             },
+            "NotificationChannelKindField": {
+                "type": "object",
+                "required": ["name", "label"],
+                "properties": {
+                    "name": {"type": "string"},
+                    "label": {"type": "string"},
+                    "optional": {"type": "boolean"},
+                    "help": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+            "NotificationChannelKind": {
+                "type": "object",
+                "required": ["kind", "label", "secret_fields", "config_fields"],
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": ["webhook", "slack", "discord", "telegram", "pushover", "email"],
+                    },
+                    "label": {"type": "string"},
+                    "secret_fields": {"type": "array", "items": _ref("NotificationChannelKindField")},
+                    "config_fields": {"type": "array", "items": _ref("NotificationChannelKindField")},
+                },
+                "additionalProperties": False,
+            },
+            "NotificationTriggerOption": {
+                "type": "object",
+                "required": ["value", "label"],
+                "properties": {
+                    "value": {"type": "string"},
+                    "label": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+            "NotificationChannelKindList": {
+                "type": "object",
+                "required": ["kinds", "triggers"],
+                "properties": {
+                    "kinds": {"type": "array", "items": _ref("NotificationChannelKind")},
+                    "triggers": {"type": "array", "items": _ref("NotificationTriggerOption")},
+                },
+            },
             "NotificationChannel": {
                 "type": "object",
                 "required": ["id", "kind", "label", "config", "triggers", "secret_fields", "muted", "created", "updated"],
@@ -1865,6 +1907,17 @@ OPENAPI_SPEC: dict = {
                     "401": _error_response("Missing, invalid, or revoked token"),
                     "429": _error_response("Rate limit exceeded"),
                     "503": _error_response("Vault unavailable"),
+                },
+            },
+        },
+        "/notification-channel-kinds": {
+            "get": {
+                "responses": {
+                    "200": _json_response(
+                        "Notification channel kind contract",
+                        _ref("NotificationChannelKindList"),
+                    ),
+                    **_common_errors(),
                 },
             },
         },

@@ -379,18 +379,32 @@ def _history_run_elapsed_seconds(row) -> float | None:
     return max(0.0, (finished - started).total_seconds())
 
 
+_HISTORY_OUTPUT_KIND_ORDER = {"error": 3, "warn": 2, "notice": 1, "info": 0}
+
+
+def _row_value(row, key: str, default=None):
+    if isinstance(row, dict):
+        return row.get(key, default)
+    try:
+        return row[key]
+    except (IndexError, KeyError, TypeError):
+        return default
+
+
 def _history_run_max_output_kind(row) -> str:
-    order = {"error": 3, "warn": 2, "notice": 1, "info": 0}
+    summary_kind = str(_row_value(row, "max_output_kind", "") or "").strip()
+    if summary_kind in _HISTORY_OUTPUT_KIND_ORDER:
+        return summary_kind
     best = "info"
     try:
-        entries = json.loads(str(row["output_preview"] or "[]"))
+        entries = json.loads(str(_row_value(row, "output_preview", "[]") or "[]"))
     except (TypeError, ValueError, json.JSONDecodeError):
         return best
     for entry in entries if isinstance(entries, list) else []:
         if not isinstance(entry, dict):
             continue
         kind = str(entry.get("kind") or "").strip()
-        if order.get(kind, -1) > order.get(best, -1):
+        if _HISTORY_OUTPUT_KIND_ORDER.get(kind, -1) > _HISTORY_OUTPUT_KIND_ORDER.get(best, -1):
             best = kind
     return best
 
@@ -414,7 +428,22 @@ def _history_insights(conn, session_id: str, *, days: int | None = None) -> dict
     cutoff = datetime.combine(fetch_start_date, datetime.min.time()).isoformat()
     rows = conn.execute(
         """
-        SELECT id, run_kind, command, started, finished, exit_code, output_line_count, output_preview,
+        SELECT id, run_kind, command, started, finished, exit_code, output_line_count,
+               COALESCE((
+                 SELECT CASE MAX(CASE s.value
+                   WHEN 'error' THEN 3
+                   WHEN 'warn' THEN 2
+                   WHEN 'notice' THEN 1
+                   WHEN 'info' THEN 0
+                   ELSE 0 END)
+                   WHEN 3 THEN 'error'
+                   WHEN 2 THEN 'warn'
+                   WHEN 1 THEN 'notice'
+                   ELSE 'info'
+                 END
+                   FROM run_output_summary s
+                  WHERE s.run_id = runs.id AND s.family = 'kind'
+               ), 'info') AS max_output_kind,
                (
                  SELECT COUNT(*) FROM findings_occurrences fo
                   WHERE fo.run_id = runs.id

@@ -170,6 +170,26 @@ _NUCLEI_RESULT_RE = re.compile(r"^\[[^\]]+\]\s+\[[a-z0-9_-]+\]\s+\[(?:info|low|m
 _SCAN_COMPLETED_RE = re.compile(r"^\[INF\]\s+Scan completed\b.*\bmatches found\.", re.I)
 _MASSCAN_RATE_RE = re.compile(r"^rate:\s+.*\bdone\b.*\bfound=\d+\b", re.I)
 _FFUF_PROGRESS_RE = re.compile(r"^::\s*Progress:\s*\[\d+/\d+\]\s*::", re.I)
+_CLEAN_HTTP_URL_RE = re.compile(r"^https?://\S+$", re.I)
+_URL_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*://", re.I)
+_URL_TAIL_RE = re.compile(r"[/?#].*$")
+_SHELL_TEMPLATE_URL_NOISE_RE = re.compile(r"(?:'\+|\+'\$|/\$1\b)")
+_FIERCE_FINDING_RE = re.compile(r"^(?:Found:|NS:|SOA:)\s+\S+", re.I)
+_DNSRECON_FINDING_RE = re.compile(r"^\[\*\]\s+DNSSEC is configured for\s+\S+", re.I)
+_NIKTO_PLUS_LINE_RE = re.compile(r"^\+\s+\S")
+_FLAG_ASSIGNMENT_RE = re.compile(r"^([^=]+)=(.+)$")
+_NSLOOKUP_SERVER_RE = re.compile(r"^server$", re.I)
+_FUZZ_SUFFIX_RE = re.compile(r"/FUZZ\b.*$", re.I)
+_NMAP_OUTPUT_PREFIX_RE = re.compile(r"^-o[AGNX]$", re.I)
+_PORT_LIST_RE = re.compile(r"^\d+(?:,\d+)*$")
+_PORT_RANGE_RE = re.compile(r"^\d+(?:-\d+)?$")
+_NMAP_DONE_RE = re.compile(r"^Nmap done:\b", re.I)
+_KILLED_BY_USER_RE = re.compile(r"^\[killed by user(?:\b|[^\w])", re.I)
+_DNS_MAIL_EXCHANGER_RE = re.compile(r"\bmail exchanger\s*=\s*\S+", re.I)
+_DNS_TEXT_RE = re.compile(r"\btext\s*=\s*.+", re.I)
+_DNS_CANONICAL_NAME_RE = re.compile(r"\bcanonical name\s*=\s*\S+", re.I)
+_DNS_ADDRESS_RE = re.compile(r"^Address(?:es)?:\s+[0-9a-f:.]+\b", re.I)
+_DNS_NAME_RE = re.compile(r"^Name:\s+\S+", re.I)
 _CIDR_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}$")
 _DNS_BARE_IP_RE = re.compile(
     r"^(?:(?:\d{1,3}\.){3}\d{1,3}|[0-9a-f:]*[0-9a-f]+:[0-9a-f:]*[0-9a-f]+)$",
@@ -298,8 +318,14 @@ def _normalize_signal_text(value: str) -> str:
     return _strip_ansi_codes(str(value or "")).strip()
 
 
-def extract_entities(text: str, *, include_private_ips: bool = False, source_line: int | None = None) -> list[dict[str, object]]:
-    stripped = _normalize_signal_text(text)
+def extract_entities(
+    text: str,
+    *,
+    include_private_ips: bool = False,
+    source_line: int | None = None,
+    normalized_text: str | None = None,
+) -> list[dict[str, object]]:
+    stripped = normalized_text if normalized_text is not None else _normalize_signal_text(text)
     if not stripped:
         return []
 
@@ -433,20 +459,20 @@ def extract_entities(text: str, *, include_private_ips: bool = False, source_lin
 
 def _looks_like_clean_url(value: str) -> bool:
     raw = _normalize_signal_text(value)
-    if not re.match(r"^https?://\S+$", raw, re.I):
+    if not _CLEAN_HTTP_URL_RE.match(raw):
         return False
-    return not re.search(r"(?:'\+|\+'\$|/\$1\b)", raw)
+    return not _SHELL_TEMPLATE_URL_NOISE_RE.search(raw)
 
 
 def _is_command_scoped_finding(root: str, stripped: str) -> bool:
     if root in {"dnsx", "subfinder"}:
         return bool(_HOSTNAME_RE.search(stripped))
     if root == "fierce":
-        return bool(re.match(r"^(?:Found:|NS:|SOA:)\s+\S+", stripped, re.I))
+        return bool(_FIERCE_FINDING_RE.match(stripped))
     if root == "dnsenum":
         return bool(_CIDR_RE.search(stripped))
     if root == "dnsrecon":
-        return bool(re.match(r"^\[\*\]\s+DNSSEC is configured for\s+\S+", stripped, re.I))
+        return bool(_DNSRECON_FINDING_RE.match(stripped))
     if root == "httpx":
         return bool(_HTTPX_RESULT_RE.search(stripped))
     if root == "gobuster":
@@ -457,7 +483,7 @@ def _is_command_scoped_finding(root: str, stripped: str) -> bool:
         return bool(_WAFW00F_RESULT_RE.search(stripped))
     if root == "nikto":
         return not _NIKTO_SKIP_RE.search(stripped) and (
-            bool(_NIKTO_FINDING_RE.search(stripped)) or bool(re.match(r"^\+\s+\S", stripped))
+            bool(_NIKTO_FINDING_RE.search(stripped)) or bool(_NIKTO_PLUS_LINE_RE.match(stripped))
         )
     if root == "wpscan":
         return not _WPSCAN_SKIP_RE.search(stripped) and bool(_WPSCAN_FINDING_RE.search(stripped))
@@ -508,14 +534,21 @@ def _is_progress_role_line(root: str, stripped: str) -> bool:
     return False
 
 
-def _extract_entities_for_command(root: str, text: str, *, source_line: int | None = None) -> list[dict[str, object]]:
-    stripped = _normalize_signal_text(text)
-    plain = _strip_ansi_codes(str(text or "")).rstrip("\n\r")
+def _extract_entities_for_command(
+    root: str,
+    text: str,
+    *,
+    source_line: int | None = None,
+    normalized_text: str | None = None,
+    ansi_stripped_text: str | None = None,
+) -> list[dict[str, object]]:
+    stripped = normalized_text if normalized_text is not None else _normalize_signal_text(text)
+    plain = ansi_stripped_text if ansi_stripped_text is not None else _strip_ansi_codes(str(text or "")).rstrip("\n\r")
     if root in _PROJECTDISCOVERY_ROOTS and _PROJECTDISCOVERY_ENTITY_NOISE_RE.search(plain):
         return []
     if root == "nmap" and _NMAP_ENTITY_NOISE_RE.search(stripped):
         return []
-    return extract_entities(text, source_line=source_line)
+    return extract_entities(text, source_line=source_line, normalized_text=stripped)
 
 
 def tokenize_command(command: str) -> list[str]:
@@ -573,17 +606,17 @@ def _strip_url_target(value: str) -> str:
     raw = str(value or "").strip()
     if not raw:
         return ""
-    if re.match(r"^[a-z][a-z0-9+.-]*://", raw, re.I):
+    if _URL_SCHEME_RE.match(raw):
         parsed = urlparse(raw)
         return parsed.netloc or raw
-    return re.sub(r"[/?#].*$", "", re.sub(r"^[a-z][a-z0-9+.-]*://", "", raw, flags=re.I))
+    return _URL_TAIL_RE.sub("", _URL_SCHEME_RE.sub("", raw))
 
 
 def _find_flag_value(tokens: list[str], names: set[str]) -> str:
     for index, token in enumerate(tokens[1:], start=1):
         if token in names and index + 1 < len(tokens) and not tokens[index + 1].startswith("-"):
             return tokens[index + 1]
-        match = re.match(r"^([^=]+)=(.+)$", token)
+        match = _FLAG_ASSIGNMENT_RE.match(token)
         if match and match.group(1) in names:
             return match.group(2)
     return ""
@@ -623,7 +656,7 @@ def _dns_target(tokens: list[str], root: str) -> str:
         if token and not token.startswith("-") and not token.startswith("+")
         and not token.startswith("@") and token.lower() not in record_types
     ]
-    if root == "nslookup" and re.match(r"^server$", positionals[0] if positionals else "", re.I):
+    if root == "nslookup" and _NSLOOKUP_SERVER_RE.match(positionals[0] if positionals else ""):
         return positionals[1] if len(positionals) > 1 else ""
     return positionals[0] if positionals else ""
 
@@ -646,14 +679,14 @@ def extract_target(command: str) -> str | None:
                 "-w", "--write-out", "--connect-timeout", "-m", "--max-time",
             },
         )
-        target = next((token for token in positionals if re.match(r"^[a-z][a-z0-9+.-]*://", token, re.I)), "")
+        target = next((token for token in positionals if _URL_SCHEME_RE.match(token)), "")
         if not target:
             target = next((token for token in positionals if "." in token), "")
         return _strip_url_target(target) if target else None
 
     if root in {"ffuf", "gobuster", "feroxbuster", "katana", "nikto", "nuclei"}:
         target = _find_flag_value(tokens, {"-u", "--url", "-target", "--target"})
-        return _strip_url_target(re.sub(r"/FUZZ\b.*$", "", target, flags=re.I)) if target else None
+        return _strip_url_target(_FUZZ_SUFFIX_RE.sub("", target)) if target else None
 
     if root == "assetfinder":
         positionals = _positional_targets(tokens)
@@ -669,16 +702,16 @@ def extract_target(command: str) -> str | None:
                     "-iL", "--script", "--script-args", "--rate", "--timeout",
                     "--host-timeout",
                 },
-                skip_values_for_prefix=re.compile(r"^-o[AGNX]$", re.I),
+                skip_values_for_prefix=_NMAP_OUTPUT_PREFIX_RE,
             )
-            if not re.match(r"^\d+(?:,\d+)*$", token)
+            if not _PORT_LIST_RE.match(token)
         ]
         return ", ".join(positionals) if positionals else None
 
     if root == "nc":
         positionals = [
             token for token in _positional_targets(tokens, skip_values_after={"-w", "-i", "-s", "-p"})
-            if not re.match(r"^\d+(?:-\d+)?$", token)
+            if not _PORT_RANGE_RE.match(token)
         ]
         return _strip_url_target(positionals[0]) if positionals else None
 
@@ -702,13 +735,12 @@ class OutputSignalClassifier:
         self.line_index = 0
         self.previous_text = ""
 
-    def _line_target(self, text: str) -> str | None:
-        stripped = _normalize_signal_text(text)
+    def _line_target(self, normalized_text: str) -> str | None:
         if self.root == "nmap":
-            report_match = _NMAP_REPORT_TARGET_RE.match(stripped)
+            report_match = _NMAP_REPORT_TARGET_RE.match(normalized_text)
             if report_match:
                 self.current_target = report_match.group(1).strip()
-            elif re.match(r"^Nmap done:\b", stripped, re.I):
+            elif _NMAP_DONE_RE.match(normalized_text):
                 return self.target
             if self.current_target:
                 return self.current_target
@@ -717,7 +749,9 @@ class OutputSignalClassifier:
     def classify_line(self, text: str, cls: str = "") -> dict[str, object]:
         text = str(text or "").rstrip("\n")
         cls = str(cls or "")
-        target = self._line_target(text)
+        ansi_stripped = _strip_ansi_codes(text).rstrip("\n\r")
+        normalized_text = ansi_stripped.strip()
+        target = self._line_target(normalized_text)
         scopes = classify_line(
             text,
             cls=cls,
@@ -726,6 +760,7 @@ class OutputSignalClassifier:
             previous_text=self.previous_text,
             include_signals=self.cmd_type not in {"builtin"} and not self.is_help_output,
             is_help_output=self.is_help_output,
+            normalized_text=normalized_text,
         )
         metadata: dict[str, object] = {
             "line_index": self.line_index,
@@ -735,7 +770,12 @@ class OutputSignalClassifier:
             metadata["target"] = target
         if scopes:
             metadata["signals"] = scopes
-        role = classify_line_role(text, root=self.root, command=self.command)
+        role = classify_line_role(
+            text,
+            root=self.root,
+            command=self.command,
+            normalized_text=normalized_text,
+        )
         if role is not None:
             metadata["role"] = role.value
         can_extract_entities = (
@@ -744,11 +784,17 @@ class OutputSignalClassifier:
             and not self.is_help_output
         )
         if can_extract_entities:
-            entities = _extract_entities_for_command(self.root, text, source_line=self.line_index)
+            entities = _extract_entities_for_command(
+                self.root,
+                text,
+                source_line=self.line_index,
+                normalized_text=normalized_text,
+                ansi_stripped_text=ansi_stripped,
+            )
             if entities:
                 metadata["entities"] = entities
         self.line_index += 1
-        self.previous_text = _normalize_signal_text(text)
+        self.previous_text = normalized_text
         return metadata
 
 
@@ -761,10 +807,11 @@ def classify_line(
     previous_text: str = "",
     include_signals: bool = True,
     is_help_output: bool | None = None,
+    normalized_text: str | None = None,
 ) -> list[str]:
     if not include_signals:
         return []
-    stripped = _normalize_signal_text(text)
+    stripped = normalized_text if normalized_text is not None else _normalize_signal_text(text)
     if not stripped:
         return []
     if any(pattern.search(stripped) for pattern in _APP_SIGNAL_EXCLUDES):
@@ -779,22 +826,22 @@ def classify_line(
 
     if cls == "notice":
         scopes.append("warnings")
-    if cls in {"denied", "exit-fail"} and not re.match(r"^\[killed by user(?:\b|[^\w])", stripped, re.I):
+    if cls in {"denied", "exit-fail"} and not _KILLED_BY_USER_RE.match(stripped):
         scopes.append("errors")
 
-    if re.match(r"^\[killed by user(?:\b|[^\w])", stripped, re.I):
+    if _KILLED_BY_USER_RE.match(stripped):
         return scopes
 
     if not any(pattern.search(stripped) for pattern in _FINDINGS_EXCLUDES):
         finding = False
-        if re.search(r"\bmail exchanger\s*=\s*\S+", stripped, re.I):
+        if _DNS_MAIL_EXCHANGER_RE.search(stripped):
             finding = True
-        elif re.search(r"\btext\s*=\s*.+", stripped, re.I):
+        elif _DNS_TEXT_RE.search(stripped):
             finding = True
-        elif re.search(r"\bcanonical name\s*=\s*\S+", stripped, re.I):
+        elif _DNS_CANONICAL_NAME_RE.search(stripped):
             finding = True
-        elif re.search(r"^Address(?:es)?:\s+[0-9a-f:.]+\b", stripped, re.I):
-            finding = bool(re.search(r"^Name:\s+\S+", previous_text, re.I))
+        elif _DNS_ADDRESS_RE.search(stripped):
+            finding = bool(_DNS_NAME_RE.search(previous_text))
         elif root in _DNS_SIGNAL_ROOTS and (_DNS_BARE_IP_RE.search(stripped) or _DNS_SHORT_MX_RE.search(stripped)):
             finding = True
         elif root == "assetfinder" and _HOSTNAME_RE.search(stripped):
@@ -817,8 +864,14 @@ def classify_line(
     return list(dict.fromkeys(scopes))
 
 
-def classify_line_role(text: str, *, root: str | None = None, command: str = "") -> LineRole | None:
-    stripped = _normalize_signal_text(text)
+def classify_line_role(
+    text: str,
+    *,
+    root: str | None = None,
+    command: str = "",
+    normalized_text: str | None = None,
+) -> LineRole | None:
+    stripped = normalized_text if normalized_text is not None else _normalize_signal_text(text)
     if not stripped:
         return None
     root = root if root is not None else command_root(command)

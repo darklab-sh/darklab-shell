@@ -44,6 +44,23 @@ WORKSPACE_COMMAND_WRITE_FILE_MODE = 0o660
 WORKSPACE_COMMAND_DIR_MODE = 0o3770
 
 
+@lru_cache(maxsize=1)
+def _sudo_bin() -> str:
+    return shutil.which("sudo") or ""
+
+
+@lru_cache(maxsize=1)
+def _scanner_user():
+    try:
+        return pwd.getpwnam("scanner")
+    except (AttributeError, KeyError, TypeError):
+        return None
+
+
+def _scanner_user_exists() -> bool:
+    return _scanner_user() is not None
+
+
 class WorkspaceError(ValueError):
     """Base class for workspace validation and operation errors."""
 
@@ -320,12 +337,8 @@ def open_workspace_file_for_download(
 
 
 def _sudo_chmod_workspace_path(path: Path, mode: int) -> bool:
-    sudo_bin = shutil.which("sudo")
-    if not sudo_bin:
-        return False
-    try:
-        pwd.getpwnam("scanner")
-    except KeyError:
+    sudo_bin = _sudo_bin()
+    if not sudo_bin or not _scanner_user_exists():
         return False
     try:
         subprocess.run(
@@ -350,8 +363,11 @@ def _sudo_chmod_workspace_path(path: Path, mode: int) -> bool:
 
 @lru_cache(maxsize=1)
 def _scanner_uid() -> int | None:
+    user = _scanner_user()
+    if user is None:
+        return None
     try:
-        return int(pwd.getpwnam("scanner").pw_uid)
+        return int(user.pw_uid)
     except (AttributeError, KeyError, TypeError, ValueError):
         return None
 
@@ -501,12 +517,8 @@ def prepare_workspace_directory_for_command(path: Path, *, mode: str) -> None:
     """Make a validated workspace directory usable by command-managed databases."""
     if path.exists() and not path.is_dir():
         raise InvalidWorkspacePath("session path is not a directory")
-    sudo_bin = shutil.which("sudo")
-    scanner_exists = True
-    try:
-        pwd.getpwnam("scanner")
-    except KeyError:
-        scanner_exists = False
+    sudo_bin = _sudo_bin()
+    scanner_exists = _scanner_user_exists()
     if sudo_bin and scanner_exists:
         if path.exists():
             try:
@@ -730,12 +742,8 @@ def delete_workspace_file(
         path.unlink()
         return
     except PermissionError:
-        sudo_bin = shutil.which("sudo")
-        if not sudo_bin:
-            raise
-        try:
-            pwd.getpwnam("scanner")
-        except KeyError:
+        sudo_bin = _sudo_bin()
+        if not sudo_bin or not _scanner_user_exists():
             raise
         subprocess.run(
             [sudo_bin, "-u", "scanner", "-g", "appuser", "rm", "--", str(path)],
@@ -756,12 +764,8 @@ def _remove_workspace_directory(path: Path) -> None:
         shutil.rmtree(path)
         return
     except PermissionError:
-        sudo_bin = shutil.which("sudo")
-        if not sudo_bin:
-            raise
-        try:
-            pwd.getpwnam("scanner")
-        except KeyError:
+        sudo_bin = _sudo_bin()
+        if not sudo_bin or not _scanner_user_exists():
             raise
         subprocess.run(
             [sudo_bin, "-u", "scanner", "-g", "appuser", "rm", "-rf", "--", str(path)],
@@ -875,12 +879,8 @@ def _move_workspace_path_direct(source: Path, destination: Path) -> None:
         shutil.move(str(source), str(destination))
         return
     except PermissionError:
-        sudo_bin = shutil.which("sudo")
-        if not sudo_bin:
-            raise
-        try:
-            pwd.getpwnam("scanner")
-        except KeyError:
+        sudo_bin = _sudo_bin()
+        if not sudo_bin or not _scanner_user_exists():
             raise
         subprocess.run(
             [sudo_bin, "-u", "scanner", "-g", "appuser", "mv", "--", str(source), str(destination)],

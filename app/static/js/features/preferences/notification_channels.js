@@ -1,53 +1,9 @@
 // Options modal outbound-notification channel management.
 (function (global) {
-  const CHANNEL_KINDS = [
-    { value: 'webhook', label: 'Webhook' },
-    { value: 'slack', label: 'Slack' },
-    { value: 'discord', label: 'Discord' },
-    { value: 'telegram', label: 'Telegram' },
-    { value: 'pushover', label: 'Pushover' },
-    { value: 'email', label: 'Email' },
-  ];
-  const TRIGGERS = [
-    { value: 'run_complete', label: 'Run complete' },
-    { value: 'pty_session_ended', label: 'PTY session ended' },
-    { value: 'scheduled_run_failed', label: 'Scheduled run failed' },
-    { value: 'watcher_changed', label: 'Watcher changed' },
-    { value: 'watcher_error', label: 'Watcher error' },
-    { value: 'watcher_recovered', label: 'Watcher recovered' },
-  ];
-  const SECRET_FIELDS = {
-    webhook: [{ name: 'url', label: 'Webhook URL' }],
-    slack: [{ name: 'url', label: 'Slack webhook URL' }],
-    discord: [{ name: 'url', label: 'Discord webhook URL' }],
-    telegram: [{ name: 'bot_token', label: 'Bot token' }],
-    pushover: [
-      { name: 'app_token', label: 'App token' },
-      { name: 'user_key', label: 'User key' },
-    ],
-    email: [],
-  };
-  const CONFIG_FIELDS = {
-    webhook: [{ name: 'timeout_seconds', label: 'Timeout seconds', optional: true }],
-    slack: [{ name: 'timeout_seconds', label: 'Timeout seconds', optional: true }],
-    discord: [{ name: 'timeout_seconds', label: 'Timeout seconds', optional: true }],
-    telegram: [
-      { name: 'chat_id', label: 'Chat ID' },
-      { name: 'timeout_seconds', label: 'Timeout seconds', optional: true },
-    ],
-    pushover: [
-      { name: 'priority', label: 'Priority', optional: true },
-      { name: 'sound', label: 'Sound', optional: true },
-      { name: 'device', label: 'Device', optional: true },
-      { name: 'timeout_seconds', label: 'Timeout seconds', optional: true },
-    ],
-    email: [
-      { name: 'recipients', label: 'Recipients', help: 'Comma-separated email addresses.' },
-      { name: 'reply_to', label: 'Reply-To', optional: true },
-      { name: 'timeout_seconds', label: 'Timeout seconds', optional: true },
-    ],
-  };
-
+  let _channelKinds = [];
+  let _triggers = [];
+  let _kindContract = null;
+  let _kindContractLoading = null;
   let _channelsCache = null;
   let _channelsLoading = false;
   const _deliveryPanels = new Set();
@@ -88,8 +44,59 @@
     });
   }
 
+  function _titleize(value) {
+    return String(value || 'Channel')
+      .replaceAll('_', ' ')
+      .replace(/\b\w/g, char => char.toUpperCase());
+  }
+
+  function _setKindContract(data) {
+    const kinds = Array.isArray(data?.kinds) ? data.kinds : [];
+    _kindContract = {
+      kinds: kinds.filter(item => item && typeof item === 'object' && item.kind),
+      triggers: Array.isArray(data?.triggers) ? data.triggers : [],
+    };
+    _channelKinds = _kindContract.kinds.map(item => ({
+      value: String(item.kind),
+      label: String(item.label || _titleize(item.kind)),
+    }));
+    _triggers = _kindContract.triggers.map(item => ({
+      value: String(item.value || ''),
+      label: String(item.label || _titleize(item.value)),
+    })).filter(item => item.value);
+  }
+
+  async function _ensureKindContract() {
+    if (_kindContract) return _kindContract;
+    if (_kindContractLoading) return _kindContractLoading;
+    _kindContractLoading = (async () => {
+      const resp = await _apiFetch()('/session/notification-channel-kinds');
+      const data = await resp.json().catch(() => ({}));
+      if (resp && resp.ok === false) throw new Error(data.message || data.error || `HTTP ${resp.status}`);
+      _setKindContract(data);
+      return _kindContract;
+    })();
+    try {
+      return await _kindContractLoading;
+    } finally {
+      _kindContractLoading = null;
+    }
+  }
+
+  function _kindDefinition(kind) {
+    return (_kindContract?.kinds || []).find(item => item.kind === kind) || null;
+  }
+
+  function _secretFields(kind) {
+    return Array.isArray(_kindDefinition(kind)?.secret_fields) ? _kindDefinition(kind).secret_fields : [];
+  }
+
+  function _configFields(kind) {
+    return Array.isArray(_kindDefinition(kind)?.config_fields) ? _kindDefinition(kind).config_fields : [];
+  }
+
   function _kindLabel(kind) {
-    return CHANNEL_KINDS.find(item => item.value === kind)?.label || String(kind || 'Channel');
+    return _channelKinds.find(item => item.value === kind)?.label || _titleize(kind);
   }
 
   function _secretConfigured(channel, name) {
@@ -258,7 +265,7 @@
     label.textContent = 'Triggers';
     const list = document.createElement('div');
     list.className = 'form-fieldset';
-    TRIGGERS.forEach((trigger) => {
+    _triggers.forEach((trigger) => {
       const row = document.createElement('label');
       row.className = 'form-check';
       const input = document.createElement('input');
@@ -437,7 +444,9 @@
   function _buildEditor(channel) {
     const content = document.createElement('div');
     content.className = 'form-fieldset';
-    const kindSelect = _select(channel?.kind || 'webhook', CHANNEL_KINDS, { 'aria-label': 'Notification channel type' });
+    const kindSelect = _select(channel?.kind || _channelKinds[0]?.value || 'webhook', _channelKinds, {
+      'aria-label': 'Notification channel type',
+    });
     kindSelect.disabled = !!channel;
     const labelInput = _input(channel?.label || '', {
       maxlength: '80',
@@ -461,7 +470,7 @@
     const renderDynamicFields = () => {
       dynamicFields.innerHTML = '';
       const kind = kindSelect.value;
-      SECRET_FIELDS[kind].forEach((field) => {
+      _secretFields(kind).forEach((field) => {
         const input = _input('', {
           type: 'password',
           autocomplete: 'off',
@@ -470,7 +479,7 @@
         input.dataset.secretField = field.name;
         dynamicFields.appendChild(_field(field.label, input));
       });
-      CONFIG_FIELDS[kind].forEach((field) => {
+      _configFields(kind).forEach((field) => {
         const value = field.name === 'recipients' && Array.isArray(channel?.config?.recipients)
           ? channel.config.recipients.join(', ')
           : (channel?.config?.[field.name] || '');
@@ -511,7 +520,7 @@
     });
     const triggers = Array.from(editor.triggerControls.list.querySelectorAll('input[type="checkbox"]:checked'))
       .map(input => input.value);
-    const missingSecret = SECRET_FIELDS[kind]
+    const missingSecret = _secretFields(kind)
       .find(field => !secretValues[field.name] && !(channel && channel.kind === kind && _secretConfigured(channel, field.name)));
     if (missingSecret) return { error: `${missingSecret.label} is required.` };
     return {
@@ -555,6 +564,12 @@
 
   async function openNotificationChannelEditor(channel = null) {
     if (typeof global.showConfirm !== 'function') return null;
+    try {
+      await _ensureKindContract();
+    } catch (error) {
+      _toast(`Could not load notification channel types: ${error.message || 'network error'}`, 'error');
+      return null;
+    }
     const editor = _buildEditor(channel);
     return global.showConfirm({
       body: {

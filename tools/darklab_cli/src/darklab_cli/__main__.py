@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import shlex
 import sys
-from typing import Any
+from typing import Any, NoReturn
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .client import DarklabClient, DarklabCliError, die, iter_sse_events, load_config, print_json
@@ -247,24 +247,33 @@ def _parser() -> argparse.ArgumentParser:
     watch_create = watch_sub.add_parser(
         "create",
         help="Create a watcher from a baseline run or from its first run.",
+        usage=(
+            "darklab watch create [--first-run] (--cron CRON | --every PRESET) "
+            "[--label LABEL] [--timezone TIMEZONE] [--disabled] "
+            "[--suppress-removals] [--notify-metadata-changes] [--format {text,json}] "
+            "[baseline_run_id] [-- COMMAND]"
+        ),
         description=(
             "Create a watcher from a completed baseline run, or use --first-run to capture "
             "the first successful watcher run as the baseline. Add `-- COMMAND` to override "
             "the baseline command or provide the first-run command."
         ),
+        epilog=(
+            "Examples: darklab watch create run_123 --every hourly; "
+            "darklab watch create run_123 --every daily -- curl -I https://darklab.sh; "
+            "darklab watch create --first-run --every hourly -- nmap -sV darklab.sh"
+        ),
     )
     watch_create.add_argument("--first-run", action="store_true", help="Capture the first successful watcher run as the baseline.")
-    watch_cadence = watch_create.add_mutually_exclusive_group(required=True)
-    watch_cadence.add_argument("--cron")
-    watch_cadence.add_argument("--every", metavar="PRESET", help="Cadence preset: hourly, daily, or weekly.")
+    watch_create.add_argument("--cron")
+    watch_create.add_argument("--every", metavar="PRESET", help="Cadence preset: hourly, daily, or weekly.")
     watch_create.add_argument("--label")
     watch_create.add_argument("--timezone")
     watch_create.add_argument("--disabled", action="store_true", help="Create the watcher paused.")
     watch_create.add_argument("--suppress-removals", action="store_true", help="Ignore removal-only diffs.")
     watch_create.add_argument("--notify-metadata-changes", action="store_true", help="Treat metadata-only changes as diffs.")
     watch_create.add_argument("--format", choices=("text", "json"), default="text")
-    watch_create.add_argument("--command-override", default=None, help=argparse.SUPPRESS)
-    watch_create.add_argument("baseline_run_id", nargs="?")
+    watch_create.add_argument("watch_argv", nargs=argparse.REMAINDER, metavar="[baseline_run_id] [-- COMMAND]")
 
     watch_info = watch_sub.add_parser("info", help="Show one watcher.")
     watch_info.add_argument("watcher_id")
@@ -304,7 +313,7 @@ def _parser() -> argparse.ArgumentParser:
     notify_list.add_argument("--format", choices=("text", "json", "ndjson"), default="text")
 
     notify_create = notify_sub.add_parser("create", help="Create a notification channel.")
-    notify_create.add_argument("kind", choices=("webhook", "slack", "discord", "telegram", "pushover", "email"))
+    notify_create.add_argument("kind", metavar="kind")
     notify_create.add_argument("--label")
     notify_create.add_argument("--trigger", action="append", default=[])
     notify_create.add_argument("--config", action="append", default=[], help="Channel config as KEY=VALUE.")
@@ -357,7 +366,7 @@ def _add_atlas_common_filters(parser: argparse.ArgumentParser, *, include_entity
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     raw_argv = sys.argv[1:] if argv is None else argv
-    args = parser.parse_args(_preprocess_watch_create_argv(raw_argv))
+    args = parser.parse_args(raw_argv)
     try:
         client = DarklabClient(load_config(args))
         return _dispatch(client, args)
@@ -366,28 +375,6 @@ def main(argv: list[str] | None = None) -> int:
         return STREAM_INTERRUPTED_EXIT_CODE
     except DarklabCliError as exc:
         return die(str(exc))
-
-
-def _preprocess_watch_create_argv(argv: list[str] | None) -> list[str] | None:
-    if argv is None:
-        return None
-    parts = list(argv)
-    watch_index = -1
-    for index in range(len(parts) - 1):
-        if parts[index] == "watch" and parts[index + 1] == "create":
-            watch_index = index
-            break
-    if watch_index < 0:
-        return parts
-    tail = parts[watch_index + 2:]
-    if "--" not in tail:
-        return parts
-    separator_index = tail.index("--")
-    command_parts = tail[separator_index + 1:]
-    rewritten = parts[:watch_index + 2]
-    rewritten.extend(tail[:separator_index])
-    rewritten.extend(["--command-override", shlex.join(command_parts) if command_parts else ""])
-    return rewritten
 
 
 def _dispatch(client: DarklabClient, args: argparse.Namespace) -> int:
@@ -558,6 +545,64 @@ def _optional_command_text(argv: list[str], command_name: str) -> str:
     return command
 
 
+class _DispatchArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> NoReturn:
+        raise DarklabCliError(message)
+
+
+def _watch_create_argv(args: argparse.Namespace) -> list[str]:
+    parts: list[str] = []
+    if args.first_run:
+        parts.append("--first-run")
+    if args.cron:
+        parts.extend(["--cron", str(args.cron)])
+    if args.every:
+        parts.extend(["--every", str(args.every)])
+    if args.label:
+        parts.extend(["--label", str(args.label)])
+    if args.timezone:
+        parts.extend(["--timezone", str(args.timezone)])
+    if args.disabled:
+        parts.append("--disabled")
+    if args.suppress_removals:
+        parts.append("--suppress-removals")
+    if args.notify_metadata_changes:
+        parts.append("--notify-metadata-changes")
+    if args.format != "text":
+        parts.extend(["--format", str(args.format)])
+    parts.extend(list(args.watch_argv or []))
+    return parts
+
+
+def _watch_create_args(argv: list[str]) -> argparse.Namespace:
+    parts = list(argv or [])
+    command = ""
+    if "--" in parts:
+        separator_index = parts.index("--")
+        command = _optional_command_text(parts[separator_index:], "watch create")
+        parts = parts[:separator_index]
+
+    parser = _DispatchArgumentParser(
+        prog="darklab watch create",
+        add_help=False,
+    )
+    parser.add_argument("--first-run", action="store_true")
+    cadence = parser.add_mutually_exclusive_group(required=True)
+    cadence.add_argument("--cron")
+    cadence.add_argument("--every", metavar="PRESET")
+    parser.add_argument("--label")
+    parser.add_argument("--timezone")
+    parser.add_argument("--disabled", action="store_true")
+    parser.add_argument("--suppress-removals", action="store_true")
+    parser.add_argument("--notify-metadata-changes", action="store_true")
+    parser.add_argument("--format", choices=("text", "json"), default="text")
+    parser.add_argument("baseline_run_id", nargs="?")
+
+    parsed = parser.parse_args(parts)
+    parsed.command_override = command
+    return parsed
+
+
 def _print_schedule(payload: dict[str, Any], output_format: str) -> int:
     if output_format == "json":
         return _print_payload(payload, "json")
@@ -608,16 +653,12 @@ def _print_schedule_info(payload: dict[str, Any], fires_payload: dict[str, Any],
         ("Failures", schedule.get("consecutive_failures")),
         ("Last error", schedule.get("last_error")),
     ))
-    print("Recent Fires")
-    recent_fires = [
-        {**fire, "fired_at": _format_schedule_time(fire.get("fired_at"), timezone_name)}
-        for fire in fires
-        if isinstance(fire, dict)
-    ]
-    if recent_fires:
-        _print_table(recent_fires, ("fired_at", "status", "run_id", "reason"))
-    else:
-        print("  none")
+    _print_recent_fire_table(
+        fires,
+        fields=("fired_at", "status", "run_id", "reason"),
+        time_field="fired_at",
+        timezone_name=timezone_name,
+    )
     return 0
 
 
@@ -667,7 +708,44 @@ def _format_detail_value(value: Any) -> str:
         return ""
     if isinstance(value, bool):
         return "yes" if value else "no"
+    if isinstance(value, dict):
+        return json.dumps(value, sort_keys=True, separators=(",", ": "))
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value)
     return str(value)
+
+
+def _format_bool_options(options: Any) -> str:
+    if not isinstance(options, dict):
+        return ""
+    enabled = [
+        str(key).replace("_", "-")
+        for key, value in sorted(options.items())
+        if bool(value)
+    ]
+    return ", ".join(enabled) if enabled else "default"
+
+
+def _print_recent_fire_table(
+    fires: list[Any],
+    *,
+    fields: tuple[str, ...],
+    time_field: str,
+    timezone_name: str,
+) -> None:
+    print("Recent Fires")
+    recent_fires = []
+    for fire in fires:
+        if not isinstance(fire, dict):
+            continue
+        recent_fires.append({
+            **fire,
+            time_field: _format_schedule_time(fire.get(time_field), timezone_name),
+        })
+    if recent_fires:
+        _print_table(recent_fires, fields)
+    else:
+        print("  none")
 
 
 def _format_schedule_time(value: Any, timezone_name: str) -> str:
@@ -695,31 +773,32 @@ def _watch(client: DarklabClient, args: argparse.Namespace) -> int:
                 fields=("id", "state", "baseline_run_id", "label", "command_text"),
             )
         case "create":
-            if not args.first_run and not args.baseline_run_id:
+            create_args = _watch_create_args(_watch_create_argv(args))
+            if not create_args.first_run and not create_args.baseline_run_id:
                 raise DarklabCliError("watch create needs a baseline run id, or use --first-run with -- COMMAND.")
             body: dict[str, Any] = {
-                "baseline_mode": "first_run" if args.first_run else "existing_run",
-                "baseline_run_id": "" if args.first_run else args.baseline_run_id,
-                "cron_expr": args.cron,
-                "cadence_preset": args.every,
-                "label": args.label,
-                "timezone": args.timezone,
-                "enabled": not args.disabled,
+                "baseline_mode": "first_run" if create_args.first_run else "existing_run",
+                "baseline_run_id": "" if create_args.first_run else create_args.baseline_run_id,
+                "cron_expr": create_args.cron,
+                "cadence_preset": create_args.every,
+                "label": create_args.label,
+                "timezone": create_args.timezone,
+                "enabled": not create_args.disabled,
                 "options": {
-                    "suppress_removals": bool(args.suppress_removals),
-                    "notify_metadata_changes": bool(args.notify_metadata_changes),
+                    "suppress_removals": bool(create_args.suppress_removals),
+                    "notify_metadata_changes": bool(create_args.notify_metadata_changes),
                 },
             }
-            if args.command_override is not None:
-                command = str(args.command_override or "").strip()
-                if not command:
-                    raise DarklabCliError("watch create needs a command after --.")
+            if create_args.command_override:
+                command = str(create_args.command_override or "").strip()
                 body["command"] = command
-            if args.first_run and not body.get("command"):
+            if create_args.first_run and not body.get("command"):
                 raise DarklabCliError("watch create --first-run needs a command after --.")
-            return _print_watcher(client.request("POST", "/watchers", body=body), args.format)
+            return _print_watcher(client.request("POST", "/watchers", body=body), create_args.format)
         case "info":
-            return _print_watcher(client.request("GET", f"/watchers/{args.watcher_id}"), args.format)
+            watcher_payload = client.request("GET", f"/watchers/{args.watcher_id}")
+            fires_payload = client.request("GET", f"/watchers/{args.watcher_id}/fires", params={"limit": 5, "offset": 0})
+            return _print_watcher_info(watcher_payload, fires_payload, args.format)
         case "pause":
             payload = client.request(
                 "PATCH",
@@ -760,6 +839,67 @@ def _print_watcher(payload: dict[str, Any], output_format: str) -> int:
     return 0
 
 
+def _watcher_status(watcher: dict[str, Any]) -> str:
+    state = str(watcher.get("state") or "").strip() or "unknown"
+    reason = str(watcher.get("state_reason") or "").strip()
+    return f"{state} ({reason})" if reason else state
+
+
+def _print_watcher_info(payload: dict[str, Any], fires_payload: dict[str, Any], output_format: str) -> int:
+    if output_format == "json":
+        combined = dict(payload) if isinstance(payload, dict) else {}
+        if isinstance(fires_payload, dict):
+            combined["fires"] = fires_payload.get("fires", [])
+            combined["fires_total"] = fires_payload.get("total")
+            combined["fires_has_more"] = fires_payload.get("has_more")
+        return _print_payload(combined, "json")
+
+    watcher = payload.get("watcher") if isinstance(payload, dict) else {}
+    if not isinstance(watcher, dict):
+        return 0
+    schedule = watcher.get("schedule")
+    if not isinstance(schedule, dict):
+        schedule = {}
+    timezone_name = str(schedule.get("timezone") or "UTC")
+    fires = fires_payload.get("fires") if isinstance(fires_payload, dict) else []
+    if not isinstance(fires, list):
+        fires = []
+
+    _print_detail_section("Watcher", (
+        ("ID", watcher.get("id")),
+        ("Label", watcher.get("label") or "(none)"),
+        ("Status", _watcher_status(watcher)),
+        ("Created", _format_schedule_time(watcher.get("created"), timezone_name)),
+        ("Updated", _format_schedule_time(watcher.get("updated"), timezone_name)),
+    ))
+    _print_detail_section("Command", (("", watcher.get("command_text")),))
+    _print_detail_section("Baseline", (
+        ("Baseline run", watcher.get("baseline_run_id") or "(pending first run)"),
+        ("Last run", watcher.get("last_run_id") or "(none)"),
+        ("Last diff", watcher.get("last_diff_summary")),
+    ))
+    _print_detail_section("Cadence", (
+        ("Preset", schedule.get("cadence_preset") or "custom"),
+        ("Cron", schedule.get("cron_expr")),
+        ("Timezone", timezone_name),
+        ("Next run", _format_schedule_time(schedule.get("next_run_at"), timezone_name)),
+    ))
+    _print_detail_section("Health", (
+        ("No-change streak", watcher.get("consecutive_no_change")),
+        ("Changed streak", watcher.get("consecutive_changed")),
+        ("Failures", watcher.get("consecutive_failures")),
+        ("Options", _format_bool_options(watcher.get("options"))),
+        ("Last error", watcher.get("last_error")),
+    ))
+    _print_recent_fire_table(
+        fires,
+        fields=("created", "diff_kind", "state_at_fire", "baseline_run_id", "run_id"),
+        time_field="created",
+        timezone_name=timezone_name,
+    )
+    return 0
+
+
 def _print_watcher_fire(payload: dict[str, Any], output_format: str) -> int:
     if output_format == "json":
         return _print_payload(payload, "json")
@@ -773,16 +913,6 @@ def _print_watcher_fire(payload: dict[str, Any], output_format: str) -> int:
     return 0
 
 
-NOTIFICATION_SECRET_FIELDS = {
-    "webhook": ("url",),
-    "slack": ("url",),
-    "discord": ("url",),
-    "telegram": ("bot_token",),
-    "pushover": ("app_token", "user_key"),
-    "email": (),
-}
-
-
 def _notify(client: DarklabClient, args: argparse.Namespace) -> int:
     match args.notify_command:
         case "list":
@@ -794,7 +924,7 @@ def _notify(client: DarklabClient, args: argparse.Namespace) -> int:
                 "label": args.label,
                 "triggers": args.trigger,
                 "config": _parse_key_values(args.config),
-                "secret_values": _notification_secret_values(args.kind, args.secret_file),
+                "secret_values": _notification_secret_values(client, args.kind, args.secret_file),
             }
             payload = client.request("POST", "/notification-channels", body=body)
             return _print_notification_channel(payload, "text")
@@ -865,8 +995,25 @@ def _parse_key_values(values: list[str]) -> dict[str, str]:
     return parsed
 
 
-def _notification_secret_values(kind: str, secret_file: str | None) -> dict[str, str]:
-    expected = NOTIFICATION_SECRET_FIELDS.get(kind, ())
+def _notification_secret_field_names(client: DarklabClient, kind: str) -> tuple[str, ...]:
+    payload = client.request("GET", "/notification-channel-kinds")
+    kinds = payload.get("kinds") if isinstance(payload, dict) else []
+    for item in kinds if isinstance(kinds, list) else []:
+        if not isinstance(item, dict) or item.get("kind") != kind:
+            continue
+        fields = item.get("secret_fields")
+        if not isinstance(fields, list):
+            return ()
+        return tuple(
+            str(field.get("name") or "").strip()
+            for field in fields
+            if isinstance(field, dict) and str(field.get("name") or "").strip()
+        )
+    raise DarklabCliError(f"unsupported notification channel kind: {kind}")
+
+
+def _notification_secret_values(client: DarklabClient, kind: str, secret_file: str | None) -> dict[str, str]:
+    expected = _notification_secret_field_names(client, kind)
     if not expected:
         return {}
     if secret_file:

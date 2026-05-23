@@ -1917,7 +1917,27 @@ describe('app helpers', () => {
   })
 
   it('renders user workflows above built-ins with edit actions', async () => {
-    const { renderWorkflowItems } = await loadAppFns()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/workflows') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            items: [
+              {
+                id: 'builtin:dns',
+                source: 'builtin',
+                title: 'DNS Troubleshooting',
+                description: '',
+                inputs: [],
+                steps: [{ cmd: 'dig darklab.sh A', note: '' }],
+              },
+            ],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { renderWorkflowItems, ensureWorkflowCatalogLoaded } = await loadAppFns({ apiFetch })
     document.getElementById('workflows-overlay').innerHTML = '<div class="workflows-body"></div>'
 
     renderWorkflowItems([
@@ -1944,6 +1964,10 @@ describe('app helpers', () => {
     expect(labels).toEqual(['My workflows', 'Built-ins'])
     expect(titles).toEqual(['Saved Recon', 'DNS Troubleshooting'])
     expect(document.querySelector('.is-user-workflow .workflow-edit-btn')).toBeTruthy()
+    const workflowFetchesBefore = apiFetch.mock.calls.filter(([url]) => url === '/workflows').length
+    await ensureWorkflowCatalogLoaded()
+    const workflowFetchesAfter = apiFetch.mock.calls.filter(([url]) => url === '/workflows').length
+    expect(workflowFetchesAfter).toBe(workflowFetchesBefore)
   })
 
   it('runs a workflow from the terminal command with flag-provided inputs', async () => {

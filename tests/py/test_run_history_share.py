@@ -2417,6 +2417,8 @@ class TestRunStreaming:
         ) in body
 
     def test_builtin_who_tty_groups_and_version_render_shell_identity(self):
+        from services.commands import builtins_system
+
         client = get_client()
 
         who_resp = _post_run(client, json={"command": "who"}, headers={"X-Session-ID": "sess-who"})
@@ -2439,6 +2441,12 @@ class TestRunStreaming:
         assert f"App {shell_app.APP_VERSION}\\n" in version_body
         assert "Flask " in version_body
         assert "Python " in version_body
+        builtins_system._flask_version.cache_clear()
+        with mock.patch("services.commands.builtins_system.package_version", return_value="9.9.9") as version_mock:
+            assert builtins_system.run_builtin_version()[3]["text"] == "Flask 9.9.9"
+            assert builtins_system.run_builtin_version()[3]["text"] == "Flask 9.9.9"
+        version_mock.assert_called_once_with("flask")
+        builtins_system._flask_version.cache_clear()
 
     def test_builtin_faq_renders_builtin_and_configured_entries(self):
         client = get_client()

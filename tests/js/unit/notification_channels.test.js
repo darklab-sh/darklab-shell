@@ -17,6 +17,30 @@ function jsonResponse(body, status = 200) {
   }
 }
 
+const CHANNEL_KIND_CONTRACT = {
+  kinds: [
+    {
+      kind: 'webhook',
+      label: 'Webhook',
+      secret_fields: [{ name: 'url', label: 'Webhook URL' }],
+      config_fields: [{ name: 'timeout_seconds', label: 'Timeout seconds', optional: true }],
+    },
+    {
+      kind: 'telegram',
+      label: 'Telegram',
+      secret_fields: [{ name: 'bot_token', label: 'Bot token' }],
+      config_fields: [
+        { name: 'chat_id', label: 'Chat ID' },
+        { name: 'timeout_seconds', label: 'Timeout seconds', optional: true },
+      ],
+    },
+  ],
+  triggers: [
+    { value: 'run_complete', label: 'Run complete' },
+    { value: 'watcher_error', label: 'Watcher error' },
+  ],
+}
+
 function loadNotificationChannels({ apiFetch = vi.fn(), showConfirm = vi.fn(), showToast = vi.fn() } = {}) {
   document.body.innerHTML = `
     <div data-options-panel="notifications" hidden></div>
@@ -105,6 +129,7 @@ describe('notification channel preferences panel', () => {
 
   it('validates required secrets and submits editor payloads without exposing them in the list', async () => {
     const apiFetch = vi.fn(async (url, options = {}) => {
+      if (url === '/session/notification-channel-kinds') return jsonResponse(CHANNEL_KIND_CONTRACT)
       if (url === '/session/notification-channels' && options.method === 'POST') {
         return jsonResponse({ channel: { id: 'ntc_webhook' } }, 201)
       }
@@ -169,6 +194,7 @@ describe('notification channel preferences panel', () => {
       },
     ]
     const apiFetch = vi.fn(async (url, options = {}) => {
+      if (url === '/session/notification-channel-kinds') return jsonResponse(CHANNEL_KIND_CONTRACT)
       if (url === '/session/notification-channels') return jsonResponse({ channels })
       if (url === '/session/notification-events?channel_id=ntc_chat&limit=5') {
         return jsonResponse({ events: deliveries, total: deliveries.length, limit: 5, offset: 0, has_more: false })

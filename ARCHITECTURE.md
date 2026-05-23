@@ -250,6 +250,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `POST` | `/api/v1/watchers/<watcher_id>/accept-baseline` | Promotes the latest watcher fire, or the supplied run id, to the new baseline. |
 | `GET` | `/api/v1/watchers/<watcher_id>/fires` | Returns paged fire audit rows for one watcher. |
 | `GET` | `/api/v1/notification-channels` | Returns masked outbound notification channel metadata for the token session. |
+| `GET` | `/api/v1/notification-channel-kinds` | Returns supported outbound notification channel kinds, secret fields, config fields, and trigger labels. |
 | `POST` | `/api/v1/notification-channels` | Creates one outbound notification channel with write-only vault-backed secret values. |
 | `PATCH` | `/api/v1/notification-channels/<channel_id>` | Updates one outbound notification channel's label, config, triggers, muted state, or replacement secret values. |
 | `DELETE` | `/api/v1/notification-channels/<channel_id>` | Deletes one outbound notification channel from the token session. |
@@ -390,6 +391,7 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | `DELETE` | `/session/secrets/<name>` | Removes one encrypted secret from the current session. |
 | `GET` | `/session/notification-events` | Lists recent outbound notification delivery audit rows for the current durable session token. |
 | `GET` | `/session/notification-channels` | Lists masked outbound notification channel metadata for the current durable session token. |
+| `GET` | `/session/notification-channel-kinds` | Returns supported outbound notification channel kinds, secret fields, config fields, and trigger labels for the browser editor. |
 | `POST` | `/session/notification-channels` | Creates one outbound notification channel with write-only vault-backed secret values. |
 | `PATCH` | `/session/notification-channels/<channel_id>` | Updates one outbound notification channel's label, config, triggers, muted state, or replacement secret values. |
 | `DELETE` | `/session/notification-channels/<channel_id>` | Removes one outbound notification channel from the current durable session token. |
@@ -849,7 +851,7 @@ The contract is guarded from both sides:
 
 Outbound notifications use the same durable session-token ownership model as the headless API and encrypted secrets. Durable `tok_` sessions can create session-owned channels from the Options **Notifications** tab, `/api/v1/notification-channels`, or the bundled CLI. Anonymous browser sessions cannot create channels because delivery needs an owner that survives browser restarts and can be revoked.
 
-The route layer only validates, masks, and queues. `app/blueprints/notifications.py` and the `/api/v1/notification-channels` routes both call `services.notifications.channels_store`, which owns channel CRUD, trigger/config validation, secret-field masking, and write-only secret replacement. Channel rows store metadata, trigger subscriptions, muted state, and references to vault entries; plaintext webhook URLs, bot tokens, and Pushover keys are not stored in channel payloads. Channel row writes and replacement vault secret writes use one database transaction so a failed channel update does not leave a half-applied secret replacement behind. SMTP email is intentionally split: recipients and reply-to live on each channel row, while relay host, user, password environment variable name, from address, and TLS mode come from operator config.
+The route layer only validates, masks, and queues. `app/blueprints/notifications.py` and the `/api/v1/notification-channels` routes both call `services.notifications.channels_store`, which owns channel CRUD, trigger/config validation, the channel-kind field contract, secret-field masking, and write-only secret replacement. Channel rows store metadata, trigger subscriptions, muted state, and references to vault entries; plaintext webhook URLs, bot tokens, and Pushover keys are not stored in channel payloads. Channel row writes and replacement vault secret writes use one database transaction so a failed channel update does not leave a half-applied secret replacement behind. SMTP email is intentionally split: recipients and reply-to live on each channel row, while relay host, user, password environment variable name, from address, and TLS mode come from operator config.
 
 Delivery is asynchronous. App event sources build stable payloads in `services.notifications.payloads` and enqueue one row per subscribed channel in `notification_events` through `services.notifications.dispatcher.enqueue()`. External non-PTY run finalization emits one `run_complete` payload with `app_name`, command root, exit code, token hint, and summary counts; built-in commands and PTY sessions do not participate in default `run_complete` fan-out. Test sends use the same queue with a fixed `test` payload and target only the requested channel, so the UI, API, and CLI exercise the real delivery path without surprising every configured destination. Chat and email summary formatters shorten long run ids to a readable suffix while generic webhooks receive the raw payload.
 
@@ -1811,12 +1813,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,210
+- behavior tests: 3,211
 - docs/inventory meta-tests: 33
-- `pytest`: 1748 (1715 behavior + 33 meta)
+- `pytest`: 1749 (1716 behavior + 33 meta)
 - `vitest`: 1244
 - `playwright`: 252
-- total: 3,244
+- total: 3,245
 
 ### Testing Architecture
 

@@ -47,6 +47,7 @@ from services.notifications.channels_store import (
     delete_notification_channel,
     list_notification_channels,
     list_notification_events,
+    notification_channel_kind_contract,
     send_test_notification,
     update_notification_channel,
 )
@@ -1588,6 +1589,12 @@ def api_notification_channels():
         return jsonify({"channels": list_notification_channels(_require_session_id())})
     except (NotificationChannelError, MasterKeyError, SecretDecryptError, ValueError) as exc:
         return _notification_api_error(exc)
+
+
+@api_v1_bp.route("/notification-channel-kinds", methods=["GET"])
+@require_api_auth
+def api_notification_channel_kinds():
+    return jsonify(notification_channel_kind_contract())
 
 
 @api_v1_bp.route("/notification-channels", methods=["POST"])

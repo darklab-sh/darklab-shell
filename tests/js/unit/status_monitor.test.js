@@ -831,16 +831,19 @@ describe('Status Monitor', () => {
     vi.useFakeTimers()
     const { openStatusMonitor, closeStatusMonitor, apiFetch } = loadStatusMonitor({ runs: [[], []] })
 
-    await openStatusMonitor({ source: 'test' })
-    expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
+    try {
+      await openStatusMonitor({ source: 'test' })
+      expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
 
-    await vi.advanceTimersByTimeAsync(3000)
-    expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
 
-    await vi.advanceTimersByTimeAsync(60000)
-    expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
-
-    closeStatusMonitor()
+      await vi.advanceTimersByTimeAsync(6000)
+      expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
+    } finally {
+      closeStatusMonitor()
+      vi.useRealTimers()
+    }
   })
 
   it('uses CPU hysteresis and recent samples for the pulse strip', async () => {

@@ -1296,23 +1296,25 @@ class _WorkspacePathOutputFilter:
 
     def __init__(self, session_id: str, cfg: dict):
         self.prefix = ""
+        self.pattern = None
         if not session_id or not cfg.get("workspace_enabled"):
             return
         try:
             self.prefix = str(session_workspace_dir(session_id, cfg).resolve(strict=False)).rstrip(os.sep)
         except (WorkspaceDisabled, OSError):
             self.prefix = ""
+        if self.prefix:
+            self.pattern = re.compile(re.escape(self.prefix) + r"(/[\w@%+=:,./-]*)?")
 
     def process_output_line(self, line: str) -> str:
-        if not self.prefix:
+        if not self.pattern:
             return line
 
         def _replace(match):
-            suffix = match.group(1).lstrip("/")
+            suffix = str(match.group(1) or "").lstrip("/")
             return f"/{suffix}" if suffix else "/"
 
-        pattern = re.escape(self.prefix) + r"(/[\w@%+=:,./-]*)?"
-        return re.sub(pattern, _replace, line)
+        return self.pattern.sub(_replace, line)
 
 
 @dataclass(frozen=True)

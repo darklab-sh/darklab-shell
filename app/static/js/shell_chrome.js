@@ -365,16 +365,59 @@
   // ── Nav menu ─────────────────────────────────────────────────────
   // The visible rail is the desktop source of truth. Route clicks directly
   // into the shared action layer.
+  function positionRailMoreMenu() {
+    if (!railMoreBtn || !railMoreMenu || railMoreMenu.classList.contains('u-hidden')) return;
+    if (typeof railMoreBtn.getBoundingClientRect !== 'function') return;
+    const triggerRect = railMoreBtn.getBoundingClientRect();
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 1024;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 768;
+    const gutter = 8;
+    const menuWidth = Math.max(railMoreMenu.offsetWidth || 220, 180);
+    const menuHeight = Math.max(railMoreMenu.offsetHeight || railMoreMenu.getBoundingClientRect?.().height || 1, 1);
+    const maxMenuHeight = Math.max(120, viewportHeight - (gutter * 2));
+    const effectiveMenuHeight = Math.min(menuHeight, maxMenuHeight);
+    const desiredArrowFromBottom = 32;
+    const triggerCenterY = triggerRect.top + (triggerRect.height / 2);
+    const preferredTop = triggerCenterY - Math.max(28, effectiveMenuHeight - desiredArrowFromBottom);
+    const top = Math.min(
+      Math.max(gutter, preferredTop),
+      Math.max(gutter, viewportHeight - effectiveMenuHeight - gutter),
+    );
+    const left = Math.min(
+      Math.max(gutter, triggerRect.right + 8),
+      Math.max(gutter, viewportWidth - menuWidth - gutter),
+    );
+    const arrowLimit = Math.max(18, effectiveMenuHeight - 18);
+    const arrowY = Math.min(arrowLimit, Math.max(18, triggerCenterY - top - 4));
+    railMoreMenu.style.position = 'fixed';
+    railMoreMenu.style.left = `${left}px`;
+    railMoreMenu.style.top = `${top}px`;
+    railMoreMenu.style.right = 'auto';
+    railMoreMenu.style.bottom = 'auto';
+    railMoreMenu.style.maxHeight = `${maxMenuHeight}px`;
+    railMoreMenu.style.overflowY = menuHeight > maxMenuHeight ? 'auto' : '';
+    railMoreMenu.style.setProperty('--rail-more-arrow-y', `${arrowY}px`);
+  }
+
   function closeRailMoreMenu() {
     if (!railMoreBtn || !railMoreMenu) return;
     railMoreBtn.setAttribute('aria-expanded', 'false');
     railMoreMenu.classList.add('u-hidden');
+    railMoreMenu.style.position = '';
+    railMoreMenu.style.left = '';
+    railMoreMenu.style.top = '';
+    railMoreMenu.style.right = '';
+    railMoreMenu.style.bottom = '';
+    railMoreMenu.style.maxHeight = '';
+    railMoreMenu.style.overflowY = '';
+    railMoreMenu.style.removeProperty('--rail-more-arrow-y');
   }
 
   function openRailMoreMenu() {
     if (!railMoreBtn || !railMoreMenu) return;
     railMoreBtn.setAttribute('aria-expanded', 'true');
     railMoreMenu.classList.remove('u-hidden');
+    positionRailMoreMenu();
     railMoreMenu.querySelector('[data-action]:not(.u-hidden)')?.focus?.();
   }
 
@@ -458,6 +501,8 @@
       railMoreBtn?.focus?.();
     }
   });
+
+  window.addEventListener('resize', positionRailMoreMenu);
 
   function _openProjectsFromHud(event) {
     event?.preventDefault?.();

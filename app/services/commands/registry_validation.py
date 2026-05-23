@@ -1,5 +1,6 @@
 """Low-level command validation helpers for the command registry."""
 
+from functools import lru_cache
 import re
 import shlex
 import shutil
@@ -37,6 +38,7 @@ def split_command_argv(command: str) -> list[str]:
         return command.strip().split()
 
 
+@lru_cache(maxsize=4096)
 def command_root(command: str) -> str | None:
     """Return the first argv token from a command string, lowercased."""
     parts = split_command_argv(command)

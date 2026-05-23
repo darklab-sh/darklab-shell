@@ -4,6 +4,7 @@ const WORKFLOW_TOKEN_RE = /{{\s*([a-z][a-z0-9_]*)\s*}}/g;
 const WORKFLOW_INPUT_STATE_KEY = 'workflow_input_state_v1';
 const _workflowRunQueueByTab = new Map();
 let workflowCatalogItems = [];
+let workflowCatalogLoadPromise = null;
 let _workflowEditorWorkflow = null;
 
 function getWorkflowStorageKey(workflow) {
@@ -760,11 +761,24 @@ function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
 }
 
 async function reloadWorkflowCatalog() {
-  const resp = await apiFetch('/workflows');
-  if (resp && resp.ok === false) throw new Error(`HTTP ${resp.status}`);
-  const data = await resp.json();
-  renderWorkflowItems(data.items || []);
-  return data.items || [];
+  const request = (async () => {
+    const resp = await apiFetch('/workflows');
+    if (resp && resp.ok === false) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    renderWorkflowItems(data.items || []);
+    return data.items || [];
+  })();
+  workflowCatalogLoadPromise = request;
+  try {
+    return await request;
+  } finally {
+    if (workflowCatalogLoadPromise === request) workflowCatalogLoadPromise = null;
+  }
+}
+
+function ensureWorkflowCatalogLoaded() {
+  if (workflowCatalogItems.length) return Promise.resolve(workflowCatalogItems);
+  return workflowCatalogLoadPromise || reloadWorkflowCatalog();
 }
 
 function activateWorkflowStepRun(cmd) {

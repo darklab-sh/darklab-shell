@@ -13,7 +13,8 @@ import logging
 import os
 import re
 import shlex
-from typing import Any, cast
+from time import monotonic_ns
+from typing import Any, NoReturn, SupportsIndex, cast
 import yaml
 from urllib.parse import urlparse
 
@@ -86,6 +87,107 @@ _COMMANDS_GROUPING_CACHE: dict[str, Any] = {
     "signature": None,
     "grouping": None,
 }
+_COMMANDS_REGISTRY_SIGNATURE_TTL_NS = 100_000_000
+_COMMANDS_REGISTRY_SIGNATURE_CACHE: dict[str, tuple[int, tuple[tuple[str, int | None, int | None], ...]]] = {}
+
+
+def _raise_read_only_registry() -> NoReturn:
+    raise TypeError("cached command registry is read-only")
+
+
+class _FrozenDict(dict):
+    """A dict-shaped read-only container for cached registry data."""
+
+    def __setitem__(self, key, value):
+        _raise_read_only_registry()
+
+    def __delitem__(self, key):
+        _raise_read_only_registry()
+
+    def clear(self):
+        _raise_read_only_registry()
+
+    def pop(self, key, default=None):
+        _raise_read_only_registry()
+
+    def popitem(self):
+        _raise_read_only_registry()
+
+    def setdefault(self, key, default=None):
+        _raise_read_only_registry()
+
+    def update(self, *args, **kwargs):
+        _raise_read_only_registry()
+
+    def __ior__(self, other):
+        _raise_read_only_registry()
+
+    def __deepcopy__(self, memo):
+        copied = {}
+        memo[id(self)] = copied
+        for key, value in self.items():
+            copied[deepcopy(key, memo)] = deepcopy(value, memo)
+        return copied
+
+
+class _FrozenList(list):
+    """A list-shaped read-only container for cached registry data."""
+
+    def __setitem__(self, key, value):
+        _raise_read_only_registry()
+
+    def __delitem__(self, key):
+        _raise_read_only_registry()
+
+    def __iadd__(self, other):
+        _raise_read_only_registry()
+
+    def __imul__(self, other):
+        _raise_read_only_registry()
+
+    def append(self, item):
+        _raise_read_only_registry()
+
+    def clear(self):
+        _raise_read_only_registry()
+
+    def extend(self, other):
+        _raise_read_only_registry()
+
+    def insert(self, index, item):
+        _raise_read_only_registry()
+
+    def pop(self, index: SupportsIndex = -1):
+        _raise_read_only_registry()
+
+    def remove(self, item):
+        _raise_read_only_registry()
+
+    def reverse(self):
+        _raise_read_only_registry()
+
+    def sort(self, *args, **kwargs):
+        _raise_read_only_registry()
+
+    def __deepcopy__(self, memo):
+        copied = []
+        memo[id(self)] = copied
+        copied.extend(deepcopy(item, memo) for item in self)
+        return copied
+
+
+def _freeze_registry_value(value: Any) -> Any:
+    if isinstance(value, (_FrozenDict, _FrozenList)):
+        return value
+    if isinstance(value, dict):
+        return _FrozenDict({
+            key: _freeze_registry_value(item)
+            for key, item in value.items()
+        })
+    if isinstance(value, list):
+        return _FrozenList(_freeze_registry_value(item) for item in value)
+    return value
+
 
 @dataclass(frozen=True)
 class CommandValidationResult:
@@ -657,7 +759,7 @@ def _merge_commands_registry(base: dict, overlay: dict) -> dict:
     )
 
 
-def _commands_registry_signature(path: str) -> tuple[tuple[str, int | None, int | None], ...]:
+def _commands_registry_signature_uncached(path: str) -> tuple[tuple[str, int | None, int | None], ...]:
     root, ext = os.path.splitext(path)
     candidates = (path, f"{root}.local{ext}")
     signature = []
@@ -672,11 +774,25 @@ def _commands_registry_signature(path: str) -> tuple[tuple[str, int | None, int 
     return tuple(signature)
 
 
-def load_commands_registry():
+def _commands_registry_signature(path: str) -> tuple[tuple[str, int | None, int | None], ...]:
+    cache_key = os.path.abspath(path)
+    now = monotonic_ns()
+    cached = _COMMANDS_REGISTRY_SIGNATURE_CACHE.get(cache_key)
+    if cached is not None:
+        expires_at, signature = cached
+        if now < expires_at:
+            return signature
+
+    signature = _commands_registry_signature_uncached(path)
+    _COMMANDS_REGISTRY_SIGNATURE_CACHE[cache_key] = (now + _COMMANDS_REGISTRY_SIGNATURE_TTL_NS, signature)
+    return signature
+
+
+def load_commands_registry() -> dict:
     """Read commands.yaml plus optional commands.local.yaml overlays."""
     signature = _commands_registry_signature(COMMANDS_REGISTRY_FILE)
     if _COMMANDS_REGISTRY_CACHE["signature"] == signature and isinstance(_COMMANDS_REGISTRY_CACHE["registry"], dict):
-        return deepcopy(_COMMANDS_REGISTRY_CACHE["registry"])
+        return _COMMANDS_REGISTRY_CACHE["registry"]
 
     registry = registry_loader.load_commands_registry(
         COMMANDS_REGISTRY_FILE,
@@ -684,9 +800,10 @@ def load_commands_registry():
         _empty_autocomplete_context_entry,
         _merge_autocomplete_context,
     )
+    frozen_registry = _freeze_registry_value(registry)
     _COMMANDS_REGISTRY_CACHE["signature"] = signature
-    _COMMANDS_REGISTRY_CACHE["registry"] = deepcopy(registry)
-    return registry
+    _COMMANDS_REGISTRY_CACHE["registry"] = frozen_registry
+    return frozen_registry
 
 
 _NATIVE_LOAD_COMMANDS_REGISTRY = load_commands_registry
@@ -698,6 +815,7 @@ def _commands_registry_loader_is_native() -> bool:
 
 def clear_commands_registry_cache() -> None:
     """Clear cached command registry data for tests or live diagnostics."""
+    _COMMANDS_REGISTRY_SIGNATURE_CACHE.clear()
     _COMMANDS_REGISTRY_CACHE["signature"] = None
     _COMMANDS_REGISTRY_CACHE["registry"] = None
     _COMMANDS_POLICY_CACHE["signature"] = None

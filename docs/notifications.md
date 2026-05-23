@@ -17,7 +17,7 @@ Notification channels belong to a durable `tok_` session. Anonymous browser sess
 | `pushover` | Pushover message API | `app_token`, `user_key` | `priority`, `sound`, `device`, `timeout_seconds` |
 | `email` | SMTP email | server SMTP password from config | `recipients`, `reply_to`, `timeout_seconds` |
 
-Secret values are write-only. List responses show whether required secrets are configured, but they do not return webhook URLs, bot tokens, Pushover keys, or SMTP passwords.
+Secret values are write-only. List responses show whether required secrets are configured, but they do not return webhook URLs, bot tokens, Pushover keys, or SMTP passwords. The browser, API clients, and `darklab notify create` read the supported secret-field names from the server's notification channel kind contract, so new channel types do not need a second client-side field map.
 
 ## Triggers
 
@@ -148,7 +148,7 @@ darklab notify test ntc_...
 darklab notify events --channel ntc_...
 ```
 
-`--secret-file ./webhook-secrets.json` is also supported when you already have a safely created local JSON file. Avoid building that file with a command that puts the secret literal in shell history.
+`--secret-file ./webhook-secrets.json` is also supported when you already have a safely created local JSON file. The file keys must match the server-declared secret fields for the selected channel kind. Avoid building that file with a command that puts the secret literal in shell history.
 
 ## Telegram Setup
 

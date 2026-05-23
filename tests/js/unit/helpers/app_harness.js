@@ -749,6 +749,7 @@ export async function loadAppFns({
     handleTabShortcut,
     renderWorkflowItems,
     reloadWorkflowCatalog,
+    ensureWorkflowCatalogLoaded,
     handleWorkflowTerminalCommand,
     getRuntimeAutocompleteContext,
     getWorkspaceAutocompletePathHints,

@@ -509,9 +509,28 @@ describe('shell chrome rail sections', () => {
     const openStatusMonitor = vi.fn(() => Promise.resolve(true))
     const shell = loadShellChrome({ openStatusMonitor })
     const nav = document.getElementById('rail-nav')
+    const rail = document.getElementById('rail')
+    const trigger = document.getElementById('rail-more-btn')
+    const menu = document.getElementById('rail-more-menu')
 
-    nav.querySelector('[data-action="rail-more"]').click()
-    expect(nav.querySelector('#rail-more-menu').classList.contains('u-hidden')).toBe(false)
+    rail.classList.add('rail-collapsed')
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 360 })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 240 })
+    Object.defineProperty(trigger, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ top: 4, right: 44, height: 34, width: 44, bottom: 38, left: 0 }),
+    })
+    Object.defineProperty(menu, 'offsetWidth', { configurable: true, value: 220 })
+    Object.defineProperty(menu, 'offsetHeight', { configurable: true, value: 360 })
+
+    trigger.click()
+    expect(menu.classList.contains('u-hidden')).toBe(false)
+    expect(menu.style.position).toBe('fixed')
+    expect(menu.style.top).toBe('8px')
+    expect(menu.style.left).toBe('52px')
+    expect(menu.style.maxHeight).toBe('224px')
+    expect(menu.style.overflowY).toBe('auto')
+    expect(menu.style.getPropertyValue('--rail-more-arrow-y')).toBe('18px')
     nav.querySelector('[data-action="status-monitor"]').click()
 
     expect(shell.openStatusMonitor).toHaveBeenCalledWith({ source: 'rail' })

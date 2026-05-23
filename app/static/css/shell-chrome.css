@@ -454,7 +454,7 @@
     content: "";
     position: absolute;
     left: -5px;
-    bottom: 28px;
+    top: var(--rail-more-arrow-y, calc(100% - 32px));
     width: 8px;
     height: 8px;
     background: var(--theme-dropdown-bg);

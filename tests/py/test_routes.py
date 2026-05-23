@@ -38,6 +38,7 @@ from core.database_backend import quote_sqlite_identifier
 from services.runs.output_model import LineEvent, LineRole
 from services.projects.findings import record_run_findings
 from services.atlas.materializer import materialize_run_entities
+from services.workspace import files as workspace_files
 from services.workspace.files import resolve_workspace_path
 
 
@@ -386,8 +387,11 @@ class TestNotificationChannelRoutes:
         client, patchers = self._notification_client(monkeypatch, tmp_path)
         try:
             resp = client.get("/session/notification-channels", headers={"X-Session-ID": "sess-anonymous"})
+            kind_contract = client.get("/session/notification-channel-kinds", headers={"X-Session-ID": "sess-anonymous"})
             assert resp.status_code == 401
             assert resp.get_json()["error"] == "session_token_required"
+            assert kind_contract.status_code == 401
+            assert kind_contract.get_json()["error"] == "session_token_required"
         finally:
             for patcher in reversed(patchers):
                 patcher.stop()
@@ -413,6 +417,9 @@ class TestNotificationChannelRoutes:
             assert listed.status_code == 200
             assert "https://example.invalid/hook" not in listed.get_data(as_text=True)
             assert listed.get_json()["channels"][0]["id"] == payload["id"]
+            kind_contract = client.get("/session/notification-channel-kinds", headers={"X-Session-ID": session_id})
+            webhook_kind = next(item for item in kind_contract.get_json()["kinds"] if item["kind"] == "webhook")
+            assert webhook_kind["secret_fields"] == [{"name": "url", "label": "Webhook URL"}]
 
             kind_change = client.patch(
                 f"/session/notification-channels/{payload['id']}",
@@ -7611,6 +7618,21 @@ class TestWorkspaceRoutes:
 # ── /runs ─────────────────────────────────────────────────────────────────────
 
 class TestRunRoute:
+    def test_workspace_path_output_filter_masks_absolute_session_paths(self):
+        from blueprints.run import _WorkspacePathOutputFilter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = TestWorkspaceRoutes()._cfg(tmp)
+            session = "workspace-filter-" + uuid.uuid4().hex[:8]
+            workspace_path = workspace_files.session_workspace_dir(session, cfg)
+            output_filter = _WorkspacePathOutputFilter(session, cfg)
+
+            filtered = output_filter.process_output_line(
+                f"wrote {workspace_path}/reports/nmap.xml and {workspace_path}"
+            )
+
+        assert filtered == "wrote /reports/nmap.xml and /"
+
     def test_brokered_run_requires_available_broker(self):
         client = get_client()
         with mock.patch("blueprints.run.broker_available", return_value=False), \
@@ -8266,6 +8288,10 @@ class TestHistoryRoute:
                  (now - timedelta(days=10, seconds=-10)).isoformat(), 0, "[]", 12),
             )
             conn.execute(
+                "INSERT INTO run_output_summary (run_id, family, value, count) VALUES (?, 'kind', 'error', 1)",
+                (run_ids[0],),
+            )
+            conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (run_ids[1], session, "curl https://ip.darklab.sh", day_one,
@@ -8302,6 +8328,8 @@ class TestHistoryRoute:
             assert roots["ping"]["failed"] == 0
             assert roots["whois"]["count"] == 1
             assert any(item["root"] == "nmap" for item in data["constellation"])
+            nmap_constellation = next(item for item in data["constellation"] if item["root"] == "nmap")
+            assert nmap_constellation["max_kind"] == "error"
             assert data["events"][0]["root"] == "sleep"
 
             fixed = json.loads(client.get("/history/insights?days=7", headers={"X-Session-ID": session}).data)
@@ -8312,6 +8340,7 @@ class TestHistoryRoute:
             assert any(item["root"] == "nmap" for item in fixed["command_mix"])
         finally:
             with sqlite3.connect(DB_PATH) as conn:
+                conn.executemany("DELETE FROM run_output_summary WHERE run_id = ?", [(run_id,) for run_id in run_ids])
                 conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
                 conn.commit()
 

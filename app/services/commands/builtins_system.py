@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version as package_version
 import sys
 
@@ -16,6 +17,14 @@ from services.commands.builtins_format import (
 
 
 _STARTED_AT = datetime.now(timezone.utc)
+
+
+@lru_cache(maxsize=1)
+def _flask_version() -> str:
+    try:
+        return package_version("flask")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def run_builtin_date() -> list[dict[str, object]]:
@@ -137,15 +146,11 @@ def run_builtin_free(command: str) -> list[dict[str, object]]:
 
 
 def run_builtin_version() -> list[dict[str, object]]:
-    try:
-        flask_version = package_version("flask")
-    except PackageNotFoundError:
-        flask_version = "unknown"
     lines = [
         _output_line("Version info:", "builtin-section"),
         _output_line(f"{CFG['app_name']} web shell", "builtin-plain"),
         _output_line(f"App {APP_VERSION}", "builtin-plain"),
-        _output_line(f"Flask {flask_version}", "builtin-plain"),
+        _output_line(f"Flask {_flask_version()}", "builtin-plain"),
         _output_line(f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}", "builtin-plain"),
     ]
     return lines

@@ -849,6 +849,87 @@
         ],
         "type": "object"
       },
+      "NotificationChannelKind": {
+        "additionalProperties": false,
+        "properties": {
+          "config_fields": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationChannelKindField"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "webhook",
+              "slack",
+              "discord",
+              "telegram",
+              "pushover",
+              "email"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "secret_fields": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationChannelKindField"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "secret_fields",
+          "config_fields"
+        ],
+        "type": "object"
+      },
+      "NotificationChannelKindField": {
+        "additionalProperties": false,
+        "properties": {
+          "help": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "optional": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "label"
+        ],
+        "type": "object"
+      },
+      "NotificationChannelKindList": {
+        "properties": {
+          "kinds": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationChannelKind"
+            },
+            "type": "array"
+          },
+          "triggers": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationTriggerOption"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "kinds",
+          "triggers"
+        ],
+        "type": "object"
+      },
       "NotificationChannelList": {
         "properties": {
           "channels": {
@@ -1060,6 +1141,22 @@
           "queued",
           "event_ids",
           "events"
+        ],
+        "type": "object"
+      },
+      "NotificationTriggerOption": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
         ],
         "type": "object"
       },
@@ -4087,6 +4184,42 @@
               }
             },
             "description": "Run not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/notification-channel-kinds": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationChannelKindList"
+                }
+              }
+            },
+            "description": "Notification channel kind contract"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
           },
           "429": {
             "content": {

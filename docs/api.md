@@ -119,6 +119,7 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `POST` | `/api/v1/watchers/<watcher_id>/accept-baseline` | Promote the latest fire, or the supplied `run_id`, to the new watcher baseline. |
 | `GET` | `/api/v1/watchers/<watcher_id>/fires` | Read paged fire audit rows for a watcher. |
 | `GET` | `/api/v1/notification-channels` | List masked outbound notification channels for the token session. |
+| `GET` | `/api/v1/notification-channel-kinds` | Return supported notification channel kinds, secret fields, config fields, and trigger labels. |
 | `POST` | `/api/v1/notification-channels` | Create one notification channel with write-only secret values. |
 | `PATCH` | `/api/v1/notification-channels/<channel_id>` | Update one notification channel's label, config, triggers, muted state, or replacement secret values. |
 | `DELETE` | `/api/v1/notification-channels/<channel_id>` | Delete one notification channel. |
@@ -295,7 +296,7 @@ darklab notify test ntc_123
 darklab notify events --channel ntc_123 --status sent
 ```
 
-The secret file is a JSON object keyed by the channel's secret fields, such as `{"url":"https://hooks.example.test/darklab"}` for webhook, Slack, and Discord channels. If `--secret-file` is omitted, the CLI prompts for the required secret fields without putting them in shell history. Non-secret channel settings use repeated `--config KEY=VALUE` flags.
+The secret file is a JSON object keyed by the channel's server-declared secret fields, such as `{"url":"https://hooks.example.test/darklab"}` for webhook, Slack, and Discord channels. If `--secret-file` is omitted, the CLI reads `/api/v1/notification-channel-kinds` and prompts for the required secret fields without putting them in shell history. Non-secret channel settings use repeated `--config KEY=VALUE` flags.
 
 Test sends use the fixed trigger `test` with a canned payload shaped like:
 

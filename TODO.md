@@ -50,14 +50,7 @@ No known issues are currently tracked.
 
 ## Technical Debt
 
-- **Watcher CLI command parsing cleanup.**
-  - Replace the `darklab watch create` argv preprocessor with the same `argparse.REMAINDER` shape used by `darklab schedule create`, then validate the optional command override inside dispatch. This keeps command-tail parsing consistent across the paired features.
-- **Notification channel secret-field contract.**
-  - Expose notification channel secret fields from one server-owned registry or API contract so the CLI does not maintain a second per-channel secret-field map.
-- **History max-output-kind summary query.**
-  - Use the `run_output_summary` table for history-row max kind display instead of walking each row's loaded output entries.
-- **Watcher CLI detail view parity.**
-  - Promote the schedule detail-section printer into a shared CLI helper and use it for `darklab watch info` so schedules and watchers have matching detail views.
+No technical debt items are currently tracked.
 
 ---
 

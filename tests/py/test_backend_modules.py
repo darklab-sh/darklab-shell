@@ -30,6 +30,7 @@ import tempfile
 import textwrap
 import unittest.mock as mock
 from contextlib import contextmanager
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -73,6 +74,7 @@ from core.output_signals import OutputSignalClassifier, classify_line, command_r
 from core.redaction import (
     RAW_ONLY_INTEL_PLACEHOLDER,
     REDACTED_ENTITY_SENTINEL,
+    apply_redaction_rules,
     line_entries_from_events,
     omit_raw_only_line_entries,
     redact_line_entries,
@@ -176,6 +178,20 @@ class TestSplitChainedCommands:
 
     def test_empty_string_returns_empty_list(self):
         assert split_chained_commands("") == []
+        from services.commands import registry_validation
+
+        cache_clear = getattr(registry_validation.command_root, "cache_clear")
+        cache_clear()
+        with mock.patch(
+            "services.commands.registry_validation.split_command_argv",
+            wraps=registry_validation.split_command_argv,
+        ) as split_mock:
+            assert commands.command_root('"NMAP" -sV ip.darklab.sh') == "nmap"
+            assert commands.command_root('"NMAP" -sV ip.darklab.sh') == "nmap"
+            assert split_mock.call_count == 1
+            assert commands.command_root("broken 'quote") == "broken"
+            assert split_mock.call_count == 2
+        cache_clear()
 
 
 class TestLoadConfig:
@@ -625,6 +641,11 @@ class TestDatabaseBackend:
 
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "builtin"
+        from services.runs import kinds as run_kinds
+
+        roots = run_kinds.builtin_command_roots_for_storage()
+        assert roots is run_kinds.builtin_command_roots_for_storage()
+        assert "version" in roots
 
     def test_postgres_identifier_quoting_and_advisory_lock_are_stable(self):
         assert database_backend.quote_postgres_identifier('odd"name') == '"odd""name"'
@@ -4450,8 +4471,8 @@ class TestSessionWorkspace:
             path = Path(tmp) / "amass"
             path.mkdir()
 
-            with mock.patch("services.workspace.files.shutil.which", return_value="/usr/bin/sudo"), \
-                    mock.patch("services.workspace.files.pwd.getpwnam", return_value=object()), \
+            with mock.patch("services.workspace.files._sudo_bin", return_value="/usr/bin/sudo"), \
+                    mock.patch("services.workspace.files._scanner_user_exists", return_value=True), \
                     mock.patch("services.workspace.files.subprocess.run") as run:
                 prepare_workspace_directory_for_command(path, mode="read_write")
 
@@ -4527,8 +4548,8 @@ class TestSessionWorkspace:
             path = resolve_workspace_path("session-1", "nmap-dot/amass.dot", cfg)
 
             with mock.patch("services.workspace.files.Path.unlink", side_effect=PermissionError), \
-                    mock.patch("services.workspace.files.shutil.which", return_value="/usr/bin/sudo"), \
-                    mock.patch("services.workspace.files.pwd.getpwnam", return_value=object()), \
+                    mock.patch("services.workspace.files._sudo_bin", return_value="/usr/bin/sudo"), \
+                    mock.patch("services.workspace.files._scanner_user_exists", return_value=True), \
                     mock.patch("services.workspace.files.subprocess.run") as run:
                 delete_workspace_file("session-1", "nmap-dot/amass.dot", cfg)
 
@@ -4894,8 +4915,24 @@ class TestDerivedCommandRegistry:
             """))
             with mock.patch("services.commands.registry.COMMANDS_REGISTRY_FILE", str(path)):
                 registry = load_commands_registry()
+                cached_registry = load_commands_registry()
+                with mock.patch("services.commands.registry.os.stat", wraps=os.stat) as stat_mock:
+                    warm_signature = commands._commands_registry_signature(str(path))
+                    assert commands._commands_registry_signature(str(path)) == warm_signature
+                    stat_mock.assert_not_called()
+                    commands.clear_commands_registry_cache()
+                    assert commands._commands_registry_signature(str(path)) == warm_signature
+                    assert stat_mock.call_count == 2
 
         ping = registry["commands"][0]
+        assert cached_registry is registry
+        assert deepcopy(registry) == registry
+        with pytest.raises(TypeError, match="read-only"):
+            registry["commands"] = []
+        with pytest.raises(TypeError, match="read-only"):
+            registry["commands"].append({"root": "curl"})
+        with pytest.raises(TypeError, match="read-only"):
+            ping["policy"]["allow"].append("ping -6")
         assert ping["root"] == "ping"
         assert ping["category"] == "Network"
         assert ping["policy"]["allow"] == ["ping"]
@@ -8136,6 +8173,12 @@ class TestRawOnlyRedaction:
         assert redacted[0].target == "[ip-redacted]"
         assert redacted[0].entities[0].value == "[ip-redacted]"
         assert redacted[0].entities[0].canonical_value == REDACTED_ENTITY_SENTINEL
+
+        invalid_rules = [{"label": "broken", "pattern": "(", "replacement": "[broken]"}]
+        with mock.patch("core.redaction.log.warning") as warning:
+            assert apply_redaction_rules("still visible", invalid_rules) == "still visible"
+            assert apply_redaction_rules("still visible", invalid_rules) == "still visible"
+        warning.assert_called_once()
 
 
 # ── _format_retention ─────────────────────────────────────────────────────────

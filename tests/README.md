@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,210
+- behavior tests: 3,211
 - docs/inventory meta-tests: 33
-- `pytest`: 1748 (1715 behavior + 33 meta)
+- `pytest`: 1749 (1716 behavior + 33 meta)
 - `vitest`: 1244
 - `playwright`: 252
-- total: 3,244
+- total: 3,245
 
 This document is organized in two parts:
 
@@ -1497,6 +1497,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestWorkspaceRoutes.test_file_list_includes_project_artifact_metadata` | Verifies that workspace file listings include project artifact metadata for files captured from run input/output flags. |
 | `TestWorkspaceRoutes.test_periodic_cleanup_runs_before_requests_when_workspace_enabled` | Verifies that request-driven workspace cleanup removes expired session directories when workspace storage is enabled. |
 | `TestWorkspaceRoutes.test_periodic_cleanup_skips_request_session_workspace` | Verifies that request-driven workspace cleanup preserves the active request session while removing other expired workspaces. |
+| `TestRunRoute.test_workspace_path_output_filter_masks_absolute_session_paths` | Verifies real-run output masking rewrites absolute session workspace paths to user-facing workspace paths. |
 | `TestRunRoute.test_brokered_run_requires_available_broker` | Verifies that `POST /runs` reports an unavailable broker before starting a command. |
 | `TestRunRoute.test_brokered_run_missing_runtime_returns_synthetic_stream_reference` | Verifies that brokered command starts return a synthetic stream reference when an allowed runtime is missing. |
 | `TestRunRoute.test_brokered_run_rejects_invalid_command_payloads` | Verifies that brokered command starts reject malformed, missing, non-string, and blank command payloads. |

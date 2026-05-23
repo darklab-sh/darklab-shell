@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
+from functools import lru_cache
 import hashlib
 import logging
 import re
@@ -105,6 +106,46 @@ def _pattern_hash(pattern: object) -> str:
     return hashlib.sha256(str(pattern or "").encode("utf-8", errors="replace")).hexdigest()[:12]
 
 
+def _redaction_rule_cache_key(rules) -> tuple[tuple[str, str, str, str], ...]:
+    cache_key: list[tuple[str, str, str, str]] = []
+    for rule in rules or ():
+        if not isinstance(rule, Mapping):
+            continue
+        pattern = rule.get("pattern")
+        if not isinstance(pattern, str) or not pattern:
+            continue
+        replacement = rule.get("replacement", "[redacted]")
+        if not isinstance(replacement, str):
+            replacement = "[redacted]"
+        flags = rule.get("flags", "")
+        if not isinstance(flags, str):
+            flags = ""
+        normalized_flags = "".join(ch for ch in flags.lower() if ch in _ALLOWED_FLAGS)
+        label = rule.get("label", "")
+        if not isinstance(label, str):
+            label = ""
+        cache_key.append((label, pattern, replacement, normalized_flags))
+    return tuple(cache_key)
+
+
+@lru_cache(maxsize=128)
+def _compile_redaction_rules(
+    cache_key: tuple[tuple[str, str, str, str], ...],
+) -> tuple[tuple[re.Pattern[str], str], ...]:
+    compiled_rules: list[tuple[re.Pattern[str], str]] = []
+    for label, pattern, replacement, flags in cache_key:
+        try:
+            compiled_rules.append((re.compile(pattern, _python_re_flags(flags)), replacement))
+        except re.error as exc:
+            log.warning("SHARE_REDACTION_RULE_FAILED", extra={
+                "label": label,
+                "pattern_hash": _pattern_hash(pattern),
+                "error": str(exc),
+            })
+            continue
+    return tuple(compiled_rules)
+
+
 BUILTIN_SHARE_REDACTION_RULES = normalize_redaction_rules(_RAW_BUILTIN_SHARE_REDACTION_RULES)
 RAW_ONLY_INTEL_PLACEHOLDER = "Intel data omitted from share"
 
@@ -186,21 +227,8 @@ def omit_raw_only_line_entries(entries: Sequence[LineEvent | Mapping[str, object
 def apply_redaction_rules(text, rules):
     """Apply normalized regex redaction rules to a single text value."""
     value = str(text or "")
-    for rule in rules or ():
-        try:
-            value = re.sub(
-                rule["pattern"],
-                rule.get("replacement", "[redacted]"),
-                value,
-                flags=_python_re_flags(str(rule.get("flags", ""))),
-            )
-        except re.error as exc:
-            log.warning("SHARE_REDACTION_RULE_FAILED", extra={
-                "label": str(rule.get("label") or ""),
-                "pattern_hash": _pattern_hash(rule.get("pattern")),
-                "error": str(exc),
-            })
-            continue
+    for pattern, replacement in _compile_redaction_rules(_redaction_rule_cache_key(rules)):
+        value = pattern.sub(replacement, value)
     return value
 
 

@@ -1160,6 +1160,8 @@ def test_api_v1_notification_channels_crud_masks_secrets_and_lists_events(monkey
 
     monkeypatch.setattr(webhook_channel, "post_json", fake_post_json)
 
+    kind_contract_resp = client.get("/api/v1/notification-channel-kinds", headers=_headers(token))
+    kind_contract = json.loads(kind_contract_resp.data)
     create = client.post(
         "/api/v1/notification-channels",
         headers=_headers(token),
@@ -1173,6 +1175,12 @@ def test_api_v1_notification_channels_crud_masks_secrets_and_lists_events(monkey
     )
     created = json.loads(create.data)["channel"]
 
+    assert kind_contract_resp.status_code == 200
+    webhook_kind = next(item for item in kind_contract["kinds"] if item["kind"] == "webhook")
+    assert webhook_kind["secret_fields"] == [{"name": "url", "label": "Webhook URL"}]
+    telegram_kind = next(item for item in kind_contract["kinds"] if item["kind"] == "telegram")
+    assert telegram_kind["secret_fields"] == [{"name": "bot_token", "label": "Bot token"}]
+    assert {"value": "run_complete", "label": "Run complete"} in kind_contract["triggers"]
     assert create.status_code == 201
     assert created["kind"] == "webhook"
     assert created["secret_fields"] == [{"name": "url", "configured": True}]
@@ -1291,6 +1299,18 @@ def test_darklab_cli_notify_commands_use_secret_file_and_event_reader(monkeypatc
 
         def request(self, method, path, *, params=None, body=None, **_kwargs):
             calls.append((method, path, params, body))
+            if path == "/notification-channel-kinds" and method == "GET":
+                return {
+                    "kinds": [
+                        {
+                            "kind": "webhook",
+                            "label": "Webhook",
+                            "secret_fields": [{"name": "url", "label": "Webhook URL"}],
+                            "config_fields": [{"name": "timeout_seconds", "label": "Timeout seconds", "optional": True}],
+                        }
+                    ],
+                    "triggers": [{"value": "run_complete", "label": "Run complete"}],
+                }
             if path == "/notification-channels" and method == "POST":
                 assert body == {
                     "kind": "webhook",
@@ -1398,6 +1418,7 @@ def test_darklab_cli_notify_commands_use_secret_file_and_event_reader(monkeypatc
     assert json.loads(capsys.readouterr().out)["removed"] is True
 
     assert [call[1] for call in calls] == [
+        "/notification-channel-kinds",
         "/notification-channels",
         "/notification-channels",
         "/notification-channels/ntc_cli",
@@ -1540,10 +1561,29 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
     watcher = {
         "id": "wtr_cli",
         "state": "ok",
+        "state_reason": "",
         "baseline_run_id": "run_base",
         "last_run_id": "",
+        "last_diff_summary": {
+            "added_line_count": 1,
+            "removed_line_count": 0,
+        },
         "label": "Hourly Watch",
         "command_text": "nmap -sV darklab.sh",
+        "options": {"suppress_removals": True, "notify_metadata_changes": False},
+        "consecutive_no_change": 2,
+        "consecutive_changed": 1,
+        "consecutive_failures": 0,
+        "created": "2026-05-19T23:00:00+00:00",
+        "updated": "2026-05-19T23:30:00+00:00",
+        "schedule": {
+            "id": "sch_wtr_cli",
+            "enabled": True,
+            "cron_expr": "0 * * * *",
+            "cadence_preset": "hourly",
+            "timezone": "UTC",
+            "next_run_at": "2026-05-20T01:00:00+00:00",
+        },
     }
 
     class FakeClient:
@@ -1558,7 +1598,7 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
                     assert body["baseline_run_id"] == ""
                     assert body["command"] == "nmap darklab.sh"
                     return {"watcher": {**watcher, "baseline_run_id": "", "state_reason": "pending_baseline"}}
-                assert body == {
+                expected_body = {
                     "baseline_mode": "existing_run",
                     "baseline_run_id": "run_base",
                     "cron_expr": None,
@@ -1567,11 +1607,13 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
                     "timezone": None,
                     "enabled": True,
                     "options": {
-                        "suppress_removals": True,
+                        "suppress_removals": bool(body.get("command")),
                         "notify_metadata_changes": False,
                     },
-                    "command": "nmap -sV darklab.sh",
                 }
+                if body.get("command"):
+                    expected_body["command"] = "nmap -sV darklab.sh"
+                assert body == expected_body
                 return {"watcher": watcher}
             if path == "/watchers" and method == "GET":
                 assert params == {"limit": 10, "offset": 0}
@@ -1623,6 +1665,8 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
         "darklab.sh",
     ]) == 0
     assert "wtr_cli" in capsys.readouterr().out
+    assert cli_main.main(["watch", "create", "run_base", "--every", "hourly", "--label", "Hourly Watch"]) == 0
+    assert "wtr_cli" in capsys.readouterr().out
     assert cli_main.main(["watch", "create", "--first-run", "--every", "hourly", "--", "nmap", "darklab.sh"]) == 0
     assert "wtr_cli" in capsys.readouterr().out
     monkeypatch.setattr(
@@ -1639,7 +1683,15 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
     assert "STATE" in list_output
     assert "Hourly Watch" in list_output
     assert cli_main.main(["watch", "info", "wtr_cli"]) == 0
-    assert "nmap -sV darklab.sh" in capsys.readouterr().out
+    info_output = capsys.readouterr().out
+    assert "Watcher" in info_output
+    assert "Baseline" in info_output
+    assert "Cadence" in info_output
+    assert "Health" in info_output
+    assert "Recent Fires" in info_output
+    assert "2026-05-20 00:00:00 UTC" in info_output
+    assert "nmap -sV darklab.sh" in info_output
+    assert "suppress-removals" in info_output
     assert cli_main.main(["watch", "pause", "wtr_cli"]) == 0
     assert "paused" in capsys.readouterr().out
     assert cli_main.main(["watch", "resume", "wtr_cli"]) == 0
@@ -1658,7 +1710,9 @@ def test_darklab_cli_watch_commands_manage_api_watchers(monkeypatch, capsys):
         "/watchers",
         "/watchers",
         "/watchers",
+        "/watchers",
         "/watchers/wtr_cli",
+        "/watchers/wtr_cli/fires",
         "/watchers/wtr_cli",
         "/watchers/wtr_cli",
         "/watchers/wtr_cli/run-now",
@@ -1700,14 +1754,18 @@ def test_api_v1_openapi_contract_describes_public_shapes():
         "HistorySearchMatch",
         "HistorySearchPage",
         "NdjsonStream",
-        "NotificationChannel",
-        "NotificationChannelCreateRequest",
-        "NotificationChannelList",
-        "NotificationChannelResponse",
-        "NotificationChannelUpdateRequest",
-        "NotificationEvent",
-        "NotificationEventPage",
-        "NotificationSecretField",
+            "NotificationChannel",
+            "NotificationChannelCreateRequest",
+            "NotificationChannelKind",
+            "NotificationChannelKindField",
+            "NotificationChannelKindList",
+            "NotificationChannelList",
+            "NotificationChannelResponse",
+            "NotificationChannelUpdateRequest",
+            "NotificationEvent",
+            "NotificationEventPage",
+            "NotificationSecretField",
+            "NotificationTriggerOption",
         "NotificationTestResponse",
         "Project",
         "ProjectCounts",
@@ -1869,6 +1927,15 @@ def test_api_v1_openapi_contract_describes_public_shapes():
     assert schemas["NotificationChannelCreateRequest"]["properties"]["secret_values"]["writeOnly"] is True
     assert schemas["NotificationChannelList"]["properties"]["channels"]["items"] == {
         "$ref": "#/components/schemas/NotificationChannel"
+    }
+    assert spec["paths"]["/notification-channel-kinds"]["get"]["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/NotificationChannelKindList"
+    }
+    assert schemas["NotificationChannelKindList"]["properties"]["kinds"]["items"] == {
+        "$ref": "#/components/schemas/NotificationChannelKind"
+    }
+    assert schemas["NotificationChannelKind"]["properties"]["secret_fields"]["items"] == {
+        "$ref": "#/components/schemas/NotificationChannelKindField"
     }
     assert schemas["NotificationEventPage"]["properties"]["events"]["items"] == {"$ref": "#/components/schemas/NotificationEvent"}
     notification_event_params = {param["name"] for param in spec["paths"]["/notification-events"]["get"]["parameters"]}

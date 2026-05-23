@@ -22,8 +22,13 @@ from services.notifications.models import (
     CHANNEL_KIND_WEBHOOK,
     CHANNEL_KINDS,
     EVENT_STATUSES,
+    TRIGGER_PTY_SESSION_ENDED,
     TRIGGER_RUN_COMPLETE,
+    TRIGGER_SCHEDULED_RUN_FAILED,
     TRIGGER_TEST,
+    TRIGGER_WATCHER_CHANGED,
+    TRIGGER_WATCHER_ERROR,
+    TRIGGER_WATCHER_RECOVERED,
     TRIGGERS,
     NotificationChannel,
     NotificationEvent,
@@ -43,16 +48,76 @@ CHANNEL_SECRET_FIELDS = {
     CHANNEL_KIND_EMAIL: (),
 }
 
-CHANNEL_CONFIG_FIELDS = {
-    CHANNEL_KIND_WEBHOOK: ("timeout_seconds",),
-    CHANNEL_KIND_SLACK: ("timeout_seconds",),
-    CHANNEL_KIND_DISCORD: ("timeout_seconds",),
-    CHANNEL_KIND_TELEGRAM: ("chat_id", "timeout_seconds"),
-    CHANNEL_KIND_PUSHOVER: ("priority", "sound", "device", "timeout_seconds"),
-    CHANNEL_KIND_EMAIL: ("recipients", "reply_to", "timeout_seconds"),
+CHANNEL_KIND_ORDER = (
+    CHANNEL_KIND_WEBHOOK,
+    CHANNEL_KIND_SLACK,
+    CHANNEL_KIND_DISCORD,
+    CHANNEL_KIND_TELEGRAM,
+    CHANNEL_KIND_PUSHOVER,
+    CHANNEL_KIND_EMAIL,
+)
+
+CHANNEL_KIND_LABELS = {
+    CHANNEL_KIND_WEBHOOK: "Webhook",
+    CHANNEL_KIND_SLACK: "Slack",
+    CHANNEL_KIND_DISCORD: "Discord",
+    CHANNEL_KIND_TELEGRAM: "Telegram",
+    CHANNEL_KIND_PUSHOVER: "Pushover",
+    CHANNEL_KIND_EMAIL: "Email",
 }
 
-UI_TRIGGERS = tuple(sorted(TRIGGERS - {TRIGGER_TEST}))
+CHANNEL_SECRET_FIELD_LABELS = {
+    CHANNEL_KIND_WEBHOOK: {"url": "Webhook URL"},
+    CHANNEL_KIND_SLACK: {"url": "Slack webhook URL"},
+    CHANNEL_KIND_DISCORD: {"url": "Discord webhook URL"},
+    CHANNEL_KIND_TELEGRAM: {"bot_token": "Bot token"},
+    CHANNEL_KIND_PUSHOVER: {"app_token": "App token", "user_key": "User key"},
+    CHANNEL_KIND_EMAIL: {},
+}
+
+CHANNEL_CONFIG_FIELD_DEFINITIONS = {
+    CHANNEL_KIND_WEBHOOK: ({"name": "timeout_seconds", "label": "Timeout seconds", "optional": True},),
+    CHANNEL_KIND_SLACK: ({"name": "timeout_seconds", "label": "Timeout seconds", "optional": True},),
+    CHANNEL_KIND_DISCORD: ({"name": "timeout_seconds", "label": "Timeout seconds", "optional": True},),
+    CHANNEL_KIND_TELEGRAM: (
+        {"name": "chat_id", "label": "Chat ID"},
+        {"name": "timeout_seconds", "label": "Timeout seconds", "optional": True},
+    ),
+    CHANNEL_KIND_PUSHOVER: (
+        {"name": "priority", "label": "Priority", "optional": True},
+        {"name": "sound", "label": "Sound", "optional": True},
+        {"name": "device", "label": "Device", "optional": True},
+        {"name": "timeout_seconds", "label": "Timeout seconds", "optional": True},
+    ),
+    CHANNEL_KIND_EMAIL: (
+        {"name": "recipients", "label": "Recipients", "help": "Comma-separated email addresses."},
+        {"name": "reply_to", "label": "Reply-To", "optional": True},
+        {"name": "timeout_seconds", "label": "Timeout seconds", "optional": True},
+    ),
+}
+
+CHANNEL_CONFIG_FIELDS = {
+    kind: tuple(str(field["name"]) for field in fields)
+    for kind, fields in CHANNEL_CONFIG_FIELD_DEFINITIONS.items()
+}
+
+TRIGGER_LABELS = {
+    TRIGGER_RUN_COMPLETE: "Run complete",
+    TRIGGER_PTY_SESSION_ENDED: "PTY session ended",
+    TRIGGER_SCHEDULED_RUN_FAILED: "Scheduled run failed",
+    TRIGGER_WATCHER_CHANGED: "Watcher changed",
+    TRIGGER_WATCHER_ERROR: "Watcher error",
+    TRIGGER_WATCHER_RECOVERED: "Watcher recovered",
+}
+
+UI_TRIGGERS = (
+    TRIGGER_RUN_COMPLETE,
+    TRIGGER_PTY_SESSION_ENDED,
+    TRIGGER_SCHEDULED_RUN_FAILED,
+    TRIGGER_WATCHER_CHANGED,
+    TRIGGER_WATCHER_ERROR,
+    TRIGGER_WATCHER_RECOVERED,
+)
 DEFAULT_TRIGGERS = (TRIGGER_RUN_COMPLETE,)
 MAX_LABEL_LENGTH = 80
 
@@ -234,6 +299,28 @@ def _serialize_test_event(event: NotificationEvent) -> dict[str, Any]:
         "event_id": event.id,
         "status": event.status,
         "last_error": event.last_error,
+    }
+
+
+def notification_channel_kind_contract() -> dict[str, Any]:
+    kinds = []
+    for kind in CHANNEL_KIND_ORDER:
+        secret_labels = CHANNEL_SECRET_FIELD_LABELS[kind]
+        kinds.append({
+            "kind": kind,
+            "label": CHANNEL_KIND_LABELS[kind],
+            "secret_fields": [
+                {"name": field, "label": secret_labels.get(field, field)}
+                for field in CHANNEL_SECRET_FIELDS[kind]
+            ],
+            "config_fields": [dict(field) for field in CHANNEL_CONFIG_FIELD_DEFINITIONS[kind]],
+        })
+    return {
+        "kinds": kinds,
+        "triggers": [
+            {"value": trigger, "label": TRIGGER_LABELS.get(trigger, trigger.replace("_", " ").title())}
+            for trigger in UI_TRIGGERS
+        ],
     }
 
 
