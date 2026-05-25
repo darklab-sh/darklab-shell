@@ -518,6 +518,7 @@ function _applyOutputSignalMetadata(span, rawLine, metadata) {
 function _atlasTabForOutputEntity(type) {
   const value = String(type || '').trim().toLowerCase();
   if (value === 'ip') return 'ip';
+  if (value === 'host') return 'domain';
   if (value === 'domain') return 'domain';
   if (value === 'url') return 'url';
   if (value === 'hash') return 'hash';
@@ -1285,7 +1286,7 @@ function _buildOutputLine(event, tabId, now, runStart, metadata = null) {
   const cls = _legacyClsForLineEvent(event);
   const span = document.createElement('span');
   span.className = 'line' + (cls ? ' ' + cls : '');
-  if (text === '') span.classList.add('is-blank');
+  if (text === '' && !_isPromptEchoLineEvent(event)) span.classList.add('is-blank');
   const coalesceRole = _coalescedOutputRoleForEvent(event);
   if (event && event.role) span.dataset.outputRole = String(event.role || '');
   const content = document.createElement('span');

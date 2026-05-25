@@ -445,13 +445,38 @@ test.describe('? keyboard-shortcuts overlay', () => {
     await expect(page.locator('#shortcuts-overlay')).not.toHaveClass(/\bopen\b/)
   })
 
-  test('? opens the overlay from the empty command prompt', async ({ page }) => {
+  test('? opens the overlay from the empty command prompt', async ({ page, browser }) => {
     await page.locator('#cmd').focus()
     await expect(page.locator('#cmd')).toHaveValue('')
     await page.keyboard.press('?')
     await expect(page.locator('#shortcuts-overlay')).toHaveClass(/\bopen\b/)
     // The `?` character should NOT have been inserted into the prompt.
     await expect(page.locator('#cmd')).toHaveValue('')
+
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#shortcuts-overlay')).not.toHaveClass(/\bopen\b/)
+
+    const freshContext = await browser.newContext()
+    const freshPage = await freshContext.newPage()
+    try {
+      await freshPage.goto(new URL('/', page.url()).toString())
+      await freshPage.locator('#cmd').waitFor()
+      await freshPage.waitForFunction(() => {
+        const activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null
+        const tabId = activeTab && activeTab.id
+        return (
+          typeof _welcomeActive !== 'undefined' &&
+          _welcomeActive &&
+          typeof welcomeOwnsTab === 'function' &&
+          welcomeOwnsTab(tabId)
+        )
+      })
+      await freshPage.keyboard.press('?')
+      await expect(freshPage.locator('#shortcuts-overlay')).toHaveClass(/\bopen\b/)
+      await expect(freshPage.locator('#cmd')).toHaveValue('')
+    } finally {
+      await freshContext.close()
+    }
   })
 
   test('? types normally when the command prompt already has text', async ({ page }) => {

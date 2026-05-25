@@ -6,6 +6,7 @@ Imported by database, process, permalinks, and app modules.
 import os
 import pwd
 import logging
+import ipaddress
 from pathlib import Path
 import yaml
 from core.redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
@@ -104,6 +105,24 @@ def _coerce_bool_value(value, default=False):
     return default
 
 
+def _normalize_ai_base_url_allowed_cidrs(value):
+    if isinstance(value, str):
+        raw_values = [item.strip() for item in value.split(",") if item.strip()]
+    elif isinstance(value, (list, tuple, set)):
+        raw_values = [str(item).strip() for item in value if str(item or "").strip()]
+    else:
+        raw_values = []
+    normalized = []
+    for cidr in raw_values:
+        try:
+            ipaddress.ip_network(cidr, strict=False)
+        except ValueError:
+            log.warning("AI_BASE_URL_ALLOWED_CIDR_INVALID", extra={"cidr": cidr[:120]})
+            continue
+        normalized.append(cidr)
+    return normalized
+
+
 def load_config(conf_dir=None):
     """Load config.yaml plus optional config.local.yaml overlays.
 
@@ -133,6 +152,29 @@ def load_config(conf_dir=None):
         "prometheus_multiproc_dir":   "/tmp/darklab_shell-prom",
         "metrics_histogram_buckets_run_duration": [0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 900, 1800, 3600],
         "metrics_histogram_buckets_http_duration": [0.005, 0.01, 0.05, 0.1, 0.5, 1, 5],
+        "metrics_histogram_buckets_ai_provider_duration": [0.1, 0.5, 1, 2, 5, 10, 30, 60],
+        "ai_enabled":                 False,
+        "ai_provider":                "openai_compatible",
+        "ai_base_url":                "",
+        "ai_model":                   "",
+        "ai_api_key_secret_name":     "",
+        "ai_api_key":                 "",
+        "ai_connect_timeout_seconds": 5,
+        "ai_timeout_seconds":         120,
+        "ai_max_input_chars":         24000,
+        "ai_max_output_tokens":       120,
+        "ai_next_commands_max_output_tokens": 180,
+        "ai_max_concurrent":          1,
+        "ai_max_queue_depth":         20,
+        "ai_rate_limit_per_session_hour": 5,
+        "ai_rate_limit_global_per_minute": 2,
+        "ai_allow_full_output":       False,
+        "ai_require_private_base_url": True,
+        "ai_base_url_allowed_cidrs":  [],
+        "ai_prompt_version_override": "",
+        "ai_feature_summary":         False,
+        "ai_feature_next_commands":   False,
+        "ai_feature_run_suggestions": False,
         "restricted_command_input_cidrs": [],
         "share_redaction_enabled":    True,
         "share_redaction_rules":      [],
@@ -341,6 +383,41 @@ def load_config(conf_dir=None):
     env_database_postgres_jit = str(os.environ.get("DATABASE_POSTGRES_JIT") or "").strip()
     if env_database_postgres_jit:
         defaults["database_postgres_jit"] = env_database_postgres_jit
+    ai_env_keys = {
+        "AI_ENABLED": "ai_enabled",
+        "AI_PROVIDER": "ai_provider",
+        "AI_BASE_URL": "ai_base_url",
+        "AI_MODEL": "ai_model",
+        "AI_API_KEY_SECRET_NAME": "ai_api_key_secret_name",
+        "AI_API_KEY": "ai_api_key",
+        "AI_CONNECT_TIMEOUT_SECONDS": "ai_connect_timeout_seconds",
+        "AI_TIMEOUT_SECONDS": "ai_timeout_seconds",
+        "AI_MAX_INPUT_CHARS": "ai_max_input_chars",
+        "AI_MAX_OUTPUT_TOKENS": "ai_max_output_tokens",
+        "AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS": "ai_next_commands_max_output_tokens",
+        "AI_MAX_CONCURRENT": "ai_max_concurrent",
+        "AI_MAX_QUEUE_DEPTH": "ai_max_queue_depth",
+        "AI_RATE_LIMIT_PER_SESSION_HOUR": "ai_rate_limit_per_session_hour",
+        "AI_RATE_LIMIT_GLOBAL_PER_MINUTE": "ai_rate_limit_global_per_minute",
+        "AI_ALLOW_FULL_OUTPUT": "ai_allow_full_output",
+        "AI_REQUIRE_PRIVATE_BASE_URL": "ai_require_private_base_url",
+        "AI_BASE_URL_ALLOWED_CIDRS": "ai_base_url_allowed_cidrs",
+        "AI_PROMPT_VERSION_OVERRIDE": "ai_prompt_version_override",
+        "AI_FEATURE_SUMMARY": "ai_feature_summary",
+        "AI_FEATURE_NEXT_COMMANDS": "ai_feature_next_commands",
+        "AI_FEATURE_RUN_SUGGESTIONS": "ai_feature_run_suggestions",
+    }
+    for env_name, cfg_key in ai_env_keys.items():
+        raw = str(os.environ.get(env_name) or "").strip()
+        if not raw:
+            continue
+        if cfg_key == "ai_base_url_allowed_cidrs":
+            defaults[cfg_key] = [item.strip() for item in raw.split(",") if item.strip()]
+        else:
+            defaults[cfg_key] = raw
+    defaults["ai_base_url_allowed_cidrs"] = _normalize_ai_base_url_allowed_cidrs(
+        defaults.get("ai_base_url_allowed_cidrs")
+    )
     defaults["database_pool_min"] = _coerce_int_value(defaults.get("database_pool_min"), 1, minimum=0)
     defaults["database_pool_max"] = _coerce_int_value(defaults.get("database_pool_max"), 5, minimum=1)
     defaults["database_postgres_jit"] = _coerce_bool_value(defaults.get("database_postgres_jit"), False)
@@ -365,6 +442,27 @@ def load_config(conf_dir=None):
         output_preview_max_mb = 1
     defaults["output_preview_max_mb"] = output_preview_max_mb
     defaults["output_preview_max_bytes"] = output_preview_max_mb * 1024 * 1024
+    for key in (
+        "ai_enabled",
+        "ai_allow_full_output",
+        "ai_require_private_base_url",
+        "ai_feature_summary",
+        "ai_feature_next_commands",
+        "ai_feature_run_suggestions",
+    ):
+        defaults[key] = _coerce_bool_value(defaults.get(key), bool(defaults[key]))
+    for key, fallback, minimum in (
+        ("ai_connect_timeout_seconds", 5, 1),
+        ("ai_timeout_seconds", 120, 1),
+        ("ai_max_input_chars", 24000, 1000),
+        ("ai_max_output_tokens", 120, 1),
+        ("ai_next_commands_max_output_tokens", 180, 1),
+        ("ai_max_concurrent", 1, 1),
+        ("ai_max_queue_depth", 20, 0),
+        ("ai_rate_limit_per_session_hour", 5, 1),
+        ("ai_rate_limit_global_per_minute", 2, 1),
+    ):
+        defaults[key] = _coerce_int_value(defaults.get(key), fallback, minimum=minimum)
     # Share/export redaction rules are normalized up front so the browser and
     # the snapshot endpoint both receive the same validated rule set.
     defaults["share_redaction_rules"] = normalize_redaction_rules(

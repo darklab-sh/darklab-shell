@@ -19,6 +19,7 @@ RUN_DURATION_BUCKETS = (0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 300.0, 900.0,
 HTTP_DURATION_BUCKETS = (0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0)
 OUTPUT_BYTES_BUCKETS = (1024.0, 10240.0, 102400.0, 1048576.0, 10485760.0, 104857600.0)
 INTEL_DURATION_BUCKETS = (0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0)
+AI_PROVIDER_DURATION_BUCKETS = (0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0)
 DB_QUERY_DURATION_BUCKETS = (0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0)
 PTY_SNAPSHOT_AGE_BUCKETS = (0.1, 0.5, 1.0, 2.0, 5.0, 15.0, 60.0, 300.0)
 EVIDENCE_PACKAGE_DURATION_BUCKETS = (0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 300.0)
@@ -27,6 +28,35 @@ EXIT_CODE_CLASSES = frozenset({"success", "error", "signal", "timeout"})
 RUN_KINDS = frozenset({RUN_KIND_BUILTIN, RUN_KIND_EXTERNAL})
 RATE_LIMIT_SCOPES = frozenset({"global", "secrets", "pty_input", "intel"})
 INTEL_OUTCOMES = frozenset({"success", "cache_hit", "error", "missing_secret", "rate_limited", "disabled"})
+AI_ASSIST_VARIANTS = frozenset({"summary", "next_commands", "diag_test"})
+AI_REQUEST_STATUSES = frozenset({"success", "error", "cache_hit", "rate_limited", "rejected"})
+AI_PROVIDER_TIMING_PHASES = frozenset({"prompt", "generation"})
+AI_ERROR_CODES = frozenset({
+    "",
+    "ai_busy",
+    "ai_context_too_large",
+    "ai_disabled",
+    "ai_malformed",
+    "ai_rate_limited",
+    "ai_suggestion_rejected",
+    "ai_unavailable",
+    "ai_base_url_not_allowed",
+})
+AI_SUGGESTION_REJECTION_REASONS = frozenset({
+    "command_target_absent",
+    "target_absent",
+    "port_absent",
+    "shell_chain",
+    "denied_flag",
+    "missing_secret",
+    "private_network",
+    "redaction_sentinel",
+    "unknown_root",
+    "extraction_failed",
+    "invalid_flag",
+    "policy_rejected",
+    "unicode_obfuscation",
+})
 PTY_DROP_REASONS = frozenset({"rate_limit", "oversize", "not_owner", "closed"})
 WORKSPACE_EVICTION_REASONS = frozenset({"quota", "inactive", "manual"})
 SNAPSHOT_TRIGGERS = frozenset({"manual", "permalink", "auto"})
@@ -36,7 +66,16 @@ EVIDENCE_PACKAGE_OUTCOMES = frozenset({"success", "too_large", "not_found", "err
 HTTP_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"})
 STATUS_CLASSES = frozenset({"1xx", "2xx", "3xx", "4xx", "5xx", "unknown"})
 RUN_FINALIZE_STAGES = frozenset({"capture", "db_write", "artifact_write", "entity_materialize"})
-BROKER_EVENT_TYPES = frozenset({"started", "output", "notice", "clear", "exit", "error", "heartbeat", "killed"})
+BROKER_EVENT_TYPES = frozenset({
+    "clear",
+    "error",
+    "exit",
+    "heartbeat",
+    "killed",
+    "notice",
+    "output",
+    "started",
+})
 BROKER_PUBLISH_ERROR_CAUSES = frozenset({"redis_unavailable", "serialize", "unknown"})
 EVIDENCE_PACKAGE_SKIPPED_KINDS = frozenset({"artifact", "item"})
 
@@ -115,6 +154,26 @@ LABEL_CARDINALITY_POLICIES: dict[str, dict[str, dict[str, Any]]] = {
     },
     "darklab_intel_request_duration_seconds": {
         "provider": {"kind": "known_provider", "fallback": "unknown"},
+    },
+    "darklab_ai_requests": {
+        "variant": {"kind": "enum", "values": AI_ASSIST_VARIANTS, "fallback": "summary"},
+        "status": {"kind": "enum", "values": AI_REQUEST_STATUSES, "fallback": "error"},
+        "error_code": {"kind": "enum", "values": AI_ERROR_CODES, "fallback": "ai_unavailable"},
+    },
+    "darklab_ai_provider_duration_seconds": {
+        "provider": {"kind": "bounded", "max_values": 16, "max_len": 80, "fallback": "unknown"},
+        "status": {"kind": "enum", "values": AI_REQUEST_STATUSES, "fallback": "error"},
+    },
+    "darklab_ai_provider_phase_duration_seconds": {
+        "provider": {"kind": "bounded", "max_values": 16, "max_len": 80, "fallback": "unknown"},
+        "status": {"kind": "enum", "values": AI_REQUEST_STATUSES, "fallback": "error"},
+        "phase": {"kind": "enum", "values": AI_PROVIDER_TIMING_PHASES, "fallback": "prompt"},
+    },
+    "darklab_ai_cache_hits": {
+        "variant": {"kind": "enum", "values": AI_ASSIST_VARIANTS, "fallback": "summary"},
+    },
+    "darklab_ai_suggestion_rejections": {
+        "reason": {"kind": "enum", "values": AI_SUGGESTION_REJECTION_REASONS, "fallback": "unknown_root"},
     },
     "darklab_findings_materialized": {
         "run_kind": {"kind": "enum", "values": RUN_KINDS, "fallback": RUN_KIND_EXTERNAL},
@@ -321,6 +380,38 @@ INTEL_REQUEST_DURATION = Histogram(
     ("provider",),
     buckets=INTEL_DURATION_BUCKETS,
 )
+AI_REQUESTS = Counter(
+    "darklab_ai_requests",
+    "AI assist requests by variant, bounded status, and bounded error code.",
+    ("variant", "status", "error_code"),
+)
+AI_PROVIDER_DURATION = Histogram(
+    "darklab_ai_provider_duration_seconds",
+    "AI provider call duration by provider and bounded status.",
+    ("provider", "status"),
+    buckets=_configured_buckets("metrics_histogram_buckets_ai_provider_duration", AI_PROVIDER_DURATION_BUCKETS),
+)
+AI_PROVIDER_PHASE_DURATION = Histogram(
+    "darklab_ai_provider_phase_duration_seconds",
+    "AI provider prompt and generation phase duration by provider and bounded status.",
+    ("provider", "status", "phase"),
+    buckets=_configured_buckets("metrics_histogram_buckets_ai_provider_duration", AI_PROVIDER_DURATION_BUCKETS),
+)
+AI_IN_FLIGHT = Gauge(
+    "darklab_ai_in_flight",
+    "Currently in-flight AI provider calls.",
+    multiprocess_mode="livesum",
+)
+AI_CACHE_HITS = Counter(
+    "darklab_ai_cache_hits",
+    "AI assist cache hits by variant.",
+    ("variant",),
+)
+AI_SUGGESTION_REJECTIONS = Counter(
+    "darklab_ai_suggestion_rejections",
+    "AI suggested commands rejected by bounded reason.",
+    ("reason",),
+)
 FINDINGS_MATERIALIZED = Counter(
     "darklab_findings_materialized",
     "Findings materialized from run output by run kind.",
@@ -393,6 +484,12 @@ METRIC_DEFINITIONS = (
     WORKSPACE_QUOTA_REJECTIONS,
     INTEL_REQUESTS,
     INTEL_REQUEST_DURATION,
+    AI_REQUESTS,
+    AI_PROVIDER_DURATION,
+    AI_PROVIDER_PHASE_DURATION,
+    AI_IN_FLIGHT,
+    AI_CACHE_HITS,
+    AI_SUGGESTION_REJECTIONS,
     FINDINGS_MATERIALIZED,
     SNAPSHOT_CREATES,
     SNAPSHOT_VIEWS,
@@ -413,6 +510,8 @@ HISTOGRAM_DEFINITIONS = (
     INTEL_PROVIDER_RATE_LIMIT_WAITS,
     DB_QUERY_DURATION,
     INTEL_REQUEST_DURATION,
+    AI_PROVIDER_DURATION,
+    AI_PROVIDER_PHASE_DURATION,
     EVIDENCE_PACKAGE_BUILD_DURATION,
     EVIDENCE_PACKAGE_ARCHIVE_BYTES,
 )
@@ -718,6 +817,51 @@ def record_intel_lookup(provider: object, outcome: str, duration_seconds: float 
         INTEL_REQUEST_DURATION.labels(provider_label).observe(max(0.0, float(duration_seconds)))
     if outcome_label == "rate_limited" and retry_after_seconds:
         INTEL_PROVIDER_RATE_LIMIT_WAITS.labels(provider_label).observe(max(0.0, float(retry_after_seconds)))
+
+
+def record_ai_request(
+    variant: str,
+    status: str,
+    duration_seconds: float = 0.0,
+    *,
+    error_code: str = "",
+    provider: object = "openai_compatible",
+    provider_timings: Mapping[str, Any] | None = None,
+) -> None:
+    variant_label = _cardinality_guarded_label(_metric_name(AI_REQUESTS), "variant", variant)
+    status_label = _cardinality_guarded_label(_metric_name(AI_REQUESTS), "status", status)
+    error_label = _cardinality_guarded_label(_metric_name(AI_REQUESTS), "error_code", error_code)
+    AI_REQUESTS.labels(variant_label, status_label, error_label).inc()
+    if duration_seconds:
+        provider_label = _cardinality_guarded_label(
+            _metric_name(AI_PROVIDER_DURATION),
+            "provider",
+            _bounded_label(provider, fallback="unknown", max_len=80),
+        )
+        AI_PROVIDER_DURATION.labels(provider_label, status_label).observe(max(0.0, float(duration_seconds)))
+        timings = provider_timings if isinstance(provider_timings, Mapping) else {}
+        for phase, key in (("prompt", "prompt_ms"), ("generation", "predicted_ms")):
+            value = timings.get(key)
+            if not isinstance(value, (int, float)):
+                continue
+            phase_label = _cardinality_guarded_label(
+                _metric_name(AI_PROVIDER_PHASE_DURATION),
+                "phase",
+                phase,
+            )
+            AI_PROVIDER_PHASE_DURATION.labels(provider_label, status_label, phase_label).observe(
+                max(0.0, float(value) / 1000.0)
+            )
+
+
+def record_ai_cache_hit(variant: str) -> None:
+    variant_label = _cardinality_guarded_label(_metric_name(AI_CACHE_HITS), "variant", variant)
+    AI_CACHE_HITS.labels(variant_label).inc()
+
+
+def record_ai_suggestion_rejection(reason: str) -> None:
+    reason_label = _cardinality_guarded_label(_metric_name(AI_SUGGESTION_REJECTIONS), "reason", reason)
+    AI_SUGGESTION_REJECTIONS.labels(reason_label).inc()
 
 
 def record_workspace_evictions(count: int, reason: str) -> None:

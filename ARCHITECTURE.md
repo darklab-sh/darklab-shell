@@ -261,6 +261,9 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/api/v1/runs/<run_id>` | Returns active broker status or completed history status for a current-token run. |
 | `GET` | `/api/v1/runs/<run_id>/output` | Returns stored run output as plain text or JSON, with optional line ranges. |
 | `POST` | `/api/v1/runs/<run_id>/wait` | Waits for an active run to become terminal or returns a timeout error. |
+| `GET` | `/api/v1/runs/<run_id>/ai-assists` | Lists cached and in-flight AI assists for one completed current-token run. |
+| `POST` | `/api/v1/runs/<run_id>/ai-summary` | Returns a cached AI summary assist or queues one for the AI worker. |
+| `POST` | `/api/v1/runs/<run_id>/ai-next-commands` | Returns cached AI next-command drafts or queues them for the AI worker. |
 | `POST` | `/api/v1/runs/<run_id>/projects/<project_id>` | Links a completed external run to an active project in the token session. |
 | `DELETE` | `/api/v1/runs/<run_id>/projects/<project_id>` | Removes a completed external run link from an active project in the token session. |
 | `GET` | `/api/v1/runs/<run_id>/stream` | Streams a current-token run as SSE by default or NDJSON when `format=ndjson`. |
@@ -273,6 +276,9 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `POST` | `/runs` | Validates, expands session variables, rewrites, starts brokered execution, and returns the run id plus stream URL. |
 | `GET` | `/runs/<run_id>/stream` | Replays brokered events and follows live output over SSE for a current-session run. |
 | `GET` | `/runs/<run_id>/events` | Returns bounded brokered event backfill for tests and non-SSE clients. |
+| `GET` | `/runs/<run_id>/ai-assists` | Lists cached and in-flight AI assists for one completed current-session run. |
+| `POST` | `/runs/<run_id>/ai-summary` | Returns a cached AI summary assist or queues one for the AI worker. |
+| `POST` | `/runs/<run_id>/ai-next-commands` | Returns cached AI next-command drafts or queues them for the AI worker. |
 | `POST` | `/pty/runs` | Starts a config-gated interactive PTY run for an allowlisted screen tool and returns the PTY run id plus stream URL. |
 | `GET` | `/pty/runs/<run_id>/snapshot` | Returns a terminal snapshot, dimensions, and resume event id for active PTY reattach. |
 | `GET` | `/pty/runs/<run_id>/stream` | Streams bounded PTY output events over SSE for the owning session. |
@@ -485,6 +491,7 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | `GET` | `/health` | Returns Docker/load-balancer health with DB and optional Redis checks; degraded dependencies return 503. |
 | `GET` | `/status` | Returns lightweight HUD status data for uptime, DB, Redis, and server time; always responds 200. |
 | `GET` | `/diag` | Serves IP-gated operator diagnostics as HTML or JSON; returns 404 outside `diagnostics_allowed_cidrs`. |
+| `POST` | `/diag/ai-test` | Runs the IP-gated AI provider test prompt from `/diag` without reloading the full diagnostics page. |
 | `GET` | `/diag/classifier-drift` | Runs the IP-gated classifier drift sampler used by `/diag` without reloading the full diagnostics page. |
 | `GET` | `/diag/classifier-inspector` | Runs the same IP-gated one-line classifier check used by the `/diag` inspector without loading the full diagnostics page. |
 | `GET` | `/metrics` | Serves IP-gated Prometheus text metrics; returns 404 when metrics are disabled or the caller is outside `diagnostics_allowed_cidrs`. |
@@ -816,6 +823,7 @@ flowchart TB
 - The infrastructure/helper layer owns shared concerns like request metadata, persistence, process tracking, permalink shaping, artifact storage, and the Flask-Limiter singleton.
 - `commands.py` and `builtin_commands.py` stay logically adjacent to the run path but remain separate from the Flask factory so command policy and shell-helper behavior can be tested in isolation.
 - The HTTP layer owns the actual request/response surface across assets/content, run streaming, history/share, session-token/session-state APIs, headless API routes, workspace-file APIs, and project workspace APIs. `app.py` remains a thin factory that composes logging, limiter setup, blueprint registration, and request hooks.
+- AI assist service code keeps provider HTTP handling in `services.ai.client`, context assembly and redaction in `services.ai.context`, Redis-backed rate/concurrency coordination in `services.ai.coordination`, queue/cache persistence in `services.ai.storage`, route orchestration in `services.ai.assists`, suggestion validation in `services.ai.suggestions`, and the provider-call loop in `services.ai.worker`.
 - Project workspace service code keeps active project helpers in `services.projects.active`, run-file artifact ingestion/checksum/availability helpers in `services.projects.artifacts`, project run comparison helpers in `services.projects.comparisons`, project create/update/delete helpers in `services.projects.crud`, project/run finding ingestion, query, and review helpers in `services.projects.findings`, project link and run-entity link helpers in `services.projects.links`, metadata helpers in `services.projects.metadata`, session migration helpers in `services.projects.migration`, row/payload shaping helpers in `services.projects.models`, evidence package create/delete/archive helpers in `services.projects.package_archive`, evidence package archive build job helpers in `services.projects.package_jobs`, evidence package export rendering helpers in `services.projects.package_rendering`, evidence package manifest/redaction helpers in `services.projects.packages`, preference helpers in `services.projects.preferences`, project list/summary/entity/run/artifact query helpers in `services.projects.queries`, slug allocation helpers in `services.projects.slugs`, project target validation/discovery/mutation helpers in `services.projects.targets`, and shared ID/timestamp/quota helpers in `services.projects.utils`. `services.projects.workspace` stays as a compatibility export layer for callers while the project service split settles.
 
 ### Backend Runtime Boundaries
@@ -827,6 +835,32 @@ This boundary view answers a different question than the dependency graph above:
 - The configured database plus artifact files own durable run, snapshot, token, workflow, workspace metadata, project workspace, package, and search state.
 - Scanner subprocesses remain an out-of-process boundary rather than an in-worker extension of the Flask app.
 - Config and theme YAML files are filesystem-backed dependencies that shape both backend behavior and frontend presentation but do not become a general runtime datastore.
+
+### AI Assist Runtime
+
+AI assists are a sidecar workflow for completed external runs. They never become terminal transcript lines, findings, Atlas source text, search input, or comparison input. The runtime path is:
+
+1. Browser and API routes call `services.ai.assists` for `summary` or `next_commands` requests.
+2. The route layer checks feature flags, completed-run ownership, useful context, Redis-backed per-session/global write limits, and a short enqueue lock.
+3. `services.ai.storage` reuses a completed cache hit when the context hash, variant, prompt version, and model match; otherwise it writes a queued `ai_run_assists` row.
+4. The AI worker claims queued rows, refreshes a heartbeat while work is running, and uses `services.ai.coordination` to hold the global provider slot.
+5. `services.ai.context` builds compact prompt sections from run metadata, saved signal lines, entities, project targets, structured output summaries, and a bounded transcript tail. If full-output use is enabled, it can read complete persisted output as source material for those bounded sections.
+6. `services.ai.client` calls the configured OpenAI-compatible provider, requests streamed output for progress, enforces the private-base-URL guard, records provider timing metrics, and validates JSON through the schema layer.
+7. Summary orchestration repairs deterministic facts such as findings/warnings and open-port counts. Next-command orchestration validates drafts through command policy, trusted targets, known open ports, redaction sentinels, and small command-specific known-bad flag checks.
+8. Storage marks the assist completed or failed, clears progress, writes suggestion validation audit rows, and publishes a lightweight broker event so open Run Details cards can refresh without closing.
+
+AI state is intentionally small and auditable. `ai_run_assists` stores status, model, prompt version, context hash, payload, bounded raw model response text, progress while in flight, and error metadata. `ai_suggestion_validations` stores accepted and rejected next-command drafts with validation outcomes. Postgres uses app-owned migrations for those tables; SQLite keeps the matching schema in the normal database bootstrap path.
+
+Failure states are user-visible and bounded:
+
+- disabled AI or disabled assist type returns `403`
+- active runs return `409`
+- missing useful context returns `422`
+- queue, enqueue lock, and write-limit pressure return `429`
+- Redis coordination or provider setup failures return `503`
+- provider, parser, and validation failures complete the assist as failed, except summary and next-command truncation paths that have deterministic empty/fallback payloads
+
+Run Details treats AI output as optional metadata. Completed cards remain visible when the other AI variant is queued or fails, and rejected suggestions stay visible as blocked drafts instead of becoming copyable commands.
 
 ### Run Output Model
 
@@ -1518,6 +1552,9 @@ The current event inventory is:
 | DEBUG | `PTY_CONTROL_APPLIED` | interactive PTY control handling | run_id, action, bytes/rows/cols |
 | DEBUG | `DIAG_REDIS_SCAN_KEY_FAILED` | `/diag` Redis probes | stage, error |
 | DEBUG | `METRICS_INTEL_CACHE_COLLECT_FAILED` | Prometheus runtime collector | (+ traceback) |
+| DEBUG | `AI_WORKER_TICK` | AI worker loop | processed |
+| DEBUG | `AI_ASSIST_PROGRESS_UPDATE_FAILED` | AI worker progress storage | assist_id, run_id (+ traceback) |
+| DEBUG | `AI_COORDINATION_LEGACY_SLOT_DELETE_FAILED` | AI Redis coordination cleanup | (+ traceback) |
 | DEBUG | `NOTIFICATION_WORKER_TICK` | notification worker | delivered, limit |
 | DEBUG | `NOTIFICATION_HTTP_REQUEST` | notification HTTP channels | label, host, timeout, test_send |
 | DEBUG | `NOTIFICATION_HTTP_RESPONSE` | notification HTTP channels | label, status, test_send |
@@ -1590,6 +1627,9 @@ The current event inventory is:
 | DEBUG | `SCHEDULE_FIRES_LISTED` | browser schedule routes | ip, session, schedule_id, count, total, limit, offset |
 | DEBUG | `API_SCHEDULES_LISTED` | API schedule routes | ip, session, count, limit, offset |
 | DEBUG | `API_SCHEDULE_FIRES_LISTED` | API schedule routes | ip, session, schedule_id, count, total, limit, offset |
+| DEBUG | `AI_CONTEXT_BUILT` | AI context assembly | run_id, session, variant, output_source, output_truncated, max_input_chars, input_chars, estimated_input_tokens, redacted_bytes, pre_redaction_bytes, useful, omitted_sections, section_count, context_hash |
+| DEBUG | `AI_SUGGESTION_VALIDATION_COMPLETED` | AI suggestion validation | suggestion_count, accepted_count, rejected_count, rejection_reasons, trusted_target_count, known_port_count |
+| DEBUG | `AI_WORKER_BUSY` | AI worker coordination | max_concurrent |
 | INFO | `SCHEDULE_CREATED` | browser schedule routes | ip, session, source, schedule_id, enabled, cron_expr, cadence_preset, timezone, next_run_at |
 | INFO | `SCHEDULE_UPDATED` | browser schedule routes | ip, session, source, schedule_id, changed_fields, enabled, next_run_at |
 | INFO | `SCHEDULE_DELETED` | browser schedule routes | ip, session, source, schedule_id, removed |
@@ -1611,6 +1651,14 @@ The current event inventory is:
 | INFO | `WATCHER_BASELINE_ACCEPTED` | watcher service | watcher_id, baseline_run_id, session |
 | INFO | `WATCHER_CHANGED` | watcher finalization | watcher_id, schedule_id, session, state, run_id, notification_count |
 | INFO | `WATCHER_RECOVERED` | watcher finalization | watcher_id, schedule_id, session, state, run_id, notification_count |
+| INFO | `AI_RATE_LIMIT_SESSION_BYPASSED` | AI route rate limiting | ip, session, variant |
+| INFO | `AI_ASSIST_ENQUEUE_RESULT` | AI assist route enqueue | assist_id, run_id, session, variant, status, inserted, force, model, prompt_version, prompt_version_source, input_chars, estimated_input_tokens, redacted_bytes, pre_redaction_bytes |
+| INFO | `AI_WORKER_STARTED` | AI worker startup | — |
+| INFO | `AI_ASSIST_PROVIDER_REQUEST` | AI provider call start | assist_id, run_id, variant, model, connect_timeout_seconds, read_timeout_seconds |
+| INFO | `AI_ASSIST_COMPLETED` | AI worker completion | assist_id, run_id, variant, duration_ms, context_hash, input_chars, output_chars, estimated_input_tokens, redacted_bytes, suggestion_count, rejected_count, provider timing fields |
+| INFO | `AI_ASSIST_SUMMARY_FALLBACK` | AI summary orchestration | assist_id, run_id, variant, reason |
+| INFO | `AI_ASSIST_NEXT_COMMANDS_FALLBACK` | AI next-command orchestration | assist_id, run_id, variant, reason |
+| INFO | `AI_WORKER_STOPPED` | AI worker shutdown | — |
 | INFO | `SCHEDULER_WORKER_STARTED` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
 | INFO | `SCHEDULER_WORKER_LOCK_HELD` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
 | INFO | `SCHEDULER_WORKER_STOPPED` | scheduler worker | tick_seconds, limit, database_backend, lock_type, lock_path |
@@ -1650,6 +1698,9 @@ The current event inventory is:
 | WARN | `WATCHER_DIFF_FAILED` | watcher finalization | watcher_id, schedule_id, session, state, run_id, error |
 | WARN | `WATCHER_DISABLED_AFTER_ERRORS` | watcher finalization | watcher_id, schedule_id, session, state, run_id, consecutive_failures |
 | WARN | `WATCHER_BASELINE_DELETED` | run cleanup | watcher_id, baseline_run_id, session |
+| WARN | `AI_RATE_LIMIT_REJECTED` | AI route rate limiting | ip, session, variant, error_code, retry_after_seconds, bypass_session_limit |
+| WARN | `AI_ASSIST_JSON_DECODE_FAILED` | AI assist storage | assist_id, column |
+| WARN | `AI_BASE_URL_ALLOWED_CIDR_INVALID` | config loading | cidr |
 | WARN | `SCHEDULE_RECOVERY_SKIPPED_INVALID_NEXT_RUN` | scheduler recovery | schedule_id, owner_kind, next_run_at, fired_at |
 | WARN | `SCHEDULE_RECOVERY_SKIPPED_STALE` | scheduler recovery | schedule_id, owner_kind, next_run_at, fired_at, catchup_window_seconds |
 | WARN | `SCHEDULE_FIRE_CLAIM_TIME_INVALID` | scheduler dispatch | schedule_id, owner_kind, session, last_run_at, command_root |
@@ -1681,6 +1732,21 @@ The current event inventory is:
 | WARN | `CONFIG_LOCAL_LOAD_FAILED` | config loading | path, error |
 | WARN | `POSTGRES_READ_RETRY` | Postgres backend read retry | sqlstate, operation, retry_delay_ms |
 | WARN | `REDIS_UNAVAILABLE` | process tracking startup | redis_scheme, redis_host, redis_port, redis_db, redis_configured, fallback |
+| WARN | `AI_SECRET_LOOKUP_FAILED` | AI provider credentials | secret_name (+ traceback) |
+| WARN | `AI_CONTEXT_SECRET_METADATA_LOAD_FAILED` | AI context redaction | session (+ traceback) |
+| WARN | `AI_CONTEXT_FULL_OUTPUT_LOAD_FAILED` | AI context assembly | run_id, rel_path, error |
+| WARN | `AI_PROVIDER_SCHEMA_RETRY` | AI provider JSON validation | variant, attempt, model, finish_reason, output_chars, error_type, provider_truncated |
+| WARN | `AI_SUGGESTION_SECRET_LOOKUP_FAILED` | AI suggestion validation | session, env, error_type (+ traceback) |
+| WARN | `AI_SUGGESTIONS_REJECTED` | AI suggestion validation | suggestion_count, accepted_count, rejected_count, rejection_reasons, trusted_target_count, known_port_count |
+| WARN | `AI_DIAG_TEST_FAILED` | AI diagnostics test prompt | ip, provider, model, error_code, status |
+| WARN | `AI_PROVIDER_PROBE_FAILED` | AI provider diagnostics | provider, model, base_url_configured, error_code, status, latency_ms |
+| WARN | `AI_COORDINATION_RELEASE_SKIPPED` | AI Redis coordination release | reason |
+| WARN | `AI_COORDINATION_RELEASE_FAILED` | AI Redis coordination release | (+ traceback) |
+| WARN | `AI_COORDINATION_HEARTBEAT_FAILED` | AI Redis coordination heartbeat | (+ traceback) |
+| WARN | `AI_WORKER_COORDINATION_UNAVAILABLE` | AI worker coordination | error |
+| WARN | `AI_ASSIST_STALE_RECLAIMED` | AI worker queue recovery | count, stale_after_seconds |
+| WARN | `AI_ASSIST_FAILED` | AI worker completion | assist_id, run_id, session, variant, model, prompt_version, prompt_version_source, context_hash, error_code, error_message |
+| WARN | `AI_WORKER_DATABASE_INTERRUPTED` | AI worker database loop | error_type |
 | WARN | `ACTIVE_RUN_METADATA_DECODE_FAILED` | process tracking metadata | key, error |
 | WARN | `REDIS_SESSION_SET_READ_FAILED` | process tracking metadata | key (+ traceback) |
 | WARN | `REDIS_SCAN_FAILED` | process tracking metadata | pattern (+ traceback) |
@@ -1709,6 +1775,7 @@ The current event inventory is:
 | ERROR | `SCHEDULE_FIRE_FAILED` | scheduler dispatch | schedule_id, owner_kind, session, fired_at, next_run_at, consecutive_failures, error, command_root (+ traceback) |
 | ERROR | `SCHEDULE_FAILURE_NOTIFICATION_ERROR` | scheduler dispatch | schedule_id (+ traceback) |
 | ERROR | `SCHEDULER_WORKER_CRASHED` | scheduler worker | phase, tick_seconds, limit, database_backend, lock_type (+ traceback) |
+| ERROR | `AI_WORKER_CRASHED` | AI worker loop | (+ traceback) |
 | ERROR | `MIGRATION_FAILED` | Postgres migration runner | version, migration_name, error (+ traceback) |
 | ERROR | `HEALTH_DB_FAIL` | `health()` | (+ traceback) |
 | ERROR | `HEALTH_REDIS_FAIL` | `health()` | (+ traceback) |
@@ -1727,8 +1794,8 @@ The current event inventory is:
 
 - `/health` remains the load-balancer contract and reports whether DB and Redis are healthy, with degraded states surfacing through status code.
 - `/status` is intentionally a softer browser-HUD contract and always responds 200 so status-pill polling never causes UI flapping or reconnect churn.
-- `/diag` is the operator-facing structured view that surfaces runtime config, service health, asset presence, database storage breakdowns, tool availability, activity summaries, and a line classifier inspector without opening a shell session.
-- `/metrics` is the Prometheus scrape contract for trendable operational signals, including HTTP traffic, runs, PTYs, rate limits, broker mode/activity, DB/Redis/workspace gauges, selected database hot-path latency, intel provider outcomes/cache size, evidence package builds, findings, snapshots, and error counters.
+- `/diag` is the operator-facing structured view that surfaces runtime config, service health, asset presence, database storage breakdowns, tool availability, activity summaries, AI provider status/test-prompt output, and a line classifier inspector without opening a shell session.
+- `/metrics` is the Prometheus scrape contract for trendable operational signals, including HTTP traffic, runs, PTYs, rate limits, broker mode/activity, DB/Redis/workspace gauges, selected database hot-path latency, AI provider duration/outcome/cache/suggestion metrics, intel provider outcomes/cache size, evidence package builds, findings, snapshots, and error counters.
 
 These surfaces share the same runtime health model, but they target different consumers: infrastructure checks, browser chrome, operator diagnostics, and time-series monitoring.
 
@@ -1742,6 +1809,7 @@ Operationally, `/diag` sits on top of the same underlying sources described earl
 - run counts, top commands, and stored artifacts come from the persistence layer described in **State And Persistence**
 - table/index or relation storage, logical payload estimates, search-index rollups, and largest saved-run hints come from the same database connection as the Database card; SQLite allocated byte counts appear when SQLite was built with `SQLITE_ENABLE_DBSTAT_VTAB`, while Postgres relation sizes come from catalog functions
 - the classifier inspector uses the backend output signal classifier against one pasted line and optional command context, so operators can see the resulting kind, role, signals, entities, root, and target without staging a run
+- the AI panel reads the same AI config used by route and worker code, probes `/v1/models` through the provider client, and can send a tiny JSON-only test prompt without attaching run output
 - config values reflect the browser/backend config split described in **Configuration Surfaces**
 - access control and denied-access logging reuse the same client-IP trust model described in **Security Model** and **Logging**
 - Prometheus counters, histograms, label normalizers, cardinality policies, and multiprocess registry setup live in `app/services/metrics/__init__.py`; scrape-time collectors for database, Redis, broker mode, workspace, intel cache size, Atlas, findings, snapshots, and provider-secret health live in `app/services/metrics/collectors.py`
@@ -1813,12 +1881,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,211
+- behavior tests: 3,229
 - docs/inventory meta-tests: 33
-- `pytest`: 1749 (1716 behavior + 33 meta)
-- `vitest`: 1244
-- `playwright`: 252
-- total: 3,245
+- `pytest`: 1781 (1748 behavior + 33 meta)
+- `vitest`: 1245
+- `playwright`: 253
+- total: 3,279
 
 ### Testing Architecture
 
@@ -1858,6 +1926,7 @@ Keep the detailed suite appendix, focused run commands, and maintenance notes in
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
 - [Atlas and Entity Model →  → Export Schema](#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide

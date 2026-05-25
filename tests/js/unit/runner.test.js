@@ -2220,7 +2220,7 @@ describe('runner helpers', () => {
     loaded.runCommand()
     await flushPromises()
 
-    expect(refreshActiveProjectContext).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(refreshActiveProjectContext).toHaveBeenCalledTimes(1))
     expect(JSON.parse(loaded.storage.getItem('darklab_project_workspace_changed'))).toEqual(expect.objectContaining({
       session_id: 'session-old',
       command: 'project target add domain new-target.example.com',

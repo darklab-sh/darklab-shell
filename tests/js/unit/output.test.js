@@ -90,11 +90,15 @@ describe('appendLine', () => {
     const { appendLine, _getTabs } = loadOutputFns()
 
     appendLine({ text: 'nmap darklab.sh', kind: 'info', role: 'prompt-echo' }, 'tab-1')
+    appendLine('', 'prompt-echo', 'tab-1')
 
     const line = document.querySelector('.line.prompt-echo')
     expect(line).not.toBeNull()
     expect(line.querySelector('.prompt-prefix')?.textContent).toContain('anon@darklab')
     expect(line.textContent).toContain('nmap darklab.sh')
+    const blankPrompt = document.querySelectorAll('.line.prompt-echo')[1]
+    expect(blankPrompt.classList.contains('is-blank')).toBe(false)
+    expect(blankPrompt.querySelector('.line-content')?.firstElementChild?.classList.contains('prompt-prefix')).toBe(true)
     expect(_getTabs()[0].rawLines[0].cls).toBe('prompt-echo')
     expect(_getTabs()[0].rawLines[0].text).toContain('nmap darklab.sh')
   })

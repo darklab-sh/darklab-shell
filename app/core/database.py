@@ -220,6 +220,7 @@ def _create_schema(conn):
     _create_notification_schema(conn)
     _create_schedule_schema(conn)
     _create_watcher_schema(conn)
+    _create_ai_assist_schema(conn)
     _create_project_workspace_schema(conn)
 
 
@@ -283,6 +284,60 @@ def _create_notification_schema(conn):
                 )
             ),
             CHECK (status IN ('pending', 'retry_wait', 'sent', 'dead'))
+        )
+    """)
+
+
+def _create_ai_assist_schema(conn):
+    """Create AI assist queue/cache and suggestion validation audit storage."""
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS ai_run_assists (
+            id                       TEXT PRIMARY KEY,
+            run_id                   TEXT NOT NULL,
+            session_id               TEXT NOT NULL,
+            variant                  TEXT NOT NULL,
+            prompt_version           TEXT NOT NULL DEFAULT '',
+            prompt_version_source    TEXT NOT NULL DEFAULT 'canonical',
+            payload_schema_version   TEXT NOT NULL DEFAULT 'v1',
+            model                    TEXT NOT NULL DEFAULT '',
+            context_hash             TEXT NOT NULL DEFAULT '',
+            status                   TEXT NOT NULL DEFAULT 'queued',
+            claimed_at               TEXT,
+            heartbeat_at             TEXT,
+            active_project_id        TEXT NOT NULL DEFAULT '',
+            project_target_snapshot  {_json_column_sql("[]")},
+            payload                  {_json_column_sql("{}")},
+            progress                 {_json_column_sql("{}")},
+            raw_model_payload        TEXT NOT NULL DEFAULT '',
+            error_code               TEXT NOT NULL DEFAULT '',
+            error_message            TEXT NOT NULL DEFAULT '',
+            input_chars              INTEGER NOT NULL DEFAULT 0,
+            output_chars             INTEGER NOT NULL DEFAULT 0,
+            estimated_input_tokens   INTEGER NOT NULL DEFAULT 0,
+            duration_ms              INTEGER NOT NULL DEFAULT 0,
+            redacted_bytes           INTEGER NOT NULL DEFAULT 0,
+            pre_redaction_bytes      INTEGER NOT NULL DEFAULT 0,
+            created_at               TEXT NOT NULL,
+            updated_at               TEXT NOT NULL DEFAULT '',
+            CHECK (variant IN ('summary', 'next_commands', 'diag_test')),
+            CHECK (prompt_version_source IN ('canonical', 'override')),
+            CHECK (status IN ('queued', 'in_progress', 'completed', 'failed'))
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ai_suggestion_validations (
+            id                       TEXT PRIMARY KEY,
+            assist_id                TEXT NOT NULL,
+            command                  TEXT NOT NULL,
+            normalized_command       TEXT NOT NULL DEFAULT '',
+            risk_label               TEXT NOT NULL DEFAULT 'unknown',
+            validation_result        TEXT NOT NULL DEFAULT 'pending',
+            rejection_reason         TEXT NOT NULL DEFAULT '',
+            target                   TEXT,
+            target_allowed           INTEGER NOT NULL DEFAULT 0,
+            created_at               TEXT NOT NULL,
+            CHECK (risk_label IN ('low', 'medium', 'high', 'unknown')),
+            CHECK (validation_result IN ('pending', 'accepted', 'rejected'))
         )
     """)
 
@@ -608,6 +663,22 @@ def _create_indexes(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_notification_events_run "
         "ON notification_events (run_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ai_run_assists_session_run_variant "
+        "ON ai_run_assists (session_id, run_id, variant, created_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ai_run_assists_status_created "
+        "ON ai_run_assists (status, created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ai_run_assists_run "
+        "ON ai_run_assists (run_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ai_suggestion_validations_assist "
+        "ON ai_suggestion_validations (assist_id)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_schedules_due "
@@ -1107,6 +1178,14 @@ def _migrate_schema(conn):
         _create_notification_schema(conn)
     except SQLiteOperationalError:
         pass
+    try:
+        _create_ai_assist_schema(conn)
+    except SQLiteOperationalError:
+        pass
+    try:
+        conn.execute(f"ALTER TABLE ai_run_assists ADD COLUMN progress {_json_column_sql('{}')}")
+    except SQLiteOperationalError:
+        pass
 
     _drop_legacy_project_entity_tables(conn)
     try:
@@ -1237,6 +1316,24 @@ def delete_run_artifacts(conn, run_ids):
     try:
         conn.execute(
             f"DELETE FROM run_output_summary WHERE run_id IN ({placeholders})",  # nosec
+            ids,
+        )
+    except SQLiteOperationalError:
+        pass
+    try:
+        assist_rows = conn.execute(
+            f"SELECT id FROM ai_run_assists WHERE run_id IN ({placeholders})",  # nosec
+            ids,
+        ).fetchall()
+        assist_ids = [row["id"] for row in assist_rows if row["id"]]
+        if assist_ids:
+            assist_placeholders = ",".join("?" for _ in assist_ids)
+            conn.execute(
+                f"DELETE FROM ai_suggestion_validations WHERE assist_id IN ({assist_placeholders})",  # nosec
+                assist_ids,
+            )
+        conn.execute(
+            f"DELETE FROM ai_run_assists WHERE run_id IN ({placeholders})",  # nosec
             ids,
         )
     except SQLiteOperationalError:

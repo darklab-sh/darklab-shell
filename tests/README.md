@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,211
+- behavior tests: 3,229
 - docs/inventory meta-tests: 33
-- `pytest`: 1749 (1716 behavior + 33 meta)
-- `vitest`: 1244
-- `playwright`: 252
-- total: 3,245
+- `pytest`: 1781 (1748 behavior + 33 meta)
+- `vitest`: 1245
+- `playwright`: 253
+- total: 3,279
 
 This document is organized in two parts:
 
@@ -374,6 +374,7 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `test_api_v1_read_routes_use_api_rate_limit` | Verifies read-only `/api/v1` routes use the shared API rate limit. |
 | `test_api_v1_history_is_token_scoped_and_uses_page_envelope` | Verifies history list responses are token-scoped and use the shared pagination envelope. |
 | `test_api_v1_history_detail_output_and_cross_session_404` | Verifies run detail/output/ranged-output reads work for the owner and hide cross-session runs behind 404. |
+| `test_api_v1_ai_summary_routes_are_token_scoped` | Verifies API summary assist enqueue and list routes are scoped to the owning token. |
 | `test_api_v1_artifact_list_and_download_are_token_scoped` | Verifies artifact list and download routes work for the owner and hide cross-session artifacts behind 404. |
 | `test_api_v1_artifact_download_rejects_cross_run_artifact_id` | Verifies artifact downloads reject artifact ids that belong to a different run. |
 | `test_api_v1_project_readers_are_token_scoped` | Verifies project detail, findings, runs, entities, and package readers work for the owner and return 404 across sessions. |
@@ -427,6 +428,32 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 
 | Test | Description |
 | --- | --- |
+| `TestAIAssistProviderClient.test_json_parser_and_summary_validator_accept_provider_variants` | Checks that the AI provider parser and summary validator accept local-provider response variants. |
+| `TestAIAssistProviderClient.test_streaming_chat_completion_reports_progress_tokens` | Checks that streamed AI provider responses report elapsed progress and token usage when the provider sends it. |
+| `TestAIAssistProviderClient.test_chat_completion_records_failure_metrics` | Checks that terminal AI provider failures record request failure metrics. |
+| `TestAIAssistProviderClient.test_private_base_url_guard_rejects_public_dns_results` | Checks that the AI provider private-base-URL guard rejects public DNS results. |
+| `TestAIAssistContextAndStorage.test_build_run_context_redacts_boundaries_and_hashes_deterministically` | Checks that AI run context assembly strips prompt boundaries and produces stable hashes. |
+| `TestAIAssistContextAndStorage.test_summary_run_context_uses_compact_sections` | Checks that summary AI context uses compact sections and omits richer context fields. |
+| `TestAIAssistContextAndStorage.test_next_commands_context_uses_compact_sections_with_entities` | Checks that next-command AI context uses compact sections while keeping trusted entities. |
+| `TestAIAssistContextAndStorage.test_summary_transcript_tail_keeps_findings_and_summaries_first` | Checks that summary transcript tails preserve findings and summaries before ordinary tail lines. |
+| `TestAIAssistContextAndStorage.test_ai_context_suppression_filters_use_boolean_literals` | Checks that AI context suppression filters use SQLite/Postgres-safe boolean literals. |
+| `TestAIAssistContextAndStorage.test_ai_context_redaction_counts_only_changed_source_bytes` | Checks that AI context redaction accounting counts only the original spans changed by redaction. |
+| `TestAIAssistContextAndStorage.test_ai_context_logs_secret_metadata_failures` | Checks that AI context assembly logs secret metadata lookup failures without exposing secret names or values. |
+| `TestAIAssistContextAndStorage.test_ai_suggestion_secret_lookup_failures_are_logged` | Checks that AI suggestion validation logs required-secret lookup failures with safe metadata. |
+| `TestAIAssistContextAndStorage.test_ai_provider_probe_logs_provider_failures` | Checks that AI provider diagnostics log failed provider probes with bounded status details. |
+| `TestAIAssistContextAndStorage.test_ai_provider_probe_reports_disabled_and_not_configured_without_client` | Checks that AI provider diagnostics report disabled or incomplete config without creating a provider client. |
+| `TestAIAssistContextAndStorage.test_ai_provider_probe_reports_reachable_model_inventory` | Checks that AI provider diagnostics report reachable provider inventory and installed-model status. |
+| `TestAIAssistContextAndStorage.test_ai_provider_probe_reports_reachable_missing_model` | Checks that AI provider diagnostics keep reachable providers distinct from missing configured models. |
+| `TestAIAssistContextAndStorage.test_ai_worker_logs_stale_reclaims_and_busy_at_debug` | Checks that the AI worker logs stale-assist recovery and keeps busy-slot chatter at debug level. |
+| `TestAIAssistContextAndStorage.test_ai_assist_storage_reuses_completed_cache_and_active_rows` | Checks that AI assist storage reuses active rows and completed cache hits. |
+| `TestAIAssistContextAndStorage.test_ai_coordination_uses_redis_for_rate_limits_locks_and_slots` | Checks that AI assist coordination uses Redis for write limits, enqueue locks, and worker slots. |
+| `TestAIAssistContextAndStorage.test_ai_assist_storage_owned_connections_use_context_manager` | Checks that AI assist storage owned connections work through the database context-manager contract. |
+| `TestAIAssistContextAndStorage.test_ai_worker_claims_summary_assist_and_persists_provider_payload` | Checks that the AI worker claims a summary assist and persists the provider payload. |
+| `TestAIAssistContextAndStorage.test_ai_worker_repairs_summary_text_that_contradicts_open_ports` | Checks that the AI worker repairs summary prose that contradicts deterministic open-port signals. |
+| `TestAIAssistContextAndStorage.test_ai_worker_uses_fallback_when_summary_provider_truncates_json` | Checks that the AI worker uses deterministic summary data when the provider truncates summary JSON. |
+| `TestAIAssistContextAndStorage.test_ai_worker_fails_assist_when_context_hash_changes` | Checks that the AI worker fails a queued assist when rebuilt context no longer matches the cached hash. |
+| `TestAIAssistContextAndStorage.test_ai_worker_validates_next_command_suggestions` | Checks that the AI worker validates next-command suggestions and persists accepted and rejected audit rows. |
+| `TestAIAssistContextAndStorage.test_ai_suggestion_validation_tolerates_redacted_context_targets` | Checks that AI suggestion validation tolerates redacted source-run targets while still validating against the saved source target. |
 | `TestSplitChainedCommands.test_plain_command_returns_one_element` | Checks that plain command returns one element. |
 | `TestSplitChainedCommands.test_pipe` | Checks pipe handling. |
 | `TestSplitChainedCommands.test_double_ampersand` | Checks double ampersand handling. |
@@ -571,6 +598,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionWorkspace.test_cleanup_can_skip_current_session_directory` | Verifies that workspace cleanup can preserve the request session while sweeping other expired session directories. |
 | `TestEntrypointWorkspaceRepair.test_workspace_repair_targets_children_inside_session_directories` | Verifies that entrypoint workspace permission repair explicitly targets files and folders inside hashed session directories. |
 | `TestEntrypointWorkspaceRepair.test_gunicorn_uses_prometheus_multiprocess_cleanup_hook` | Verifies that Gunicorn starts with the Prometheus multiprocess dead-worker cleanup hook configured. |
+| `TestAIRuntimeWiring.test_ai_worker_entrypoint_is_gated_and_supervised` | Verifies that the AI worker entrypoint is disabled by default, gated by `AI_WORKER_ENABLED`, runs as `appuser`, and restarts after exits. |
+| `TestAIRuntimeWiring.test_compose_ai_profile_wires_shell_to_llama_sidecar` | Verifies that the Compose llama profile, shell AI environment, optional dependency, healthcheck, and model cache volume stay wired together. |
 | `TestDerivedCommandRegistry.test_commands_registry_loader_normalizes_policy_and_autocomplete` | Verifies that the `commands.yaml` loader normalizes policy, help metadata, smoke metadata, and autocomplete data, including pipe-helper entries. |
 | `TestDerivedCommandRegistry.test_command_catalog_derives_reference_data_from_registry` | Verifies that the command catalog helper derives descriptions, examples, flags, workspace file handling, runtime notes, and subcommand-scoped details from the command registry. |
 | `TestDerivedCommandRegistry.test_commands_registry_local_overlay_appends_policy_and_context` | Verifies that `commands.local.yaml` appends policy entries, adds new roots, overrides categories, and merges autocomplete hints without replacing the base registry. |
@@ -1370,6 +1399,8 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestDiagRoute.test_classifier_inspector_reports_line_metadata` | Verifies that `/diag` and the lightweight classifier endpoint can inspect one output line and report the backend classifier's kind, role, command root, signals, and rendered HTML section near the top of the page. |
 | `TestDiagRoute.test_every_config_key_belongs_to_a_group` | Drift guard: every key emitted into `result['config']` must be listed in exactly one `_DIAG_CONFIG_GROUPS` entry, otherwise it would render nowhere on the page. |
 | `TestDiagRoute.test_html_response_renders_config_group_labels` | Checks that the HTML diag page renders each config group label and the `.diag-config-group-label` styling hook. |
+| `TestDiagRoute.test_ai_test_route_runs_prompt_and_rate_limits_repeats` | Checks that the AI diagnostics test route runs one prompt and rate-limits repeats. |
+| `TestDiagRoute.test_ai_test_route_logs_provider_failures` | Checks that the AI diagnostics test route logs provider failures with safe status details. |
 | `TestDiagRoute.test_db_section_ok_and_has_counts` | Checks that database section ok and has counts. |
 | `TestDiagRoute.test_db_section_error_on_db_failure` | Checks that database section error on database failure. |
 | `TestDiagRoute.test_redis_section_reflects_client_presence` | Checks that Redis section reflects client presence. |
@@ -1534,6 +1565,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestHistoryRoute.test_bulk_delete_history_reports_partial_results_and_rejects_running_runs` | Verifies bulk history delete reports per-run results and rejects running runs without deleting them. |
 | `TestHistoryRoute.test_bulk_delete_history_rejects_malformed_ids` | Verifies that bulk history delete rejects non-string and overlong run IDs before querying or logging them. |
 | `TestHistoryRoute.test_get_run_nonexistent_returns_404` | Checks that get run nonexistent returns 404. |
+| `TestHistoryRoute.test_ai_summary_routes_enqueue_and_list_session_scoped_assists` | Checks that browser AI summary assist routes enqueue, list, and enforce session scope. |
 | `TestHistoryRoute.test_history_respects_panel_limit_and_sorts_newest_first` | Checks that history respects panel limit and sorts newest first. |
 | `TestHistoryRoute.test_history_commands_returns_distinct_recent_commands_without_exit_filter` | Verifies that `/history/commands` returns the newest distinct commands without excluding non-zero exit codes. |
 | `TestHistoryRoute.test_history_reports_totals_and_keeps_roots_complete_across_pages` | Checks that paginated history responses report totals and keep command-root suggestions across pages. |
@@ -2432,6 +2464,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `refreshHistoryPanel permalink action falls back to execCommand when clipboard writes reject` | Verifies the history drawer permalink action falls back to execCommand when clipboard writeText rejects. |
 | `clicking a history entry row opens run details without closing the panel` | Verifies row click opens the Run Details modal while keeping the History drawer in context, leaving the composer untouched, and passing the run context to Atlas. |
 | `opens the watchers modal from the Run Details baseline action` | Verifies Run Details can open the Watchers modal with the current run as the prefilled baseline. |
+| `renders Run Details AI summary actions when AI summaries are enabled` | Verifies Run Details can load cached AI assists, request a summary, render returned summary fields, and show validated Copy/Run suggestion actions when the AI feature flags are enabled. |
 | `uses shared row primitives for fallback Run Details entity rows` | Verifies Run Details fallback entity rows use the shared clickable row primitives when the Atlas row renderer is unavailable. |
 | `shows remove from project in Run Details and can also unlink same-run entities` | Verifies Run Details replaces project add actions with remove for linked runs and can include same-run, non-curated Atlas entity unlinking. |
 | `uses Current Project attachment state for Run Details project actions when link metadata is missing` | Verifies Run Details still shows remove-from-project actions when an opened run lacks embedded project-link metadata but the Current Project card confirms the active project link. |
@@ -3489,6 +3522,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | Test | Description |
 | --- | --- |
 | `clicking a history entry opens run details and keeps the drawer open` | Verifies that the row-tap primary action opens the Run Details modal, leaves the History drawer open behind it, and does not spawn a tab. |
+| `Run Details AI workflow renders summary and validated next commands` | Verifies the feature-flagged Run Details AI flow can request a summary, request next-command suggestions, render accepted and blocked suggestions, and wire Copy/Run actions without a live AI provider. |
 | `the history restore button loads output into a tab without touching the composer` | Verifies that the per-row `restore` action button loads the run's output into a tab and leaves `#cmd` empty — the pre-swap "click row to restore" behavior now lives on an explicit button. |
 | `the history restore button switches to an existing tab instead of duplicating it` | Verifies that clicking `restore` for a run whose output is already open activates the existing tab rather than opening a duplicate. |
 | `deleting a starred entry removes it from the chip bar` | Verifies that deleting a starred entry removes it from the chip bar. |
@@ -3838,6 +3872,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 - [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](../TODO.md) - open follow-ups, research notes, known issues, and future ideas
 - [ARCHITECTURE.md → Atlas Export Schema](../ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [docs/ai-privacy.md](../docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](../docs/api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](../docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/notifications.md](../docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide

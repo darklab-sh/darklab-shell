@@ -305,6 +305,232 @@ test.describe('history drawer', () => {
     await expect(page.locator('#history-run-body')).toContainText(/No structured findings|Loading findings/)
   })
 
+  test('Run Details AI workflow renders summary and validated next commands', async ({ page }) => {
+    const runId = 'run-ai-e2e'
+    const command = 'nmap -sV darklab.sh'
+    const historyRun = {
+      id: runId,
+      type: 'run',
+      run_kind: 'external',
+      command,
+      started: '2026-05-25T00:00:00Z',
+      finished: '2026-05-25T00:00:02Z',
+      exit_code: 0,
+      output_line_count: 3,
+      full_output_available: true,
+      full_output_truncated: false,
+    }
+    let summaryPosts = 0
+    let nextCommandPosts = 0
+
+    await page.route(/https?:\/\/[^/]+\/(?:atlas|entities|history|projects|runs)(?:\/|\?|$)/, async (route) => {
+      const request = route.request()
+      const url = new URL(request.url())
+      const json = async (body, status = 200) => {
+        await route.fulfill({
+          status,
+          contentType: 'application/json',
+          body: JSON.stringify(body),
+        })
+      }
+
+      if (url.pathname === '/history' && request.method() === 'GET') {
+        await json({
+          items: [historyRun],
+          runs: [historyRun],
+          roots: ['nmap'],
+          page: 1,
+          page_size: 50,
+          page_count: 1,
+          total_count: 1,
+          has_prev: false,
+          has_next: false,
+        })
+        return
+      }
+      if (url.pathname === `/history/${runId}` && request.method() === 'GET') {
+        await json({
+          ...historyRun,
+          output_entries: [
+            { text: 'Nmap scan report for darklab.sh', cls: '' },
+            { text: '443/tcp open https', cls: '' },
+            { text: 'Nmap done: 1 IP address (1 host up) scanned in 2.00 seconds', cls: '' },
+          ],
+          output_summary: {
+            kinds: { output: 3 },
+            signals: { findings: 1 },
+            signal_toc: [
+              { line_number: 2, signal: 'findings', text: '443/tcp open https' },
+            ],
+          },
+        })
+        return
+      }
+      if (url.pathname === '/projects/active') {
+        await json({ project: null })
+        return
+      }
+      if (url.pathname === `/entities/run/${runId}/findings`) {
+        await json({
+          findings: [],
+          limit: 50,
+          offset: 0,
+          total: 0,
+          has_more: false,
+          occurrence_total: 0,
+        })
+        return
+      }
+      if (url.pathname === '/atlas') {
+        await json({ total: 0, counts: {} })
+        return
+      }
+      if (url.pathname === '/atlas/entities') {
+        await json({
+          entities: [],
+          limit: 50,
+          offset: 0,
+          total: 0,
+          has_more: false,
+        })
+        return
+      }
+      if (url.pathname === `/runs/${runId}/ai-assists` && request.method() === 'GET') {
+        await json({ assists: [] })
+        return
+      }
+      if (url.pathname === `/runs/${runId}/ai-summary` && request.method() === 'POST') {
+        summaryPosts += 1
+        await json({
+          assist: {
+            id: 'ai-summary-e2e',
+            run_id: runId,
+            variant: 'summary',
+            status: 'completed',
+            payload: {
+              summary: 'HTTPS is open on darklab.sh.',
+              key_findings: ['443/tcp open https'],
+              next_steps_hint: 'Inspect TLS details.',
+            },
+          },
+        })
+        return
+      }
+      if (url.pathname === `/runs/${runId}/ai-next-commands` && request.method() === 'POST') {
+        nextCommandPosts += 1
+        await json({
+          assist: {
+            id: 'ai-next-e2e',
+            run_id: runId,
+            variant: 'next_commands',
+            status: 'completed',
+            payload: {
+              suggestions: [
+                {
+                  command: 'sslscan darklab.sh',
+                  reason: 'Inspect certificate and TLS settings.',
+                  risk_label: 'low',
+                  target: 'darklab.sh',
+                  target_allowed: true,
+                  validation_result: 'accepted',
+                  rejection_reason: '',
+                },
+                {
+                  command: 'nmap -sV --script=http-vuln -p 318 darklab.sh',
+                  reason: 'Model draft used an absent port.',
+                  risk_label: 'medium',
+                  target: 'darklab.sh',
+                  target_allowed: true,
+                  validation_result: 'rejected',
+                  rejection_reason: 'port_absent',
+                },
+              ],
+            },
+          },
+        })
+        return
+      }
+      await json({ error: 'not found' }, 404)
+    })
+
+    const aiEnabledConfig = await page.evaluate(() => ({
+      ...window.APP_CONFIG,
+      ai_enabled: true,
+      ai_feature_summary: true,
+      ai_feature_next_commands: true,
+      ai_feature_run_suggestions: true,
+    }))
+    await page.route(/https?:\/\/[^/]+\/config(?:\?|$)/, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(aiEnabledConfig),
+      })
+    })
+    await page.reload()
+    await page.locator('#cmd').waitFor()
+    await page.waitForFunction(() => (
+      window.APP_CONFIG
+      && window.APP_CONFIG.ai_enabled === true
+      && window.APP_CONFIG.ai_feature_summary === true
+      && window.APP_CONFIG.ai_feature_next_commands === true
+    ))
+
+    await page.evaluate(() => {
+      window.__copiedAiSuggestion = ''
+      window.__ranAiSuggestions = []
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: async (text) => {
+            window.__copiedAiSuggestion = String(text || '')
+          },
+        },
+      })
+      window.submitComposerCommand = (cmd, options) => {
+        window.__ranAiSuggestions.push({ cmd, options })
+        return 'settle'
+      }
+    })
+
+    await openHistory(page)
+    await page.locator('.history-entry').first().click()
+
+    const overlay = page.locator('#history-run-overlay')
+    const body = page.locator('#history-run-body')
+    await expect(overlay).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#history-run-subtitle')).toContainText(command)
+    await expect(body).toContainText('No AI summary has been generated for this run.')
+    await expect(body).toContainText('No AI next-command suggestions have been generated for this run.')
+
+    await page.locator('[data-history-run-action="ai-summary"]').click()
+    await expect(body).toContainText('HTTPS is open on darklab.sh.')
+    await expect(body).toContainText('443/tcp open https')
+    await expect(body).toContainText('Inspect TLS details.')
+
+    await page.locator('[data-history-run-action="ai-next-commands"]').click()
+    await expect(body).toContainText('sslscan darklab.sh')
+    await expect(body).toContainText('Inspect certificate and TLS settings.')
+    await expect(body).toContainText('nmap -sV --script=http-vuln -p 318 darklab.sh')
+    await expect(body).toContainText('Rejected: port_absent')
+    await expect(page.locator('[data-history-run-copy-suggestion]')).toHaveCount(1)
+    await expect(page.locator('[data-history-run-run-suggestion]')).toHaveCount(1)
+
+    await page.locator('[data-history-run-copy-suggestion]').click()
+    await expect.poll(() => page.evaluate(() => window.__copiedAiSuggestion)).toBe('sslscan darklab.sh')
+
+    await page.locator('[data-history-run-run-suggestion]').click()
+    await expect.poll(() => page.evaluate(() => window.__ranAiSuggestions)).toEqual([
+      {
+        cmd: 'sslscan darklab.sh',
+        options: { dismissKeyboard: true, focusAfterSubmit: true },
+      },
+    ])
+    await expect(overlay).not.toHaveClass(/\bopen\b/)
+    expect(summaryPosts).toBe(1)
+    expect(nextCommandPosts).toBe(1)
+  })
+
   test('the history restore button loads output into a tab without touching the composer', async ({
     page,
   }) => {

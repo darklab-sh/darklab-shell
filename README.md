@@ -35,7 +35,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Status Monitor** — a desktop modal and mobile sheet for DB/Redis health, workspace quota, session stats, CPU-driven heartbeat visuals, activity heatmaps, command mix, recent-run constellation popovers, active-run CPU/RSS meters, Attach/Kill actions, and safe close-tab prompts that can leave a backend run running in the background
 - **Mobile shell** — dedicated mobile composer, keyboard helper row, character and word-level cursor movement, stable Firefox-friendly layout, shared desktop/mobile Run-button state, output-follow behavior when the keyboard opens, and a mobile History panel with collapsible search, filter, and bulk-action tools
 - **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy, `save ▾` exports (txt / html / pdf), completed-run exports from Run Details, jump-to-live / jump-to-bottom controls, and exports that keep permalink pages, saved HTML, and PDF output visually aligned where the PDF renderer allows
-- **History and sharing** — recent command chips, desktop/mobile history with full-text and structured output search across command text and stored output, visible filters for common structured selectors, Atlas entity/finding counts for external runs, filters, stars, visible-page bulk actions, active-run reconnect after reload, idle-tab restore, run permalinks with toggleable structured output highlights, snapshot rows, native mobile sharing, and full-output files for longer runs
+- **History and sharing** — recent command chips, desktop/mobile history with full-text and structured output search across command text and stored output, visible filters for common structured selectors, Atlas entity/finding counts for external runs, optional AI summaries and validated next-command drafts in Run Details, filters, stars, visible-page bulk actions, active-run reconnect after reload, idle-tab restore, run permalinks with toggleable structured output highlights, snapshot rows, native mobile sharing, and full-output files for longer runs
 - **Run comparison** — compare any two saved runs from History, Run Details, or Projects with responsive side-by-side/unified transcript views, folded unchanged context with lazy expansion, Prev/Next change navigation, copyable summaries, restore actions, and order-insensitive finding/artifact diffs
 - **Session command variables** — `var set HOST ip.darklab.sh`, `var list`, and `var unset HOST` define per-session values you can reuse as `$HOST` or `${HOST}`. Expansion happens before command validation, typed history stays readable, and the transcript shows the expanded command that actually ran
 - **Encrypted secrets** — per-session API keys for approved tools can be added, replaced, and deleted from the Options **Secrets** tab or with `secret set NAME`. Options suggests the known tool keys from `commands.yaml` first, `providers` shows which intel providers are ready or need setup, stored values are encrypted, and saved secrets are never revealed after save, printed in transcripts, or injected outside matching command environments
@@ -388,6 +388,7 @@ To prevent commands from writing to either path directly, the app blocks any com
 - [THEME.md](THEME.md) - Theme registry, selector metadata, and override behavior
 - [TODO.md](TODO.md) - Open follow-ups, research notes, known issues, and future ideas
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](docs/api.md) - Headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - External command registry, rewrite, environment, Files, and smoke-test contracts
 - [docs/notifications.md](docs/notifications.md) - Outbound notification channels, payloads, retries, and setup guide
@@ -407,7 +408,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ```text
 .
 ├── .dockerignore               # Docker build-context exclusion list — keeps node_modules, tests, .git out of the image
-├── .env.example                # Environment variable template (copy to .env and edit locally)
+├── .env.example                # Environment variable template (copy to .env and edit locally, including optional AI worker/provider settings)
 ├── .gitignore                  # Git ignore patterns
 ├── .gitlab-ci.yml              # GitLab CI pipeline — pytest, Vitest, Playwright, lint, audit, and Docker build
 ├── .gitlab/
@@ -495,7 +496,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   │   ├── v0009_notification_channels.py # Postgres outbound notification channel and event tables
 │   │   │   ├── v0010_schedules.py # Postgres scheduled-run and watcher-owned schedule tables
 │   │   │   ├── v0011_watchers.py # Postgres watcher state and fire-audit tables
-│   │   │   └── v0012_run_output_summary.py # Postgres structured output summary table for fast output filters
+│   │   │   ├── v0012_run_output_summary.py # Postgres structured output summary table for fast output filters
+│   │   │   ├── v0013_ai_run_assists.py # Postgres AI assist queue/cache and suggestion validation tables
+│   │   │   └── v0014_ai_assist_progress.py # Postgres in-flight AI assist progress column
 │   │   ├── output_signals.py   # Server-side output signal and entity classifier
 │   │   ├── process.py          # Redis setup, pid_register/pid_pop, active-run state, and in-process fallback
 │   │   └── redaction.py        # Snapshot-share redaction helpers and built-in rule application
@@ -504,6 +507,20 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── requirements.txt        # Python runtime dependencies
 │   ├── services/
 │   │   ├── __init__.py         # Service package marker
+│   │   ├── ai/
+│   │   │   ├── __init__.py     # Optional AI assist config helper
+│   │   │   ├── assists.py      # Shared browser/API AI assist enqueue and listing helpers
+│   │   │   ├── client.py       # OpenAI-compatible provider client, JSON parsing, and private-endpoint guard
+│   │   │   ├── context.py      # Redacted run-context assembly, caps, and deterministic hashing
+│   │   │   ├── coordination.py # Redis-backed AI rate limits, enqueue locks, and worker concurrency slots
+│   │   │   ├── diagnostics.py  # /diag AI provider probe and test-prompt helpers
+│   │   │   ├── next_commands.py # Next-command assist provider orchestration and validation handoff
+│   │   │   ├── prompts.py      # Versioned AI prompt text and prompt-boundary helpers
+│   │   │   ├── schemas.py      # Pinned AI response schemas and validators
+│   │   │   ├── storage.py      # AI assist queue/cache storage helpers
+│   │   │   ├── suggestions.py  # AI next-command validation, target checks, and audit shaping
+│   │   │   ├── summarize.py    # Summary assist provider orchestration and deterministic signal repairs
+│   │   │   └── worker.py       # Dedicated AI worker entrypoint
 │   │   ├── api_v1/
 │   │   │   ├── __init__.py     # Headless API service package marker
 │   │   │   ├── auth.py         # /api/v1 token authentication and JSON error helpers
@@ -880,8 +897,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── assets/                     # README media assets (demo videos)
 ├── data/                       # Writable volume — SQLite database, artifacts, body-store files, and secret key file
 │   └── history.db              #   stores run history and tab snapshots
-├── docker-compose.yml
+├── docker-compose.yml          # Local Compose stack with Redis, optional Postgres, optional local AI providers, and the shell app
 ├── docs/
+│   ├── ai-privacy.md          # Optional AI assist privacy posture and operator checks
 │   ├── api-v1-openapi.json    # Checked-in OpenAPI snapshot for /api/v1
 │   ├── api.md                 # Headless API and bundled CLI usage guide
 │   ├── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
@@ -890,7 +908,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── schedules.md           # Scheduled-command cadence, timezone, worker, and audit behavior
 │   ├── storage-scaling.md      # SQLite growth baseline, storage pressure points, and Postgres sizing guidance
 │   └── watchers.md            # Change-detection watcher baseline, diff, scheduler, and notification behavior
-├── entrypoint.sh               # Container startup script — fixes /data ownership, drops to appuser
+├── entrypoint.sh               # Container startup script — fixes writable dirs, starts optional workers, drops to appuser
 ├── examples/
 │   ├── docker-compose.prod.yml  # Optional production Docker Compose override (GELF, proxy env, external network)
 │   ├── grafana/

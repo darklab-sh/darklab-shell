@@ -319,6 +319,9 @@
 # GET /metrics exposes Prometheus-format metrics for dashboards and alerts.
 # It uses the same IP allowlist as /diag and returns 404 when the caller is not
 # allowed. Keep diagnostics_allowed_cidrs empty to hide both endpoints.
+# AI assist writes from this allowlist also bypass the per-session AI quota for
+# operator testing. The deployment-wide AI quota and worker concurrency still
+# apply, so trusted clients cannot overload a local model.
 #
 # Server default if unset: true
 # metrics_enabled: true
@@ -352,6 +355,47 @@
 #   - 0.5
 #   - 1
 #   - 5
+# metrics_histogram_buckets_ai_provider_duration:
+#   - 0.1
+#   - 0.5
+#   - 1
+#   - 2
+#   - 5
+#   - 10
+#   - 30
+#   - 60
+
+# ── AI Assists ───────────────────────────────────────────────────────────────
+#
+# Optional AI provider settings for run-output summaries and safe next-command
+# drafts. The foundation is disabled by default. Provider calls use an
+# OpenAI-compatible /v1/chat/completions endpoint, and the diagnostics page can
+# probe /v1/models plus run a tiny JSON-only test prompt when enabled.
+# Server defaults if unset:
+# ai_enabled: false
+# ai_provider: openai_compatible
+# ai_base_url: ""
+# ai_model: ""
+# ai_api_key_secret_name: ""  # Existing session vault secret name, when the caller has a session.
+# ai_api_key: ""              # Environment/config fallback for operators that prefer process env.
+# ai_connect_timeout_seconds: 5
+# ai_timeout_seconds: 120
+# ai_max_input_chars: 24000
+# ai_max_output_tokens: 120
+# ai_next_commands_max_output_tokens: 180
+# ai_max_concurrent: 1
+# ai_max_queue_depth: 20
+# diagnostics_allowed_cidrs clients bypass this per-session AI write limit only.
+# The global AI write limit below still applies to every client.
+# ai_rate_limit_per_session_hour: 5
+# ai_rate_limit_global_per_minute: 2
+# ai_allow_full_output: false
+# ai_require_private_base_url: true
+# ai_base_url_allowed_cidrs: []
+# ai_prompt_version_override: ""
+# ai_feature_summary: false
+# ai_feature_next_commands: false
+# ai_feature_run_suggestions: false
 
 # ── Restricted Command Inputs ────────────────────────────────────────────────
 

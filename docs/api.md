@@ -136,10 +136,53 @@ History `since` and `until` filters must be ISO 8601 datetimes, such as `2026-05
 | `GET` | `/api/v1/runs/<run_id>` | Active or completed run status. |
 | `GET` | `/api/v1/runs/<run_id>/output` | Stored run output, with the same `format` and `range` options as the history output route. |
 | `POST` | `/api/v1/runs/<run_id>/wait` | Block until the run finishes or `?timeout=` expires. |
+| `GET` | `/api/v1/runs/<run_id>/ai-assists` | List cached and in-flight AI assists for one completed run. |
+| `POST` | `/api/v1/runs/<run_id>/ai-summary` | Return a cached AI summary or queue one for the AI worker. |
+| `POST` | `/api/v1/runs/<run_id>/ai-next-commands` | Return cached AI next-command drafts or queue them for the AI worker. |
 | `POST` | `/api/v1/runs/<run_id>/projects/<project_id>` | Link a completed external run to an active project. |
 | `DELETE` | `/api/v1/runs/<run_id>/projects/<project_id>` | Remove a completed external run link from an active project. |
 | `GET` | `/api/v1/runs/<run_id>/stream` | SSE stream by default, or NDJSON with `?format=ndjson`. |
 | `POST` | `/api/v1/runs/<run_id>/cancel` | Cancel an active current-token run, including browser-started runs. |
+
+AI assist writes accept an optional JSON body:
+
+```json
+{
+  "force": true
+}
+```
+
+Omit `force` or set it to `false` to reuse a completed cached assist when the same run context and prompt version already exist. Set `force` to `true` to queue a fresh assist request for the completed run.
+
+AI assist responses use this envelope:
+
+```json
+{
+  "assist": {
+    "id": "ai_...",
+    "run_id": "run_...",
+    "variant": "summary",
+    "status": "queued",
+    "payload": {},
+    "progress": {}
+  }
+}
+```
+
+`variant` is `summary` or `next_commands`. `status` is `queued`, `in_progress`, `completed`, or `failed`. `GET /api/v1/runs/<run_id>/ai-assists` returns `{"assists":[...]}` with cached and in-flight assists visible to the current token.
+
+`POST /api/v1/runs/<run_id>/ai-summary` and `POST /api/v1/runs/<run_id>/ai-next-commands` return `200` when a completed cached assist is reused and `202` when work is queued or already in progress. Error responses use the normal API error envelope and include:
+
+- `403` with `ai_disabled` or `ai_feature_disabled` when AI or that assist type is off.
+- `404` when the run is not visible to the token.
+- `409` with `ai_run_active` when the run is still active.
+- `422` with `ai_no_context` when the run has no useful context.
+- `429` with `ai_busy` or `ai_rate_limited` when the queue, enqueue lock, or write limits reject the request.
+- `503` with `ai_unavailable` when Redis coordination or provider setup is unavailable.
+
+AI assist responses include a `progress` object while a queued request is actively generating. The fields are intentionally small: elapsed milliseconds, output characters seen, and token counts when the provider reports usage. Completed and failed assists return an empty progress object.
+
+Summary payloads use `summary`, `key_findings`, `warnings`, and `next_steps_hint`. Next-command payloads use `suggestions`, where accepted and rejected drafts include command text, reason, risk label, validation result, and any rejection reason.
 
 All run, history, artifact, and project routes are scoped to the token session. Cross-session IDs return `404` rather than confirming the object exists elsewhere.
 
@@ -483,6 +526,7 @@ timeout = 30
 - [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](../TODO.md) - open follow-ups, research notes, known issues, and future ideas
 - [ARCHITECTURE.md -> Atlas Export Schema](../ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [docs/ai-privacy.md](ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/external-command-integrations.md](external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/notifications.md](notifications.md) - outbound notification channels, payloads, retries, and setup guide
 - [docs/postgres-migration.md](postgres-migration.md) - offline SQLite-to-Postgres cutover helper and validation workflow

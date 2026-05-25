@@ -171,8 +171,8 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **1749 pytest + 1244 Vitest + 252 Playwright = 3,245 tests**.
-That total includes 3,211 behavior tests plus 33 docs/inventory meta-tests.
+Current totals: **1781 pytest + 1245 Vitest + 253 Playwright = 3,279 tests**.
+That total includes 3,229 behavior tests plus 33 docs/inventory meta-tests.
 
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration
@@ -387,6 +387,7 @@ Keep the summary factual. Do not bury risk or incomplete validation.
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide

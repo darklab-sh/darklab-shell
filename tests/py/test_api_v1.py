@@ -10,6 +10,7 @@ from unittest import mock
 
 import app as shell_app
 import config
+import core.process as process
 from core.database import DB_PATH
 from services.scheduler.models import CADENCE_PRESETS, Schedule
 from services.watchers.models import WATCHER_OPTION_DEFAULTS, Watcher, WatcherFire
@@ -34,8 +35,14 @@ def _headers(token):
     return {"Authorization": f"Bearer {token}"}
 
 
-def _seed_run(session_id, *, command="echo api", output: str | list[str] = "ok"):
-    run_id = "api_run_" + session_id[-8:]
+def _seed_run(
+    session_id: str,
+    *,
+    run_id: str | None = None,
+    command: str = "echo api",
+    output: str | list[str] = "ok",
+) -> str:
+    run_id = run_id or "api_run_" + session_id[-8:]
     output_lines = output if isinstance(output, list) else [str(output)]
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
@@ -55,6 +62,12 @@ def _seed_run(session_id, *, command="echo api", output: str | list[str] = "ok")
         )
         conn.commit()
     return run_id
+
+
+def _ai_assist_count_for_run(run_id: str) -> int:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute("SELECT COUNT(*) FROM ai_run_assists WHERE run_id = ?", (run_id,)).fetchone()
+    return int(row[0] if row else 0)
 
 
 def _create_project(client, token, *, name="API Project"):
@@ -304,6 +317,137 @@ def test_api_v1_history_detail_output_and_cross_session_404():
     assert invalid_range.status_code == 400
     assert json.loads(invalid_range.data)["error"]["code"] == "invalid_range"
     assert cross_session.status_code == 404
+
+
+def test_api_v1_ai_summary_routes_are_token_scoped(monkeypatch):
+    from services.ai import assists as ai_assists
+
+    client = get_client()
+    token = _token(client)
+    other_token = _token(client)
+    run_id = _seed_run(
+        token,
+        command="nmap -sV darklab.sh",
+        output=[
+            "Starting scan for darklab.sh with enough context for a summary.",
+            "443/tcp open https and 80/tcp open http were detected.",
+            "Inspect TLS and response headers next if the operator wants more detail.",
+        ],
+    )
+    guard_run_id = _seed_run(
+        token,
+        run_id="api_ai_guard_" + uuid.uuid4().hex[:8],
+        command="nmap darklab.sh",
+        output=[
+            "Starting scan for darklab.sh with enough useful context for route guards.",
+            "443/tcp open https and 80/tcp open http were detected.",
+            "Inspect TLS and response headers next if the operator wants more detail.",
+        ],
+    )
+    no_context_run_id = _seed_run(
+        token,
+        run_id="api_ai_empty_" + uuid.uuid4().hex[:8],
+        command="true",
+        output="ok",
+    )
+
+    monkeypatch.setitem(config.CFG, "ai_enabled", True)
+    monkeypatch.setitem(config.CFG, "ai_feature_summary", True)
+    monkeypatch.setitem(config.CFG, "ai_feature_next_commands", True)
+    monkeypatch.setitem(config.CFG, "ai_model", "llama3.1:8b")
+    monkeypatch.setitem(config.CFG, "ai_max_input_chars", 8000)
+    monkeypatch.setitem(config.CFG, "ai_rate_limit_per_session_hour", 1)
+    monkeypatch.setitem(config.CFG, "ai_rate_limit_global_per_minute", 20)
+    monkeypatch.setitem(config.CFG, "diagnostics_allowed_cidrs", ["127.0.0.1/32"])
+    monkeypatch.setitem(config.CFG, "share_redaction_enabled", False)
+    monkeypatch.setattr(process, "redis_client", process._FakeRedisClient())
+
+    queued = client.post(f"/api/v1/runs/{run_id}/ai-summary", json={}, headers=_headers(token))
+    suggested = client.post(f"/api/v1/runs/{run_id}/ai-next-commands", json={}, headers=_headers(token))
+    listed = client.get(f"/api/v1/runs/{run_id}/ai-assists", headers=_headers(token))
+    cross = client.post(f"/api/v1/runs/{run_id}/ai-summary", json={}, headers=_headers(other_token))
+    invalid_body = client.post(f"/api/v1/runs/{guard_run_id}/ai-summary", json=[], headers=_headers(token))
+
+    base_guard_cfg = {
+        "ai_enabled": True,
+        "ai_feature_summary": True,
+        "ai_feature_next_commands": True,
+        "ai_model": "llama3.1:8b",
+        "ai_max_input_chars": 8000,
+        "ai_rate_limit_per_session_hour": 20,
+        "ai_rate_limit_global_per_minute": 20,
+        "diagnostics_allowed_cidrs": [],
+        "share_redaction_enabled": False,
+    }
+    guard_cases = []
+    for cfg_patch, path, expected_status, expected_error in (
+        ({"ai_enabled": False}, f"/api/v1/runs/{guard_run_id}/ai-summary", 403, "ai_disabled"),
+        ({"ai_feature_summary": False}, f"/api/v1/runs/{guard_run_id}/ai-summary", 403, "ai_feature_disabled"),
+        (
+            {"ai_feature_next_commands": False},
+            f"/api/v1/runs/{guard_run_id}/ai-next-commands",
+            403,
+            "ai_feature_disabled",
+        ),
+    ):
+        with mock.patch.dict(config.CFG, {**base_guard_cfg, **cfg_patch}, clear=False), \
+             mock.patch.object(process, "redis_client", process._FakeRedisClient()):
+            guard_cases.append((expected_status, expected_error, client.post(path, json={}, headers=_headers(token))))
+    busy_lock = mock.MagicMock()
+    busy_lock.__enter__.return_value = False
+    busy_lock.__exit__.return_value = False
+    with mock.patch.dict(config.CFG, base_guard_cfg, clear=False), \
+         mock.patch.object(process, "redis_client", process._FakeRedisClient()), \
+         mock.patch.object(ai_assists, "enqueue_lock", return_value=busy_lock):
+        guard_cases.append((429, "ai_busy", client.post(
+            f"/api/v1/runs/{guard_run_id}/ai-summary",
+            json={},
+            headers=_headers(token),
+        )))
+    with mock.patch.dict(config.CFG, base_guard_cfg, clear=False), \
+         mock.patch.object(process, "redis_client", None):
+        guard_cases.append((503, "ai_unavailable", client.post(
+            f"/api/v1/runs/{guard_run_id}/ai-summary",
+            json={},
+            headers=_headers(token),
+        )))
+    with mock.patch.dict(config.CFG, {**base_guard_cfg, "ai_rate_limit_per_session_hour": 1}, clear=False), \
+         mock.patch.object(process, "redis_client", process._FakeRedisClient()):
+        rate_first = client.post(f"/api/v1/runs/{guard_run_id}/ai-summary", json={}, headers=_headers(token))
+        rate_limited = client.post(f"/api/v1/runs/{guard_run_id}/ai-summary", json={}, headers=_headers(token))
+    with mock.patch.dict(config.CFG, base_guard_cfg, clear=False), \
+         mock.patch.object(process, "redis_client", process._FakeRedisClient()), \
+         mock.patch.object(ai_assists, "build_run_context", return_value=mock.Mock(useful=False)):
+        no_context = client.post(f"/api/v1/runs/{no_context_run_id}/ai-summary", json={}, headers=_headers(token))
+
+    queued_payload = json.loads(queued.data)
+    suggested_payload = json.loads(suggested.data)
+    listed_payload = json.loads(listed.data)
+    assert queued.status_code == 202
+    assert queued_payload["assist"]["status"] == "queued"
+    assert queued_payload["assist"]["variant"] == "summary"
+    assert suggested.status_code == 202
+    assert suggested_payload["assist"]["status"] == "queued"
+    assert suggested_payload["assist"]["variant"] == "next_commands"
+    assert listed.status_code == 200
+    assert {assist["id"] for assist in listed_payload["assists"]} == {
+        queued_payload["assist"]["id"],
+        suggested_payload["assist"]["id"],
+    }
+    assert cross.status_code == 404
+    assert json.loads(cross.data)["error"]["code"] == "not_found"
+    assert invalid_body.status_code == 400
+    assert json.loads(invalid_body.data)["error"]["code"] == "invalid_body"
+    for expected_status, expected_error, response in guard_cases:
+        assert response.status_code == expected_status
+        assert json.loads(response.data)["error"]["code"] == expected_error
+    assert rate_first.status_code == 202
+    assert rate_limited.status_code == 429
+    assert json.loads(rate_limited.data)["error"]["code"] == "ai_rate_limited"
+    assert no_context.status_code == 422
+    assert json.loads(no_context.data)["error"]["code"] == "ai_no_context"
+    assert _ai_assist_count_for_run(no_context_run_id) == 0
+    assert _ai_assist_count_for_run(guard_run_id) == 1
 
 
 def test_api_v1_artifact_list_and_download_are_token_scoped(monkeypatch, tmp_path):

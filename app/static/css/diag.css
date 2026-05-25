@@ -596,6 +596,20 @@ body.diag-page::before { display: none; }
   font-family: var(--font-mono);
   font-size: 11px;
 }
+.diag-inline-form {
+  padding: 12px 14px;
+  border-top: 1px solid var(--theme-panel-border);
+}
+.diag-ai-raw {
+  margin: 0;
+  padding: 10px 12px;
+  border-top: 1px solid var(--theme-panel-border);
+  overflow: auto;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+}
 .diag-storage-summary {
   display: flex;
   flex-wrap: wrap;

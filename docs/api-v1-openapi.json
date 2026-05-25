@@ -1,6 +1,152 @@
 {
   "components": {
     "schemas": {
+      "AIAssist": {
+        "properties": {
+          "active_project_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "duration_ms": {
+            "type": "integer"
+          },
+          "error_code": {
+            "type": "string"
+          },
+          "error_message": {
+            "type": "string"
+          },
+          "estimated_input_tokens": {
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_chars": {
+            "type": "integer"
+          },
+          "model": {
+            "type": "string"
+          },
+          "output_chars": {
+            "type": "integer"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "payload_schema_version": {
+            "type": "string"
+          },
+          "pre_redaction_bytes": {
+            "type": "integer"
+          },
+          "progress": {
+            "additionalProperties": true,
+            "properties": {
+              "elapsed_ms": {
+                "type": "integer"
+              },
+              "input_tokens_seen": {
+                "type": "integer"
+              },
+              "output_chars_seen": {
+                "type": "integer"
+              },
+              "output_tokens_seen": {
+                "type": "integer"
+              },
+              "phase": {
+                "type": "string"
+              },
+              "tokens_seen": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "prompt_version": {
+            "type": "string"
+          },
+          "prompt_version_source": {
+            "enum": [
+              "canonical",
+              "override"
+            ],
+            "type": "string"
+          },
+          "redacted_bytes": {
+            "type": "integer"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "in_progress",
+              "completed",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "variant": {
+            "enum": [
+              "summary",
+              "next_commands"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "variant",
+          "status",
+          "payload",
+          "progress"
+        ],
+        "type": "object"
+      },
+      "AIAssistList": {
+        "properties": {
+          "assists": {
+            "items": {
+              "$ref": "#/components/schemas/AIAssist"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "assists"
+        ],
+        "type": "object"
+      },
+      "AIAssistRequest": {
+        "properties": {
+          "force": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "AIAssistResponse": {
+        "properties": {
+          "assist": {
+            "$ref": "#/components/schemas/AIAssist"
+          }
+        },
+        "required": [
+          "assist"
+        ],
+        "type": "object"
+      },
       "ActiveRunList": {
         "properties": {
           "runs": {
@@ -5386,6 +5532,297 @@
               }
             },
             "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/ai-assists": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIAssistList"
+                }
+              }
+            },
+            "description": "Cached and in-flight AI assists"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run not found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/ai-next-commands": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AIAssistRequest"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIAssistResponse"
+                }
+              }
+            },
+            "description": "Cached next-command assist"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIAssistResponse"
+                }
+              }
+            },
+            "description": "Queued or in-progress next-command assist"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "AI disabled"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run still active"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "No useful AI context"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "AI queue full or rate limit exceeded"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "AI coordination or provider unavailable"
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/ai-summary": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Run id",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AIAssistRequest"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIAssistResponse"
+                }
+              }
+            },
+            "description": "Cached summary assist"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIAssistResponse"
+                }
+              }
+            },
+            "description": "Queued or in-progress summary assist"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Missing, invalid, or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "AI disabled"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Run still active"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "No useful AI context"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "AI queue full or rate limit exceeded"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "AI coordination or provider unavailable"
           }
         }
       }

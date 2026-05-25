@@ -46,6 +46,7 @@
   {% set rstats = data.redis.stats or {} %}
   {% set broker = data.broker or {} %}
   {% set fb = broker.fallback or {} %}
+  {% set ai = data.ai or {} %}
   {% set inspector = data.classifier_inspector or {} %}
   {% set inspector_result = inspector.result or {} %}
   {% set assets_loaded = (1 if data.assets.ansi_up.ok else 0) + (1 if data.assets.jspdf.ok else 0) + (1 if data.assets.fonts.ok else 0) %}
@@ -254,6 +255,38 @@
         <span class="{{ 'diag-ok' if data.assets.fonts.ok else 'diag-fail' }}">fonts{% if data.assets.fonts.size %} {{ data.assets.fonts.size_human }}{% endif %}</span>
       </div>
     </div>
+  </section>
+
+  <section class="diag-section s-ai diag-ai-panel" data-diag-ai-panel>
+    <div class="diag-section-title">AI Assists</div>
+    <table class="diag-table">
+      <tr>
+        <td>status</td>
+        <td>
+          {% if ai.enabled and ai.ok %}
+            <span class="diag-dot ok"></span><span class="diag-ok">ready</span>
+          {% elif ai.enabled %}
+            <span class="diag-dot fail"></span><span class="diag-fail">{{ ai.status or 'error' }}</span>
+          {% else %}
+            <span class="diag-dot warn"></span><span class="diag-warn">disabled</span>
+          {% endif %}
+          {% if ai.latency_ms is defined %}<span class="diag-muted">· {{ ai.latency_ms }} ms</span>{% endif %}
+        </td>
+      </tr>
+      <tr><td>provider</td><td>{{ ai.provider or '—' }}</td></tr>
+      <tr><td>model</td><td>{{ ai.model or '—' }}</td></tr>
+      <tr>
+        <td>model installed</td>
+        <td class="{{ 'diag-ok' if ai.model_installed else 'diag-muted' }}">{{ 'yes' if ai.model_installed else 'unknown' }}</td>
+      </tr>
+      {% if ai.error %}
+      <tr><td>error</td><td class="diag-fail">{{ ai.error }}</td></tr>
+      {% endif %}
+    </table>
+    <form class="diag-inline-form" data-diag-ai-test-form method="post" action="/diag/ai-test">
+      <button class="btn btn-secondary btn-compact" type="submit">Test prompt</button>
+    </form>
+    <div class="diag-ai-test-result" aria-live="polite"></div>
   </section>
 
   {{ classifier_inspector_section(inspector, inspector_result) }}
@@ -735,12 +768,13 @@
       if (document.visibilityState !== 'visible') return true;
       if (document.querySelector(
         '.diag-classifier-form.is-dirty, .diag-classifier-form.is-loading, '
-        + '.diag-drift-report.is-loading, .diag-drift-form.is-dirty'
+        + '.diag-drift-report.is-loading, .diag-drift-form.is-dirty, '
+        + '.diag-ai-panel.is-loading'
       )) return true;
       return !!(
         document.activeElement
         && document.activeElement.closest
-        && document.activeElement.closest('.diag-classifier-form, .diag-drift-form')
+        && document.activeElement.closest('.diag-classifier-form, .diag-drift-form, .diag-ai-panel')
       );
     }
 
@@ -791,6 +825,74 @@
         ? event.target.closest('.diag-classifier-form, .diag-drift-form')
         : null;
       if (form) form.classList.add('is-dirty');
+    });
+  })();
+
+  // AI diagnostics: keep the explicit provider test prompt off the main page
+  // refresh path so slow local models do not reload the diagnostics document.
+  (function () {
+    function timingText(timings) {
+      if (!timings) return '';
+      var parts = [];
+      if (timings.prompt_ms != null) {
+        parts.push('prompt ' + Math.round(Number(timings.prompt_ms) || 0) + ' ms'
+          + (timings.prompt_n != null ? ' / ' + timings.prompt_n + ' tok' : ''));
+      }
+      if (timings.predicted_ms != null) {
+        parts.push('generation ' + Math.round(Number(timings.predicted_ms) || 0) + ' ms'
+          + (timings.predicted_n != null ? ' / ' + timings.predicted_n + ' tok' : ''));
+      }
+      return parts.join(' · ');
+    }
+
+    function renderResult(region, payload) {
+      if (!region) return;
+      region.replaceChildren();
+      var el = document.createElement('div');
+      el.className = payload && payload.ok ? 'diag-storage-banner diag-ok' : 'diag-storage-banner diag-fail';
+      if (payload && payload.ok) {
+        el.textContent = 'Prompt OK'
+          + (payload.latency_ms != null ? ' · ' + payload.latency_ms + ' ms' : '')
+          + (timingText(payload.provider_timings) ? ' · ' + timingText(payload.provider_timings) : '')
+          + (payload.payload && payload.payload.message ? ' · ' + payload.payload.message : '');
+      } else {
+        el.textContent = payload && payload.error ? payload.error : 'AI test prompt failed.';
+      }
+      region.appendChild(el);
+      if (payload && payload.raw_response) {
+        var pre = document.createElement('pre');
+        pre.className = 'diag-ai-raw';
+        pre.textContent = payload.raw_response;
+        region.appendChild(pre);
+      }
+    }
+
+    document.addEventListener('submit', async function (event) {
+      var form = event.target && event.target.matches && event.target.matches('[data-diag-ai-test-form]')
+        ? event.target
+        : null;
+      if (!form) return;
+      event.preventDefault();
+      var panel = form.closest('[data-diag-ai-panel]');
+      var region = panel ? panel.querySelector('.diag-ai-test-result') : null;
+      var submit = form.querySelector('[type="submit"]');
+      if (panel) panel.classList.add('is-loading');
+      if (submit) submit.disabled = true;
+      try {
+        var resp = await fetch(form.action, {
+          method: 'POST',
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' },
+        });
+        var payload = await resp.json().catch(function () { return { ok: false }; });
+        renderResult(region, payload);
+      } catch (_) {
+        renderResult(region, { ok: false, error: 'AI test prompt failed.' });
+      } finally {
+        if (panel) panel.classList.remove('is-loading');
+        if (submit) submit.disabled = false;
+      }
     });
   })();
 

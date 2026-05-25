@@ -172,6 +172,7 @@ body.mobile-terminal-mode { padding: 0; gap: 0; }
   min-height: 0;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  cursor: text;
 }
 
 .nice-scroll {
@@ -489,10 +490,12 @@ body.ts-clock .output .shell-prompt-wrap {
     linear-gradient(180deg, transparent, color-mix(in srgb, var(--surface) 22%, transparent));
   justify-content: flex-end;
   flex-shrink: 0;
+  cursor: default;
 }
 
 .terminal-body {
   position: relative;
+  cursor: text;
 }
 
 .output-follow-btn {

@@ -156,9 +156,13 @@ def _rate_limit_handler(e):
 @app.errorhandler(500)
 def _server_error_handler(e):
     app_metrics.record_unhandled_exception(request.endpoint or "unknown")
+    try:
+        session_for_log = get_log_session_id(get_session_id())
+    except Exception:
+        session_for_log = ""
     log.error("UNHANDLED_EXCEPTION", exc_info=True, extra={
         "ip": get_client_ip(),
-        "session": get_log_session_id(get_session_id()),
+        "session": session_for_log,
         "method": request.method,
         "path": request.path,
         "status": 500,

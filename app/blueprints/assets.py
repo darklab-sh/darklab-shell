@@ -27,6 +27,8 @@ from services.diagnostics.storage import (
     table_storage_breakdown,
 )
 from services.diagnostics.classifier_drift import classifier_drift_report
+from services.ai.client import AIClientError
+from services.ai.diagnostics import provider_probe as ai_provider_probe, run_test_prompt as ai_run_test_prompt
 from core.output_signals import OutputSignalClassifier, strip_ansi_codes
 from core.helpers import (
     FONT_FILES,
@@ -102,6 +104,21 @@ _DIAG_CLASSIFIER_LINE_LIMIT = 4096
 _DIAG_CLASSIFIER_COMMAND_LIMIT = 512
 _DIAG_CLASSIFIER_CLS_LIMIT = 80
 _DIAG_CLASSIFIER_CMD_TYPES = frozenset({"real", "builtin"})
+_DIAG_AI_TEST_RATE_SECONDS = 60
+_DIAG_AI_TEST_LAST_BY_CLIENT: dict[str, float] = {}
+
+
+def _prune_diag_ai_test_clients(now: float) -> None:
+    cutoff = now - _DIAG_AI_TEST_RATE_SECONDS
+    stale_clients = [
+        client_ip
+        for client_ip, last_seen in _DIAG_AI_TEST_LAST_BY_CLIENT.items()
+        if last_seen <= cutoff
+    ]
+    for client_ip in stale_clients:
+        _DIAG_AI_TEST_LAST_BY_CLIENT.pop(client_ip, None)
+
+
 # Themed groupings for the Config card. Every key emitted into
 # `result["config"]` must appear in exactly one group, otherwise it is
 # invisible on the rendered page (the drift test
@@ -144,6 +161,25 @@ _DIAG_CONFIG_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "trusted_proxy_cidrs",
         "log_level",
         "log_format",
+    )),
+    ("AI assists", (
+        "ai_enabled",
+        "ai_provider",
+        "ai_base_url_configured",
+        "ai_model",
+        "ai_connect_timeout_seconds",
+        "ai_timeout_seconds",
+        "ai_max_input_chars",
+        "ai_max_output_tokens",
+        "ai_max_concurrent",
+        "ai_max_queue_depth",
+        "ai_allow_full_output",
+        "ai_require_private_base_url",
+        "ai_base_url_allowed_cidrs",
+        "ai_prompt_version_override",
+        "ai_feature_summary",
+        "ai_feature_next_commands",
+        "ai_feature_run_suggestions",
     )),
 )
 
@@ -746,7 +782,27 @@ def diag():
         "trusted_proxy_cidrs":        CFG.get("trusted_proxy_cidrs", []),
         "log_level":                  CFG.get("log_level"),
         "log_format":                 CFG.get("log_format"),
+        "ai_enabled":                 CFG.get("ai_enabled"),
+        "ai_provider":                CFG.get("ai_provider"),
+        "ai_base_url_configured":     bool(CFG.get("ai_base_url")),
+        "ai_model":                   CFG.get("ai_model"),
+        "ai_connect_timeout_seconds": CFG.get("ai_connect_timeout_seconds"),
+        "ai_timeout_seconds":         CFG.get("ai_timeout_seconds"),
+        "ai_max_input_chars":         CFG.get("ai_max_input_chars"),
+        "ai_max_output_tokens":       CFG.get("ai_max_output_tokens"),
+        "ai_max_concurrent":          CFG.get("ai_max_concurrent"),
+        "ai_max_queue_depth":         CFG.get("ai_max_queue_depth"),
+        "ai_allow_full_output":       CFG.get("ai_allow_full_output"),
+        "ai_require_private_base_url": CFG.get("ai_require_private_base_url"),
+        "ai_base_url_allowed_cidrs":  CFG.get("ai_base_url_allowed_cidrs", []),
+        "ai_prompt_version_override": CFG.get("ai_prompt_version_override"),
+        "ai_feature_summary":         CFG.get("ai_feature_summary"),
+        "ai_feature_next_commands":   CFG.get("ai_feature_next_commands"),
+        "ai_feature_run_suggestions": CFG.get("ai_feature_run_suggestions"),
     }
+
+    # ── AI assists ───────────────────────────────────────────────────────────
+    result["ai"] = ai_provider_probe()
 
     # ── Database ─────────────────────────────────────────────────────────────
     db_info: dict = {"ok": False}
@@ -978,6 +1034,43 @@ def diag_classifier_drift():
         log.warning("CLASSIFIER_DRIFT_REPORT_FAILED", exc_info=True, extra={"reason": type(exc).__name__})
         report = {"ok": False, "error": str(exc)}
     return jsonify(report)
+
+
+@assets_bp.route("/diag/ai-test", methods=["POST"])
+def diag_ai_test():
+    client_ip = _require_diag_access()
+    now = time.monotonic()
+    _prune_diag_ai_test_clients(now)
+    last = _DIAG_AI_TEST_LAST_BY_CLIENT.get(client_ip, 0.0)
+    if now - last < _DIAG_AI_TEST_RATE_SECONDS:
+        return jsonify({
+            "ok": False,
+            "error_code": "ai_rate_limited",
+            "error": "AI test prompt is limited to once per minute per diagnostics client.",
+        }), 429
+    _DIAG_AI_TEST_LAST_BY_CLIENT[client_ip] = now
+    try:
+        payload = ai_run_test_prompt()
+    except AIClientError as exc:
+        app_metrics.record_ai_request(
+            "diag_test",
+            "error",
+            0.0,
+            error_code=exc.code,
+            provider=CFG.get("ai_provider", "openai_compatible"),
+        )
+        log.warning(
+            "AI_DIAG_TEST_FAILED",
+            extra={
+                "ip": client_ip,
+                "provider": CFG.get("ai_provider", "openai_compatible"),
+                "model": CFG.get("ai_model", ""),
+                "error_code": exc.code,
+                "status": exc.status,
+            },
+        )
+        return jsonify({"ok": False, "error_code": exc.code, "error": str(exc)}), 502
+    return jsonify(payload)
 
 
 @assets_bp.route("/metrics")

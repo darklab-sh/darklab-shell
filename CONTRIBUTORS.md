@@ -27,11 +27,19 @@ darklab_shell uses or builds on:
 - [Gunicorn](https://gunicorn.org/) — WSGI HTTP server
 - [Redis](https://redis.io/) — shared rate-limit and PID-tracking backend
 - [SQLite](https://sqlite.org/) — persistent run history and snapshots
+- [PostgreSQL](https://www.postgresql.org/) — optional multi-user database backend
+- [psycopg](https://www.psycopg.org/psycopg3/) — PostgreSQL driver and connection pool
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) — optional local AI model server
 - [ansi_up](https://github.com/drudru/ansi_up) — ANSI-to-HTML rendering
 - [jsPDF](https://github.com/parallax/jsPDF) — client-side PDF generation
 - [xterm.js](https://github.com/xtermjs/xterm.js) — browser terminal emulator for interactive PTY tabs
 - [xterm.js Fit Addon](https://github.com/xtermjs/xterm.js/tree/master/addons/addon-fit) — terminal sizing for interactive PTY tabs
 - [pyte](https://pyte.readthedocs.io/) — server-side terminal emulation for saved interactive PTY output
+- [prometheus_client](https://github.com/prometheus/client_python) — Prometheus metrics for Python services
+- [croniter](https://github.com/kiorky/croniter) — cron schedule parsing
+- [cryptography](https://cryptography.io/) — encrypted session secret storage
+- [PyYAML](https://pyyaml.org/) — YAML configuration loading
+- [psutil](https://github.com/giampaolo/psutil) — process and system metrics
 - [JetBrains Mono](https://www.jetbrains.com/lp/mono/) — terminal font
 - [Syne](https://www.tunera.xyz/fonts/syne/) — UI heading font
 - [SecLists](https://github.com/danielmiessler/SecLists) — wordlist collection included in the container image

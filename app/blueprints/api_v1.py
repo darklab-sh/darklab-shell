@@ -33,6 +33,7 @@ from services.atlas.lookup import (
     list_findings as list_atlas_findings,
     list_source_runs as list_atlas_source_runs,
 )
+from services.ai.assists import AIAssistRouteError, enqueue_next_commands_assist, enqueue_summary_assist, list_run_assists
 from services.history.search import run_search_clause
 from services.history.run_metadata import (
     history_offloaded_search_run_ids as _history_offloaded_search_run_ids,
@@ -390,6 +391,10 @@ def _parse_int(value: object, default: int, *, minimum: int = 0, maximum: int = 
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(parsed, maximum))
+
+
+def _parse_bool(value: object) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _parse_float(value: object, default: float, *, minimum: float = 0.0, maximum: float = 3600.0) -> float:
@@ -1787,6 +1792,44 @@ def api_run_wait(run_id):
         if remaining <= 0:
             return _api_json_error("wait_timeout", "Run is still running.", 408)
         time.sleep(min(poll_interval, remaining))
+
+
+@api_v1_bp.route("/runs/<run_id>/ai-assists")
+@require_api_auth
+def api_run_ai_assists(run_id):
+    try:
+        assists = list_run_assists(_require_session_id(), run_id)
+    except AIAssistRouteError as exc:
+        return _api_json_error(exc.code, exc.message, exc.status_code)
+    return jsonify({"assists": assists})
+
+
+@api_v1_bp.route("/runs/<run_id>/ai-summary", methods=["POST"])
+@require_api_auth
+def api_run_ai_summary(run_id):
+    try:
+        assist, status_code = enqueue_summary_assist(
+            _require_session_id(),
+            run_id,
+            force=_parse_bool(_json_body().get("force")),
+        )
+    except AIAssistRouteError as exc:
+        return _api_json_error(exc.code, exc.message, exc.status_code)
+    return jsonify({"assist": assist}), status_code
+
+
+@api_v1_bp.route("/runs/<run_id>/ai-next-commands", methods=["POST"])
+@require_api_auth
+def api_run_ai_next_commands(run_id):
+    try:
+        assist, status_code = enqueue_next_commands_assist(
+            _require_session_id(),
+            run_id,
+            force=_parse_bool(_json_body().get("force")),
+        )
+    except AIAssistRouteError as exc:
+        return _api_json_error(exc.code, exc.message, exc.status_code)
+    return jsonify({"assist": assist}), status_code
 
 
 @api_v1_bp.route("/runs/<run_id>/projects/<project_id>", methods=["POST"])

@@ -13,6 +13,7 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [Redis-Backed Run Broker](#redis-backed-run-broker)
   - [Multi-worker Process Killing via Redis](#multi-worker-process-killing-via-redis)
   - [Rate Limiting via Redis](#rate-limiting-via-redis)
+  - [AI Assists: Private Provider, Worker, and Validation Boundary](#ai-assists-private-provider-worker-and-validation-boundary)
 - [Security and Isolation Decisions](#security-and-isolation-decisions)
   - [Cross-User Process Killing](#cross-user-process-killing)
   - [Two-User Security Model](#two-user-security-model)
@@ -97,6 +98,30 @@ The old request-owned `POST /run` execution route was removed instead of kept as
 Request identity now follows an explicit trusted-proxy allowlist (`trusted_proxy_cidrs`) instead of honoring arbitrary `X-Forwarded-For` from direct clients. If a request arrives from outside the trusted ranges, the app falls back to the direct peer IP and logs the proxy IP so operators can see which Docker bridge, reverse proxy, or local forwarding hop needs to be added.
 
 This is what motivated the Redis addition in the first place. Once Redis was a dependency for rate limiting, it became the natural fit for PID tracking too (replacing the SQLite `active_procs` workaround).
+
+### AI Assists: Private Provider, Worker, and Validation Boundary
+
+**AI assists are an optional metadata layer, not an autonomous command runner.**
+
+The feature was added to summarize completed run output and draft next commands, but several constraints shape the design:
+
+- provider calls are disabled by default
+- the provider contract is OpenAI-compatible chat completions rather than provider-specific APIs
+- provider URLs are private by default and must resolve to loopback, private, link-local, or explicitly allowed CIDR ranges
+- local llama.cpp support is a Compose profile, not a required runtime dependency
+- slow model calls run in the dedicated AI worker instead of Gunicorn request workers or scheduler workers
+- Redis coordinates write limits, enqueue locks, and global provider-call slots across processes
+- model output is always treated as untrusted data
+
+The worker split matters for local CPU models. A llama.cpp 8B model can take tens of seconds or more per request, especially after a cold start. If browser/API routes waited directly on those calls, ordinary app traffic would compete with model latency and Gunicorn worker capacity. The route path therefore validates the request, reuses cached completed assists when possible, writes a queued row, and returns quickly. The AI worker drains the queue, keeps a heartbeat, records progress, and marks assists completed or failed.
+
+Redis is fail-closed for writes because the expensive part is shared infrastructure. Without Redis, multiple web or worker processes cannot reliably enforce per-session write quotas, global write limits, enqueue locks, or provider-call slots. Read-only cached assist listing can still be scoped by the database, but new provider work should not fan out blindly when coordination is unavailable.
+
+The private-base-URL guard is intentionally conservative. The default use case is a local or self-hosted model near the app, where run output and redacted prompt context stay on infrastructure the operator controls. Hosted or public-compatible providers remain possible, but they require an explicit CIDR/config decision instead of happening accidentally because someone set `AI_BASE_URL`.
+
+Suggestion validation sits outside the model. The model may propose only JSON, but the app still checks the command root, command policy, trusted target presence, known open ports for port-scoped suggestions, redaction sentinels, and a small denylist of known hallucinated flags. Accepted suggestions can be copied, and optional Run buttons still submit through the normal composer path so command policy gets the final say. Rejected suggestions are stored and displayed as blocked drafts because they are useful debugging evidence without becoming executable UI.
+
+AI payloads are stored separately from transcripts, findings, Atlas source text, search text, and comparisons. This keeps assistant text additive and auditable while preserving the original command output as the source of truth.
 
 ---
 
@@ -483,6 +508,7 @@ Confirmations were originally per-surface: the kill flow, history clear, history
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide

@@ -69,8 +69,11 @@ class _FakeRedisClient:
     def ping(self) -> bool:
         return True
 
-    def set(self, key: str, value: Any, ex: int | None = None) -> bool:
+    def set(self, key: str, value: Any, ex: int | None = None, nx: bool = False) -> bool:
         with self._lock:
+            self._purge_key(key)
+            if nx and (key in self._values or key in self._sets):
+                return False
             self._values[key] = value
             self._sets.pop(key, None)
             if ex:
@@ -142,6 +145,17 @@ class _FakeRedisClient:
                 self._expires_at.pop(key, None)
                 removed += int(existed)
         return removed
+
+    def incr(self, key: str, amount: int = 1) -> int:
+        with self._lock:
+            self._purge_key(key)
+            value = int(self._values.get(key) or 0) + int(amount)
+            self._values[key] = value
+            self._sets.pop(key, None)
+            return value
+
+    def decr(self, key: str, amount: int = 1) -> int:
+        return self.incr(key, -int(amount))
 
     def scan_iter(self, match: str | None = None, count: int | None = None):
         del count

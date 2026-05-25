@@ -105,11 +105,34 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `share_redaction_enabled` | `true` | Enables the built-in basic snapshot-share redaction baseline for bearer tokens, email addresses, IPv4 addresses, IPv6 addresses, and hostnames/dotted domains. When enabled, the `share snapshot` action asks whether to share the raw or redacted snapshot until the user sets a persistent default in the Options modal. If the prompt’s checkbox is enabled, the chosen raw/redacted mode is written back to that same persistent default. When disabled, no built-in or custom snapshot-share redaction rules run |
 | `share_redaction_rules` | `[]` | Optional operator-defined regex rules appended after the built-in snapshot-share redaction baseline. Each rule supports `label`, `pattern`, `replacement`, and `flags` (`i`, `m`). This does not change stored run history or the history drawer permalink path; it affects only snapshot sharing |
 | `trusted_proxy_cidrs` | `["127.0.0.1/32", "::1/128"]` | IPs / CIDRs allowed to supply `X-Forwarded-For`. Requests outside these ranges ignore forwarded headers and use the direct connection IP |
-| `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access `/diag` and `/metrics`. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so `X-Forwarded-For` is honored only when the direct peer is inside `trusted_proxy_cidrs`. Empty list disables the page entirely and prevents metrics scrapes. When enabled, a `diag` button appears in the desktop rail and the mobile menu for matching visitors |
+| `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access `/diag` and `/metrics`. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so `X-Forwarded-For` is honored only when the direct peer is inside `trusted_proxy_cidrs`. Empty list disables the page entirely and prevents metrics scrapes. When enabled, a `diag` button appears in the desktop rail and the mobile menu for matching visitors. Matching clients also bypass the per-session AI assist write quota for operator testing, but the global AI write limit still applies |
 | `metrics_enabled` | `true` | Enables the Prometheus `/metrics` endpoint for callers allowed by `diagnostics_allowed_cidrs`. Set to `false` to hide `/metrics` while keeping `/diag` available |
 | `prometheus_multiproc_dir` | `/tmp/darklab_shell-prom` | Writable shared directory used by `prometheus_client` to aggregate counters and histograms across Gunicorn workers. `PROMETHEUS_MULTIPROC_DIR` overrides this value when set |
 | `metrics_histogram_buckets_run_duration` | `[0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 900, 1800, 3600]` | Prometheus run and PTY duration histogram buckets, in seconds |
 | `metrics_histogram_buckets_http_duration` | `[0.005, 0.01, 0.05, 0.1, 0.5, 1, 5]` | Prometheus HTTP request duration histogram buckets, in seconds |
+| `metrics_histogram_buckets_ai_provider_duration` | `[0.1, 0.5, 1, 2, 5, 10, 30, 60]` | Prometheus AI provider duration histogram buckets, in seconds |
+| `ai_enabled` | `false` | Enables the optional AI assist foundation. When disabled, cached reads stay harmless and no provider calls are made |
+| `ai_provider` | `openai_compatible` | Provider contract for AI assists. The current foundation uses OpenAI-compatible `/v1/chat/completions` and `/v1/models` endpoints |
+| `ai_base_url` | _(empty)_ | Base URL for the AI provider, such as a llama.cpp, Ollama, vLLM, LiteLLM, or hosted OpenAI-compatible endpoint |
+| `ai_model` | _(empty)_ | Model name sent to the provider and checked by `/diag` against `/v1/models` |
+| `ai_api_key_secret_name` | _(empty)_ | Optional session vault secret name to use when an AI request has a session context |
+| `ai_api_key` | _(empty)_ | Optional process/config fallback API key. Local unauthenticated providers usually leave this empty |
+| `ai_connect_timeout_seconds` | `5` | Provider TCP connect timeout |
+| `ai_timeout_seconds` | `120` | Provider read timeout. Local CPU models can need longer than normal HTTP calls, and AI assists run in the worker path rather than tying up a route worker |
+| `ai_max_input_chars` | `24000` | Maximum assembled prompt context size, measured in characters rather than tokens |
+| `ai_max_output_tokens` | `120` | Provider output cap for summary JSON responses. Summaries ask the model only for short prose so local CPU providers return sooner |
+| `ai_next_commands_max_output_tokens` | `180` | Provider output cap for next-command JSON responses. This is higher than summaries because suggestions need enough room to close valid JSON |
+| `ai_max_concurrent` | `1` | Global provider-call concurrency target for the AI worker path |
+| `ai_max_queue_depth` | `20` | Maximum queued/in-progress assist backlog before writes should return busy |
+| `ai_rate_limit_per_session_hour` | `5` | Per-session AI write limit enforced through Redis before new assists are queued. Clients allowed by `diagnostics_allowed_cidrs` bypass this per-session quota only |
+| `ai_rate_limit_global_per_minute` | `2` | Deployment-wide AI write limit enforced through Redis so multiple workers cannot overload a local model |
+| `ai_allow_full_output` | `false` | Lets AI context assembly read complete persisted output as source material for bounded prompt sections. It does not send an unbounded full transcript |
+| `ai_require_private_base_url` | `true` | Requires provider hosts to resolve to loopback/private/link-local addresses or an allowed CIDR |
+| `ai_base_url_allowed_cidrs` | `[]` | Extra CIDRs allowed for AI providers when `ai_require_private_base_url` is enabled |
+| `ai_prompt_version_override` | _(empty)_ | Optional prompt version override for staging comparisons |
+| `ai_feature_summary` | `false` | Feature flag for Run Details AI summaries |
+| `ai_feature_next_commands` | `false` | Feature flag for Run Details AI next-command drafts. Accepted suggestions can be copied after validation |
+| `ai_feature_run_suggestions` | `false` | Feature flag for Run buttons on accepted AI suggestions. The button submits through the normal composer path, so command policy still applies |
 | `restricted_command_input_cidrs` | `[]` | IPs / CIDRs that command validation rejects when supplied in metadata-known target slots. Applies to literal IP/CIDR values, URLs with literal IP hosts, host:port values, and inspectable workspace input files passed through declared read flags. Domain names are not DNS-resolved |
 | `history_panel_limit` | `50` | Number of history rows shown per page in the desktop history drawer and mobile recents sheet |
 | `recent_commands_limit` | `50` | Number of distinct recent commands loaded into prompt Up/Down history, desktop rail recents, and the mobile recent peek |
@@ -624,14 +647,41 @@ cp .env.example .env
 ```
 
 ```env
-APP_PORT=8888
-WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
+# APP_PORT=8888
+# WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 # WEB_CONCURRENCY=4
 # WEB_THREADS=4
 # PROMETHEUS_MULTIPROC_DIR=/tmp/darklab_shell-prom
 # NOTIFICATION_WORKER_ENABLED=1
 # SCHEDULER_ENABLED=1
-# COMPOSE_PROFILES=postgres
+
+# Optional AI assists and bundled llama.cpp model settings.
+# Disabled until AI features are enabled.
+# If you also use Postgres, include it in COMPOSE_PROFILES, for example:
+# COMPOSE_PROFILES=llama,postgres
+# AI_WORKER_ENABLED=0
+# AI_ENABLED=false
+# AI_BASE_URL=http://llama:8080
+# AI_MODEL=Llama-3.1-8B-Instruct
+# AI_TIMEOUT_SECONDS=120
+# AI_MAX_OUTPUT_TOKENS=120
+# AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS=180
+# AI_MAX_CONCURRENT=1
+# AI_MAX_QUEUE_DEPTH=20
+# AI_RATE_LIMIT_PER_SESSION_HOUR=5
+# AI_RATE_LIMIT_GLOBAL_PER_MINUTE=2
+# AI_FEATURE_SUMMARY=false
+# AI_FEATURE_NEXT_COMMANDS=false
+# AI_FEATURE_RUN_SUGGESTIONS=false
+# LLAMA_HF_MODEL=bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q4_K_M
+# LLAMA_THREADS=8
+# LLAMA_CTX_SIZE=2048
+# LLAMA_N_PREDICT=180
+# LLAMA_PARALLEL=1
+
+# Optional Postgres backend settings. SQLite remains the default; uncomment
+# these when you want Compose to start Postgres and the app to use it. Add
+# postgres to COMPOSE_PROFILES above when enabling the bundled Postgres service.
 # DATABASE_BACKEND=postgres
 # DATABASE_URL=postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell
 # DATABASE_POOL_MIN=1
@@ -644,6 +694,8 @@ WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 # DOCKER_GELF_ADDRESS=udp://loghost.darklab.sh:12201/
 ```
 
+For AI assists in Compose, `AI_ENABLED=true` turns on the app-side AI routes and diagnostics state, while `AI_WORKER_ENABLED=1` starts the worker process that drains queued provider calls. The summary and next-command feature flags control which Run Details cards appear. Without the worker, new assists can be queued but won't complete until a worker is running.
+
 | Variable | Used by | Purpose |
 |----------|---------|---------|
 | `APP_PORT` | Docker Compose, Dockerfile/entrypoint healthcheck path | App port exposed by the container and published by the base Compose file |
@@ -653,7 +705,20 @@ WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
 | `NOTIFICATION_WORKER_ENABLED` | Docker entrypoint | Starts the outbound notification worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
 | `SCHEDULER_ENABLED` | Docker entrypoint | Starts the scheduled-run worker beside Gunicorn when set to `1` or left unset. Set to `0` to run only the web process |
 | `PROMETHEUS_MULTIPROC_DIR` | Docker Compose, Flask app, Prometheus client | Optional override for `prometheus_multiproc_dir`. The app creates this scratch directory and exports it for `prometheus_client` multiprocess metrics |
-| `COMPOSE_PROFILES` | Docker Compose | Optional comma-separated Compose profiles to enable. Set to `postgres` when you want the profile-gated Postgres service included without passing `--profile postgres` |
+| `COMPOSE_PROFILES` | Docker Compose | Optional comma-separated Compose profiles to enable. Set to `llama`, `postgres`, or a comma-separated combination such as `llama,postgres` when you want profile-gated services included without passing `--profile` |
+| `AI_WORKER_ENABLED` | Docker entrypoint | Starts the AI worker beside Gunicorn when set to `1`. Leave it `0` when AI is disabled or when another process is responsible for draining the AI queue |
+| `AI_ENABLED` / `AI_PROVIDER` / `AI_BASE_URL` / `AI_MODEL` | Docker Compose, Flask app | Core AI provider settings. `AI_ENABLED` permits AI routes and diagnostics; `AI_PROVIDER` is currently `openai_compatible`; `AI_BASE_URL` points at the provider; `AI_MODEL` is sent to chat completions and checked by `/diag` |
+| `AI_API_KEY_SECRET_NAME` / `AI_API_KEY` | Flask app | Optional AI provider credentials. The secret-name value reads from the encrypted session vault when a request has session context; `AI_API_KEY` is the process/config fallback. Local unauthenticated providers usually leave both empty |
+| `AI_CONNECT_TIMEOUT_SECONDS` / `AI_TIMEOUT_SECONDS` | Docker Compose, Flask app | Provider connect and read timeouts. Local CPU models often need a longer read timeout than normal app routes |
+| `AI_MAX_INPUT_CHARS` / `AI_MAX_OUTPUT_TOKENS` / `AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS` | Docker Compose, Flask app | Prompt input and provider output caps. Input is measured in characters. Summary and next-command assists use separate output caps because next-command JSON needs more room |
+| `AI_MAX_CONCURRENT` / `AI_MAX_QUEUE_DEPTH` | Docker Compose, Flask app | AI worker concurrency and queue/backlog limits. The bundled local profile defaults to one concurrent provider call |
+| `AI_RATE_LIMIT_PER_SESSION_HOUR` / `AI_RATE_LIMIT_GLOBAL_PER_MINUTE` | Docker Compose, Flask app | Redis-backed AI assist write limits. Clients allowed by `diagnostics_allowed_cidrs` bypass the per-session quota for operator testing, but the global limit still applies |
+| `AI_ALLOW_FULL_OUTPUT` | Docker Compose, Flask app | Lets AI context assembly read complete persisted output as source material for bounded prompt sections. It does not send an unbounded full transcript |
+| `AI_REQUIRE_PRIVATE_BASE_URL` / `AI_BASE_URL_ALLOWED_CIDRS` | Docker Compose, Flask app | Provider network guard. The default requires the provider host to resolve to loopback, private, link-local, or explicitly allowed CIDR ranges |
+| `AI_PROMPT_VERSION_OVERRIDE` | Docker Compose, Flask app | Optional prompt version override for staging prompt comparisons |
+| `AI_FEATURE_SUMMARY` / `AI_FEATURE_NEXT_COMMANDS` / `AI_FEATURE_RUN_SUGGESTIONS` | Docker Compose, Flask app | AI UI feature flags for summaries, next-command drafts, and opt-in Run buttons for accepted suggestions |
+| `LLAMA_HF_MODEL` | Docker Compose | Hugging Face GGUF repo and quantization passed to the optional llama.cpp sidecar |
+| `LLAMA_THREADS` / `LLAMA_CTX_SIZE` / `LLAMA_N_PREDICT` / `LLAMA_PARALLEL` | Docker Compose | Runtime sizing for the optional llama.cpp sidecar. These map to llama-server thread count, context size, max generated tokens, and parallel slot count. The bundled default keeps `LLAMA_PARALLEL=1` so serialized AI worker requests reuse one slot more predictably |
 | `DATABASE_BACKEND` | Flask app | Optional override for `database_backend`. Use `sqlite` for the default local/single-user path or `postgres` for a Postgres-backed deployment |
 | `DATABASE_URL` | Flask app | Optional override for `database_url`, normally a Postgres DSN when `DATABASE_BACKEND=postgres` |
 | `DATABASE_POOL_MIN` / `DATABASE_POOL_MAX` | Flask app | Optional Postgres connection-pool bounds |
@@ -682,6 +747,31 @@ DATABASE_URL=postgresql://darklab:<redacted>@postgres:5432/darklab_shell
 ```
 
 `COMPOSE_PROFILES=postgres` enables the profile-gated `postgres` service without passing `--profile postgres` on every command. `DATABASE_BACKEND`, `DATABASE_URL`, `DATABASE_POOL_MIN`, `DATABASE_POOL_MAX`, and `DATABASE_POSTGRES_JIT` are read by the Flask app. `POSTGRES_PASSWORD` is read by the Postgres container at database initialization time.
+
+For the bundled llama.cpp server, include the `llama` profile:
+
+```env
+COMPOSE_PROFILES=llama
+AI_ENABLED=true
+AI_WORKER_ENABLED=1
+AI_BASE_URL=http://llama:8080
+AI_MODEL=Llama-3.1-8B-Instruct
+AI_TIMEOUT_SECONDS=120
+AI_MAX_OUTPUT_TOKENS=120
+AI_NEXT_COMMANDS_MAX_OUTPUT_TOKENS=180
+AI_FEATURE_SUMMARY=true
+AI_FEATURE_NEXT_COMMANDS=true
+AI_FEATURE_RUN_SUGGESTIONS=false
+LLAMA_HF_MODEL=bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q4_K_M
+LLAMA_THREADS=8
+LLAMA_CTX_SIZE=2048
+LLAMA_N_PREDICT=180
+LLAMA_PARALLEL=1
+```
+
+The llama.cpp sidecar serves the same OpenAI-compatible chat endpoint the app already uses, so `AI_PROVIDER` can stay at `openai_compatible`. The first startup downloads the configured GGUF into the `llama-cache` volume mounted at `/root/.cache`, which preserves both Hugging Face model downloads and llama.cpp cache files across container recreations. Compose passes `AI_MODEL` to `llama-server` as the model alias so `/diag` can match the configured model against `/v1/models`. The bundled profile defaults `LLAMA_PARALLEL=1` because the app already serializes local AI provider calls; using one llama-server slot makes prompt-prefix reuse more predictable on CPU-only hosts. The Compose service starts `llama-server` with `--mlock`; Docker hosts that disallow memory locking can remove or override that flag in a local Compose override. The sidecar healthcheck probes `/v1/models`, and the app container waits for that healthcheck when the `llama` profile is enabled.
+
+The base Compose file defaults `AI_BASE_URL` to `http://llama:8080` and `AI_MODEL` to `Llama-3.1-8B-Instruct`, so those two lines can stay commented in `.env` when you use the bundled llama.cpp sidecar.
 
 If you run the app outside Compose, or you prefer file-based app config, the equivalent app-side settings are:
 
@@ -921,6 +1011,7 @@ metrics_enabled: true
 prometheus_multiproc_dir: /tmp/darklab_shell-prom
 metrics_histogram_buckets_run_duration: [0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 900, 1800, 3600]
 metrics_histogram_buckets_http_duration: [0.005, 0.01, 0.05, 0.1, 0.5, 1, 5]
+metrics_histogram_buckets_ai_provider_duration: [0.1, 0.5, 1, 2, 5, 10, 30, 60]
 ```
 
 Example Prometheus scrape config:
@@ -935,6 +1026,8 @@ scrape_configs:
 ```
 
 Metrics use the `darklab_` prefix and bounded labels such as command root, provider ID, Flask endpoint, broker mode, DB operation name, status class, and coarse outcome. A starter Grafana dashboard lives at `examples/grafana/darklab-overview.json`.
+
+Clients allowed by `diagnostics_allowed_cidrs` also bypass the per-session AI assist write quota. This is meant for operator testing from trusted networks; the global AI write limit and worker concurrency still apply.
 
 ### Set The Default Theme
 
@@ -978,6 +1071,7 @@ Use the production Compose overlay and `DOCKER_GELF_ADDRESS` if Docker should al
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide

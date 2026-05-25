@@ -48,6 +48,12 @@ from services.atlas.cleanup import (
     delete_atlas_cleanup_preview,
     public_cleanup_preview,
 )
+from services.ai.assists import (
+    AIAssistRouteError,
+    enqueue_next_commands_assist,
+    enqueue_summary_assist,
+    list_run_assists,
+)
 from services.projects.comparisons import compare_project_runs
 from services.projects.contracts import (
     BULK_AUDIT_FAILURE_LIMIT,
@@ -129,6 +135,10 @@ def _history_root_rows_from_command_rows(rows):
 
 def _parse_history_bool(value):
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _ai_route_error(exc: AIAssistRouteError):
+    return jsonify({"error": exc.code, "message": exc.message}), exc.status_code
 
 
 def _parse_history_int(value, default, *, minimum=1, maximum=None):
@@ -1483,6 +1493,56 @@ def compare_history_lines():
         "byte_limit": run_comparison.COMPARE_LAZY_EQUAL_BYTE_LIMIT,
         **({"note": "requested range exceeded available compared output"} if range_clamped else {}),
     })
+
+
+@history_bp.route("/runs/<run_id>/ai-assists")
+def history_run_ai_assists(run_id):
+    session_id = get_session_id()
+    if not session_id:
+        return jsonify({"error": "session_required"}), 401
+    try:
+        assists = list_run_assists(session_id, run_id)
+    except AIAssistRouteError as exc:
+        return _ai_route_error(exc)
+    return jsonify({"assists": assists})
+
+
+@history_bp.route("/runs/<run_id>/ai-summary", methods=["POST"])
+def history_run_ai_summary(run_id):
+    session_id = get_session_id()
+    if not session_id:
+        return jsonify({"error": "session_required"}), 401
+    data = request.get_json(silent=True)
+    if data is not None and not isinstance(data, dict):
+        return jsonify({"error": "invalid_body", "message": "Request body must be a JSON object"}), 400
+    try:
+        assist, status_code = enqueue_summary_assist(
+            session_id,
+            run_id,
+            force=_parse_history_bool((data or {}).get("force")),
+        )
+    except AIAssistRouteError as exc:
+        return _ai_route_error(exc)
+    return jsonify({"assist": assist}), status_code
+
+
+@history_bp.route("/runs/<run_id>/ai-next-commands", methods=["POST"])
+def history_run_ai_next_commands(run_id):
+    session_id = get_session_id()
+    if not session_id:
+        return jsonify({"error": "session_required"}), 401
+    data = request.get_json(silent=True)
+    if data is not None and not isinstance(data, dict):
+        return jsonify({"error": "invalid_body", "message": "Request body must be a JSON object"}), 400
+    try:
+        assist, status_code = enqueue_next_commands_assist(
+            session_id,
+            run_id,
+            force=_parse_history_bool((data or {}).get("force")),
+        )
+    except AIAssistRouteError as exc:
+        return _ai_route_error(exc)
+    return jsonify({"assist": assist}), status_code
 
 
 @history_bp.route("/history/<run_id>")

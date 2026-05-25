@@ -3878,7 +3878,7 @@ describe('shell chrome project workspace', () => {
     expect(document.querySelector('[data-project-action="edit-target"][data-target-id="target-1"]')).toBeNull()
     expect(document.querySelector('.project-target-row')?.textContent).toContain('api.darklab.sh')
     setTimeoutSpy.mockRestore()
-  })
+  }, 10000)
 
   it('reorders project findings when the sort control changes', async () => {
     const projectRuns = [

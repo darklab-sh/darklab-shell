@@ -20,6 +20,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [Session Entity Atlas](#session-entity-atlas)
 - [Copy, Save, and Export](#copy-save-and-export)
 - [Tabs & Run History](#tabs--run-history)
+- [AI Assists](#ai-assists)
 - [Run Comparison](#run-comparison)
 - [Guided Workflows](#guided-workflows)
 - [Scheduled Runs](#scheduled-runs)
@@ -203,7 +204,7 @@ Browser-native combos like `Cmd+T`, `Cmd+W`, and `Ctrl+Tab` are intentionally tr
 
 The same shortcut reference appears in two places in the shell:
 
-- press `?` from anywhere on the page to open the keyboard-shortcuts overlay — including from the command prompt itself when it is empty. Once any text is present in the prompt (or any other input), `?` types normally so args like `curl "…?foo=bar"` are not interfered with. The handler also skips modifier chords (`Ctrl` / `Meta` / `Alt`) and the welcome-animation active state
+- press `?` from anywhere on the page to open the keyboard-shortcuts overlay — including from the command prompt itself when it is empty, and even as the first key after page load while the welcome animation is settling. Once any text is present in the prompt (or any other input), `?` types normally so args like `curl "…?foo=bar"` are not interfered with. The handler also skips modifier chords (`Ctrl` / `Meta` / `Alt`)
 - run `shortcuts` in the shell to print the same reference as a text dump inside the current tab
 
 Both views read from the same backend list (exposed to the browser via `GET /shortcuts`), so they cannot drift. The overlay lists the `?` binding itself as the first entry so the shortcut is self-documenting.
@@ -463,6 +464,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 - The **⧖ history** button opens a slide-out drawer listing persisted session history with a `type` filter for **all**, **runs: all**, **runs: built-in**, **runs: external**, and **snapshots**. Run rows open Run Details on click; each row also has a toggleable **star** plus **copy command**, **restore**, **permalink**, **delete**, and project-aware **more** actions for external runs. External run rows show their Atlas entity and finding counts when structured Atlas data exists. Snapshot rows show the snapshot label and created time plus **open** / **copy link** / **edit** / **delete** actions. Run and snapshot rows surface existing label badges and note indicators so project/workflow context is visible without opening another modal. The **restore** action loads the run's output into a tab with the command shown as a styled prompt line (activating an existing matching tab when one exists). Starred runs list before unstarred ones regardless of age. Star state persists server-side per session and follows named session tokens.
 - Select mode adds checkboxes for completed runs and saved snapshots on the visible page. **Select all**, **Clear**, and the top-level **Actions** menu let you add selected external runs to the active project, add them to a chosen project, remove them from linked projects, or delete selected history items in one pass. Bulk project actions skip runs that are already in the requested state instead of failing the whole request, and running rows are not selectable for bulk delete.
 - The History row and Run Details **more** menus are project-aware for external runs: unlinked runs offer **add to active project** and **add to project**, while runs that are already linked to one or more projects show **remove from project** instead. Removing a run from a project can also remove same-run disposable Atlas entity links from that project, with a separate checkbox for curated entity links and counts for findings that will leave the Project Findings tab. Built-in runs stay in History without project-link actions.
+- When AI assists are enabled, Run Details can show a summary card and next-command suggestions for completed external runs. See [AI Assists](#ai-assists) for the full behavior and privacy model.
 - When full-output persistence is enabled, the history drawer's permalink points at the complete saved artifact; loading into a tab still uses the capped preview and shows a notice linking to the permalink if truncated. The active tab's **share snapshot** action creates a separate `/share/<id>` snapshot and can optionally redact before saving.
 - The **delete all** button in History prompts **Delete all** / **Delete Non-Favorites** / **Cancel** to separate destructive deletion from starred-only cleanup.
 - If the page reloads mid-run, the shell restores a running placeholder tab with the kill action available and subscribes back to the brokered `/runs/<run_id>/stream` for replay plus live output when events are still retained. Active-run recovery is client-aware: another browser using the same session token can see the live run in Status Monitor without automatically creating a terminal tab or taking over the stream. Non-running tabs restore separately from `sessionStorage` with labels, transcript previews, statuses, and draft input preserved; restored completed tabs remount a live prompt immediately.
@@ -476,6 +478,30 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 **Full-text search:** the history surfaces support a shared `type` filter, run-subtype filters, project filters for linked runs, and full-text search across command text and stored run output for run rows, with additional filters for command name, exit status, recent date range, starred-only, and structured output selectors such as `signal:findings`, `kind:error`, `kind!=info`, `role:exit-fail`, `entity:darklab.sh`, and `entity_type:cve`. The drawer also exposes `signal`, `kind`, `entity`, and `entity_type` as visible controls, so common structured-output searches don't require memorizing query syntax. The search field placeholder reads "search history". Search is backend-aware: SQLite uses `runs_fts` with a `LIKE` fallback for short terms, while Postgres uses substring `ILIKE` clauses backed by `pg_trgm` indexes. When full-output persistence is enabled, `output_search_text` is populated from the complete gzip artifact so early lines of long runs stay reachable; otherwise it falls back to the capped preview window. Snapshot search matches the snapshot label only, and snapshots remain share/history records rather than project-linked records. On mobile, search, advanced filters, and bulk actions stay behind the dedicated **history tools** toggle to preserve result space; the command-name field uses app-owned autocomplete, and row actions keep the sheet open where that matches the desktop action contract. Ctrl+R stays command-only so reverse history search keeps normal shell expectations.
 
 On mobile, the **☰** menu in the top-right header opens a bottom-sheet that groups session-scoped actions (search, clear, line numbers, timestamps) and overlays (options, history, status, commands, workflows, files, theme, FAQ, diag) — see the Mobile Shell section below for the full layout.
+
+---
+
+## AI Assists
+
+**Purpose:** optional summaries and next-command drafts for completed runs, designed to help operators review noisy output without handing control to the model.
+
+**Behavior:**
+
+- AI assists are off by default. When enabled, Run Details shows AI cards only for completed external runs, not active runs or built-in command rows.
+- **AI Summary** produces a short summary, key signals, warnings, and a next-step hint. The summary is separate from the transcript and never replaces stored output, findings, Atlas entities, search text, or comparison data.
+- **AI Next Commands** drafts follow-up commands with short reasons. Suggestions are treated as untrusted until the app validates the command root, target, known open ports, redaction placeholders, and a small set of known-bad flags.
+- Accepted suggestions show a **Copy** action. If `AI_FEATURE_RUN_SUGGESTIONS` is enabled, they can also show **Run**, which submits through the normal composer path so command policy still gets the final say.
+- Rejected suggestions stay visible under **Blocked** with a rejection reason such as `target_absent`, `port_absent`, `unknown_root`, `invalid_flag`, or `redaction_sentinel`.
+- Refreshing an AI card queues new work or returns a cached result. While a request is queued or generating, the card shows status, progress text, and provider progress such as elapsed time and token counts when the provider reports them.
+- Backend rate-limit, queue, provider, malformed-response, and no-context errors are shown in the matching AI card without clearing unrelated completed AI output.
+- Operators can point assists at an OpenAI-compatible provider, including the bundled llama.cpp Compose profile. The default posture requires a private provider URL unless an operator explicitly allows another CIDR range.
+- AI context is built from completed run metadata and bounded output sections. Share/export redaction rules run before provider calls, and target validation prevents suggestions from introducing unrelated hosts.
+
+**Limits:** AI output is assistant-generated metadata, not authoritative scan truth. Summaries can still be wrong, and suggestions can be blocked even when a human could adapt them safely. Multi-target or heavily redacted runs may produce generic summaries or blocked suggestions when the app cannot prove a single safe target.
+
+**Configuration:** `AI_ENABLED`, `AI_WORKER_ENABLED`, `AI_BASE_URL`, `AI_MODEL`, `AI_FEATURE_SUMMARY`, `AI_FEATURE_NEXT_COMMANDS`, and `AI_FEATURE_RUN_SUGGESTIONS` control the common setup. See [Configuration](CONFIGURATION.md#environment-variables-and-env) for the full operator list and [AI Privacy Posture](docs/ai-privacy.md) for provider, storage, and logging details.
+
+**Related files:** `app/services/ai/` (provider client, context, coordination, storage, worker orchestration, prompts, schemas, and suggestion validation), `app/blueprints/history.py` (browser AI routes), `app/blueprints/api_v1.py` (headless API routes), `app/static/js/features/history/history_run_details.js` (Run Details AI cards), and `app/static/css/features/history.css` (Run Details AI card layout).
 
 ---
 
@@ -1376,6 +1402,7 @@ The repo also includes a starter Grafana dashboard at `examples/grafana/darklab-
 - [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
 - [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
 - [ARCHITECTURE.md → Atlas Export Schema](ARCHITECTURE.md#export-schema) - Session Entity Atlas CSV/JSONL export schema and filters
+- [docs/ai-privacy.md](docs/ai-privacy.md) - AI assist privacy posture, provider boundaries, redaction, storage, and logging
 - [docs/api.md](docs/api.md) - headless API and bundled CLI usage guide
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
 - [docs/notifications.md](docs/notifications.md) - outbound notification channels, payloads, retries, and setup guide

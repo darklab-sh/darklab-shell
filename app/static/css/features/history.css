@@ -557,6 +557,12 @@ body #history-panel { background: var(--theme-chrome-bg); }
   padding: 18px 20px 22px;
 }
 
+.history-run-body.history-run-body-entities {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
 .history-run-section,
 .history-run-list-item {
   border: 1px solid var(--border);
@@ -605,6 +611,7 @@ body #history-panel { background: var(--theme-chrome-bg); }
 
 .history-run-section {
   display: flex;
+  flex: 0 0 auto;
   flex-direction: column;
   gap: 12px;
   min-height: 116px;
@@ -621,6 +628,7 @@ body #history-panel { background: var(--theme-chrome-bg); }
 .history-run-field-list {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .history-run-field {
@@ -628,6 +636,7 @@ body #history-panel { background: var(--theme-chrome-bg); }
   grid-template-columns: minmax(64px, max-content) minmax(0, 1fr);
   align-items: start;
   gap: 12px;
+  min-width: 0;
 }
 
 .history-run-field-label {
@@ -636,6 +645,10 @@ body #history-panel { background: var(--theme-chrome-bg); }
   font-size: 10px;
   line-height: 1.6;
   text-transform: uppercase;
+}
+
+.history-run-ai-suggestion-field .history-run-field-label {
+  padding-top: 11px;
 }
 
 .history-run-field-value {
@@ -654,6 +667,99 @@ body #history-panel { background: var(--theme-chrome-bg); }
 
 .history-run-output-summary .history-run-section {
   min-height: 0;
+}
+
+.history-run-ai-summary {
+  min-height: 0;
+}
+
+.history-run-ai-summary-copy {
+  margin: 0;
+}
+
+.history-run-ai-suggestion-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.history-run-ai-suggestion-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--surface-muted);
+}
+
+.history-run-ai-suggestion-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.history-run-ai-suggestion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.history-run-ai-suggestion-command {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.history-run-ai-suggestion-reason {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.history-run-ai-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  min-width: 0;
+  padding-left: 18px;
+}
+
+.history-run-ai-list li {
+  min-width: 0;
+  padding-left: 2px;
+  overflow-wrap: anywhere;
+}
+
+.history-run-ai-thinking {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: minmax(180px, max-content) auto;
+  align-items: center;
+  min-width: min(260px, 100%);
+  min-height: 18px;
+  color: var(--muted);
+}
+
+.history-run-ai-thinking-phrase {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+}
+
+.history-run-ai-thinking-dots {
+  grid-area: 1 / 2;
+  margin-left: 4px;
+  animation: history-ai-thinking-dots 1.2s steps(4, end) infinite;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+@keyframes history-ai-thinking-dots {
+  0% { width: 0; }
+  100% { width: 1.5em; }
 }
 
 .history-run-output-summary-fields {
@@ -748,12 +854,31 @@ body #history-panel { background: var(--theme-chrome-bg); }
     gap: 4px;
   }
 
+  .history-run-ai-suggestion-field .history-run-field-label {
+    padding-top: 0;
+  }
+
   .history-run-output-summary-fields {
     grid-template-columns: 1fr;
   }
 
   .history-run-output-outline-list .history-run-field {
     grid-template-columns: 1fr;
+  }
+
+  .history-run-ai-suggestion-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .history-run-ai-suggestion-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .history-run-ai-suggestion-actions .btn {
+    flex: 1 1 120px;
+    justify-content: center;
   }
 }
 
@@ -778,10 +903,24 @@ body #history-panel { background: var(--theme-chrome-bg); }
   gap: 8px;
 }
 
+.history-run-entity-panel {
+  display: grid;
+  flex: 1 1 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-content: stretch;
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
+  padding-right: 2px;
+}
+
 .history-run-entity-list {
+  min-height: 0;
   border: 1px solid var(--border);
   border-radius: 6px;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .history-run-entity-list .atlas-entity-row {

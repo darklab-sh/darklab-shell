@@ -23,6 +23,17 @@ const HISTORY_SCRIPT_PATHS = [
 ]
 const HISTORY_WITH_UTILS_SCRIPT_PATHS = ['app/static/js/core/utils.js', ...HISTORY_SCRIPT_PATHS]
 
+async function flushPromises(times = 4) {
+  for (let index = 0; index < times; index += 1) {
+    await Promise.resolve()
+  }
+}
+
+async function flushFakeTimers(ms = 0) {
+  await vi.advanceTimersByTimeAsync(ms)
+  await flushPromises()
+}
+
 /**
  * Load star functions with an injectable apiFetch mock. Each call returns a
  * fresh scope so tests stay isolated.
@@ -513,6 +524,7 @@ describe('history panel actions', () => {
     openWatchersModalImpl = vi.fn(() => Promise.resolve()),
     downloadBlobAsAttachmentImpl = vi.fn(),
     emitUiEvent = vi.fn(),
+    submitComposerCommandImpl = vi.fn(() => true),
   } = {}) {
     document.body.innerHTML = `
       <div id="history-panel"></div>
@@ -770,6 +782,7 @@ describe('history panel actions', () => {
           executeHistAction: () => {},
           bindDismissible,
           useMobileTerminalViewportMode: () => mobileMode,
+          submitComposerCommand: submitComposerCommandImpl,
           setComposerValue: (val, start = null, end = null) => {
             cmdInput.value = String(val ?? '')
             if (typeof start === 'number') cmdInput.selectionStart = start
@@ -806,6 +819,7 @@ describe('history panel actions', () => {
       appendCommandEcho,
       setTabStatus,
       hideTabKillBtn,
+      submitComposerCommand: submitComposerCommandImpl,
       showToast,
       tabs,
       bindDismissible,
@@ -969,6 +983,328 @@ describe('history panel actions', () => {
     }))
   })
 
+  it('renders Run Details AI summary actions when AI summaries are enabled', async () => {
+    vi.useFakeTimers()
+    let aiSummaryPosts = 0
+    let aiNextPosts = 0
+    let aiAssistReads = 0
+    const clipboard = { writeText: vi.fn(() => Promise.resolve()) }
+    const submitComposerCommand = vi.fn(() => false)
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            roots: ['nmap'],
+            items: [
+              {
+                id: 'run-ai',
+                type: 'run',
+                command: 'nmap darklab.sh',
+                label: 'nmap darklab.sh',
+                started: '2026-01-01T00:00:00Z',
+                finished: '2026-01-01T00:00:02Z',
+                exit_code: 0,
+              },
+              {
+                id: 'run-builtin-ai',
+                type: 'run',
+                run_kind: 'builtin',
+                command: 'help',
+                label: 'help',
+                started: '2026-01-01T00:01:00Z',
+                finished: '2026-01-01T00:01:01Z',
+                exit_code: 0,
+              },
+            ],
+            runs: [],
+          }),
+        })
+      }
+      if (url === '/history/run-ai?json&preview=1') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            id: 'run-ai',
+            command: 'nmap darklab.sh',
+            started: '2026-01-01T00:00:00Z',
+            finished: '2026-01-01T00:00:02Z',
+            output_entries: [{ text: '443/tcp open https', cls: '' }],
+            output_summary: {
+              kinds: { output: 16 },
+              signals: { findings: 14 },
+              signal_toc: [
+                { line_number: 3, signal: 'summaries', text: 'Host is up.' },
+                { line_number: 4, signal: 'errors', text: 'Not shown: closed ports.' },
+                ...Array.from({ length: 12 }, (_, index) => ({
+                  line_number: index + 6,
+                  signal: 'findings',
+                  text: `${1000 + index}/tcp open test-service-${index}`,
+                })),
+              ],
+            },
+            exit_code: 0,
+          }),
+        })
+      }
+      if (url === '/history/run-builtin-ai?json&preview=1') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            id: 'run-builtin-ai',
+            run_kind: 'builtin',
+            command: 'help',
+            started: '2026-01-01T00:01:00Z',
+            finished: '2026-01-01T00:01:01Z',
+            output_entries: [{ text: 'Built-in help output', cls: '' }],
+            exit_code: 0,
+          }),
+        })
+      }
+      if (url === '/runs/run-ai/ai-assists' && (!options || !options.method)) {
+        aiAssistReads += 1
+        const completedSummaryRefresh = aiSummaryPosts >= 2 && aiAssistReads > 2
+        const completedNextRefresh = aiNextPosts >= 1 && aiAssistReads > 1
+        const assists = []
+        if (completedSummaryRefresh) {
+          assists.push({
+            id: 'ai_2',
+            run_id: 'run-ai',
+            variant: 'summary',
+            status: 'completed',
+            payload: {
+              summary: 'Refresh finished.',
+              key_findings: ['443/tcp open https'],
+              next_steps_hint: 'Done.',
+            },
+          })
+        } else if (aiSummaryPosts >= 1) {
+          assists.push({
+            id: 'ai_1',
+            run_id: 'run-ai',
+            variant: 'summary',
+            status: 'completed',
+            payload: {
+              summary: 'HTTPS is open on the target.',
+              key_findings: ['443/tcp open https'],
+              next_steps_hint: 'Inspect TLS details.',
+            },
+          })
+        }
+        if (completedNextRefresh) {
+          const nextSuggestions = aiNextPosts >= 2
+            ? [{
+                command: 'nmap -sV --script=http-vuln -p 318 darklab.sh',
+                reason: 'Model draft used an absent port.',
+                risk_label: 'medium',
+                target: 'darklab.sh',
+                target_allowed: true,
+                validation_result: 'rejected',
+                rejection_reason: 'port_absent',
+              }]
+            : [
+                {
+                  command: 'sslscan darklab.sh',
+                  reason: 'Inspect certificate and TLS settings.',
+                  risk_label: 'low',
+                  target: 'darklab.sh',
+                  target_allowed: true,
+                  validation_result: 'accepted',
+                  rejection_reason: '',
+                },
+                {
+                  command: 'nmap -sV --script=http-vuln -p 318 darklab.sh',
+                  reason: 'Model draft used an absent port.',
+                  risk_label: 'medium',
+                  target: 'darklab.sh',
+                  target_allowed: true,
+                  validation_result: 'rejected',
+                  rejection_reason: 'port_absent',
+                },
+              ]
+          assists.push({
+            id: aiNextPosts >= 2 ? 'ai_next_2' : 'ai_next_1',
+            run_id: 'run-ai',
+            variant: 'next_commands',
+            status: 'completed',
+            payload: {
+              suggestions: nextSuggestions,
+            },
+          })
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ assists }),
+        })
+      }
+      if (url === '/runs/run-ai/ai-summary' && options.method === 'POST') {
+        aiSummaryPosts += 1
+        const body = JSON.parse(options.body || '{}')
+        if (aiSummaryPosts === 1) expect(body).toEqual({})
+        if (aiSummaryPosts === 2) expect(body).toEqual({ force: true })
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            assist: {
+              id: aiSummaryPosts === 1 ? 'ai_1' : 'ai_2',
+              run_id: 'run-ai',
+              variant: 'summary',
+              status: aiSummaryPosts === 1 ? 'completed' : 'queued',
+              payload: {
+                summary: 'HTTPS is open on the target.',
+                key_findings: ['443/tcp open https'],
+                next_steps_hint: 'Inspect TLS details.',
+              },
+            },
+          }),
+        })
+      }
+      if (url === '/runs/run-ai/ai-next-commands' && options.method === 'POST') {
+        aiNextPosts += 1
+        if (aiNextPosts >= 3) {
+          return Promise.resolve({
+            ok: false,
+            status: 429,
+            json: () => Promise.resolve({
+              error: 'ai_rate_limited',
+              message: 'AI assists are limited to a few requests per session each hour.',
+            }),
+          })
+        }
+        const rejectedOnly = aiNextPosts >= 2
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            assist: {
+              id: rejectedOnly ? 'ai_next_2' : 'ai_next_1',
+              run_id: 'run-ai',
+              variant: 'next_commands',
+              status: rejectedOnly ? 'completed' : 'queued',
+              payload: {
+                suggestions: rejectedOnly ? [{
+                  command: 'nmap -sV --script=http-vuln -p 318 darklab.sh',
+                  reason: 'Model draft used an absent port.',
+                  risk_label: 'medium',
+                  target: 'darklab.sh',
+                  target_allowed: true,
+                  validation_result: 'rejected',
+                  rejection_reason: 'port_absent',
+                }] : [],
+              },
+            },
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    try {
+      const { refreshHistoryPanel } = loadHistoryPanel({
+        apiFetchImpl: apiFetch,
+        clipboardImpl: clipboard,
+        submitComposerCommandImpl: submitComposerCommand,
+        appConfig: {
+          ai_enabled: true,
+          ai_feature_summary: true,
+          ai_feature_next_commands: true,
+          ai_feature_run_suggestions: true,
+        },
+      })
+
+      refreshHistoryPanel()
+      await flushFakeTimers()
+      document.querySelector('#history-list .history-entry')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await flushPromises()
+
+      expect(apiFetch).toHaveBeenCalledWith('/runs/run-ai/ai-assists', { cache: 'no-store' })
+      expect(document.getElementById('history-run-body').textContent).toContain('No AI summary')
+
+      document.querySelector('[data-history-run-action="ai-summary"]')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await flushFakeTimers()
+
+      expect(apiFetch).toHaveBeenCalledWith('/runs/run-ai/ai-summary', expect.objectContaining({ method: 'POST' }))
+      expect(document.getElementById('history-run-body').textContent).toContain('HTTPS is open on the target.')
+      expect(document.getElementById('history-run-body').textContent).toContain('443/tcp open https')
+      expect(document.getElementById('history-run-body').textContent).toContain('Inspect TLS details.')
+
+      document.querySelector('[data-history-run-action="ai-next-commands"]')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await flushFakeTimers()
+
+      expect(aiNextPosts).toBe(1)
+      expect(document.getElementById('history-run-body').textContent).toContain('The AI worker has next-command suggestions queued.')
+      expect(document.getElementById('history-run-body').textContent).toContain('Reading the signal map')
+      await flushFakeTimers(2100)
+      expect(document.getElementById('history-run-body').textContent).toContain('sslscan darklab.sh')
+      expect(document.getElementById('history-run-body').textContent).toContain('Inspect certificate and TLS settings.')
+      expect(document.getElementById('history-run-body').textContent).toContain('Blocked')
+      expect(document.getElementById('history-run-body').textContent).toContain('Rejected: port_absent')
+      expect(document.querySelectorAll('[data-history-run-copy-suggestion]')).toHaveLength(1)
+      expect(document.querySelectorAll('[data-history-run-run-suggestion]')).toHaveLength(1)
+      document.querySelector('[data-history-run-copy-suggestion]')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await flushPromises()
+      expect(clipboard.writeText).toHaveBeenCalledWith('sslscan darklab.sh')
+      document.querySelector('[data-history-run-run-suggestion]')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      expect(submitComposerCommand).toHaveBeenCalledWith(
+        'sslscan darklab.sh',
+        { dismissKeyboard: true, focusAfterSubmit: true },
+      )
+      expect(document.getElementById('history-run-overlay').classList.contains('open')).toBe(true)
+
+      document.querySelector('[data-history-run-action="ai-next-commands"]')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await flushFakeTimers()
+
+      expect(aiNextPosts).toBe(2)
+      expect(document.getElementById('history-run-body').textContent).toContain('No safe command suggestions passed validation.')
+      expect(document.getElementById('history-run-body').textContent).toContain('nmap -sV --script=http-vuln -p 318 darklab.sh')
+      expect(document.getElementById('history-run-body').textContent).toContain('Rejected: port_absent')
+      expect(document.querySelectorAll('[data-history-run-copy-suggestion]')).toHaveLength(0)
+      expect(document.querySelectorAll('[data-history-run-run-suggestion]')).toHaveLength(0)
+
+      document.querySelector('[data-history-run-action="ai-summary"]')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await flushFakeTimers()
+
+      expect(aiSummaryPosts).toBe(2)
+      expect(document.getElementById('history-run-body').textContent).toContain('The AI worker has this run queued.')
+      expect(document.getElementById('history-run-body').textContent).toContain('Thinking')
+      expect(document.activeElement?.id).toBe('history-run-modal')
+
+      await flushFakeTimers(2100)
+      expect(apiFetch).toHaveBeenCalledWith('/runs/run-ai/ai-assists', { cache: 'no-store' })
+      expect(document.getElementById('history-run-body').textContent).toContain('Refresh finished.')
+
+      document.querySelector('[data-history-run-action="ai-next-commands"]')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await flushFakeTimers()
+
+      expect(aiNextPosts).toBe(3)
+      expect(document.getElementById('history-run-body').textContent)
+        .toContain('AI assists are limited to a few requests per session each hour.')
+      expect(document.getElementById('history-run-body').textContent).toContain('Refresh finished.')
+      expect(document.getElementById('history-run-body').textContent)
+        .not.toContain('Could not start AI suggestions.')
+
+      document.querySelector('[data-history-run-tab="output"]')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      expect(document.getElementById('history-run-body').textContent).toContain('1011/tcp open test-service-11')
+
+      document.querySelectorAll('#history-list .history-entry')[1]
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await flushFakeTimers()
+
+      expect(document.getElementById('history-run-modal').textContent).toContain('help')
+      expect(document.getElementById('history-run-body').textContent).not.toContain('AI summary')
+      expect(document.getElementById('history-run-body').textContent).not.toContain('AI next commands')
+      expect(document.querySelector('[data-history-run-action="ai-summary"]')).toBeNull()
+      expect(document.querySelector('[data-history-run-action="ai-next-commands"]')).toBeNull()
+      expect(apiFetch).not.toHaveBeenCalledWith('/runs/run-builtin-ai/ai-assists', { cache: 'no-store' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('uses shared row primitives for fallback Run Details entity rows', async () => {
     const apiFetch = vi.fn((url) => {
       if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
@@ -1063,6 +1399,13 @@ describe('history panel actions', () => {
     })
 
     const row = document.querySelector('[data-history-run-entity-id="ent_1"]')
+    const panel = document.querySelector('.history-run-entity-panel')
+    const list = document.querySelector('.history-run-entity-list')
+    expect(panel).not.toBeNull()
+    expect(list).not.toBeNull()
+    expect(document.getElementById('history-run-body').classList.contains('history-run-body-entities')).toBe(true)
+    expect(list.classList.contains('nice-scroll')).toBe(true)
+    expect(panel.contains(row)).toBe(true)
     expect(row.classList.contains('chrome-row')).toBe(true)
     expect(row.classList.contains('chrome-row-clickable')).toBe(true)
     expect(row.classList.contains('history-run-list-item')).toBe(false)

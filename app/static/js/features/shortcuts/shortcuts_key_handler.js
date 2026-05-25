@@ -5,7 +5,6 @@
 document.addEventListener('keydown', e => {
   if (e.key !== '?') return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  if (typeof _welcomeActive !== 'undefined' && _welcomeActive) return;
   const ae = document.activeElement;
   if (ae) {
     const tag = (ae.tagName || '').toLowerCase();
@@ -28,6 +27,15 @@ document.addEventListener('keydown', e => {
   }
   e.preventDefault();
   e.stopImmediatePropagation();
+  if (
+    typeof _welcomeActive !== 'undefined' && _welcomeActive
+    && typeof activeTabId !== 'undefined'
+    && typeof welcomeOwnsTab === 'function'
+    && welcomeOwnsTab(activeTabId)
+    && typeof requestWelcomeSettle === 'function'
+  ) {
+    requestWelcomeSettle(activeTabId);
+  }
   if (typeof isShortcutsOverlayOpen === 'function' && isShortcutsOverlayOpen()) {
     closeShortcuts();
   } else {

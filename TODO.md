@@ -19,7 +19,6 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
   - [Workflows v2 — playbooks with parameters](#workflows-v2--playbooks-with-parameters)
   - [Multi-operator / team mode](#multi-operator--team-mode)
   - [Run replay / scrubbable event stream](#run-replay--scrubbable-event-stream)
-  - [AI-assisted output summary and next-command suggestion](#ai-assisted-output-summary-and-next-command-suggestion)
   - [Tool-specific guidance](#tool-specific-guidance)
   - [Command catalog future-state](#command-catalog-future-state)
   - [Command outcome summaries](#command-outcome-summaries)
@@ -40,11 +39,13 @@ This file tracks open work, feature enhancements, known issues, technical debt, 
 
 ## Open TODOs
 
-No open TODOs are currently tracked.
+No Open TODOs are currently tracked.
+
+---
 
 ## Known Issues
 
-No known issues are currently tracked.
+- Synthetic post-filter `grep` treats quoted patterns that begin with `-` as unsupported flags, so commands such as `man nmap | grep '-script'` fall out of the safe pipe-helper path and hit the shell-operator denial. Add support for `grep -- -pattern` and `grep -e '-pattern'` while keeping the synthetic grep helper limited to safe app-native filtering.
 
 ---
 
@@ -136,11 +137,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 - Turn completed runs into replayable structured event logs, building on the Structured Output Model.
 - Support a scrub timeline, bookmarks, per-line comments, and command-by-command playback.
 - Keep replay integrated with findings, Atlas entities, summaries, and run comparison rather than treating it as a separate asciinema-style recording.
-
-### AI-assisted output summary and next-command suggestion
-- Research an optional assistant layer that uses recent run output plus project context to summarize what happened and suggest likely next commands.
-- Keep it self-hosted-LLM-friendly because security operators often care about where output and target context are sent.
-- Use the Structured Output Model as the substrate so summaries can reason over findings, entities, command roots, projects, and prior run context instead of raw transcript text alone.
 
 ### Tool-specific guidance
 - Add lightweight inline notes for tools with non-obvious web-shell behavior like `mtr`, `nmap`, `naabu`, or `nuclei`.

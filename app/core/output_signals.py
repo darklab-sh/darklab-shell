@@ -116,7 +116,10 @@ _DNS_SIGNAL_ROOTS = {"dig", "host", "nslookup"}
 _CRAWL_URL_ROOTS = {"katana"}
 _PROJECTDISCOVERY_ROOTS = {"chaos", "dnsx", "httpx", "katana", "naabu", "nuclei", "subfinder"}
 _HTTPX_RESULT_RE = re.compile(r"^https?://\S+\s+\[\d{3}\](?:\s+\[[^\]]*\])*", re.I)
-_PROJECTDISCOVERY_ENTITY_NOISE_RE = re.compile(r"^\t\tprojectdiscovery\.io\s*$", re.I)
+_PROJECTDISCOVERY_ENTITY_NOISE_RE = re.compile(
+    r"^(?:\s*projectdiscovery\.io|\[INF\]\s+Using\s+Interactsh\s+Server:\s+oast\.site)\s*$",
+    re.I,
+)
 _GOBUSTER_RESULT_RE = re.compile(
     r"^\S(?:.*\S)?\s+\(Status:\s*\d{3}\)\s+\[Size:\s*\d+\](?:\s+\[-->\s+\S+\])?$",
     re.I,
@@ -153,6 +156,10 @@ _TESTSSL_FINDING_RE = re.compile(
     r"Elliptic curves offered:|Common Name \(CN\)|subjectAltName \(SAN\)|Trust \(hostname\)|"
     r"Certificate Validity \(UTC\)|Issuer\s+|HTTP Status Code|Strict Transport Security|Server banner|"
     r"Overall Grade|ROBOT\s+|Secure Renegotiation|BREACH \(CVE-|LOGJAM \(CVE-)",
+    re.I,
+)
+_TESTSSL_ENTITY_NOISE_RE = re.compile(
+    r"^(?:Using\s+OpenSSL\b.*|on\s+\S+:/opt/testssl\.sh/bin/openssl\.\S+)\s*$",
     re.I,
 )
 _SSLSCAN_FINDING_RE = re.compile(
@@ -336,7 +343,9 @@ _HOSTNAME_RE = re.compile(
 _NMAP_REPORT_TARGET_RE = re.compile(r"^Nmap scan report for\s+(.+?)(?:\s+\(([^)]+)\))?$", re.I)
 _NMAP_ENTITY_NOISE_RE = re.compile(
     r"^(?:Starting Nmap\b.*\bhttps://nmap\.org\b|"
-    r"Service detection performed\. Please report any incorrect results at https://nmap\.org/submit/ \.)",
+    r"Service detection performed\. Please report any incorrect results at https://nmap\.org/submit/ \.|"
+    r".*\bfollowing fingerprints at https://nmap\.org/cgi-bin/submit\.cgi\?new-service\b.*|"
+    r"SF:)",
     re.I,
 )
 _ENTITY_IPV4_RE = re.compile(
@@ -371,6 +380,7 @@ _ENTITY_FILELIKE_SUFFIXES = {
     "map",
     "md",
     "out",
+    "php",
     "png",
     "sqlite",
     "svg",
@@ -432,6 +442,14 @@ def _add_entity(
         item["start"] = start
         item["end"] = end
     entities.append(item)
+
+
+def _seen_entities(entities: list[dict[str, object]]) -> set[tuple[str, str]]:
+    return {
+        (str(item.get("type") or ""), str(item.get("canonical_value") or ""))
+        for item in entities
+        if isinstance(item, dict)
+    }
 
 
 def _looks_like_file_hostname(value: str) -> bool:
@@ -516,7 +534,7 @@ def extract_entities(
     for match in _ENTITY_URL_RE.finditer(stripped):
         raw_url = match.group(0)
         host = urlparse(raw_url).hostname or ""
-        if not host or _looks_like_file_hostname(host):
+        if not host or "\\" in host or _looks_like_file_hostname(host):
             continue
         try:
             canonical = canonical_domain(host)
@@ -542,7 +560,7 @@ def extract_entities(
         if _span_overlaps(url_tail_spans, match.start(), match.end()):
             continue
         raw = match.group(0).rstrip(".")
-        if _looks_like_file_hostname(raw):
+        if "\\" in raw or _looks_like_file_hostname(raw):
             continue
         try:
             canonical = canonical_domain(raw)
@@ -615,6 +633,53 @@ def _parse_shodan_dns_row(stripped: str) -> tuple[str, str, str] | None:
     if len(parts) >= 3 and parts[1].upper() in _SHODAN_DNS_RECORD_TYPES:
         return parts[0], parts[1].upper(), parts[2]
     return None
+
+
+def _nmap_report_entities(stripped: str, source_line: int | None) -> list[dict[str, object]]:
+    match = _NMAP_REPORT_TARGET_RE.match(stripped)
+    if not match:
+        return []
+
+    entities: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add_target(raw_value: str, *, start: int, end: int) -> None:
+        value = str(raw_value or "").strip().strip("[]")
+        if not value:
+            return
+        try:
+            canonical = canonical_ip(value)
+        except CanonicalizationError:
+            try:
+                canonical = canonical_domain(value)
+            except CanonicalizationError:
+                return
+            _add_entity(
+                entities,
+                seen,
+                entity_type="host",
+                value=value,
+                canonical_value=canonical,
+                source_line=source_line,
+                start=start,
+                end=end,
+            )
+            return
+        _add_entity(
+            entities,
+            seen,
+            entity_type="ip",
+            value=value,
+            canonical_value=canonical,
+            source_line=source_line,
+            start=start,
+            end=end,
+        )
+
+    add_target(match.group(1), start=match.start(1), end=match.end(1))
+    if match.group(2):
+        add_target(match.group(2), start=match.start(2), end=match.end(2))
+    return entities
 
 
 def _is_shodan_dns_text_row(stripped: str) -> bool:
@@ -875,10 +940,16 @@ def _extract_entities_for_command(
     plain = ansi_stripped_text if ansi_stripped_text is not None else _strip_ansi_codes(str(text or "")).rstrip("\n\r")
     if root in _PROJECTDISCOVERY_ROOTS and _PROJECTDISCOVERY_ENTITY_NOISE_RE.search(plain):
         return []
+    if root == "testssl" and _TESTSSL_ENTITY_NOISE_RE.search(stripped):
+        return []
     if root == "masscan" and _MASSCAN_STARTUP_RE.search(stripped):
         return []
     if root == "nmap" and _NMAP_ENTITY_NOISE_RE.search(stripped):
         return []
+    if root == "nmap":
+        nmap_report_entities = _nmap_report_entities(stripped, source_line)
+        if nmap_report_entities:
+            return nmap_report_entities
     if root == "openssl" and _is_openssl_noise(stripped):
         return []
     if root == "ffuf" and (_is_ffuf_noise(stripped) or bool(_FFUF_CONFIG_RE.search(stripped))):
@@ -896,11 +967,7 @@ def _extract_entities_for_command(
             canonical = canonical_url(result_url)
         except CanonicalizationError:
             return entities
-        seen = {
-            (str(item.get("type") or ""), str(item.get("canonical_value") or ""))
-            for item in entities
-            if isinstance(item, dict)
-        }
+        seen = _seen_entities(entities)
         start = plain.find(result_path)
         _add_entity(
             entities,
@@ -928,11 +995,7 @@ def _extract_entities_for_command(
         canonical = canonical_domain(fqdn)
     except CanonicalizationError:
         return entities
-    seen = {
-        (str(item.get("type") or ""), str(item.get("canonical_value") or ""))
-        for item in entities
-        if isinstance(item, dict)
-    }
+    seen = _seen_entities(entities)
     _add_entity(
         entities,
         seen,
@@ -1066,6 +1129,10 @@ def extract_target(command: str) -> str | None:
         target = _dns_target(tokens, root)
         return _strip_url_target(target) if target else None
 
+    if root == "dnsrecon":
+        target = _find_flag_value(tokens, {"-d", "--domain"})
+        return _strip_url_target(target) if target else None
+
     if root in {"curl", "httpx", "wafw00f"}:
         positionals = _positional_targets(
             tokens,
@@ -1079,7 +1146,11 @@ def extract_target(command: str) -> str | None:
             target = next((token for token in positionals if "." in token), "")
         return _strip_url_target(target) if target else None
 
-    if root in {"ffuf", "gobuster", "feroxbuster", "katana", "nikto", "nuclei"}:
+    if root == "nikto":
+        target = _find_flag_value(tokens, {"-h", "-u", "--url", "-target", "--target"})
+        return _strip_url_target(_FUZZ_SUFFIX_RE.sub("", target)) if target else None
+
+    if root in {"ffuf", "gobuster", "feroxbuster", "katana", "nuclei"}:
         target = _find_flag_value(tokens, {"-u", "--url", "-target", "--target"})
         return _strip_url_target(_FUZZ_SUFFIX_RE.sub("", target)) if target else None
 
@@ -1104,7 +1175,7 @@ def extract_target(command: str) -> str | None:
                 tokens,
                 skip_values_after={
                     "-p", "--ports", "--top-ports", "-oA", "-oG", "-oN", "-oX",
-                    "-iL", "--script", "--script-args", "--rate", "--timeout",
+                    "-iL", "-script", "--script", "--script-args", "--rate", "--timeout",
                     "--host-timeout",
                 },
                 skip_values_for_prefix=_NMAP_OUTPUT_PREFIX_RE,

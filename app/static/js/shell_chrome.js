@@ -2856,6 +2856,11 @@
   applyWidth();
   applySectionsState();
   renderRailRecent();
+  if (typeof ensureWorkflowCatalogLoaded === 'function') {
+    ensureWorkflowCatalogLoaded()
+      .then(items => renderRailWorkflows(items))
+      .catch(() => {});
+  }
   refreshHudActions();
   loadActiveProjectContext().catch(() => {});
 

@@ -30,6 +30,7 @@ import blueprints.assets as shell_assets
 import blueprints.history as history_routes
 import blueprints.projects as project_routes
 import config
+import core.process as process
 import services.runs.comparison as run_comparison
 import services.secrets.vault as secrets_vault
 from services.commands.builtins import execute_builtin_command
@@ -48,6 +49,12 @@ def _builtin_line_text(line: dict[str, object]) -> str:
 
 def _builtin_lines_text(lines: list[dict[str, object]]) -> str:
     return "\n".join(_builtin_line_text(line) for line in lines)
+
+
+def _ai_assist_count_for_run(run_id: str) -> int:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute("SELECT COUNT(*) FROM ai_run_assists WHERE run_id = ?", (run_id,)).fetchone()
+    return int(row[0] if row else 0)
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -4033,7 +4040,7 @@ class TestDiagRoute:
         client = self._allowed_client()
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
-        assert set(data.keys()) >= {"app", "config", "db", "redis", "broker", "pty", "assets", "tools"}
+        assert set(data.keys()) >= {"app", "config", "db", "redis", "broker", "pty", "assets", "ai", "tools"}
 
     def test_app_section_has_version_and_name(self):
         client = self._allowed_client()
@@ -4054,7 +4061,8 @@ class TestDiagRoute:
                     "high_volume_output_line_threshold", "high_volume_output_status_interval_lines",
                     "interactive_pty_input_max_bytes", "interactive_pty_control_poll_seconds",
                     "persist_full_run_output", "permalink_retention_days",
-                    "share_redaction_enabled", "custom_redaction_rule_count"):
+                    "share_redaction_enabled", "custom_redaction_rule_count",
+                    "ai_enabled", "ai_provider", "ai_model", "ai_max_queue_depth"):
             assert key in cfg, f"missing config key: {key}"
 
     def test_pty_section_contains_operator_metrics(self):
@@ -4199,6 +4207,62 @@ class TestDiagRoute:
         for label, _keys in shell_assets._DIAG_CONFIG_GROUPS:
             assert label in body, f"config group label '{label}' not rendered"
         assert "diag-config-group-label" in body
+        assert "AI Assists" in body
+        assert "data-diag-ai-test-form" in body
+
+    def test_ai_test_route_runs_prompt_and_rate_limits_repeats(self):
+        client = self._allowed_client()
+        shell_assets._DIAG_AI_TEST_LAST_BY_CLIENT.clear()
+        shell_assets._DIAG_AI_TEST_LAST_BY_CLIENT.update({
+            "198.51.100.10": 900.0,
+            "198.51.100.11": 980.0,
+        })
+        payload = {"ok": True, "payload": {"status": "ok", "message": "pong"}}
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch("blueprints.assets.ai_run_test_prompt", return_value=payload) as test_prompt:
+                with mock.patch("blueprints.assets.time.monotonic", side_effect=[999.0, 1000.0, 1001.0, 1001.0]):
+                    first = client.post("/diag/ai-test")
+                    second = client.post("/diag/ai-test")
+
+        assert first.status_code == 200
+        assert first.get_json() == payload
+        assert second.status_code == 429
+        assert "198.51.100.10" not in shell_assets._DIAG_AI_TEST_LAST_BY_CLIENT
+        assert shell_assets._DIAG_AI_TEST_LAST_BY_CLIENT["198.51.100.11"] == 980.0
+        test_prompt.assert_called_once()
+        shell_assets._DIAG_AI_TEST_LAST_BY_CLIENT.clear()
+
+    def test_ai_test_route_logs_provider_failures(self):
+        from services.ai.client import AIClientError
+
+        client = self._allowed_client()
+        shell_assets._DIAG_AI_TEST_LAST_BY_CLIENT.clear()
+        cfg = {
+            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+            "ai_provider": "openai_compatible",
+            "ai_model": "Llama-3.1-8B-Instruct",
+        }
+        with mock.patch.dict("config.CFG", cfg):
+            with mock.patch(
+                "blueprints.assets.ai_run_test_prompt",
+                side_effect=AIClientError("ai_unavailable", "provider down", status=503),
+            ):
+                with mock.patch.object(shell_assets.log, "warning") as warning:
+                    resp = client.post("/diag/ai-test")
+
+        assert resp.status_code == 502
+        assert resp.get_json()["error_code"] == "ai_unavailable"
+        warning.assert_called_once_with(
+            "AI_DIAG_TEST_FAILED",
+            extra={
+                "ip": "127.0.0.1",
+                "provider": "openai_compatible",
+                "model": "Llama-3.1-8B-Instruct",
+                "error_code": "ai_unavailable",
+                "status": 503,
+            },
+        )
+        shell_assets._DIAG_AI_TEST_LAST_BY_CLIENT.clear()
 
     def test_db_section_ok_and_has_counts(self):
         client = self._allowed_client()
@@ -8597,6 +8661,272 @@ class TestHistoryRoute:
         client = get_client()
         resp = client.get("/history/nonexistent-run-id")
         assert resp.status_code == 404
+
+    def test_ai_summary_routes_enqueue_and_list_session_scoped_assists(self):
+        from services.ai import assists as ai_assists
+
+        client = get_client()
+        session = "ai-route-session"
+        other_session = "ai-route-other"
+        run_id = "run-ai-route"
+        active_run_id = "run-ai-active"
+        no_context_run_id = "run-ai-no-context"
+        guard_run_id = "run-ai-guards"
+        output_rows = [
+            {"text": "Starting scan for darklab.sh with several useful details", "cls": "", "tsC": "", "tsE": ""},
+            {"text": "443/tcp open https and 80/tcp open http were detected", "cls": "", "tsC": "", "tsE": ""},
+            {"text": "The next useful step is to inspect TLS and response headers", "cls": "", "tsC": "", "tsE": ""},
+        ]
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+                    "VALUES (?, ?, 'external', 'nmap -sV darklab.sh', ?, ?, 0, ?, ?)",
+                    (
+                        run_id,
+                        session,
+                        "2026-05-23T11:00:00+00:00",
+                        "2026-05-23T11:00:02+00:00",
+                        json.dumps(output_rows),
+                        len(output_rows),
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, run_kind, command, started, output_preview, output_line_count) "
+                    "VALUES (?, ?, 'external', 'sleep 30', ?, ?, 1)",
+                    (active_run_id, session, "2026-05-23T11:00:00+00:00", json.dumps(output_rows[:1])),
+                )
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+                    "VALUES (?, ?, 'external', 'true', ?, ?, 0, ?, 1)",
+                    (
+                        no_context_run_id,
+                        session,
+                        "2026-05-23T11:00:00+00:00",
+                        "2026-05-23T11:00:01+00:00",
+                        json.dumps([{"text": "ok", "cls": "", "tsC": "", "tsE": ""}]),
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO runs "
+                    "(id, session_id, run_kind, command, started, finished, exit_code, output_preview, output_line_count) "
+                    "VALUES (?, ?, 'external', 'nmap darklab.sh', ?, ?, 0, ?, ?)",
+                    (
+                        guard_run_id,
+                        session,
+                        "2026-05-23T11:00:00+00:00",
+                        "2026-05-23T11:00:02+00:00",
+                        json.dumps(output_rows),
+                        len(output_rows),
+                    ),
+                )
+                conn.commit()
+
+            with mock.patch.dict(config.CFG, {
+                "ai_enabled": True,
+                "ai_feature_summary": True,
+                "ai_feature_next_commands": True,
+                "ai_model": "llama3.1:8b",
+                "ai_max_input_chars": 8000,
+                "ai_rate_limit_per_session_hour": 20,
+                "ai_rate_limit_global_per_minute": 20,
+                "share_redaction_enabled": False,
+            }), mock.patch.object(process, "redis_client", process._FakeRedisClient()):
+                with mock.patch.object(ai_assists.log, "info") as info_log:
+                    queued = client.post(f"/runs/{run_id}/ai-summary", json={}, headers={"X-Session-ID": session})
+                    suggested = client.post(f"/runs/{run_id}/ai-next-commands", json={}, headers={"X-Session-ID": session})
+                    enqueue_log_count = info_log.call_count
+                missing_summary_session = client.post(f"/runs/{run_id}/ai-summary", json={})
+                missing_next_session = client.post(f"/runs/{run_id}/ai-next-commands", json={})
+                listed = client.get(f"/runs/{run_id}/ai-assists", headers={"X-Session-ID": session})
+                cross = client.get(f"/runs/{run_id}/ai-assists", headers={"X-Session-ID": other_session})
+                active = client.post(f"/runs/{active_run_id}/ai-summary", json={}, headers={"X-Session-ID": session})
+                invalid_body = client.post(
+                    f"/runs/{guard_run_id}/ai-summary",
+                    json=[],
+                    headers={"X-Session-ID": session},
+                )
+                with sqlite3.connect(DB_PATH) as conn:
+                    conn.execute(
+                        "UPDATE ai_run_assists SET status = 'completed', payload = ? WHERE run_id = ?",
+                        (json.dumps({"summary": "cached"}), run_id),
+                    )
+                    conn.commit()
+                with mock.patch.object(ai_assists.log, "info") as reuse_log:
+                    cached = client.post(f"/runs/{run_id}/ai-summary", json={}, headers={"X-Session-ID": session})
+                    forced = client.post(f"/runs/{run_id}/ai-summary", json={"force": True}, headers={"X-Session-ID": session})
+
+                guard_cases = []
+                base_guard_cfg = {
+                    "ai_enabled": True,
+                    "ai_feature_summary": True,
+                    "ai_feature_next_commands": True,
+                    "ai_model": "llama3.1:8b",
+                    "ai_max_input_chars": 8000,
+                    "ai_rate_limit_per_session_hour": 20,
+                    "ai_rate_limit_global_per_minute": 20,
+                    "diagnostics_allowed_cidrs": [],
+                    "share_redaction_enabled": False,
+                }
+                for cfg_patch, path, expected_status, expected_error in (
+                    (
+                        {"ai_enabled": False},
+                        f"/runs/{guard_run_id}/ai-summary",
+                        403,
+                        "ai_disabled",
+                    ),
+                    (
+                        {"ai_enabled": True, "ai_feature_summary": False},
+                        f"/runs/{guard_run_id}/ai-summary",
+                        403,
+                        "ai_feature_disabled",
+                    ),
+                    (
+                        {"ai_enabled": True, "ai_feature_next_commands": False},
+                        f"/runs/{guard_run_id}/ai-next-commands",
+                        403,
+                        "ai_feature_disabled",
+                    ),
+                ):
+                    with mock.patch.dict(config.CFG, {**base_guard_cfg, **cfg_patch}, clear=False), \
+                         mock.patch.object(process, "redis_client", process._FakeRedisClient()):
+                        guard_cases.append((expected_status, expected_error, client.post(
+                            path,
+                            json={},
+                            headers={"X-Session-ID": session},
+                        )))
+                busy_lock = mock.MagicMock()
+                busy_lock.__enter__.return_value = False
+                busy_lock.__exit__.return_value = False
+                with mock.patch.dict(config.CFG, base_guard_cfg, clear=False), \
+                     mock.patch.object(process, "redis_client", process._FakeRedisClient()), \
+                     mock.patch.object(ai_assists, "enqueue_lock", return_value=busy_lock):
+                    guard_cases.append((429, "ai_busy", client.post(
+                        f"/runs/{guard_run_id}/ai-summary",
+                        json={},
+                        headers={"X-Session-ID": session},
+                    )))
+                with mock.patch.dict(config.CFG, base_guard_cfg, clear=False), \
+                     mock.patch.object(process, "redis_client", None):
+                    guard_cases.append((503, "ai_unavailable", client.post(
+                        f"/runs/{guard_run_id}/ai-summary",
+                        json={},
+                        headers={"X-Session-ID": session},
+                    )))
+                with mock.patch.dict(config.CFG, {
+                    **base_guard_cfg,
+                    "ai_rate_limit_per_session_hour": 1,
+                }, clear=False), mock.patch.object(process, "redis_client", process._FakeRedisClient()):
+                    rate_first = client.post(
+                        f"/runs/{guard_run_id}/ai-summary",
+                        json={},
+                        headers={"X-Session-ID": session},
+                    )
+                    rate_limited = client.post(
+                        f"/runs/{guard_run_id}/ai-summary",
+                        json={},
+                        headers={"X-Session-ID": session},
+                    )
+                with mock.patch.dict(config.CFG, base_guard_cfg, clear=False), \
+                     mock.patch.object(process, "redis_client", process._FakeRedisClient()), \
+                     mock.patch.object(ai_assists, "build_run_context", return_value=mock.Mock(useful=False)):
+                    no_context = client.post(
+                        f"/runs/{no_context_run_id}/ai-summary",
+                        json={},
+                        headers={"X-Session-ID": session},
+                    )
+
+            queued_payload = json.loads(queued.data)
+            suggested_payload = json.loads(suggested.data)
+            listed_payload = json.loads(listed.data)
+            cached_payload = json.loads(cached.data)
+            forced_payload = json.loads(forced.data)
+            assert queued.status_code == 202
+            assert queued_payload["assist"]["status"] == "queued"
+            assert queued_payload["assist"]["variant"] == "summary"
+            assert suggested.status_code == 202
+            assert suggested_payload["assist"]["status"] == "queued"
+            assert suggested_payload["assist"]["variant"] == "next_commands"
+            assert missing_summary_session.status_code == 401
+            assert json.loads(missing_summary_session.data)["error"] == "session_required"
+            assert missing_next_session.status_code == 401
+            assert json.loads(missing_next_session.data)["error"] == "session_required"
+            assert listed.status_code == 200
+            assert {assist["id"] for assist in listed_payload["assists"]} == {
+                queued_payload["assist"]["id"],
+                suggested_payload["assist"]["id"],
+            }
+            assert cross.status_code == 404
+            assert active.status_code == 409
+            assert json.loads(active.data)["error"] == "ai_run_active"
+            assert invalid_body.status_code == 400
+            assert json.loads(invalid_body.data)["error"] == "invalid_body"
+            for expected_status, expected_error, response in guard_cases:
+                assert response.status_code == expected_status
+                assert json.loads(response.data)["error"] == expected_error
+            assert rate_first.status_code == 202
+            assert rate_limited.status_code == 429
+            assert json.loads(rate_limited.data)["error"] == "ai_rate_limited"
+            assert no_context.status_code == 422
+            assert json.loads(no_context.data)["error"] == "ai_no_context"
+            assert _ai_assist_count_for_run(no_context_run_id) == 0
+            assert _ai_assist_count_for_run(guard_run_id) == 1
+            assert cached.status_code == 200
+            assert cached_payload["assist"]["id"] == queued_payload["assist"]["id"]
+            assert forced.status_code == 202
+            assert forced_payload["assist"]["id"] != queued_payload["assist"]["id"]
+            assert forced_payload["assist"]["status"] == "queued"
+            assert enqueue_log_count == 2
+            reuse_events = [
+                (call.args[0], call.kwargs["extra"])
+                for call in reuse_log.call_args_list
+            ]
+            assert [event for event, _extra in reuse_events] == ["AI_ASSIST_ENQUEUE_RESULT"] * 2
+            assert reuse_events[0][1] == {
+                "assist_id": queued_payload["assist"]["id"],
+                "run_id": run_id,
+                "session": session,
+                "variant": "summary",
+                "status": "completed",
+                "inserted": False,
+                "force": False,
+                "model": "llama3.1:8b",
+                "prompt_version": "ai-assist-v1",
+                "prompt_version_source": "canonical",
+                "input_chars": mock.ANY,
+                "estimated_input_tokens": mock.ANY,
+                "redacted_bytes": 0,
+                "pre_redaction_bytes": mock.ANY,
+            }
+            assert reuse_events[1][1] == {
+                "assist_id": forced_payload["assist"]["id"],
+                "run_id": run_id,
+                "session": session,
+                "variant": "summary",
+                "status": "queued",
+                "inserted": True,
+                "force": True,
+                "model": "llama3.1:8b",
+                "prompt_version": "ai-assist-v1",
+                "prompt_version_source": "canonical",
+                "input_chars": mock.ANY,
+                "estimated_input_tokens": mock.ANY,
+                "redacted_bytes": 0,
+                "pre_redaction_bytes": mock.ANY,
+            }
+        finally:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    "DELETE FROM ai_run_assists WHERE run_id IN (?, ?, ?, ?)",
+                    (run_id, active_run_id, no_context_run_id, guard_run_id),
+                )
+                conn.execute(
+                    "DELETE FROM runs WHERE id IN (?, ?, ?, ?)",
+                    (run_id, active_run_id, no_context_run_id, guard_run_id),
+                )
+                conn.commit()
 
     def test_history_respects_panel_limit_and_sorts_newest_first(self):
         client = get_client()

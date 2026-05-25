@@ -13,6 +13,15 @@ let _historyRunModalState = {
   entitiesPagination: null,
   activeEntityTab: 'ip',
   projectState: null,
+  aiAssists: [],
+  aiAssistsLoaded: false,
+  loadingAiAssists: false,
+  aiSummarySubmitting: false,
+  aiNextSubmitting: false,
+  aiSummaryError: '',
+  aiNextError: '',
+  aiAssistPollTimer: null,
+  aiThinkingStartedAt: 0,
   activeTab: 'summary',
   loadingDetails: false,
   loadingFindings: false,
@@ -24,6 +33,22 @@ let _historyRunModalState = {
 let _historyRunModalToken = 0;
 const HISTORY_RUN_FINDINGS_PAGE_LIMIT = 50;
 const HISTORY_RUN_ENTITIES_PAGE_LIMIT = 50;
+const HISTORY_RUN_OUTPUT_OUTLINE_LIMIT = 16;
+const HISTORY_RUN_AI_ASSIST_POLL_MS = 2000;
+const HISTORY_RUN_AI_THINKING_PHRASES = [
+  'Reading the signal map',
+  'Checking the noisy bits',
+  'Weighing the findings',
+  'Tracing tool signals',
+  'Sorting the evidence',
+  'Checking command context',
+  'Looking for contradictions',
+  'Compressing the highlights',
+  'Cross-checking findings',
+  'Normalizing the odd bits',
+  'Preparing the summary',
+  'Tightening the summary',
+];
 
 function _historyRunCountLabel(count, singular, plural) {
   const numeric = Math.max(0, Number(count || 0));
@@ -45,7 +70,7 @@ function _ensureHistoryRunOverlay() {
   overlay.id = 'history-run-overlay';
   overlay.className = 'modal-overlay mobile-sheet-overlay u-hidden history-run-overlay';
   overlay.innerHTML = `
-    <section id="history-run-modal" class="history-run-modal mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="history-run-title">
+    <section id="history-run-modal" class="history-run-modal mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="history-run-title" tabindex="-1">
       <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close run details"></div>
       <div class="history-run-header surface-header">
         <div class="history-run-heading">
@@ -130,8 +155,30 @@ function _ensureHistoryRunOverlay() {
       void _handleHistoryRunExport(String(exportAction.dataset.historyRunExport || ''));
       return;
     }
+    const suggestionCopy = e.target.closest?.('[data-history-run-copy-suggestion]');
+    if (suggestionCopy) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (suggestionCopy.disabled) return;
+      const command = String(suggestionCopy.dataset.historyRunCopySuggestion || '');
+      if (!command) return;
+      copyTextToClipboard(command)
+        .then(() => showToast('Suggested command copied'))
+        .catch(() => showToast('Failed to copy suggestion', 'error'));
+      return;
+    }
+    const suggestionRun = e.target.closest?.('[data-history-run-run-suggestion]');
+    if (suggestionRun) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (suggestionRun.disabled) return;
+      _runHistoryRunSuggestedCommand(String(suggestionRun.dataset.historyRunRunSuggestion || ''));
+      return;
+    }
     const action = e.target.closest?.('[data-history-run-action]');
     if (action) {
+      e.preventDefault();
+      e.stopPropagation();
       _closeHistoryRunActionMenus();
       _handleHistoryRunModalAction(String(action.dataset.historyRunAction || ''));
     }
@@ -164,6 +211,7 @@ function closeHistoryRunOverlay() {
   overlay.setAttribute('aria-hidden', 'true');
   window.syncModalOverlayState?.();
   _historyRunModalToken += 1;
+  _stopHistoryRunAiAssistPolling();
   _closeHistoryRunActionMenus();
 }
 
@@ -173,6 +221,9 @@ function _openHistoryRunOverlay() {
   overlay.classList.add('open');
   overlay.setAttribute('aria-hidden', 'false');
   window.syncModalOverlayState?.();
+  setTimeout(() => {
+    overlay.querySelector('#history-run-modal')?.focus({ preventScroll: true });
+  }, 0);
 }
 
 function isHistoryRunOverlayOpen() {
@@ -189,7 +240,7 @@ function _setHistoryRunOverlayTab(tabId, { focus = false } = {}) {
   _historyRunModalState.activeTab = nextTab;
   _renderHistoryRunModal();
   if (focus) {
-    window.setTimeout(() => {
+    setTimeout(() => {
       overlay.querySelector(tabSelector)?.focus({ preventScroll: true });
     }, 0);
   }
@@ -273,7 +324,113 @@ function _historyRunActionButton(label, action, { disabled = false, tone = 'seco
   return btn;
 }
 
+function _historyRunAiSummaryEnabled() {
+  return !!(
+    APP_CONFIG
+    && APP_CONFIG.ai_enabled
+    && APP_CONFIG.ai_feature_summary
+  );
+}
+
+function _historyRunAiNextCommandsEnabled() {
+  return !!(
+    APP_CONFIG
+    && APP_CONFIG.ai_enabled
+    && APP_CONFIG.ai_feature_next_commands
+  );
+}
+
+function _historyRunAiRunSuggestionsEnabled() {
+  return !!(
+    APP_CONFIG
+    && APP_CONFIG.ai_enabled
+    && APP_CONFIG.ai_feature_next_commands
+    && APP_CONFIG.ai_feature_run_suggestions
+  );
+}
+
+function _historyRunAiEnabled() {
+  return _historyRunAiSummaryEnabled() || _historyRunAiNextCommandsEnabled();
+}
+
+function _historyRunLatestSummaryAssist() {
+  const assists = Array.isArray(_historyRunModalState.aiAssists) ? _historyRunModalState.aiAssists : [];
+  return assists.find(item => item && String(item.variant || '') === 'summary') || null;
+}
+
+function _historyRunLatestNextCommandsAssist() {
+  const assists = Array.isArray(_historyRunModalState.aiAssists) ? _historyRunModalState.aiAssists : [];
+  return assists.find(item => item && String(item.variant || '') === 'next_commands') || null;
+}
+
+function _historyRunAssistPending(assist) {
+  const status = String(assist?.status || '').toLowerCase();
+  return status === 'queued' || status === 'in_progress';
+}
+
+function _historyRunAnyAiAssistPending() {
+  const assists = Array.isArray(_historyRunModalState.aiAssists) ? _historyRunModalState.aiAssists : [];
+  return assists.some((assist) => {
+    return _historyRunAssistPending(assist);
+  });
+}
+
+function _historyRunAssistStatusLabel(status) {
+  const normalized = String(status || '').toLowerCase();
+  if (normalized === 'in_progress') return 'Working';
+  if (normalized === 'queued') return 'Queued';
+  if (normalized === 'completed') return 'Ready';
+  if (normalized === 'failed') return 'Failed';
+  return normalized || 'Unknown';
+}
+
+function _historyRunAiThinkingPhrase(now = Date.now()) {
+  if (!_historyRunModalState.aiThinkingStartedAt) {
+    _historyRunModalState.aiThinkingStartedAt = now;
+  }
+  const elapsed = Math.max(0, now - Number(_historyRunModalState.aiThinkingStartedAt || now));
+  const index = Math.floor(elapsed / HISTORY_RUN_AI_ASSIST_POLL_MS) % HISTORY_RUN_AI_THINKING_PHRASES.length;
+  return HISTORY_RUN_AI_THINKING_PHRASES[index] || HISTORY_RUN_AI_THINKING_PHRASES[0];
+}
+
+function _historyRunAiThinkingNode() {
+  const wrap = document.createElement('span');
+  wrap.className = 'history-run-ai-thinking';
+  wrap.setAttribute('aria-label', 'AI assist is processing');
+  const phrase = document.createElement('span');
+  phrase.className = 'history-run-ai-thinking-phrase';
+  phrase.textContent = _historyRunAiThinkingPhrase();
+  wrap.appendChild(phrase);
+  const dots = document.createElement('span');
+  dots.className = 'history-run-ai-thinking-dots';
+  dots.setAttribute('aria-hidden', 'true');
+  dots.textContent = '...';
+  wrap.appendChild(dots);
+  return wrap;
+}
+
+function _historyRunAiProgressText(assist, fallbackText) {
+  const progress = assist && assist.progress && typeof assist.progress === 'object' ? assist.progress : {};
+  const parts = [];
+  const phase = String(progress.phase || '').replace(/_/g, ' ').trim();
+  parts.push(phase ? phase.charAt(0).toUpperCase() + phase.slice(1) : fallbackText);
+  const elapsedMs = Number(progress.elapsed_ms || 0);
+  if (elapsedMs > 0) parts.push(`${Math.max(1, Math.round(elapsedMs / 1000))}s elapsed`);
+  const tokens = Number(progress.tokens_seen || 0);
+  if (tokens > 0) {
+    parts.push(`${tokens.toLocaleString()} tokens`);
+  } else {
+    const chars = Number(progress.output_chars_seen || 0);
+    if (chars > 0) parts.push(`${chars.toLocaleString()} chars`);
+  }
+  return parts.join(' · ');
+}
+
 function _historyRunCanOpenAtlas(run = _historyRunPrimary()) {
+  return String(run?.run_kind || 'external') !== 'builtin';
+}
+
+function _historyRunCanUseAi(run = _historyRunPrimary()) {
   return String(run?.run_kind || 'external') !== 'builtin';
 }
 
@@ -436,9 +593,9 @@ function _historyRunSectionHeader(title, action = null) {
   return header;
 }
 
-function _historyRunField(label, content) {
+function _historyRunField(label, content, options = {}) {
   const row = document.createElement('div');
-  row.className = 'history-run-field';
+  row.className = `history-run-field${options.className ? ` ${options.className}` : ''}`;
   const key = document.createElement('span');
   key.className = 'history-run-field-label';
   key.textContent = label;
@@ -451,6 +608,253 @@ function _historyRunField(label, content) {
   }
   row.append(key, value);
   return row;
+}
+
+function _renderHistoryRunAiSummary(body) {
+  if (!_historyRunAiSummaryEnabled()) return;
+  const run = _historyRunPrimary();
+  if (!run || !run.id || !run.finished || !_historyRunCanUseAi(run)) return;
+  const assist = _historyRunLatestSummaryAssist();
+  const status = String(assist?.status || '').toLowerCase();
+  const busy = !!_historyRunModalState.loadingAiAssists
+    || !!_historyRunModalState.aiSummarySubmitting
+    || !!_historyRunModalState.aiNextSubmitting
+    || _historyRunAnyAiAssistPending();
+  const canRequest = !busy && status !== 'queued' && status !== 'in_progress';
+
+  const action = _historyRunActionButton(
+    status === 'failed' ? 'Retry' : assist ? 'Refresh' : 'Summarize',
+    'ai-summary',
+    { disabled: !canRequest },
+  );
+  const section = document.createElement('div');
+  section.className = 'history-run-section history-run-ai-summary';
+  section.appendChild(_historyRunSectionHeader('AI summary', action));
+
+  const fields = document.createElement('div');
+  fields.className = 'history-run-field-list';
+  const statusBadge = document.createElement('span');
+  statusBadge.className = status === 'completed'
+    ? 'badge badge-tone-green'
+    : status === 'failed'
+      ? 'badge badge-tone-red'
+      : 'badge badge-tone-muted';
+  statusBadge.textContent = busy && !assist ? 'Loading' : _historyRunAssistStatusLabel(status);
+  fields.appendChild(_historyRunField('Status', statusBadge));
+
+  if (_historyRunModalState.aiSummaryError) {
+    const error = document.createElement('div');
+    error.className = 'history-run-notice is-error';
+    error.textContent = _historyRunModalState.aiSummaryError;
+    fields.appendChild(_historyRunField('Message', error));
+  }
+  if (status === 'completed') {
+    const payload = assist && assist.payload && typeof assist.payload === 'object' ? assist.payload : {};
+    const summaryText = String(payload.summary || '').trim();
+    if (summaryText) {
+      const summaryNode = document.createElement('p');
+      summaryNode.className = 'history-run-ai-summary-copy';
+      summaryNode.textContent = summaryText;
+      fields.appendChild(_historyRunField('Summary', summaryNode));
+    }
+    const keyFindings = Array.isArray(payload.key_findings) ? payload.key_findings : [];
+    if (keyFindings.length) {
+      const list = document.createElement('ul');
+      list.className = 'history-run-ai-list';
+      keyFindings.slice(0, 6).forEach((item) => {
+        const li = document.createElement('li');
+        li.textContent = String(item || '');
+        list.appendChild(li);
+      });
+      fields.appendChild(_historyRunField('Signals', list));
+    }
+    const hint = String(payload.next_steps_hint || '').trim();
+    if (hint) fields.appendChild(_historyRunField('Next', hint));
+    if (!summaryText && !keyFindings.length && !hint) {
+      const empty = document.createElement('span');
+      empty.className = 'history-run-muted';
+      empty.textContent = 'No summary text was returned.';
+      fields.appendChild(_historyRunField('Summary', empty));
+    }
+  } else if (status === 'queued' || status === 'in_progress') {
+    const pending = document.createElement('span');
+    pending.className = 'history-run-muted';
+    pending.textContent = status === 'queued'
+      ? 'The AI worker has this run queued.'
+      : _historyRunAiProgressText(assist, 'The AI worker is summarizing this run.');
+    fields.appendChild(_historyRunField('Progress', pending));
+    fields.appendChild(_historyRunField('Thinking', _historyRunAiThinkingNode()));
+  } else if (status === 'failed') {
+    const message = document.createElement('div');
+    message.className = 'history-run-notice is-error';
+    message.textContent = assist.error_message || assist.error_code || 'The summary could not be generated.';
+    fields.appendChild(_historyRunField('Message', message));
+  } else if (_historyRunModalState.loadingAiAssists) {
+    const loading = document.createElement('span');
+    loading.className = 'history-run-muted';
+    loading.textContent = 'Checking cached assists...';
+    fields.appendChild(_historyRunField('Summary', loading));
+  } else {
+    const empty = document.createElement('span');
+    empty.className = 'history-run-muted';
+    empty.textContent = 'No AI summary has been generated for this run.';
+    fields.appendChild(_historyRunField('Summary', empty));
+  }
+
+  section.appendChild(fields);
+  body.appendChild(section);
+}
+
+function _renderHistoryRunAiNextCommands(body) {
+  if (!_historyRunAiNextCommandsEnabled()) return;
+  const run = _historyRunPrimary();
+  if (!run || !run.id || !run.finished || !_historyRunCanUseAi(run)) return;
+  const assist = _historyRunLatestNextCommandsAssist();
+  const status = String(assist?.status || '').toLowerCase();
+  const busy = !!_historyRunModalState.loadingAiAssists
+    || !!_historyRunModalState.aiSummarySubmitting
+    || !!_historyRunModalState.aiNextSubmitting
+    || _historyRunAnyAiAssistPending();
+  const canRequest = !busy && status !== 'queued' && status !== 'in_progress';
+  const action = _historyRunActionButton(
+    status === 'failed' ? 'Retry' : assist ? 'Refresh' : 'Suggest',
+    'ai-next-commands',
+    { disabled: !canRequest },
+  );
+  const section = document.createElement('div');
+  section.className = 'history-run-section history-run-ai-next-commands';
+  section.appendChild(_historyRunSectionHeader('AI next commands', action));
+
+  const fields = document.createElement('div');
+  fields.className = 'history-run-field-list';
+  const statusBadge = document.createElement('span');
+  statusBadge.className = status === 'completed'
+    ? 'badge badge-tone-green'
+    : status === 'failed'
+      ? 'badge badge-tone-red'
+      : 'badge badge-tone-muted';
+  statusBadge.textContent = busy && !assist ? 'Loading' : _historyRunAssistStatusLabel(status);
+  fields.appendChild(_historyRunField('Status', statusBadge));
+
+  if (_historyRunModalState.aiNextError) {
+    const error = document.createElement('div');
+    error.className = 'history-run-notice is-error';
+    error.textContent = _historyRunModalState.aiNextError;
+    fields.appendChild(_historyRunField('Message', error));
+  }
+  if (status === 'completed') {
+    const payload = assist && assist.payload && typeof assist.payload === 'object' ? assist.payload : {};
+    const suggestions = Array.isArray(payload.suggestions) ? payload.suggestions : [];
+    const accepted = suggestions.filter(item => String(item?.validation_result || '') === 'accepted');
+    const blocked = suggestions.filter(item => String(item?.validation_result || '') !== 'accepted');
+    if (accepted.length) {
+      const list = document.createElement('div');
+      list.className = 'history-run-ai-suggestion-list';
+      accepted.forEach(suggestion => list.appendChild(_historyRunAiSuggestionCard(suggestion)));
+      fields.appendChild(_historyRunField('Suggestions', list, { className: 'history-run-ai-suggestion-field' }));
+    } else if (blocked.length) {
+      const empty = document.createElement('span');
+      empty.className = 'history-run-muted';
+      empty.textContent = 'No safe command suggestions passed validation.';
+      fields.appendChild(_historyRunField('Suggestions', empty));
+    } else {
+      const empty = document.createElement('span');
+      empty.className = 'history-run-muted';
+      empty.textContent = 'No command suggestions were returned.';
+      fields.appendChild(_historyRunField('Suggestions', empty));
+    }
+    if (blocked.length) {
+      const blockedList = document.createElement('div');
+      blockedList.className = 'history-run-ai-suggestion-list';
+      blocked.forEach(suggestion => blockedList.appendChild(_historyRunAiSuggestionCard(suggestion)));
+      fields.appendChild(_historyRunField('Blocked', blockedList, { className: 'history-run-ai-suggestion-field' }));
+    }
+  } else if (status === 'queued' || status === 'in_progress') {
+    const pending = document.createElement('span');
+    pending.className = 'history-run-muted';
+    pending.textContent = status === 'queued'
+      ? 'The AI worker has next-command suggestions queued.'
+      : _historyRunAiProgressText(assist, 'The AI worker is drafting next commands.');
+    fields.appendChild(_historyRunField('Progress', pending));
+    fields.appendChild(_historyRunField('Thinking', _historyRunAiThinkingNode()));
+  } else if (status === 'failed') {
+    const message = document.createElement('div');
+    message.className = 'history-run-notice is-error';
+    message.textContent = assist.error_message || assist.error_code || 'Suggestions could not be generated.';
+    fields.appendChild(_historyRunField('Message', message));
+  } else if (_historyRunModalState.loadingAiAssists) {
+    const loading = document.createElement('span');
+    loading.className = 'history-run-muted';
+    loading.textContent = 'Checking cached assists...';
+    fields.appendChild(_historyRunField('Suggestions', loading));
+  } else {
+    const empty = document.createElement('span');
+    empty.className = 'history-run-muted';
+    empty.textContent = 'No AI next-command suggestions have been generated for this run.';
+    fields.appendChild(_historyRunField('Suggestions', empty));
+  }
+
+  section.appendChild(fields);
+  body.appendChild(section);
+}
+
+function _historyRunAiSuggestionCard(suggestion) {
+  const card = document.createElement('div');
+  card.className = 'history-run-ai-suggestion-card';
+  const command = String(suggestion && suggestion.command || '').trim();
+  const valid = String(suggestion && suggestion.validation_result || '') === 'accepted';
+  const head = document.createElement('div');
+  head.className = 'history-run-ai-suggestion-head';
+  const risk = document.createElement('span');
+  risk.className = `badge ${valid ? 'badge-tone-green' : 'badge-tone-red'}`;
+  risk.textContent = valid ? String(suggestion.risk_label || 'unknown') : 'Blocked';
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'btn btn-secondary btn-compact';
+  copy.textContent = 'Copy';
+  copy.dataset.historyRunCopySuggestion = command;
+  const run = document.createElement('button');
+  run.type = 'button';
+  run.className = 'btn btn-primary btn-compact';
+  run.textContent = 'Run';
+  run.dataset.historyRunRunSuggestion = command;
+  const actions = document.createElement('div');
+  actions.className = 'history-run-ai-suggestion-actions';
+  head.appendChild(risk);
+  if (valid && command) {
+    if (_historyRunAiRunSuggestionsEnabled()) actions.appendChild(run);
+    actions.appendChild(copy);
+    head.appendChild(actions);
+  }
+  const code = document.createElement('code');
+  code.className = 'history-run-ai-suggestion-command';
+  code.textContent = command || '(empty command)';
+  const reason = document.createElement('p');
+  reason.className = 'history-run-ai-suggestion-reason';
+  reason.textContent = valid
+    ? String(suggestion.reason || 'Suggested follow-up command.')
+    : `Rejected: ${String(suggestion.rejection_reason || 'policy_rejected')}`;
+  card.append(head, code, reason);
+  return card;
+}
+
+function _runHistoryRunSuggestedCommand(command) {
+  const cmd = String(command || '').trim();
+  if (!cmd) return;
+  if (typeof submitComposerCommand !== 'function') {
+    if (typeof setComposerValue === 'function') setComposerValue(cmd, cmd.length, cmd.length);
+    showToast('Suggested command loaded');
+    closeHistoryRunOverlay();
+    if (typeof hideHistoryPanel === 'function') hideHistoryPanel();
+    return;
+  }
+  const result = submitComposerCommand(cmd, { dismissKeyboard: true, focusAfterSubmit: true });
+  if (result === true || result === 'settle') {
+    closeHistoryRunOverlay();
+    if (typeof hideHistoryPanel === 'function') hideHistoryPanel();
+  } else {
+    showToast('Could not run suggested command', 'error');
+  }
 }
 
 function _renderHistoryRunSummary(body, run) {
@@ -486,6 +890,8 @@ function _renderHistoryRunSummary(body, run) {
   }
   summary.append(...summaryRows);
   body.appendChild(summary);
+  _renderHistoryRunAiSummary(body);
+  _renderHistoryRunAiNextCommands(body);
 
   const context = document.createElement('div');
   context.className = 'history-run-context-grid';
@@ -617,7 +1023,7 @@ function _renderHistoryOutputSummary(body, run) {
     outline.appendChild(_historyRunSectionHeader('Output outline'));
     const list = document.createElement('div');
     list.className = 'history-run-field-list history-run-output-outline-list';
-    [...outlineItems.slice(0, 8), ...signalItems.slice(0, 8)].slice(0, 12).forEach((item) => {
+    [...outlineItems, ...signalItems].slice(0, HISTORY_RUN_OUTPUT_OUTLINE_LIMIT).forEach((item) => {
       const label = `L${Number(item.line_number || 0).toLocaleString()} · ${item.signal || item.role || 'line'}`;
       list.appendChild(_historyRunField(label, String(item.text || '')));
     });
@@ -778,11 +1184,14 @@ function _renderHistoryRunEntityTabs(body) {
 
 function _renderHistoryRunEntities(body) {
   _renderHistoryRunEntityTabs(body);
+  const panel = document.createElement('div');
+  panel.className = 'history-run-entity-panel';
+  body.appendChild(panel);
   if (_historyRunModalState.loadingEntities && _historyRunModalState.entities == null) {
     const loading = document.createElement('div');
     loading.className = 'history-run-empty';
     loading.textContent = 'Loading Atlas entities...';
-    body.appendChild(loading);
+    panel.appendChild(loading);
     return;
   }
   const entities = Array.isArray(_historyRunModalState.entities) ? _historyRunModalState.entities : [];
@@ -792,16 +1201,16 @@ function _renderHistoryRunEntities(body) {
     empty.className = 'history-run-empty';
     const tab = _historyRunActiveEntityTab();
     empty.textContent = `No ${_historyRunEntityLabel(tab.type).toLowerCase()} recorded for this run.`;
-    body.appendChild(empty);
-    if (pager) body.appendChild(pager);
+    panel.appendChild(empty);
+    if (pager) panel.appendChild(pager);
     return;
   }
-  if (pager) body.appendChild(pager);
+  if (pager) panel.appendChild(pager);
   const list = document.createElement('div');
-  list.className = 'history-run-entity-list';
+  list.className = 'history-run-entity-list nice-scroll';
   entities.forEach(entity => list.appendChild(_historyRunEntityRow(entity)));
-  body.appendChild(list);
-  if (pager) body.appendChild(_renderHistoryRunEntitiesPagination(entities));
+  panel.appendChild(list);
+  if (pager) panel.appendChild(_renderHistoryRunEntitiesPagination(entities));
 }
 
 function _renderHistoryRunEntitiesPagination(entities) {
@@ -913,6 +1322,7 @@ function _renderHistoryRunModal() {
   }
   const body = overlay.querySelector('#history-run-body');
   if (!body) return;
+  body.classList.toggle('history-run-body-entities', _historyRunModalState.activeTab === 'entities');
   body.replaceChildren();
   if (_historyRunModalState.error) {
     const error = document.createElement('div');
@@ -925,6 +1335,28 @@ function _renderHistoryRunModal() {
   else if (_historyRunModalState.activeTab === 'entities') _renderHistoryRunEntities(body);
   else if (_historyRunModalState.activeTab === 'artifacts') _renderHistoryRunArtifacts(body, run);
   else _renderHistoryRunSummary(body, run);
+}
+
+function _stopHistoryRunAiAssistPolling() {
+  const timer = _historyRunModalState.aiAssistPollTimer;
+  if (timer) {
+    clearTimeout(timer);
+    _historyRunModalState.aiAssistPollTimer = null;
+  }
+}
+
+function _scheduleHistoryRunAiAssistPolling(runId, token) {
+  if (!_historyRunAiEnabled() || !_historyRunCanUseAi() || !_historyRunAnyAiAssistPending()) {
+    _stopHistoryRunAiAssistPolling();
+    return;
+  }
+  if (_historyRunModalState.aiAssistPollTimer) return;
+  const timer = setTimeout(() => {
+    _historyRunModalState.aiAssistPollTimer = null;
+    void _loadHistoryRunAIAssists(runId, token, { showLoading: false });
+  }, HISTORY_RUN_AI_ASSIST_POLL_MS);
+  if (timer && typeof timer.unref === 'function') timer.unref();
+  _historyRunModalState.aiAssistPollTimer = timer;
 }
 
 async function _loadHistoryRunDetails(runId, token) {
@@ -1319,6 +1751,153 @@ async function _loadHistoryRunProjectState(runId, token) {
   }
 }
 
+async function _loadHistoryRunAIAssists(runId, token, { showLoading = true } = {}) {
+  if (!_historyRunAiEnabled() || !_historyRunCanUseAi()) return;
+  if (showLoading) _historyRunModalState.loadingAiAssists = true;
+  _historyRunModalState.aiSummaryError = '';
+  _historyRunModalState.aiNextError = '';
+  if (showLoading) _renderHistoryRunModal();
+  try {
+    const resp = await apiFetch(`/runs/${encodeURIComponent(runId)}/ai-assists`, { cache: 'no-store' });
+    if (resp.ok === false) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    if (token !== _historyRunModalToken) return;
+    _historyRunModalState.aiAssists = Array.isArray(data.assists) ? data.assists : [];
+    _historyRunModalState.aiAssistsLoaded = true;
+  } catch (_) {
+    if (token === _historyRunModalToken) {
+      _historyRunModalState.aiAssists = [];
+      _historyRunModalState.aiAssistsLoaded = false;
+      _historyRunModalState.aiSummaryError = 'Could not load AI assists.';
+      _historyRunModalState.aiNextError = 'Could not load AI assists.';
+    }
+  } finally {
+    if (token === _historyRunModalToken) {
+      if (showLoading) _historyRunModalState.loadingAiAssists = false;
+      _renderHistoryRunModal();
+      _scheduleHistoryRunAiAssistPolling(runId, token);
+    }
+  }
+}
+
+async function _requestHistoryRunAiSummary() {
+  const run = _historyRunPrimary();
+  if (
+    !run
+    || !run.id
+    || !_historyRunAiSummaryEnabled()
+    || !_historyRunCanUseAi(run)
+    || _historyRunModalState.aiSummarySubmitting
+  ) return;
+  const currentAssist = _historyRunLatestSummaryAssist();
+  const currentStatus = String(currentAssist?.status || '').toLowerCase();
+  const force = !!currentAssist && currentStatus !== 'queued' && currentStatus !== 'in_progress';
+  const token = _historyRunModalToken;
+  _historyRunModalState.aiSummarySubmitting = true;
+  _historyRunModalState.aiSummaryError = '';
+  _renderHistoryRunModal();
+  document.getElementById('history-run-modal')?.focus({ preventScroll: true });
+  try {
+    const resp = await apiFetch(`/runs/${encodeURIComponent(run.id)}/ai-summary`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(force ? { force: true } : {}),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok === false) {
+      throw new Error(_historyRunAiResponseMessage(data, `HTTP ${resp.status}`));
+    }
+    if (token !== _historyRunModalToken) return;
+    const assist = data && data.assist && typeof data.assist === 'object' ? data.assist : null;
+    if (assist) {
+      const existing = Array.isArray(_historyRunModalState.aiAssists) ? _historyRunModalState.aiAssists : [];
+      _historyRunModalState.aiAssists = [
+        assist,
+        ...existing.filter(item => String(item && item.id || '') !== String(assist.id || '')),
+      ];
+      _historyRunModalState.aiAssistsLoaded = true;
+    }
+  } catch (error) {
+    if (token === _historyRunModalToken) {
+      _historyRunModalState.aiSummaryError = _historyRunAiErrorMessage(error, 'Could not start AI summary.');
+    }
+  } finally {
+    if (token === _historyRunModalToken) {
+      _historyRunModalState.aiSummarySubmitting = false;
+      _renderHistoryRunModal();
+      _scheduleHistoryRunAiAssistPolling(run.id, token);
+      document.getElementById('history-run-modal')?.focus({ preventScroll: true });
+    }
+  }
+}
+
+async function _requestHistoryRunAiNextCommands() {
+  const run = _historyRunPrimary();
+  if (
+    !run
+    || !run.id
+    || !_historyRunAiNextCommandsEnabled()
+    || !_historyRunCanUseAi(run)
+    || _historyRunModalState.aiNextSubmitting
+  ) return;
+  const currentAssist = _historyRunLatestNextCommandsAssist();
+  const currentStatus = String(currentAssist?.status || '').toLowerCase();
+  const force = !!currentAssist && currentStatus !== 'queued' && currentStatus !== 'in_progress';
+  const token = _historyRunModalToken;
+  _historyRunModalState.aiNextSubmitting = true;
+  _historyRunModalState.aiNextError = '';
+  _renderHistoryRunModal();
+  document.getElementById('history-run-modal')?.focus({ preventScroll: true });
+  try {
+    const resp = await apiFetch(`/runs/${encodeURIComponent(run.id)}/ai-next-commands`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(force ? { force: true } : {}),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok === false) {
+      throw new Error(_historyRunAiResponseMessage(data, `HTTP ${resp.status}`));
+    }
+    if (token !== _historyRunModalToken) return;
+    const assist = data && data.assist && typeof data.assist === 'object' ? data.assist : null;
+    if (assist) {
+      const existing = Array.isArray(_historyRunModalState.aiAssists) ? _historyRunModalState.aiAssists : [];
+      _historyRunModalState.aiAssists = [
+        assist,
+        ...existing.filter(item => String(item && item.id || '') !== String(assist.id || '')),
+      ];
+      _historyRunModalState.aiAssistsLoaded = true;
+    }
+  } catch (error) {
+    if (token === _historyRunModalToken) {
+      _historyRunModalState.aiNextError = _historyRunAiErrorMessage(error, 'Could not start AI suggestions.');
+    }
+  } finally {
+    if (token === _historyRunModalToken) {
+      _historyRunModalState.aiNextSubmitting = false;
+      _renderHistoryRunModal();
+      _scheduleHistoryRunAiAssistPolling(run.id, token);
+      document.getElementById('history-run-modal')?.focus({ preventScroll: true });
+    }
+  }
+}
+
+function _historyRunAiResponseMessage(data, fallback) {
+  if (data && typeof data === 'object') {
+    const message = String(data.message || '').trim();
+    if (message) return message;
+    const code = String(data.error || data.code || '').trim();
+    if (code) return code;
+  }
+  return String(fallback || '').trim() || 'AI request failed.';
+}
+
+function _historyRunAiErrorMessage(error, fallback) {
+  const message = String(error && error.message || '').trim();
+  if (message) return message;
+  return fallback;
+}
+
 function openHistoryRunDetails(run) {
   if (!run || !run.id) return;
   _historyRunModalToken += 1;
@@ -1347,6 +1926,14 @@ function openHistoryRunDetails(run) {
     },
     activeEntityTab: _historyRunEntityTabs()[0]?.id || 'ip',
     projectState: null,
+    aiAssists: [],
+    aiAssistsLoaded: false,
+    loadingAiAssists: false,
+    aiSummarySubmitting: false,
+    aiNextSubmitting: false,
+    aiSummaryError: '',
+    aiNextError: '',
+    aiThinkingStartedAt: 0,
     activeTab: 'summary',
     loadingDetails: false,
     loadingFindings: false,
@@ -1362,6 +1949,7 @@ function openHistoryRunDetails(run) {
   _loadHistoryRunEntitySummary(run.id, token);
   _loadHistoryRunEntities(run.id, token);
   _loadHistoryRunProjectState(run.id, token);
+  if (_historyRunCanUseAi(run)) _loadHistoryRunAIAssists(run.id, token);
 }
 
 async function _handleHistoryRunModalAction(action) {
@@ -1429,6 +2017,10 @@ async function _handleHistoryRunModalAction(action) {
         runLabel: run.command || run.label || run.id,
       });
     }
+  } else if (action === 'ai-summary') {
+    await _requestHistoryRunAiSummary();
+  } else if (action === 'ai-next-commands') {
+    await _requestHistoryRunAiNextCommands();
   } else if (action === 'add-active-project') {
     const projectState = _historyRunModalState.projectState;
     const project = projectState && projectState.project;

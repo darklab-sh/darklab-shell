@@ -40,6 +40,9 @@ _STORAGE_BUCKETS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "runs",
         "runs_fts",
         "run_output_artifacts",
+        "run_output_summary",
+        "ai_run_assists",
+        "ai_suggestion_validations",
     )),
     ("Snapshots and permalinks", (
         "snapshots",
@@ -79,6 +82,16 @@ _STORAGE_BUCKET_BY_TABLE = {
 _PAYLOAD_COLUMNS = {
     "runs": ("command", "output", "output_preview", "output_search_text"),
     "run_output_artifacts": ("rel_path", "compression"),
+    "run_output_summary": ("run_id", "family", "value"),
+    "ai_run_assists": (
+        "run_id", "session_id", "variant", "prompt_version", "model",
+        "context_hash", "status", "active_project_id", "payload",
+        "raw_model_payload", "error_code", "error_message",
+    ),
+    "ai_suggestion_validations": (
+        "assist_id", "command", "normalized_command", "risk_label",
+        "validation_result", "rejection_reason", "target",
+    ),
     "run_file_artifacts": ("workspace_path", "display_name", "kind", "content_type", "preview_type", "content_sha256"),
     "snapshots": ("label", "content"),
     "entities": ("type", "canonical_value", "signature_hash"),
