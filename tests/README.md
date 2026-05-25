@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,229
+- behavior tests: 3,231
 - docs/inventory meta-tests: 33
-- `pytest`: 1781 (1748 behavior + 33 meta)
+- `pytest`: 1783 (1750 behavior + 33 meta)
 - `vitest`: 1245
 - `playwright`: 253
-- total: 3,279
+- total: 3,281
 
 This document is organized in two parts:
 
@@ -1110,8 +1110,10 @@ Prometheus `/metrics` route, runtime collector, label, and histogram-bucket cove
 | `TestMetricsEndpoint.test_disabled_route_returns_404_even_when_allowlisted` | Verifies that `metrics_enabled: false` hides `/metrics` even for allowlisted callers. |
 | `TestMetricsEndpoint.test_allowlisted_callers_get_prometheus_text` | Verifies that allowlisted callers receive Prometheus text with the expected content type. |
 | `TestMetricsEndpoint.test_scrape_includes_runtime_gauge_families` | Verifies that scrape-time runtime gauge families render in `/metrics`. |
+| `TestMetricsEndpoint.test_scrape_includes_durable_ai_assist_queue_health` | Verifies that `/metrics` exposes durable AI assist status counts plus queued, in-progress, and heartbeat age gauges. |
+| `TestMetricsEndpoint.test_scrape_includes_postgres_pool_config_and_state` | Verifies that Postgres pool configuration and connection-state gauges render with bounded labels. |
 | `TestMetricsEndpoint.test_run_finalize_metric_uses_bounded_labels` | Verifies that completed-run metrics use command-root, run-kind, and exit-code-class labels. |
-| `TestMetricsEndpoint.test_rate_limit_and_intel_helpers_render_expected_labels` | Verifies that rate-limit, intel, DB query, history fallback, evidence package, PTY completion, and workspace eviction helper metrics render with bounded labels. |
+| `TestMetricsEndpoint.test_rate_limit_and_intel_helpers_render_expected_labels` | Verifies that rate-limit, intel, AI request, DB query, history fallback, evidence package, PTY completion, and workspace eviction helper metrics render with bounded labels. |
 | `TestMetricsDefinitionDrift.test_metric_names_use_darklab_prefix` | Verifies that every registered metric name uses the `darklab_` prefix. |
 | `TestMetricsDefinitionDrift.test_histograms_have_explicit_buckets` | Verifies that every histogram declares explicit buckets. |
 | `TestMetricsDefinitionDrift.test_labeled_metrics_have_cardinality_policies` | Verifies that every labeled metric has an explicit cardinality policy and fails on unreviewed labels. |

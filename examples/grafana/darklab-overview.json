@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "Starter operational dashboard for darklab_shell metrics exposed at /metrics. Covers active load, run/PTY/HTTP/intel latency, storage growth, rate-limit pressure, intel-provider health, evidence package builds, and FTS fallbacks. Metric source of truth: app/services/metrics/.",
+  "description": "Operational dashboard for darklab_shell metrics exposed at /metrics. Covers active load, runs, PTY, HTTP, AI assists, database/backend health, Redis/broker coordination, workspace storage, intel provider activity, evidence packages, Atlas/findings, and error telemetry. Metric source of truth: app/services/metrics/.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -245,7 +245,8 @@
           },
           "expr": "time() - max(darklab_app_start_time_seconds)",
           "refId": "A",
-          "legendFormat": ""
+          "legendFormat": "",
+          "instant": true
         }
       ],
       "fieldConfig": {
@@ -276,7 +277,7 @@
         },
         "textMode": "auto",
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto"
       }
     },
@@ -294,6 +295,246 @@
       "panels": []
     },
     {
+      "id": 94,
+      "type": "stat",
+      "title": "Runs completed in range",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum(increase(darklab_runs_finished_total[$__range]))",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 95,
+      "type": "stat",
+      "title": "Failure rate in range",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 6,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "100 * sum(increase(darklab_runs_finished_total{exit_code_class!=\"success\"}[$__range])) / clamp_min(sum(increase(darklab_runs_finished_total[$__range])), 1)",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 30
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 96,
+      "type": "stat",
+      "title": "Run duration p95 in range",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 6,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le)(increase(darklab_run_duration_seconds_bucket[$__range])))",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 97,
+      "type": "stat",
+      "title": "Truncated outputs in range",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 6,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum(increase(darklab_run_output_truncated_total[$__range]))",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
       "id": 7,
       "type": "timeseries",
       "title": "Run start rate by tool (per 5m)",
@@ -303,7 +544,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 6,
+        "y": 10,
         "w": 12,
         "h": 8
       },
@@ -362,7 +603,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 6,
+        "y": 10,
         "w": 12,
         "h": 8
       },
@@ -421,7 +662,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 14,
+        "y": 18,
         "w": 12,
         "h": 8
       },
@@ -479,7 +720,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 14,
+        "y": 18,
         "w": 12,
         "h": 8
       },
@@ -552,7 +793,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 22,
+        "y": 26,
         "w": 6,
         "h": 4
       },
@@ -600,7 +841,7 @@
       },
       "gridPos": {
         "x": 6,
-        "y": 22,
+        "y": 26,
         "w": 12,
         "h": 4
       },
@@ -658,14 +899,14 @@
     {
       "id": 13,
       "type": "stat",
-      "title": "Tool latency p95 (top 5)",
+      "title": "Average run duration by tool (top 5)",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "x": 18,
-        "y": 22,
+        "y": 26,
         "w": 6,
         "h": 4
       },
@@ -675,7 +916,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "topk(5, histogram_quantile(0.95, sum by (tool, le)(rate(darklab_run_duration_seconds_bucket[5m]))))",
+          "expr": "topk(5, sum by (tool)(rate(darklab_run_duration_seconds_sum[5m])) / clamp_min(sum by (tool)(rate(darklab_run_duration_seconds_count[5m])), 1))",
           "refId": "A",
           "legendFormat": "{{tool}}"
         }
@@ -699,7 +940,7 @@
         },
         "textMode": "value_and_name",
         "colorMode": "value",
-        "graphMode": "area",
+      "graphMode": "none",
         "justifyMode": "auto"
       }
     },
@@ -709,7 +950,7 @@
       "title": "PTY",
       "gridPos": {
         "x": 0,
-        "y": 26,
+        "y": 30,
         "w": 24,
         "h": 1
       },
@@ -726,7 +967,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 27,
+        "y": 31,
         "w": 8,
         "h": 8
       },
@@ -790,7 +1031,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 27,
+        "y": 31,
         "w": 8,
         "h": 8
       },
@@ -854,7 +1095,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 27,
+        "y": 31,
         "w": 8,
         "h": 8
       },
@@ -909,7 +1150,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 35,
+        "y": 39,
         "w": 12,
         "h": 8
       },
@@ -967,7 +1208,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 35,
+        "y": 39,
         "w": 12,
         "h": 8
       },
@@ -1027,7 +1268,7 @@
       "title": "HTTP",
       "gridPos": {
         "x": 0,
-        "y": 43,
+        "y": 47,
         "w": 24,
         "h": 1
       },
@@ -1044,7 +1285,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 44,
+        "y": 48,
         "w": 12,
         "h": 8
       },
@@ -1103,7 +1344,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 44,
+        "y": 48,
         "w": 12,
         "h": 8
       },
@@ -1172,7 +1413,7 @@
       "title": "Rate limiting",
       "gridPos": {
         "x": 0,
-        "y": 52,
+        "y": 56,
         "w": 24,
         "h": 1
       },
@@ -1189,7 +1430,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 53,
+        "y": 57,
         "w": 8,
         "h": 8
       },
@@ -1248,7 +1489,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 53,
+        "y": 57,
         "w": 8,
         "h": 8
       },
@@ -1303,7 +1544,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 53,
+        "y": 57,
         "w": 8,
         "h": 8
       },
@@ -1352,12 +1593,504 @@
       }
     },
     {
-      "id": 27,
+      "id": 76,
       "type": "row",
-      "title": "Database (SQLite)",
+      "title": "AI assists",
       "gridPos": {
         "x": 0,
-        "y": 61,
+        "y": 65,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 77,
+      "type": "timeseries",
+      "title": "AI requests by variant/status (per 5m)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 66,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (variant, status)(rate(darklab_ai_requests_total[5m]))",
+          "refId": "A",
+          "legendFormat": "{{variant}} {{status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "pointSize": 4,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 78,
+      "type": "timeseries",
+      "title": "AI provider duration p50/p95",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 66,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "histogram_quantile(0.5, sum by (status, le)(rate(darklab_ai_provider_duration_seconds_bucket[5m])))",
+          "refId": "A",
+          "legendFormat": "p50 {{status}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (status, le)(rate(darklab_ai_provider_duration_seconds_bucket[5m])))",
+          "refId": "B",
+          "legendFormat": "p95 {{status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "pointSize": 4,
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 79,
+      "type": "bargauge",
+      "title": "Durable assist rows",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 74,
+        "w": 8,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (variant, status)(darklab_ai_assist_rows)",
+          "refId": "A",
+          "legendFormat": "{{variant}} {{status}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 80,
+      "type": "timeseries",
+      "title": "Oldest assist ages",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 74,
+        "w": 8,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "max by (variant)(darklab_ai_assist_oldest_queued_age_seconds)",
+          "refId": "A",
+          "legendFormat": "queued {{variant}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "max by (variant)(darklab_ai_assist_oldest_in_progress_age_seconds)",
+          "refId": "B",
+          "legendFormat": "in progress {{variant}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "max by (variant)(darklab_ai_assist_oldest_heartbeat_age_seconds)",
+          "refId": "C",
+          "legendFormat": "heartbeat {{variant}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "pointSize": 4,
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 81,
+      "type": "stat",
+      "title": "AI in flight",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 74,
+        "w": 4,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum(darklab_ai_in_flight)",
+          "refId": "A",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 82,
+      "type": "timeseries",
+      "title": "AI cache hits (per 5m)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 74,
+        "w": 4,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (variant)(rate(darklab_ai_cache_hits_total[5m]))",
+          "refId": "A",
+          "legendFormat": "{{variant}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "pointSize": 4,
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 83,
+      "type": "timeseries",
+      "title": "Suggestion rejections by reason (per 5m)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 81,
+        "w": 12,
+        "h": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (reason)(rate(darklab_ai_suggestion_rejections_total[5m]))",
+          "refId": "A",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "pointSize": 4,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 84,
+      "type": "timeseries",
+      "title": "AI provider phase p95",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 81,
+        "w": 12,
+        "h": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (phase, le)(rate(darklab_ai_provider_phase_duration_seconds_bucket[5m])))",
+          "refId": "A",
+          "legendFormat": "{{phase}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "pointSize": 4,
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 27,
+      "type": "row",
+      "title": "Database",
+      "gridPos": {
+        "x": 0,
+        "y": 88,
         "w": 24,
         "h": 1
       },
@@ -1367,14 +2100,14 @@
     {
       "id": 28,
       "type": "stat",
-      "title": "DB file size",
+      "title": "DB/storage size",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "x": 0,
-        "y": 62,
+        "y": 89,
         "w": 6,
         "h": 4
       },
@@ -1430,71 +2163,6 @@
       }
     },
     {
-      "id": 29,
-      "type": "stat",
-      "title": "WAL size",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "gridPos": {
-        "x": 6,
-        "y": 62,
-        "w": 6,
-        "h": 4
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "expr": "darklab_db_wal_size_bytes",
-          "refId": "A",
-          "legendFormat": ""
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "bytes",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 536870912
-              },
-              {
-                "color": "red",
-                "value": 2147483648
-              }
-            ]
-          },
-          "color": {
-            "mode": "thresholds"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto"
-      }
-    },
-    {
       "id": 30,
       "type": "stat",
       "title": "Reclaimable bytes",
@@ -1503,8 +2171,8 @@
         "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
-        "x": 12,
-        "y": 62,
+        "x": 6,
+        "y": 89,
         "w": 6,
         "h": 4
       },
@@ -1560,16 +2228,16 @@
       }
     },
     {
-      "id": 31,
+      "id": 92,
       "type": "stat",
-      "title": "FTS orphans",
+      "title": "Database backend",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
-        "x": 18,
-        "y": 62,
+        "x": 12,
+        "y": 89,
         "w": 6,
         "h": 4
       },
@@ -1579,7 +2247,302 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "darklab_db_fts_orphans",
+          "expr": "max by (backend)(darklab_db_backend_info)",
+          "refId": "A",
+          "legendFormat": "{{backend}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "name",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 34,
+      "type": "timeseries",
+      "title": "DB query duration p95 by operation",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 89,
+        "w": 8,
+        "h": 14
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (operation, le)(rate(darklab_db_query_duration_seconds_bucket[5m])))",
+          "refId": "A",
+          "legendFormat": "{{operation}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "pointSize": 4,
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 32,
+      "type": "table",
+      "title": "Rows by table/relation",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 93,
+        "w": 8,
+        "h": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "darklab_db_table_rows",
+          "refId": "A",
+          "legendFormat": "",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "type": "table",
+      "title": "Allocated bytes by object",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 93,
+        "w": 8,
+        "h": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "darklab_db_table_allocated_bytes",
+          "refId": "A",
+          "legendFormat": "",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 93,
+      "type": "row",
+      "title": "SQLite details (empty on Postgres)",
+      "gridPos": {
+        "x": 0,
+        "y": 103,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 29,
+      "type": "stat",
+      "title": "SQLite WAL size",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 104,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "darklab_db_wal_size_bytes * on() group_left() darklab_db_backend_info{backend=\"sqlite\"}",
+          "refId": "A",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 536870912
+              },
+              {
+                "color": "red",
+                "value": 2147483648
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 31,
+      "type": "stat",
+      "title": "SQLite FTS orphans",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 104,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "darklab_db_fts_orphans * on() group_left() darklab_db_backend_info{backend=\"sqlite\"}",
           "refId": "A",
           "legendFormat": ""
         }
@@ -1625,177 +2588,18 @@
       }
     },
     {
-      "id": 32,
-      "type": "table",
-      "title": "Rows per table",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 66,
-        "w": 8,
-        "h": 10
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "expr": "darklab_db_table_rows",
-          "refId": "A",
-          "legendFormat": "",
-          "format": "table",
-          "instant": true
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "showHeader": true
-      },
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true,
-              "__name__": true,
-              "instance": true,
-              "job": true
-            }
-          }
-        }
-      ]
-    },
-    {
-      "id": 33,
-      "type": "table",
-      "title": "Allocated bytes per table",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "gridPos": {
-        "x": 8,
-        "y": 66,
-        "w": 8,
-        "h": 10
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "expr": "darklab_db_table_allocated_bytes",
-          "refId": "A",
-          "legendFormat": "",
-          "format": "table",
-          "instant": true
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "showHeader": true
-      },
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true,
-              "__name__": true,
-              "instance": true,
-              "job": true
-            }
-          }
-        }
-      ]
-    },
-    {
-      "id": 34,
-      "type": "timeseries",
-      "title": "DB query duration p95 by operation",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "gridPos": {
-        "x": 16,
-        "y": 66,
-        "w": 8,
-        "h": 5
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "expr": "histogram_quantile(0.95, sum by (operation, le)(rate(darklab_db_query_duration_seconds_bucket[5m])))",
-          "refId": "A",
-          "legendFormat": "{{operation}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "fillOpacity": 10,
-            "pointSize": 4,
-            "showPoints": "auto",
-            "spanNulls": false
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "calcs": []
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
       "id": 35,
       "type": "timeseries",
-      "title": "History search FTS\u2192LIKE fallbacks (per 5m)",
+      "title": "SQLite History search FTS\u2192LIKE fallbacks (per 5m)",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
-        "x": 16,
-        "y": 71,
-        "w": 8,
-        "h": 5
+        "x": 12,
+        "y": 104,
+        "w": 12,
+        "h": 4
       },
       "targets": [
         {
@@ -1803,7 +2607,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum by (reason)(rate(darklab_history_search_fallbacks_total[5m]))",
+          "expr": "sum by (reason)(rate(darklab_history_search_fallbacks_total[5m])) * on() group_left() darklab_db_backend_info{backend=\"sqlite\"}",
           "refId": "A",
           "legendFormat": "{{reason}}"
         }
@@ -1839,12 +2643,194 @@
       }
     },
     {
+      "id": 88,
+      "type": "row",
+      "title": "Postgres pool (empty on SQLite)",
+      "gridPos": {
+        "x": 0,
+        "y": 108,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 89,
+      "type": "bargauge",
+      "title": "Postgres pool config",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 109,
+        "w": 8,
+        "h": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "darklab_postgres_pool_config",
+          "refId": "A",
+          "legendFormat": "{{setting}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      }
+    },
+    {
+      "id": 90,
+      "type": "timeseries",
+      "title": "Postgres pool connections",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 109,
+        "w": 8,
+        "h": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "darklab_postgres_pool_connections",
+          "refId": "A",
+          "legendFormat": "{{state}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "pointSize": 4,
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 91,
+      "type": "stat",
+      "title": "Postgres pool open failures /5m",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 109,
+        "w": 8,
+        "h": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "increase(darklab_postgres_pool_open_failures_total[5m])",
+          "refId": "A",
+          "legendFormat": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
       "id": 36,
       "type": "row",
       "title": "Redis and broker",
       "gridPos": {
         "x": 0,
-        "y": 76,
+        "y": 115,
         "w": 24,
         "h": 1
       },
@@ -1861,7 +2847,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 77,
+        "y": 116,
         "w": 4,
         "h": 4
       },
@@ -1937,7 +2923,7 @@
       },
       "gridPos": {
         "x": 4,
-        "y": 77,
+        "y": 116,
         "w": 4,
         "h": 4
       },
@@ -1985,7 +2971,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 77,
+        "y": 116,
         "w": 4,
         "h": 4
       },
@@ -2033,7 +3019,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 77,
+        "y": 116,
         "w": 4,
         "h": 4
       },
@@ -2081,7 +3067,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 77,
+        "y": 116,
         "w": 4,
         "h": 4
       },
@@ -2146,7 +3132,7 @@
       },
       "gridPos": {
         "x": 20,
-        "y": 77,
+        "y": 116,
         "w": 4,
         "h": 4
       },
@@ -2209,7 +3195,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 81,
+        "y": 120,
         "w": 8,
         "h": 7
       },
@@ -2264,7 +3250,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 81,
+        "y": 120,
         "w": 8,
         "h": 7
       },
@@ -2319,7 +3305,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 81,
+        "y": 120,
         "w": 8,
         "h": 7
       },
@@ -2374,7 +3360,7 @@
       "title": "Workspace storage",
       "gridPos": {
         "x": 0,
-        "y": 88,
+        "y": 127,
         "w": 24,
         "h": 1
       },
@@ -2391,7 +3377,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 89,
+        "y": 128,
         "w": 8,
         "h": 8
       },
@@ -2456,7 +3442,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 89,
+        "y": 128,
         "w": 4,
         "h": 4
       },
@@ -2495,6 +3481,61 @@
       }
     },
     {
+      "id": 50,
+      "type": "timeseries",
+      "title": "Workspace evictions by reason (per 5m)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 128,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum by (reason)(rate(darklab_workspace_evictions_total[5m]))",
+          "refId": "A",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "pointSize": 4,
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "id": 49,
       "type": "stat",
       "title": "Quota rejections /5m",
@@ -2504,7 +3545,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 93,
+        "y": 132,
         "w": 4,
         "h": 4
       },
@@ -2560,67 +3601,12 @@
       }
     },
     {
-      "id": 50,
-      "type": "timeseries",
-      "title": "Workspace evictions by reason (per 5m)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 89,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "expr": "sum by (reason)(rate(darklab_workspace_evictions_total[5m]))",
-          "refId": "A",
-          "legendFormat": "{{reason}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "fillOpacity": 10,
-            "pointSize": 4,
-            "showPoints": "auto",
-            "spanNulls": false
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "calcs": []
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
       "id": 51,
       "type": "row",
       "title": "Intel providers",
       "gridPos": {
         "x": 0,
-        "y": 97,
+        "y": 136,
         "w": 24,
         "h": 1
       },
@@ -2637,7 +3623,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 98,
+        "y": 137,
         "w": 12,
         "h": 8
       },
@@ -2696,7 +3682,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 98,
+        "y": 137,
         "w": 12,
         "h": 8
       },
@@ -2754,7 +3740,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 106,
+        "y": 145,
         "w": 8,
         "h": 6
       },
@@ -2811,7 +3797,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 106,
+        "y": 145,
         "w": 8,
         "h": 6
       },
@@ -2860,15 +3846,15 @@
     },
     {
       "id": 56,
-      "type": "table",
-      "title": "Providers with missing secret",
+      "type": "timeseries",
+      "title": "Intel requests by outcome (per 5m)",
       "datasource": {
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "x": 16,
-        "y": 106,
+        "y": 145,
         "w": 8,
         "h": 6
       },
@@ -2878,38 +3864,44 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "darklab_intel_provider_secret_missing == 1",
+          "expr": "sum by (outcome)(rate(darklab_intel_requests_total[5m]))",
           "refId": "A",
-          "legendFormat": "",
-          "format": "table",
-          "instant": true
+          "legendFormat": "{{outcome}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
-            "align": "auto"
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "pointSize": 4,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
           }
         },
         "overrides": []
       },
       "options": {
-        "showHeader": true
-      },
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true,
-              "__name__": true,
-              "instance": true,
-              "job": true,
-              "Value": true
-            }
-          }
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
         }
-      ]
+      }
     },
     {
       "id": 57,
@@ -2917,7 +3909,7 @@
       "title": "Atlas and findings",
       "gridPos": {
         "x": 0,
-        "y": 112,
+        "y": 151,
         "w": 24,
         "h": 1
       },
@@ -2934,7 +3926,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 113,
+        "y": 152,
         "w": 8,
         "h": 7
       },
@@ -2991,7 +3983,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 113,
+        "y": 152,
         "w": 8,
         "h": 7
       },
@@ -3048,7 +4040,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 113,
+        "y": 152,
         "w": 8,
         "h": 7
       },
@@ -3105,7 +4097,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 120,
+        "y": 159,
         "w": 12,
         "h": 7
       },
@@ -3160,7 +4152,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 120,
+        "y": 159,
         "w": 4,
         "h": 4
       },
@@ -3208,7 +4200,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 120,
+        "y": 159,
         "w": 8,
         "h": 7
       },
@@ -3263,7 +4255,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 124,
+        "y": 163,
         "w": 4,
         "h": 3
       },
@@ -3314,7 +4306,7 @@
       "title": "Evidence packages",
       "gridPos": {
         "x": 0,
-        "y": 127,
+        "y": 166,
         "w": 24,
         "h": 1
       },
@@ -3331,7 +4323,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 128,
+        "y": 167,
         "w": 12,
         "h": 8
       },
@@ -3389,7 +4381,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 128,
+        "y": 167,
         "w": 12,
         "h": 8
       },
@@ -3448,7 +4440,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 136,
+        "y": 175,
         "w": 12,
         "h": 6
       },
@@ -3512,7 +4504,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 136,
+        "y": 175,
         "w": 12,
         "h": 6
       },
@@ -3567,7 +4559,7 @@
       "title": "Errors and client telemetry",
       "gridPos": {
         "x": 0,
-        "y": 142,
+        "y": 181,
         "w": 24,
         "h": 1
       },
@@ -3584,7 +4576,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 143,
+        "y": 182,
         "w": 12,
         "h": 8
       },
@@ -3639,7 +4631,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 143,
+        "y": 182,
         "w": 12,
         "h": 8
       },
@@ -3690,7 +4682,7 @@
       "title": "Build info",
       "gridPos": {
         "x": 0,
-        "y": 151,
+        "y": 190,
         "w": 24,
         "h": 1
       },
@@ -3707,7 +4699,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 152,
+        "y": 191,
         "w": 16,
         "h": 4
       },
@@ -3760,7 +4752,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 152,
+        "y": 191,
         "w": 8,
         "h": 4
       },

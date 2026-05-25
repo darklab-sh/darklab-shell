@@ -16,6 +16,7 @@ CONFIG_LOAD_WARNINGS: list[dict[str, str]] = []
 
 APP_VERSION = "2.0"
 PROJECT_NAME = "darklab_shell"
+APP_NAME_MAX_CHARS = 20
 
 PROJECT_README = "https://gitlab.com/darklab.sh/darklab_shell#darklab_shell"
 APP_CONF_DIR = os.environ.get("APP_CONF_DIR", "")
@@ -103,6 +104,18 @@ def _coerce_bool_value(value, default=False):
     if normalized in {"0", "false", "no", "off"}:
         return False
     return default
+
+
+def _normalize_app_name(value):
+    raw = str(value or PROJECT_NAME).strip() or PROJECT_NAME
+    normalized = " ".join(raw.split())
+    if len(normalized) <= APP_NAME_MAX_CHARS:
+        return normalized
+    log.warning(
+        "APP_NAME_TRUNCATED",
+        extra={"configured_chars": len(normalized), "max_chars": APP_NAME_MAX_CHARS},
+    )
+    return normalized[:APP_NAME_MAX_CHARS].rstrip() or PROJECT_NAME
 
 
 def _normalize_ai_base_url_allowed_cidrs(value):
@@ -423,6 +436,7 @@ def load_config(conf_dir=None):
     defaults["database_postgres_jit"] = _coerce_bool_value(defaults.get("database_postgres_jit"), False)
     if defaults["database_pool_max"] < defaults["database_pool_min"]:
         defaults["database_pool_max"] = defaults["database_pool_min"] or 1
+    defaults["app_name"] = _normalize_app_name(defaults.get("app_name"))
     legacy_full_output_max_bytes = defaults.pop("full_output_max_bytes", None)
     full_output_max_mb = _coerce_mb_value(defaults.get("full_output_max_mb"))
     if full_output_max_mb is None and legacy_full_output_max_bytes is not None:

@@ -12,6 +12,7 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
 - [Branch Workflow](#branch-workflow)
 - [Release Branch Merge Checklist](#release-branch-merge-checklist)
 - [Code Style](#code-style)
+- [Adding External Commands](#adding-external-commands)
 - [Running Tests](#running-tests)
 - [Linting and Security Scanning](#linting-and-security-scanning)
 - [Dependency Version Tracking](#dependency-version-tracking)
@@ -161,6 +162,22 @@ Before merging a version branch back to `main`:
 
 ---
 
+## Adding External Commands
+
+Adding a new external command usually means touching more than the command registry. Before a command ships, check the places where darklab_shell has command-specific behavior:
+
+- `app/conf/commands.yaml` for policy, autocomplete, examples, help metadata, required secrets, workspace-aware paths, runtime adaptations, interactive PTY settings, and smoke metadata.
+- [docs/external-command-integrations.md](docs/external-command-integrations.md) for any behavior the app owns, such as rewritten flags, managed tool directories, secret handling, or workspace file rules.
+- `app/core/output_signals.py` when the command has output lines that should become findings, warnings, errors, summaries, targets, entities, or intentionally ignored noise.
+- Project and Atlas flows when command output should create durable findings or entities that appear outside the transcript.
+- `app/services/ai/next_commands.py`, `app/services/ai/prompts.py`, and `app/services/ai/suggestions.py` when AI should understand, suggest, validate, rewrite, or reject follow-up commands for that tool.
+- Command registry, output-signal, route/policy, autocomplete, smoke, and AI tests that match the changed behavior.
+- User-facing docs such as README, FEATURES, CONFIGURATION, or THEME only when the command changes what operators can see or configure.
+
+Keep command examples in sync across the registry, docs, autocomplete, smoke fixtures, and any AI prompt menus. If a tool has noisy banners, generated paths, uncommon target syntax, or special list-file behavior, add a small regression test with real sample output instead of relying on the generic parser.
+
+---
+
 ## Running Tests
 
 Run the three suites directly:
@@ -171,8 +188,8 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **1781 pytest + 1245 Vitest + 253 Playwright = 3,279 tests**.
-That total includes 3,229 behavior tests plus 33 docs/inventory meta-tests.
+Current totals: **1783 pytest + 1245 Vitest + 253 Playwright = 3,281 tests**.
+That total includes 3,231 behavior tests plus 33 docs/inventory meta-tests.
 
 CI runs the Postgres backend lane automatically. Locally, use
 `npm run test:postgres` to run the Postgres smoke, route, and migration

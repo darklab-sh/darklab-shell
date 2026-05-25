@@ -8,6 +8,7 @@ const _hudClockModes = PreferenceCore.HUD_CLOCK_MODES;
 const PREF_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 const _sessionPreferenceKeys = PreferenceCore.SESSION_PREFERENCE_KEYS;
 let _sessionPreferenceOverrides = null;
+let _sessionPreferencePersistQueue = Promise.resolve();
 if (typeof window !== 'undefined') {
   window.__sessionPreferencesLoadState = 'idle';
 }
@@ -109,11 +110,7 @@ function _buildCurrentSessionPreferenceSnapshot() {
   return _normalizeSessionPreferences(rawPrefs);
 }
 
-async function _persistCurrentSessionPreferences() {
-  const prefs = _buildCurrentSessionPreferenceSnapshot();
-  _sessionPreferenceOverrides = prefs;
-  _writePreferenceSnapshotToStorage(prefs, { writeThemeToLocalStorage: false });
-  _cacheSessionPreferences(prefs);
+async function _sendSessionPreferenceSnapshot(prefs) {
   const resp = await apiFetch('/session/preferences', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -128,6 +125,18 @@ async function _persistCurrentSessionPreferences() {
     throw new Error(`failed to save session preferences${detail}`);
   }
   return prefs;
+}
+
+function _persistCurrentSessionPreferences() {
+  const prefs = _buildCurrentSessionPreferenceSnapshot();
+  _sessionPreferenceOverrides = prefs;
+  _writePreferenceSnapshotToStorage(prefs, { writeThemeToLocalStorage: false });
+  _cacheSessionPreferences(prefs);
+  const persist = _sessionPreferencePersistQueue
+    .catch(() => {})
+    .then(() => _sendSessionPreferenceSnapshot(prefs));
+  _sessionPreferencePersistQueue = persist.catch(() => {});
+  return persist;
 }
 
 async function loadSessionPreferences() {

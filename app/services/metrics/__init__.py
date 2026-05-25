@@ -35,12 +35,18 @@ AI_ERROR_CODES = frozenset({
     "",
     "ai_busy",
     "ai_context_too_large",
+    "ai_context_changed",
     "ai_disabled",
+    "ai_feature_disabled",
     "ai_malformed",
+    "ai_no_context",
     "ai_rate_limited",
+    "ai_run_active",
     "ai_suggestion_rejected",
+    "ai_unsupported_variant",
     "ai_unavailable",
     "ai_base_url_not_allowed",
+    "not_found",
 })
 AI_SUGGESTION_REJECTION_REASONS = frozenset({
     "command_target_absent",
@@ -355,6 +361,10 @@ DB_QUERY_DURATION = Histogram(
     ("operation",),
     buckets=DB_QUERY_DURATION_BUCKETS,
 )
+POSTGRES_POOL_OPEN_FAILURES = Counter(
+    "darklab_postgres_pool_open_failures",
+    "Postgres pool open failures.",
+)
 HISTORY_SEARCH_FALLBACKS = Counter(
     "darklab_history_search_fallbacks",
     "History searches that fell back from FTS to LIKE by bounded reason.",
@@ -479,6 +489,7 @@ METRIC_DEFINITIONS = (
     BROKER_SUBSCRIBERS,
     BROKER_PUBLISH_ERRORS,
     DB_QUERY_DURATION,
+    POSTGRES_POOL_OPEN_FAILURES,
     HISTORY_SEARCH_FALLBACKS,
     WORKSPACE_EVICTIONS,
     WORKSPACE_QUOTA_REJECTIONS,
@@ -802,6 +813,10 @@ def record_db_query(operation: object, duration_seconds: float) -> None:
     ).observe(
         max(0.0, float(duration_seconds or 0.0))
     )
+
+
+def record_postgres_pool_open_failure() -> None:
+    POSTGRES_POOL_OPEN_FAILURES.inc()
 
 
 def record_history_search_fallback(reason: str) -> None:

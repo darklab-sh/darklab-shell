@@ -328,6 +328,11 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
   if (typeof window !== 'undefined') window.APP_CONFIG = APP_CONFIG;
   document.title = cfg.app_name;
   if (headerTitle) headerTitle.textContent = cfg.app_name;
+  const railWordmarkTitle = document.getElementById('rail-wordmark-title');
+  if (railWordmarkTitle) {
+    railWordmarkTitle.textContent = cfg.app_name;
+    railWordmarkTitle.title = cfg.app_name;
+  }
   const wmVersion = cfg.version ? ` v${cfg.version}` : '';
   const projectText = `${cfg.project_name || 'darklab_shell'}${wmVersion}`;
   document.querySelectorAll('.menu-footer, .rail-nav-version').forEach(el => {

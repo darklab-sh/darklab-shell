@@ -312,6 +312,55 @@ def postgres_pool_settings(cfg: dict[str, Any]) -> tuple[str, int, int, bool]:
     return dsn, min_size, max_size, jit_enabled
 
 
+def postgres_pool_metrics_snapshot(cfg: dict[str, Any]) -> dict[str, int]:
+    """Return bounded, non-secret Postgres pool state for Prometheus scrapes."""
+    pool_config = postgres_pool_settings(cfg)
+    _, min_size, max_size, jit_enabled = pool_config
+    snapshot = {
+        "configured_min": min_size,
+        "configured_max": max_size,
+        "jit_enabled": 1 if jit_enabled else 0,
+        "open": 0,
+    }
+    pool = _POSTGRES_POOL if _POSTGRES_POOL_CONFIG == pool_config else None
+    if pool is None:
+        return snapshot
+    snapshot["open"] = 1
+    get_stats = getattr(pool, "get_stats", None)
+    if not callable(get_stats):
+        return snapshot
+    try:
+        stats = get_stats()
+    except Exception:
+        return snapshot
+    if not isinstance(stats, dict):
+        return snapshot
+
+    def stat_int(*names: str) -> int | None:
+        for name in names:
+            value = stats.get(name)
+            if value is None:
+                continue
+            try:
+                return max(0, int(value))
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    size = stat_int("pool_size", "size")
+    available = stat_int("pool_available", "available")
+    waiting = stat_int("requests_waiting", "pool_waiting", "waiting")
+    if size is not None:
+        snapshot["size"] = size
+    if available is not None:
+        snapshot["available"] = available
+    if waiting is not None:
+        snapshot["waiting"] = waiting
+    if size is not None and available is not None:
+        snapshot["used"] = max(0, size - available)
+    return snapshot
+
+
 def _load_postgres_pool_types():
     try:
         from psycopg.rows import dict_row  # type: ignore[reportMissingImports]
@@ -343,6 +392,11 @@ def get_postgres_pool(cfg: dict[str, Any]) -> Any:
             open=True,
         )
     except Exception as exc:
+        try:
+            from services import metrics as app_metrics  # noqa: PLC0415
+            app_metrics.record_postgres_pool_open_failure()
+        except Exception:
+            pass
         log.error(
             "POSTGRES_POOL_OPEN_FAILED",
             exc_info=True,

@@ -268,7 +268,7 @@
   <aside class="rail{% if initial_rail.collapsed %} rail-collapsed{% endif %}" id="rail" aria-label="Shell sidebar" style="--rail-w: {% if initial_rail.collapsed %}44px{% else %}{{ initial_rail.width }}px{% endif %};">
     <div class="rail-header">
       <div class="rail-wordmark">
-        <div class="rail-wordmark-title">{{ app_name }}</div>
+        <div class="rail-wordmark-title" id="rail-wordmark-title" title="{{ app_name }}">{{ app_name }}</div>
         <div class="rail-wordmark-sub">{% if version %}v{{ version }} · {% endif %}isolated</div>
       </div>
       <button id="rail-collapse-btn" class="rail-collapse-btn btn btn-ghost btn-icon-only btn-compact" type="button" aria-label="{% if initial_rail.collapsed %}Expand sidebar (Alt+\){% else %}Collapse sidebar (Alt+\){% endif %}" title="{% if initial_rail.collapsed %}Expand sidebar (Alt+\){% else %}Collapse sidebar (Alt+\){% endif %}">{% if initial_rail.collapsed %}»{% else %}«{% endif %}</button>

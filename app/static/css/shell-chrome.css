@@ -137,10 +137,18 @@
     justify-content: center;
   }
 
-  .rail-wordmark { flex: 1; min-width: 0; }
+  .rail-wordmark {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
   .rail.rail-collapsed .rail-wordmark { display: none; }
 
   .rail-wordmark-title {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
     color: var(--green);
     font-size: 16px;
     font-weight: 500;
@@ -148,7 +156,16 @@
     white-space: nowrap;
     text-shadow: 0 0 8px color-mix(in srgb, var(--green) 18%, transparent);
   }
+  .rail.rail-narrow-brand .rail-wordmark-title {
+    font-size: 14px;
+    letter-spacing: 0.25px;
+  }
   .rail-wordmark-sub {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--muted);
     font-size: 9.5px;
     letter-spacing: 2px;
@@ -351,17 +368,11 @@
     min-width: 0;
   }
   .rail-section-workflows .rail-item {
-    align-items: flex-start;
-    white-space: normal;
+    align-items: center;
+    white-space: nowrap;
   }
-  /* The drill-chev primitive is 22px (its own line-box) against 12.5px row
-     text; with align-items:flex-start (kept so the glyph pins to the first
-     line when a long workflow title wraps via .line-clamp-2), the › codepoint
-     renders in the lower half of its em-box, leaving it visually below the
-     first-line centerline. A small translateY pulls the glyph up onto the
-     first-line visual midline without disturbing the wrap behavior. */
   .rail-section-workflows .rail-item .drill-chev {
-    transform: translateY(-4px);
+    flex: 0 0 auto;
   }
   .rail-section-empty {
     padding: 5px 18px;

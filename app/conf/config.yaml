@@ -13,7 +13,8 @@
 
 # ── Branding ──────────────────────────────────────────────────────────────────
 
-# Name displayed in the browser tab, header, and permalink pages
+# Name displayed in the browser tab, header, and permalink pages.
+# Values longer than 20 visible characters are shortened at startup.
 # Server default if unset: "darklab_shell"
 # app_name: "darklab_shell"
 

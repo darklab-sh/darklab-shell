@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 from prometheus_client.core import GaugeMetricFamily
@@ -14,6 +15,7 @@ from core import database, process
 from core.database_backend import (
     DatabaseBackend,
     SQLiteConnection,
+    postgres_pool_metrics_snapshot,
 )
 from services.diagnostics.storage import storage_snapshot
 from services.intel.registry import INTEL_PROVIDERS
@@ -24,7 +26,19 @@ from services.workspace.files import workspace_root, workspace_settings
 log = logging.getLogger("shell")
 
 _REDIS_SCAN_KEY_CAP = 2000
-_REDIS_PREFIXES = ("runstream", "proc", "procmeta", "sessionprocs", "intel")
+_REDIS_KEY_PATTERNS = (
+    ("runstream", "runstream:*"),
+    ("proc", "proc:*"),
+    ("procmeta", "procmeta:*"),
+    ("sessionprocs", "sessionprocs:*"),
+    ("intel", "intel:*"),
+    ("ai_rate", "ai:rate:*"),
+    ("ai_assist_inflight", "ai:assist:inflight:*"),
+    ("ai_provider_slot", "ai:provider:slot:*"),
+    ("ai_provider_legacy", "ai:provider:inflight"),
+)
+_AI_ASSIST_VARIANTS = frozenset({"summary", "next_commands", "diag_test"})
+_AI_ASSIST_STATUSES = frozenset({"queued", "in_progress", "completed", "failed"})
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -39,6 +53,35 @@ def _db_file_size(path: str) -> int:
         return os.path.getsize(path)
     except OSError:
         return 0
+
+
+def _parse_utc(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _age_seconds(now: datetime, value: Any) -> float:
+    parsed = _parse_utc(value)
+    if parsed is None:
+        return 0.0
+    return max(0.0, (now - parsed).total_seconds())
+
+
+def _ai_variant_label(value: Any) -> str:
+    variant = str(value or "unknown")
+    return variant if variant in _AI_ASSIST_VARIANTS else "unknown"
+
+
+def _ai_status_label(value: Any) -> str:
+    status = str(value or "unknown")
+    return status if status in _AI_ASSIST_STATUSES else "unknown"
 
 
 def _workspace_usage() -> tuple[int, int]:
@@ -125,6 +168,7 @@ class RuntimeStateCollector:
         yield from self._collect_broker()
         health = GaugeMetricFamily("darklab_health_status", "Component health status, 1 is healthy.", labels=("component",))
         yield from self._collect_database(health)
+        yield from self._collect_postgres_pool()
         yield from self._collect_redis(health)
         yield health
         yield from self._collect_intel_cache()
@@ -169,6 +213,38 @@ class RuntimeStateCollector:
         broker.add_metric([mode], 1)
         yield broker
 
+    def _collect_postgres_pool(self):
+        if database.DB_BACKEND != DatabaseBackend.POSTGRES:
+            return
+        config_metric = GaugeMetricFamily(
+            "darklab_postgres_pool_config",
+            "Postgres pool configured values by setting.",
+            labels=("setting",),
+        )
+        connections = GaugeMetricFamily(
+            "darklab_postgres_pool_connections",
+            "Postgres pool connection state gauges.",
+            labels=("state",),
+        )
+        try:
+            snapshot = postgres_pool_metrics_snapshot(CFG)
+        except Exception:
+            log.debug("METRICS_POSTGRES_POOL_COLLECT_FAILED", exc_info=True)
+            snapshot = {}
+
+        for setting, key in (
+            ("min", "configured_min"),
+            ("max", "configured_max"),
+            ("jit_enabled", "jit_enabled"),
+        ):
+            if key in snapshot:
+                config_metric.add_metric([setting], _safe_int(snapshot.get(key)))
+        for state in ("open", "size", "available", "used", "waiting"):
+            if state in snapshot:
+                connections.add_metric([state], _safe_int(snapshot.get(state)))
+        yield config_metric
+        yield connections
+
     def _collect_database(self, health: GaugeMetricFamily):
         backend_info = GaugeMetricFamily(
             "darklab_db_backend_info",
@@ -210,6 +286,26 @@ class RuntimeStateCollector:
             "1 when a registered keyed provider has no saved secret in any session.",
             labels=("provider",),
         )
+        ai_assists = GaugeMetricFamily(
+            "darklab_ai_assist_rows",
+            "Durable AI assist rows by bounded variant and status.",
+            labels=("variant", "status"),
+        )
+        ai_queued_age = GaugeMetricFamily(
+            "darklab_ai_assist_oldest_queued_age_seconds",
+            "Age in seconds of the oldest queued AI assist by bounded variant.",
+            labels=("variant",),
+        )
+        ai_in_progress_age = GaugeMetricFamily(
+            "darklab_ai_assist_oldest_in_progress_age_seconds",
+            "Age in seconds of the oldest in-progress AI assist by bounded variant.",
+            labels=("variant",),
+        )
+        ai_heartbeat_age = GaugeMetricFamily(
+            "darklab_ai_assist_oldest_heartbeat_age_seconds",
+            "Age in seconds of the oldest AI assist heartbeat by bounded variant.",
+            labels=("variant",),
+        )
 
         try:
             with database.db_connect() as conn:
@@ -231,6 +327,7 @@ class RuntimeStateCollector:
                 self._add_findings(conn, findings)
                 self._add_snapshots(conn, snapshots)
                 self._add_intel_missing(conn, intel_missing)
+                self._add_ai_assists(conn, ai_assists, ai_queued_age, ai_in_progress_age, ai_heartbeat_age)
         except Exception:
             log.warning(
                 "METRICS_DB_COLLECT_FAILED",
@@ -251,6 +348,10 @@ class RuntimeStateCollector:
         yield findings
         yield snapshots
         yield intel_missing
+        yield ai_assists
+        yield ai_queued_age
+        yield ai_in_progress_age
+        yield ai_heartbeat_age
 
     def _add_atlas(self, conn: SQLiteConnection, metric: GaugeMetricFamily) -> None:
         try:
@@ -287,6 +388,47 @@ class RuntimeStateCollector:
                 continue
             metric.add_metric([provider.id], 0 if secret_env in configured_envs else 1)
 
+    def _add_ai_assists(
+        self,
+        conn: SQLiteConnection,
+        assists: GaugeMetricFamily,
+        queued_age: GaugeMetricFamily,
+        in_progress_age: GaugeMetricFamily,
+        heartbeat_age: GaugeMetricFamily,
+    ) -> None:
+        try:
+            rows = conn.execute(
+                "SELECT COALESCE(NULLIF(variant, ''), 'unknown') AS variant, "
+                "COALESCE(NULLIF(status, ''), 'unknown') AS status, COUNT(*) AS count "
+                "FROM ai_run_assists GROUP BY variant, status"
+            ).fetchall()
+            queued_rows = conn.execute(
+                "SELECT COALESCE(NULLIF(variant, ''), 'unknown') AS variant, MIN(created_at) AS oldest_at "
+                "FROM ai_run_assists WHERE status = 'queued' GROUP BY variant"
+            ).fetchall()
+            progress_rows = conn.execute(
+                "SELECT COALESCE(NULLIF(variant, ''), 'unknown') AS variant, "
+                "MIN(COALESCE(claimed_at, created_at)) AS oldest_at, "
+                "MIN(COALESCE(heartbeat_at, claimed_at, created_at)) AS oldest_heartbeat_at "
+                "FROM ai_run_assists WHERE status = 'in_progress' GROUP BY variant"
+            ).fetchall()
+        except Exception:
+            log.debug("METRICS_AI_ASSIST_COLLECT_FAILED", exc_info=True)
+            return
+
+        now = datetime.now(timezone.utc)
+        for row in rows:
+            assists.add_metric(
+                [_ai_variant_label(row["variant"]), _ai_status_label(row["status"])],
+                _safe_int(row["count"]),
+            )
+        for row in queued_rows:
+            queued_age.add_metric([_ai_variant_label(row["variant"])], _age_seconds(now, row["oldest_at"]))
+        for row in progress_rows:
+            variant = _ai_variant_label(row["variant"])
+            in_progress_age.add_metric([variant], _age_seconds(now, row["oldest_at"]))
+            heartbeat_age.add_metric([variant], _age_seconds(now, row["oldest_heartbeat_at"]))
+
     def _collect_redis(self, health: GaugeMetricFamily):
         redis_up = GaugeMetricFamily("darklab_redis_up", "Redis health, 1 is reachable.")
         redis_ping = GaugeMetricFamily("darklab_redis_ping_seconds", "Redis ping latency in seconds.")
@@ -317,8 +459,8 @@ class RuntimeStateCollector:
             redis_up.add_metric([], 1)
             redis_ping.add_metric([], ping_seconds)
             health.add_metric(["redis"], 1)
-            for prefix in _REDIS_PREFIXES:
-                redis_keys.add_metric([prefix], _redis_scan_count(client, f"{prefix}:*"))
+            for prefix, pattern in _REDIS_KEY_PATTERNS:
+                redis_keys.add_metric([prefix], _redis_scan_count(client, pattern))
                 if prefix == "runstream":
                     redis_stream.add_metric([prefix], _redis_stream_length_sample(client, prefix))
             try:

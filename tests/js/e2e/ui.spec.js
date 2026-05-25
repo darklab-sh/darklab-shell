@@ -1273,6 +1273,7 @@ test.describe('options modal', () => {
         try {
           const payload = JSON.parse(response.request().postData() || '{}')
           return payload?.preferences?.pref_hud_clock === 'local'
+            && payload?.preferences?.pref_line_numbers === 'on'
         } catch {
           return false
         }

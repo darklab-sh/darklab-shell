@@ -102,6 +102,7 @@
   const PREF_WORKFLOWS = 'pref_rail_workflows_open';
 
   const MIN_W = 180, MAX_W = 360, DEFAULT_W = 214;
+  const NARROW_BRAND_W = 200;
   const MIN_SECTION_H = 80;
   const PROJECT_TARGET_HELPERS = global.ProjectTargetValidation || window.ProjectTargetValidation;
   if (!PROJECT_TARGET_HELPERS) throw new Error('ProjectTargetValidation is unavailable');
@@ -139,6 +140,7 @@
   // ── Layout application ──────────────────────────────────────────
   function applyCollapsed() {
     rail.classList.toggle('rail-collapsed', ui.collapsed);
+    rail.classList.toggle('rail-narrow-brand', !ui.collapsed && ui.railW <= NARROW_BRAND_W);
     rail.style.setProperty('--rail-w', ui.collapsed ? '44px' : `${ui.railW}px`);
     if (railCollapseBtn) {
       railCollapseBtn.textContent = ui.collapsed ? '»' : '«';
@@ -149,6 +151,7 @@
   }
 
   function applyWidth() {
+    rail.classList.toggle('rail-narrow-brand', !ui.collapsed && ui.railW <= NARROW_BRAND_W);
     if (!ui.collapsed) rail.style.setProperty('--rail-w', `${ui.railW}px`);
   }
 
@@ -340,7 +343,7 @@
       glyph.setAttribute('aria-hidden', 'true');
       glyph.textContent = '›';
       const text = document.createElement('span');
-      text.className = 'rail-item-text line-clamp-2';
+      text.className = 'rail-item-text';
       text.textContent = label;
       row.appendChild(glyph);
       row.appendChild(text);

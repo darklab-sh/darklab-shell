@@ -6118,20 +6118,22 @@ describe('app helpers', () => {
     await recordTourOpened()
     expect(getTourSeenVersionPreference()).toBe(4)
     expect(document.cookie).toContain('pref_tour_seen_version=4')
-    const postCalls = apiFetch.mock.calls.filter(([url, opts]) => url === '/session/preferences' && opts?.method === 'POST')
-    expect(postCalls.length).toBeGreaterThan(0)
-    const lastPayload = JSON.parse(postCalls.at(-1)[1].body)
-    expect(lastPayload.preferences).toMatchObject({
-      pref_theme_name: 'theme_light_olive',
-      pref_timestamps: 'elapsed',
-      pref_line_numbers: 'on',
-      pref_welcome_intro: 'disable_animation',
-      pref_share_redaction_default: 'redacted',
-      pref_project_auto_link_external_runs: 'off',
-      pref_project_auto_link_run_entities: 'off',
-      pref_hud_clock: 'local',
-      pref_compare_view_mode: 'side_by_side',
-      pref_compare_context: '10',
+    await vi.waitFor(() => {
+      const postCalls = apiFetch.mock.calls.filter(([url, opts]) => url === '/session/preferences' && opts?.method === 'POST')
+      expect(postCalls.length).toBeGreaterThan(0)
+      const lastPayload = JSON.parse(postCalls.at(-1)[1].body)
+      expect(lastPayload.preferences).toMatchObject({
+        pref_theme_name: 'theme_light_olive',
+        pref_timestamps: 'elapsed',
+        pref_line_numbers: 'on',
+        pref_welcome_intro: 'disable_animation',
+        pref_share_redaction_default: 'redacted',
+        pref_project_auto_link_external_runs: 'off',
+        pref_project_auto_link_run_entities: 'off',
+        pref_hud_clock: 'local',
+        pref_compare_view_mode: 'side_by_side',
+        pref_compare_context: '10',
+      })
     })
   })
 

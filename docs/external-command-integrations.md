@@ -363,7 +363,7 @@ Workspace integration covers list input and output files:
 
 ## Adding Or Changing An Integration
 
-Before merging a new external-command adaptation:
+The registry is the first stop for a new command, but it is not the only stop. Before merging a new external-command adaptation:
 
 - Add or update the command metadata in `app/conf/commands.yaml`.
 - Keep user-facing examples aligned with the app-owned rewrite behavior.
@@ -371,3 +371,11 @@ Before merging a new external-command adaptation:
 - Add autocomplete tests if examples, flags, or positional hints change.
 - Add or update container smoke expectations when the change affects visible examples or workflow steps. The generic smoke corpus skips normal examples for commands with required encrypted secrets, but it can include registry-declared help examples marked with `smoke.profile: unauthenticated`. Cover credentialed behavior with registry, policy, secret-injection, or keyed smoke tests.
 - Document tool-specific behavior here when the app does more than simple allowlist metadata.
+
+Also check the command-specific surfaces that sit outside the registry:
+
+- Output signals: update `app/core/output_signals.py` when the tool has actionable rows that should become findings, warnings, errors, summaries, or Atlas entities. Use real sample lines for tests, especially when the output has banners, progress lines, ANSI styling, escaped payloads, help text, or non-target domains that should stay out of Atlas.
+- Target extraction: add command-specific parsing when the target can appear behind a flag, inside a scan-report line, in a list file, or across multiple output rows. Multi-target commands should avoid pretending there is one safe `SOURCE_TARGET` unless the source is unambiguous.
+- AI follow-ups: update `app/services/ai/next_commands.py`, `app/services/ai/prompts.py`, and `app/services/ai/suggestions.py` when the tool should appear in next-command suggestions or needs special validation for targets, ports, scripts, wordlists, known-bad flags, duplicate-source commands, or packaged file paths.
+- Durable surfaces: confirm Project Findings, Atlas entities, History search, exports, and evidence packages still show the intended output shape when the command creates reusable findings or entities.
+- Tests: add focused output-signal tests for transcript parsing, registry/autocomplete/policy tests for command metadata, smoke coverage for visible examples, and AI validation/context tests when the tool can be suggested or rejected by AI.

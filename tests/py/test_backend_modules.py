@@ -856,7 +856,13 @@ class TestAIAssistContextAndStorage:
         context = build_run_context("run-ai", session_id="tok_ai", cfg=cfg, variant="summary")
         prompt_version, source = resolved_prompt_version()
         cache_hits = []
+        db_operations = []
         monkeypatch.setattr(ai_storage.app_metrics, "record_ai_cache_hit", lambda variant: cache_hits.append(variant))
+        monkeypatch.setattr(
+            ai_storage.app_metrics,
+            "record_db_query",
+            lambda operation, duration: db_operations.append((operation, duration)),
+        )
 
         first, inserted = enqueue_assist(
             "tok_ai",
@@ -912,6 +918,26 @@ class TestAIAssistContextAndStorage:
         assert forced_inserted is True
         assert forced["id"] != first["id"]
         assert forced["status"] == "queued"
+        ai_storage.replace_suggestion_validations(
+            forced["id"],
+            [
+                {
+                    "command": "nmap -sV 192.0.2.10",
+                    "normalized_command": "nmap -sV 192.0.2.10",
+                    "risk_label": "low",
+                    "validation_result": "accepted",
+                    "target": "192.0.2.10",
+                    "target_allowed": True,
+                }
+            ],
+        )
+        claimed = ai_storage.claim_next_assist()
+        assert claimed is not None
+        assert claimed["id"] == forced["id"]
+        ai_storage.heartbeat_assist(forced["id"])
+        ai_storage.update_assist_progress(forced["id"], {"elapsed_seconds": 1, "tokens": 2})
+        assert ai_storage.reclaim_stale_assists(stale_after_seconds=9999) == 0
+        assert ai_storage.fail_assist("missing-assist", error_code="ai_unavailable", error_message="gone") is None
         with database.db_connect() as conn:
             conn.execute(
                 "UPDATE ai_run_assists SET payload = ?, project_target_snapshot = ?, progress = ? WHERE id = ?",
@@ -930,6 +956,21 @@ class TestAIAssistContextAndStorage:
             {"assist_id": forced["id"], "column": "project_target_snapshot"},
             {"assist_id": forced["id"], "column": "progress"},
         ]
+        assert {
+            "ai_active_lookup",
+            "ai_cache_lookup",
+            "ai_claim_next_assist",
+            "ai_complete_assist",
+            "ai_enqueue_assist",
+            "ai_fail_assist",
+            "ai_heartbeat_assist",
+            "ai_list_recent_assists",
+            "ai_queue_depth",
+            "ai_reclaim_stale_assists",
+            "ai_replace_suggestion_validations",
+            "ai_update_assist_progress",
+        } <= {operation for operation, _ in db_operations}
+        assert all(duration >= 0 for _, duration in db_operations)
 
     def test_ai_coordination_uses_redis_for_rate_limits_locks_and_slots(self):
         from services.ai import assists as ai_assists
@@ -2063,14 +2104,14 @@ class TestLoadConfig:
             with open(local_path, "w") as f:
                 f.write(textwrap.dedent(
                     """
-                    app_name: local-shell
+                    app_name: abcdefghijklmnopqrstuv
                     prompt_username: local
                     rate_limit_per_minute: 99
                     """
                 ))
             cfg = app_config.load_config(tmp)
 
-        assert cfg["app_name"] == "local-shell"
+        assert cfg["app_name"] == "abcdefghijklmnopqrst"
         assert cfg["prompt_username"] == "local"
         assert cfg["prompt_domain"] == "local"
         assert cfg["default_theme"] == "base-theme.yaml"
@@ -2300,6 +2341,13 @@ class TestDatabaseBackend:
             def connection(self):
                 return "connection-context"
 
+            def get_stats(self):
+                return {
+                    "pool_size": 2,
+                    "pool_available": 1,
+                    "requests_waiting": 3,
+                }
+
             def close(self):
                 closed.append(True)
 
@@ -2314,9 +2362,20 @@ class TestDatabaseBackend:
 
             pool = database_backend.get_postgres_pool(cfg)
             same_pool = database_backend.get_postgres_pool(cfg)
+            pool_metrics = database_backend.postgres_pool_metrics_snapshot(cfg)
 
             assert pool is same_pool
             assert database_backend.connect_postgres(cfg) == "connection-context"
+            assert pool_metrics == {
+                "configured_min": 1,
+                "configured_max": 3,
+                "jit_enabled": 0,
+                "open": 1,
+                "size": 2,
+                "available": 1,
+                "waiting": 3,
+                "used": 1,
+            }
             assert created == [{
                 "conninfo": "postgresql://darklab:secret@postgres:5432/darklab_shell",
                 "min_size": 1,
@@ -2327,6 +2386,20 @@ class TestDatabaseBackend:
         finally:
             database_backend.close_postgres_pool()
         assert closed == [True]
+
+        class FailingPool:
+            def __init__(self, **_kwargs):
+                raise RuntimeError("pool boom")
+
+        failures = []
+        monkeypatch.setattr(database_backend, "_load_postgres_pool_types", lambda: (FailingPool, "dict_row"))
+        monkeypatch.setattr(
+            "services.metrics.record_postgres_pool_open_failure",
+            lambda: failures.append(True),
+        )
+        with pytest.raises(database_backend.PostgresConnectionError, match="Could not open Postgres pool"):
+            database_backend.get_postgres_pool(cfg)
+        assert failures == [True]
 
     def test_postgres_compat_connection_converts_app_placeholders(self, monkeypatch):
         calls = []

@@ -1,5 +1,7 @@
 """Prometheus `/metrics` route and instrumentation tests."""
 
+from datetime import datetime, timedelta, timezone
+import fnmatch
 import re
 import uuid
 from unittest import mock
@@ -8,6 +10,8 @@ import pytest
 
 import app as shell_app
 import config
+from core import database
+from core.database_backend import DatabaseBackend
 from services import metrics as app_metrics
 
 
@@ -29,6 +33,27 @@ class _Capture:
     full_output_truncated = False
     full_output_bytes = 42
     preview_bytes = 42
+
+
+class _RedisMetricsClient:
+    def __init__(self, keys: list[str] | None = None) -> None:
+        self.keys = sorted(keys or [])
+
+    def ping(self):
+        return True
+
+    def scan(self, cursor=0, match=None, count=100):  # noqa: ARG002
+        start = int(cursor or 0)
+        matched = [key for key in self.keys if fnmatch.fnmatch(key, match or "*")]
+        end = min(start + max(1, int(count or 100)), len(matched))
+        next_cursor = 0 if end >= len(matched) else end
+        return next_cursor, matched[start:end]
+
+    def xlen(self, key):
+        return 3 if key == "runstream:run-1" else 0
+
+    def info(self):
+        return {"connected_clients": 2}
 
 
 class TestMetricsEndpoint:
@@ -53,7 +78,25 @@ class TestMetricsEndpoint:
         assert "# HELP darklab_build_info" in body
         assert "# TYPE darklab_http_requests_total counter" in body
 
-    def test_scrape_includes_runtime_gauge_families(self):
+    def test_scrape_includes_runtime_gauge_families(self, monkeypatch):
+        from services.metrics import collectors
+
+        monkeypatch.setattr(
+            collectors.process,
+            "redis_client",
+            _RedisMetricsClient([
+                "ai:assist:inflight:dedupe",
+                "ai:provider:inflight",
+                "ai:provider:slot:0",
+                "ai:rate:global:123",
+                "ai:rate:session:abcd:456",
+                "intel:cache:shodan:abc",
+                "proc:123",
+                "procmeta:123",
+                "runstream:run-1",
+                "sessionprocs:tok",
+            ]),
+        )
         body = _allowed_metrics(get_client(use_forwarded_for=False)).get_data(as_text=True)
 
         expected_names = [
@@ -70,9 +113,118 @@ class TestMetricsEndpoint:
             "darklab_health_status",
             "darklab_intel_cache_entries",
             "darklab_intel_quota_cache_entries",
+            "darklab_ai_assist_rows",
+            "darklab_ai_assist_oldest_queued_age_seconds",
+            "darklab_ai_assist_oldest_in_progress_age_seconds",
+            "darklab_ai_assist_oldest_heartbeat_age_seconds",
         ]
         for name in expected_names:
             assert name in body
+        assert 'darklab_redis_keys{prefix="ai_rate"} 2.0' in body
+        assert 'darklab_redis_keys{prefix="ai_assist_inflight"} 1.0' in body
+        assert 'darklab_redis_keys{prefix="ai_provider_slot"} 1.0' in body
+        assert 'darklab_redis_keys{prefix="ai_provider_legacy"} 1.0' in body
+        assert 'darklab_redis_stream_length{prefix="runstream"} 3.0' in body
+
+    def test_scrape_includes_durable_ai_assist_queue_health(self, monkeypatch, tmp_path):
+        db_path = tmp_path / "metrics-ai.db"
+        monkeypatch.setattr(database, "DB_PATH", str(db_path))
+        monkeypatch.setattr(database, "DB_INIT_LOCK_PATH", str(tmp_path / "metrics-ai.db.init.lock"))
+        monkeypatch.setattr(database, "DB_BACKEND", DatabaseBackend.SQLITE)
+        database.db_init()
+        now = datetime.now(timezone.utc)
+        with database.db_connect() as conn:
+            conn.executemany(
+                "INSERT INTO ai_run_assists "
+                "(id, run_id, session_id, variant, prompt_version, prompt_version_source, "
+                "payload_schema_version, model, context_hash, status, created_at, updated_at, "
+                "claimed_at, heartbeat_at) "
+                "VALUES (?, ?, ?, ?, 'ai-assist-v1', 'canonical', 'v1', 'llama', ?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        "ai_metrics_queued",
+                        "run-metrics",
+                        "tok_metrics",
+                        "summary",
+                        "hash-q",
+                        "queued",
+                        (now - timedelta(minutes=7)).isoformat(),
+                        now.isoformat(),
+                        None,
+                        None,
+                    ),
+                    (
+                        "ai_metrics_progress",
+                        "run-metrics",
+                        "tok_metrics",
+                        "next_commands",
+                        "hash-p",
+                        "in_progress",
+                        (now - timedelta(minutes=12)).isoformat(),
+                        now.isoformat(),
+                        (now - timedelta(minutes=11)).isoformat(),
+                        (now - timedelta(minutes=3)).isoformat(),
+                    ),
+                    (
+                        "ai_metrics_completed",
+                        "run-metrics",
+                        "tok_metrics",
+                        "next_commands",
+                        "hash-c",
+                        "completed",
+                        (now - timedelta(minutes=1)).isoformat(),
+                        now.isoformat(),
+                        None,
+                        None,
+                    ),
+                ],
+            )
+            conn.commit()
+
+        body = _allowed_metrics(get_client(use_forwarded_for=False)).get_data(as_text=True)
+
+        assert re.search(r'darklab_ai_assist_rows\{status="queued",variant="summary"\} 1\.0', body)
+        assert re.search(r'darklab_ai_assist_rows\{status="in_progress",variant="next_commands"\} 1\.0', body)
+        assert re.search(r'darklab_ai_assist_rows\{status="completed",variant="next_commands"\} 1\.0', body)
+        assert re.search(r'darklab_ai_assist_oldest_queued_age_seconds\{variant="summary"\} [1-9]\d*(?:\.\d+)?', body)
+        assert re.search(
+            r'darklab_ai_assist_oldest_in_progress_age_seconds\{variant="next_commands"\} [1-9]\d*(?:\.\d+)?',
+            body,
+        )
+        assert re.search(
+            r'darklab_ai_assist_oldest_heartbeat_age_seconds\{variant="next_commands"\} [1-9]\d*(?:\.\d+)?',
+            body,
+        )
+
+    def test_scrape_includes_postgres_pool_config_and_state(self, monkeypatch):
+        from services.metrics import collectors
+
+        monkeypatch.setattr(collectors.database, "DB_BACKEND", DatabaseBackend.POSTGRES)
+        monkeypatch.setattr(
+            collectors,
+            "postgres_pool_metrics_snapshot",
+            lambda _cfg: {
+                "configured_min": 2,
+                "configured_max": 7,
+                "jit_enabled": 0,
+                "open": 1,
+                "size": 4,
+                "available": 3,
+                "used": 1,
+                "waiting": 2,
+            },
+        )
+
+        body = _allowed_metrics(get_client(use_forwarded_for=False)).get_data(as_text=True)
+
+        assert 'darklab_postgres_pool_config{setting="min"} 2.0' in body
+        assert 'darklab_postgres_pool_config{setting="max"} 7.0' in body
+        assert 'darklab_postgres_pool_config{setting="jit_enabled"} 0.0' in body
+        assert 'darklab_postgres_pool_connections{state="open"} 1.0' in body
+        assert 'darklab_postgres_pool_connections{state="size"} 4.0' in body
+        assert 'darklab_postgres_pool_connections{state="available"} 3.0' in body
+        assert 'darklab_postgres_pool_connections{state="used"} 1.0' in body
+        assert 'darklab_postgres_pool_connections{state="waiting"} 2.0' in body
 
     def test_run_finalize_metric_uses_bounded_labels(self):
         app_metrics.record_completed_run("nmap -sV darklab.sh", "external", 0, 1.25, _Capture())
@@ -90,7 +242,18 @@ class TestMetricsEndpoint:
         app_metrics.record_intel_lookup("shodan", "cache_hit", 0.05)
         app_metrics.record_intel_lookup("user supplied provider", "surprise")
         app_metrics.record_db_query("history_list", 0.01)
+        app_metrics.record_postgres_pool_open_failure()
         app_metrics.record_history_search_fallback("missing_fts")
+        for error_code in (
+            "ai_context_changed",
+            "ai_feature_disabled",
+            "ai_no_context",
+            "ai_run_active",
+            "ai_unsupported_variant",
+            "not_found",
+        ):
+            app_metrics.record_ai_request("summary", "rejected", error_code=error_code)
+        app_metrics.record_ai_request("summary", "error", error_code="unexpected_ai_error")
         app_metrics.record_evidence_package_build(
             "success",
             0.2,
@@ -108,6 +271,18 @@ class TestMetricsEndpoint:
         assert 'darklab_intel_requests_total{outcome="error",provider="unknown"}' in body
         assert 'provider="user_supplied_provider"' not in body
         assert 'darklab_db_query_duration_seconds_bucket{le="0.05",operation="history_list"}' in body
+        assert re.search(r"darklab_postgres_pool_open_failures_total [1-9]\d*(?:\.0)?", body)
+        for error_code in (
+            "ai_context_changed",
+            "ai_feature_disabled",
+            "ai_no_context",
+            "ai_run_active",
+            "ai_unsupported_variant",
+            "not_found",
+        ):
+            assert f'darklab_ai_requests_total{{error_code="{error_code}",status="rejected",variant="summary"}}' in body
+        assert 'darklab_ai_requests_total{error_code="unexpected_ai_error"' not in body
+        assert 'darklab_ai_requests_total{error_code="ai_unavailable",status="error",variant="summary"}' in body
         assert 'darklab_history_search_fallbacks_total{reason="missing_fts"}' in body
         assert 'darklab_evidence_package_build_duration_seconds_bucket{le="0.5",outcome="success"}' in body
         assert "darklab_evidence_package_archive_bytes_bucket" in body
