@@ -112,6 +112,7 @@ _WORKSPACE_CLEANUP_INTERVAL_SECONDS = 300
 _last_workspace_cleanup_monotonic = 0.0
 _REQUEST_COMPLETED_LOG_SKIP_PREFIXES = ("/static/", "/vendor/")
 _REQUEST_COMPLETED_LOG_SKIP_PATHS = frozenset({"/favicon.ico"})
+_REQUEST_COMPLETED_LOG_DEBUG_PATHS = frozenset({"/health", "/status"})
 
 
 def _should_log_request_completed() -> bool:
@@ -119,6 +120,15 @@ def _should_log_request_completed() -> bool:
     if path in _REQUEST_COMPLETED_LOG_SKIP_PATHS:
         return False
     return not path.startswith(_REQUEST_COMPLETED_LOG_SKIP_PREFIXES)
+
+
+def _request_completed_log_level(status_code: int) -> int | None:
+    if not _should_log_request_completed():
+        return None
+    path = request.path or ""
+    if path in _REQUEST_COMPLETED_LOG_DEBUG_PATHS and 200 <= status_code < 400:
+        return logging.DEBUG
+    return logging.INFO
 
 
 def _cleanup_active_run_metadata_on_startup():
@@ -226,8 +236,10 @@ def _log_response(response):
         response.status_code,
         elapsed,
     )
-    if log.isEnabledFor(logging.INFO) and _should_log_request_completed():
-        log.info(
+    request_completed_level = _request_completed_log_level(response.status_code)
+    if request_completed_level is not None and log.isEnabledFor(request_completed_level):
+        log_method = log.debug if request_completed_level <= logging.DEBUG else log.info
+        log_method(
             "REQUEST_COMPLETED",
             extra={
                 "ip": get_client_ip(),

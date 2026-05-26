@@ -765,7 +765,7 @@ class TestRunFailureEvents:
 
 
 class TestRequestResponseDebugEvents:
-    """REQUEST/RESPONSE stay DEBUG-only while REQUEST_COMPLETED is visible at INFO."""
+    """REQUEST/RESPONSE stay DEBUG-only while REQUEST_COMPLETED keeps routine probes quiet."""
 
     def test_request_not_logged_at_info_level(self):
         original_level = shell_app.log.level
@@ -794,9 +794,34 @@ class TestRequestResponseDebugEvents:
         shell_app.log.setLevel(logging.INFO)
         try:
             with mock.patch.object(shell_app.log, "info") as mock_info:
-                get_client().get("/health")
+                get_client().get("/config")
             completed_calls = [c for c in mock_info.call_args_list if c[0][0] == "REQUEST_COMPLETED"]
             assert len(completed_calls) == 1
+        finally:
+            shell_app.log.setLevel(original_level)
+
+    def test_request_completed_demotes_successful_probe_paths_to_debug(self):
+        original_level = shell_app.log.level
+        shell_app.log.setLevel(logging.INFO)
+        try:
+            with mock.patch.object(shell_app.log, "info") as mock_info:
+                get_client().get("/health")
+                get_client().get("/status")
+            completed_calls = [c for c in mock_info.call_args_list if c[0][0] == "REQUEST_COMPLETED"]
+            assert len(completed_calls) == 0
+        finally:
+            shell_app.log.setLevel(original_level)
+
+    def test_request_completed_probe_debug_event_keeps_bounded_fields(self):
+        original_level = shell_app.log.level
+        shell_app.log.setLevel(logging.DEBUG)
+        try:
+            with mock.patch.object(shell_app.log, "debug") as mock_debug:
+                get_client().get("/health")
+            completed_calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST_COMPLETED"]
+            assert len(completed_calls) == 1
+            assert completed_calls[0].kwargs["extra"]["path"] == "/health"
+            assert completed_calls[0].kwargs["extra"]["status"] == 200
         finally:
             shell_app.log.setLevel(original_level)
 
@@ -805,11 +830,11 @@ class TestRequestResponseDebugEvents:
         shell_app.log.setLevel(logging.INFO)
         try:
             with mock.patch.object(shell_app.log, "info") as mock_info:
-                get_client().get("/health?debug=1")
+                get_client().get("/config?debug=1")
             call = next(c for c in mock_info.call_args_list if c[0][0] == "REQUEST_COMPLETED")
             assert call.kwargs["extra"]["method"] == "GET"
-            assert call.kwargs["extra"]["path"] == "/health"
-            assert call.kwargs["extra"]["endpoint"] == "assets.health"
+            assert call.kwargs["extra"]["path"] == "/config"
+            assert call.kwargs["extra"]["endpoint"] == "content.get_config"
             assert call.kwargs["extra"]["status"] == 200
             assert "duration_ms" in call.kwargs["extra"]
             assert "qs" not in call.kwargs["extra"]
