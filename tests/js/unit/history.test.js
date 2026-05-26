@@ -2029,8 +2029,12 @@ describe('history panel actions', () => {
       .find(btn => btn.textContent === 'Select all')
     expect(selectAll.getAttribute('aria-pressed')).toBe('mixed')
 
+    const documentClick = vi.fn()
+    document.addEventListener('click', documentClick)
     selectAll.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    document.removeEventListener('click', documentClick)
     await new Promise((resolve) => setImmediate(resolve))
+    expect(documentClick).not.toHaveBeenCalled()
     expect(historyFetchCount()).toBe(1)
     expect(document.querySelector('.history-bulk-count').textContent).toBe('2 selected')
     expect([...document.querySelectorAll('[data-action="select-run"]')].map(input => input.checked))

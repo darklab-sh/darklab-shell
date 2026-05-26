@@ -1024,7 +1024,10 @@ function _renderHistoryBulkToolbar() {
   selectAll.textContent = allSelected && someSelected ? 'Deselect all' : 'Select all';
   selectAll.disabled = !_historySelection.selectMode || !visibleSelectable.length || _historySelection.bulkInFlight;
   selectAll.setAttribute('aria-pressed', allSelected && someSelected ? 'true' : someSelected ? 'mixed' : 'false');
-  selectAll.addEventListener('click', () => _historySelectAllVisibleItems());
+  selectAll.addEventListener('click', (event) => {
+    event.stopPropagation();
+    _historySelectAllVisibleItems();
+  });
   actionRow.appendChild(selectAll);
 
   const clear = document.createElement('button');
@@ -1032,7 +1035,8 @@ function _renderHistoryBulkToolbar() {
   clear.type = 'button';
   clear.textContent = 'Clear';
   clear.disabled = selectedCount === 0 || _historySelection.bulkInFlight;
-  clear.addEventListener('click', () => {
+  clear.addEventListener('click', (event) => {
+    event.stopPropagation();
     _historyClearSelection({ render: false });
     _historyRenderCurrentPanel();
   });

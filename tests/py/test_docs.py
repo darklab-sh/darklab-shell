@@ -781,8 +781,8 @@ class TestDocumentedCombinedTotals:
 # parent directory below).
 _PROJECT_STRUCTURE_EXCLUSIONS = frozenset({
     "app/blueprints/__init__.py",     # empty package marker
-    "docs/release-drafts/v2.0-merge-request.md",   # temporary branch artifact
-    "docs/release-drafts/v2.0-release-notes.md",   # temporary branch artifact
+    "docs/release-drafts/v2.1-merge-request.md",   # temporary branch artifact
+    "docs/release-drafts/v2.1-release-notes.md",   # temporary branch artifact
 })
 
 # Directories whose individual files are intentionally collapsed into a

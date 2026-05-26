@@ -1,6 +1,6 @@
 {
   "name": "darklab_shell",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
   "scripts": {
     "test": "npm run test:pytest && npm run test:unit && npm run test:e2e",

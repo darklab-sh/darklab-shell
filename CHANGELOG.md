@@ -6,6 +6,19 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
+## [2.1] — Unreleased
+
+### Added
+
+### Changed
+
+### Fixed
+
+- **History bulk-select drawer stability** — clicking **Select all** or **Clear** in History bulk mode no longer bubbles into document-level outside-click handlers after the toolbar re-renders.
+  - **Tests:** updated the History bulk-selection unit coverage so Select all must keep document click handlers quiet while selecting the visible completed runs.
+
+---
+
 ## [2.0] — 2026-05-26
 
 ### Added
