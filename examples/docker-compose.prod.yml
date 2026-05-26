@@ -2,6 +2,9 @@
 # Use with the root compose file, for example:
 #   docker compose -f docker-compose.yml \
 #     -f examples/docker-compose.prod.yml up -d
+# Add root-file profiles when you use optional services:
+#   docker compose --profile postgres --profile llama \
+#     -f docker-compose.yml -f examples/docker-compose.prod.yml up -d
 # This file is not a complete stack on its own.
 ---
 services:
@@ -53,6 +56,12 @@ services:
         gelf-address: "${DOCKER_GELF_ADDRESS:-udp://loghost.darklab.sh:12201/}"
   postgres:
     container_name: shell.darklab.sh-postgres
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "${DOCKER_GELF_ADDRESS:-udp://loghost.darklab.sh:12201/}"
+  llama:
+    container_name: shell.darklab.sh-llama
     logging:
       driver: gelf
       options:

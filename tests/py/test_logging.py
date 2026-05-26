@@ -807,6 +807,11 @@ class TestRequestResponseDebugEvents:
             with mock.patch.object(shell_app.log, "info") as mock_info:
                 get_client().get("/health")
                 get_client().get("/status")
+                with mock.patch.dict(
+                    shell_app.CFG,
+                    {"diagnostics_allowed_cidrs": ["127.0.0.1/32"], "metrics_enabled": True},
+                ):
+                    get_client(use_forwarded_for=False).get("/metrics")
             completed_calls = [c for c in mock_info.call_args_list if c[0][0] == "REQUEST_COMPLETED"]
             assert len(completed_calls) == 0
         finally:

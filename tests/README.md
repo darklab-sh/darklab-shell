@@ -1037,7 +1037,7 @@ Meta-tests that verify documentation stays in sync with the test suite and opera
 | `TestRequestResponseDebugEvents.test_request_not_logged_at_info_level` | Checks that request not logged at info level. |
 | `TestRequestResponseDebugEvents.test_response_not_logged_at_info_level` | Checks that response not logged at info level. |
 | `TestRequestResponseDebugEvents.test_request_completed_logged_at_info_level` | Verifies normal request completions emit an INFO-level `REQUEST_COMPLETED` event. |
-| `TestRequestResponseDebugEvents.test_request_completed_demotes_successful_probe_paths_to_debug` | Verifies successful `/health` and `/status` probes do not emit INFO-level completion events. |
+| `TestRequestResponseDebugEvents.test_request_completed_demotes_successful_probe_paths_to_debug` | Verifies successful `/health`, `/status`, and `/metrics` probes do not emit INFO-level completion events. |
 | `TestRequestResponseDebugEvents.test_request_completed_probe_debug_event_keeps_bounded_fields` | Verifies successful probe completion events keep bounded fields when DEBUG logging is enabled. |
 | `TestRequestResponseDebugEvents.test_request_completed_extra_has_bounded_request_fields` | Verifies `REQUEST_COMPLETED` includes bounded request fields without query-string data. |
 | `TestRequestResponseDebugEvents.test_request_completed_skips_static_asset_noise` | Verifies static asset-style requests do not emit the INFO-level completion event. |

@@ -29,6 +29,8 @@ Entries favor clear outcomes first, then implementation and test details when th
     - Added AI queue-health metric, AI storage DB timing, AI Redis key metric, database context-manager, Postgres-safe AI context suppression-filter, summary-worker completion, next-command worker validation, stale-assist recovery logging, redacted-context suggestion validation, suggestion-rejection metric emission, stale-context failure, and deterministic summary truncation fallback coverage.
     - Added browser summary/next-command route coverage for invalid-body, missing-session, disabled/feature-disabled, no-context, Redis-unavailable, busy, and rate-limit guard rejection, plus API summary/next-command routes with the same guard/error matrix.
     - Added deterministic Run Details AI summary/suggestion rendering coverage that drives queued polling with fake timers, a Playwright Run Details AI workflow smoke, and static entrypoint/Compose assertions for the gated AI worker plus llama sidecar wiring. Current suite total: 1796 pytest + 1247 Vitest + 253 Playwright = **3,296 tests**.
+- **Production Compose example refresh** — `examples/docker-compose.prod.yml` now mirrors the root Compose stack's optional profiles.
+  - **What:** documented the `postgres` and `llama` profile flags in the example command and added production container naming plus GELF logging for the llama.cpp sidecar.
 - **Structured output model** — run output now has a typed Python and browser contract, and producers, storage, live streams, and consumers all share the same line-event shape while legacy transcript output stays stable at the compatibility boundary.
   - **Why:** command transcripts currently overload `cls` with severity and visual-role hints, which makes comparison, redaction, search, exports, and structured summaries harder to keep consistent.
   - **What:**
@@ -104,7 +106,7 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Tests:** updated structured-log and broker-stream regressions for the enriched event payloads and quieter Redis stream disconnect event.
 - **Worker and request logging release hardening** — scheduler and notification worker entrypoints now configure the same structured logging pipeline as the web process, and normal non-asset HTTP requests emit a bounded `REQUEST_COMPLETED` info event.
   - **Why:** autonomous worker processes and successful request traffic need production-visible breadcrumbs without requiring DEBUG logs.
-  - **What:** successful `/health` and `/status` probe completions now move to DEBUG so routine polling does not flood INFO logs, while failed probes and normal app/API requests stay visible.
+  - **What:** successful `/health`, `/status`, and `/metrics` probe completions now move to DEBUG so routine polling and scrapes do not flood INFO logs, while failed probes and normal app/API requests stay visible.
   - **Tests:** added structured-logging regressions for worker entrypoint setup, INFO-level request completion fields, successful probe demotion, DEBUG probe fields, and static asset noise suppression.
 - **Headless API and bundled CLI client** — scripts and CI jobs can now authenticate with existing session tokens, start non-interactive runs, stream broker events, cancel active runs, read saved history/output/artifacts, and inspect read-only project data without driving the browser.
   - **Why:** operators need the same guarded run and evidence surfaces from local scripts and automation that they already trust in the browser shell.

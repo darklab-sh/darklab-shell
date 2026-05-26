@@ -112,7 +112,7 @@ _WORKSPACE_CLEANUP_INTERVAL_SECONDS = 300
 _last_workspace_cleanup_monotonic = 0.0
 _REQUEST_COMPLETED_LOG_SKIP_PREFIXES = ("/static/", "/vendor/")
 _REQUEST_COMPLETED_LOG_SKIP_PATHS = frozenset({"/favicon.ico"})
-_REQUEST_COMPLETED_LOG_DEBUG_PATHS = frozenset({"/health", "/status"})
+_REQUEST_COMPLETED_LOG_DEBUG_PATHS = frozenset({"/health", "/metrics", "/status"})
 
 
 def _should_log_request_completed() -> bool:
