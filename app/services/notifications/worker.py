@@ -6,7 +6,9 @@ import logging
 import signal
 import time
 
+from config import CFG
 from core.database_backend import is_transient_postgres_error
+from core.logging_setup import configure_logging
 from services.notifications.dispatcher import dispatch_due_events, prune_sent_events
 
 log = logging.getLogger("shell")
@@ -61,6 +63,7 @@ def run_forever(*, poll_seconds: float = DEFAULT_POLL_SECONDS, limit: int = 100)
 
 
 def main() -> None:
+    configure_logging(CFG)
     run_forever()
 
 

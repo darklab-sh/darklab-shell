@@ -1516,11 +1516,16 @@ def test_darklab_cli_notify_commands_use_secret_file_and_event_reader(monkeypatc
         "timeout_seconds=5",
         "--secret-file",
         str(secret_file),
+        "--format",
+        "json",
     ]) == 0
     create_output = capsys.readouterr().out
-    assert "MUTED" in create_output
-    assert "ntc_cli" in create_output
-    assert "no" in create_output
+    assert json.loads(create_output)["channel"] == {
+        "id": "ntc_cli",
+        "kind": "webhook",
+        "muted": False,
+        "label": "CLI Hook",
+    }
     assert cli_main.main(["notify", "list"]) == 0
     list_output = capsys.readouterr().out
     assert "ID       KIND     MUTED  LABEL" in list_output

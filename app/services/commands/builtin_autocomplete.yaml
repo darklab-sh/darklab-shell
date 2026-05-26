@@ -528,6 +528,131 @@ commands:
     description: "built-in: show the shell routing table summary"
     autocomplete:
       arguments: []
+  - root: notify
+    description: "built-in: manage outbound notification channels"
+    autocomplete:
+      subcommands:
+        list:
+          description: "List notification channels"
+          closes: true
+        kinds:
+          description: "List supported notification channel types"
+          closes: true
+        create:
+          description: "Create a channel when no secret values are required"
+          arguments:
+            - value: webhook
+              description: "Generic JSON webhook"
+            - value: slack
+              description: "Slack incoming webhook"
+            - value: discord
+              description: "Discord incoming webhook"
+            - value: telegram
+              description: "Telegram Bot API"
+            - value: pushover
+              description: "Pushover"
+            - value: email
+              description: "SMTP email"
+          flags:
+            - value: --label
+              takes_value: true
+              description: "Display label"
+            - value: --trigger
+              takes_value: true
+              description: "Notification trigger"
+              suggest:
+                - value: run_complete
+                  description: "External run completed"
+                - value: pty_session_ended
+                  description: "PTY session ended"
+                - value: scheduled_run_failed
+                  description: "Scheduled run failed"
+                - value: watcher_changed
+                  description: "Watcher detected a change"
+                - value: watcher_error
+                  description: "Watcher failed"
+                - value: watcher_recovered
+                  description: "Watcher recovered"
+            - value: --config
+              takes_value: true
+              description: "Channel config as KEY=VALUE"
+            - value: --muted
+              description: "Create the channel muted"
+        update:
+          description: "Update channel label, triggers, or config"
+          arguments:
+            - value: "<channel-id>"
+              hint_only: true
+              description: "Notification channel id"
+          flags:
+            - value: --label
+              takes_value: true
+              description: "Display label"
+            - value: --trigger
+              takes_value: true
+              description: "Replacement notification trigger"
+            - value: --config
+              takes_value: true
+              description: "Replacement config as KEY=VALUE"
+            - value: --muted
+              description: "Set the channel muted"
+        info:
+          description: "Show channel details"
+          arguments:
+            - value: "<channel-id>"
+              hint_only: true
+              description: "Notification channel id"
+        mute:
+          description: "Mute a channel"
+          arguments:
+            - value: "<channel-id>"
+              hint_only: true
+              description: "Notification channel id"
+        unmute:
+          description: "Unmute a channel"
+          arguments:
+            - value: "<channel-id>"
+              hint_only: true
+              description: "Notification channel id"
+        delete:
+          description: "Delete a channel"
+          arguments:
+            - value: "<channel-id>"
+              hint_only: true
+              description: "Notification channel id"
+        test:
+          description: "Send a test notification"
+          arguments:
+            - value: "<channel-id>"
+              hint_only: true
+              description: "Notification channel id"
+        events:
+          description: "List notification delivery events"
+          flags:
+            - value: --channel
+              takes_value: true
+              description: "Filter by channel id"
+            - value: --status
+              takes_value: true
+              description: "Filter by delivery status"
+              suggest:
+                - value: pending
+                  description: "Pending delivery"
+                - value: retry_wait
+                  description: "Waiting to retry"
+                - value: sent
+                  description: "Sent"
+                - value: dead
+                  description: "Dead-lettered"
+            - value: --trigger
+              takes_value: true
+              description: "Filter by trigger"
+            - value: --limit
+              takes_value: true
+              description: "Rows to return"
+            - value: --offset
+              takes_value: true
+              description: "Rows to skip"
   - root: runs
     description: >-
       built-in: show active runs; use -v for details or --json for automation

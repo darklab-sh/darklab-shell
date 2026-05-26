@@ -2,7 +2,7 @@
 
 darklab_shell can send queued notifications to external destinations for durable session-token users. Use this when a long run finishes while you are away from the browser, or when automation needs an audit trail of what was sent and what failed.
 
-Browser desktop notifications are still controlled by the **Run Notifications** preference. This page covers outbound channels from the Options **Notifications** tab, `/api/v1`, and the bundled `darklab notify` CLI.
+Browser desktop notifications are still controlled by the **Run Notifications** preference. This page covers outbound channels from the Options **Notifications** tab, the terminal `notify` built-in, `/api/v1`, and the bundled `darklab notify` CLI. Secret-valued channel creation stays in Options, the API, or the CLI's prompt/secret-file flow instead of accepting secrets in terminal command text.
 
 ## Channel Types
 
@@ -17,7 +17,7 @@ Notification channels belong to a durable `tok_` session. Anonymous browser sess
 | `pushover` | Pushover message API | `app_token`, `user_key` | `priority`, `sound`, `device`, `timeout_seconds` |
 | `email` | SMTP email | server SMTP password from config | `recipients`, `reply_to`, `timeout_seconds` |
 
-Secret values are write-only. List responses show whether required secrets are configured, but they do not return webhook URLs, bot tokens, Pushover keys, or SMTP passwords. The browser, API clients, and `darklab notify create` read the supported secret-field names from the server's notification channel kind contract, so new channel types do not need a second client-side field map.
+Secret values are write-only. List responses show whether required secrets are configured, but they do not return webhook URLs, bot tokens, Pushover keys, or SMTP passwords. The browser, API clients, terminal `notify kinds`, and `darklab notify create` read the supported secret-field names from the server's notification channel kind contract, so new channel types do not need a second client-side field map.
 
 ## Triggers
 
@@ -31,7 +31,7 @@ Channels subscribe to one or more trigger names:
 | `watcher_error` | A watcher failed while checking its source. |
 | `watcher_recovered` | A watcher that had previously changed or failed returned to a clean state. |
 | `scheduled_run_failed` | A scheduled run could not be started or completed by the scheduler path. |
-| `test` | A manual test send from the UI, API, or CLI. |
+| `test` | A manual test send from the UI, terminal built-in, API, or CLI. |
 
 The app currently emits `run_complete` and `test` from the shipped run and channel-management surfaces. The other trigger names are accepted by the channel contract and only produce deliveries when a matching app source enqueues them.
 
@@ -105,10 +105,10 @@ Notifications are queued in `notification_events`. A dedicated worker claims due
 - `notifications.retry.max_age_hours` defaults to `24` and caps how long an event can keep retrying.
 - `notifications.delivery_rate_per_minute` caps each channel's sends.
 - `notifications.do_not_disturb` pauses delivery attempts without deleting events or consuming retry attempts.
-- Muted channels stay configured, but they do not queue test sends or other deliveries until unmuted.
+- Muted channels stay configured and skip normal deliveries, but an explicit test send can still target the selected channel for troubleshooting.
 - If Postgres restarts while the worker is polling, the worker logs `NOTIFICATION_WORKER_DATABASE_INTERRUPTED` and retries instead of treating the restart as a delivery failure.
 
-The delivery audit is visible from the Options **Notifications** tab by opening a channel's **Deliveries** row. It is also available through `/api/v1/notification-events` and `darklab notify events`.
+The delivery audit is visible from the Options **Notifications** tab by opening a channel's **Deliveries** row. It is also available through `/api/v1/notification-events`, terminal `notify events`, and `darklab notify events`.
 
 ## Webhook Quickstart
 
@@ -140,6 +140,7 @@ The CLI can create the same channel without putting the secret on the command li
 
 ```bash
 darklab notify create webhook --label "Ops Hook" --trigger run_complete
+darklab notify create webhook --label "JSON Hook" --trigger run_complete --format json
 darklab notify list
 darklab notify update ntc_... --label "Ops Hook Primary"
 darklab notify mute ntc_...
@@ -149,6 +150,21 @@ darklab notify events --channel ntc_...
 ```
 
 `--secret-file ./webhook-secrets.json` is also supported when you already have a safely created local JSON file. The file keys must match the server-declared secret fields for the selected channel kind. Avoid building that file with a command that puts the secret literal in shell history.
+
+Inside the web terminal, use the built-in `notify` command for day-to-day channel management:
+
+```bash
+notify list
+notify kinds
+notify info ntc_...
+notify mute ntc_...
+notify unmute ntc_...
+notify test ntc_...
+notify events --channel ntc_...
+notify delete ntc_...
+```
+
+`notify create` refuses channel kinds that need secrets and points you back to Options **Notifications**, so webhook URLs and tokens do not end up in terminal history.
 
 ## Telegram Setup
 
@@ -175,10 +191,10 @@ The SMTP password is read from the environment variable named by `notifications.
 ## Operator Notes
 
 - The notification worker runs beside Gunicorn and is supervised by the container entrypoint when enabled.
-- API and CLI channel management require a durable session token.
+- Terminal, API, and CLI channel management require a durable session token.
 - Test sends use the same queued dispatcher path as real events and report whether the selected channel delivered, deferred, or failed the test event.
 - Manual test sends use `notifications.test_timeout_seconds`, so a broken webhook or SMTP relay returns feedback faster than normal background delivery.
-- Sent delivery audit rows are kept for `notifications.events.retention_days` days. Retry and dead-letter rows remain until they are retried, deleted with their channel/session data, or handled by a future cleanup path.
+- Sent delivery audit rows are kept for `notifications.events.retention_days` days. Retry and dead-letter rows remain until they are retried or deleted with their channel/session data.
 - Delivery history stays attached to the session token even if a channel row is later deleted.
 
 ## Related Docs

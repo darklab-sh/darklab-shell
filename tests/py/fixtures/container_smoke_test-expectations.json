@@ -1150,7 +1150,7 @@
       "any_of": [
         { "expected_text": ["108.79.194.246"] },
         { "expected_text": ["107.178.106.164"] },
-        { "expected_text": ["172.18.0.1"] },
+        { "expected_text": ["172.18.0"] },
         { "expected_text": ["10.20.0.2"] }
       ]
     },

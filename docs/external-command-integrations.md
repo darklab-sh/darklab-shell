@@ -111,7 +111,7 @@ requires_secrets:
 
 Shodan's CLI still expects its `shodan init` config file. Users do not need to run that setup command inside darklab_shell: when a Shodan command launches, the app writes the vault-backed `SHODAN_API_KEY` into a temporary per-run Shodan config directory, points that command at the temporary home, and removes the directory when the command exits. The key stays out of command text, history, and stored output.
 
-The Options Secrets picker reads this command-registry metadata so users see the known tool key names first. Custom names remain available for local registry overlays and future integrations.
+The Options Secrets picker reads this command-registry metadata so users see the known tool key names first. Custom names remain available for local registry overlays.
 
 `ipinfo` declares `IPINFO_TOKEN` as optional. The CLI can show limited unauthenticated output, while saved tokens unlock the provider data attached to the user's IPinfo account.
 

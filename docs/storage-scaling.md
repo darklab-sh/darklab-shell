@@ -83,7 +83,7 @@ Snapshots matter, but they are not the primary storage driver in the measured da
 | Average snapshot content | 148.26 KB |
 | Largest snapshot content | 0.85 MB |
 
-Intel payloads are tiny right now. The measured `entity_intel_snapshots.data_json` total is about 36 KB. That could change if future Atlas workflows cache larger raw provider responses, but current normalized provider data is not a storage risk.
+Intel payloads are tiny right now. The measured `entity_intel_snapshots.data_json` total is about 36 KB. Current normalized provider data is not a storage risk.
 
 ## One-Year Projection
 

@@ -180,6 +180,7 @@ _DOCUMENTED_BUILTIN_COMMANDS = [
     {"name": "quit", "description": "Alias for `exit`.", "root": "quit"},
     {"name": "retention", "description": "Show retention and persisted-output settings.", "root": "retention"},
     {"name": "mv <source> <destination>", "description": "Move or rename a session file or folder.", "root": "mv"},
+    {"name": "notify", "description": "List, inspect, mute, test, and delete outbound notification channels.", "root": "notify"},
     {"name": "rm <file>", "description": "Remove a session file after confirmation.", "root": "rm"},
     {"name": "route", "description": "Show the shell routing table summary.", "root": "route"},
     {"name": "runs [-v|--json]", "description": "Show app-native active run metadata for this session.", "root": "runs"},

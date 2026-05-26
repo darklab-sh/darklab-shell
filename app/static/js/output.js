@@ -1229,26 +1229,29 @@ function _appendBuiltinMarkerRow(content, marker, text, textClass = '') {
 
 function _appendBuiltinCommandCell(content, command) {
   const value = String(command || '').trim();
-  if (/^[a-z][a-z0-9_.-]*$/i.test(value)) {
-    _appendOutputCommandChip(content, value, value);
-    return;
-  }
   const commandEl = document.createElement('span');
-  commandEl.className = 'builtin-help-command';
+  commandEl.className = 'builtin-help-label';
   commandEl.textContent = value;
   content.appendChild(commandEl);
+}
+
+function _splitBuiltinHelpRow(value) {
+  const columnMatch = value.match(/^(.+?)\s{2,}(.+)$/);
+  if (columnMatch) return [columnMatch[1].trim(), columnMatch[2].trim()];
+  const dashMatch = value.match(/^(.+?)\s+-\s+(.+)$/);
+  if (dashMatch) return [dashMatch[1].trim(), dashMatch[2].trim()];
+  return null;
 }
 
 function _appendStructuredBuiltinHelpRow(content, text) {
   const value = String(text || '').trim();
   if (!value) return false;
-  const match = value.match(/^(\S+)(?:\s{2,}|\s+-\s+)(.+)$/);
-  if (!match) {
+  const split = _splitBuiltinHelpRow(value);
+  if (!split) {
     _appendOutputInlineText(content, value);
     return true;
   }
-  const command = match[1].trim();
-  const description = match[2].trim();
+  const [command, description] = split;
   _appendBuiltinCommandCell(content, command);
   const desc = document.createElement('span');
   desc.className = 'builtin-help-description';
@@ -1268,6 +1271,10 @@ function _appendStructuredBuiltinLine(content, text, cls) {
     return true;
   }
   if (classes.includes('builtin-plain')) {
+    _appendOutputInlineText(content, text);
+    return true;
+  }
+  if (classes.includes('builtin-table-header') || classes.includes('builtin-table-row')) {
     _appendOutputInlineText(content, text);
     return true;
   }

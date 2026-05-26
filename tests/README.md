@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,236
+- behavior tests: 3,244
 - docs/inventory meta-tests: 33
-- `pytest`: 1787 (1754 behavior + 33 meta)
-- `vitest`: 1246
+- `pytest`: 1794 (1761 behavior + 33 meta)
+- `vitest`: 1247
 - `playwright`: 253
-- total: 3,286
+- total: 3,294
 
 This document is organized in two parts:
 
@@ -537,6 +537,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestNotificationsPhase0.test_notification_channel_ids_use_full_uuid_hex` | Verifies notification channel ids use the same full UUID hex length as notification event ids. |
 | `TestNotificationsPhase0.test_notification_helpers_do_not_import_blueprints` | Verifies notification service helpers stay independent from Flask blueprint modules. |
 | `TestNotificationsPhase0.test_notification_channels_require_durable_session_tokens` | Verifies outbound notification channels reject anonymous session ids and require durable session tokens. |
+| `TestNotificationsPhase0.test_notify_builtin_lists_mutes_tests_events_and_deletes_channel` | Verifies the terminal `notify` built-in can list, inspect, mute, test, audit, unmute, and delete a vault-backed channel. |
+| `TestNotificationsPhase0.test_notify_builtin_keeps_secret_channel_creation_in_options` | Verifies terminal `notify create` keeps secret-valued channel setup in Options instead of accepting secrets in shell history. |
 | `TestRunHistorySearchClauses.test_sqlite_history_search_prefers_fts_for_output_scope` | Verifies SQLite history search still prefers FTS for output-capable searches with indexable terms. |
 | `TestRunHistorySearchClauses.test_sqlite_history_search_falls_back_to_like_for_short_terms` | Verifies SQLite history search falls back to substring `LIKE` for short terms that FTS trigram tokenization cannot match. |
 | `TestRunHistorySearchClauses.test_sqlite_command_scope_searches_command_only` | Verifies command-scoped history search only matches the command text. |
@@ -1034,12 +1036,17 @@ Meta-tests that verify documentation stays in sync with the test suite and opera
 | `TestRunFailureEvents.test_run_stream_error_emits_error` | Checks that run stream error emits error. |
 | `TestRequestResponseDebugEvents.test_request_not_logged_at_info_level` | Checks that request not logged at info level. |
 | `TestRequestResponseDebugEvents.test_response_not_logged_at_info_level` | Checks that response not logged at info level. |
+| `TestRequestResponseDebugEvents.test_request_completed_logged_at_info_level` | Verifies normal request completions emit an INFO-level `REQUEST_COMPLETED` event. |
+| `TestRequestResponseDebugEvents.test_request_completed_extra_has_bounded_request_fields` | Verifies `REQUEST_COMPLETED` includes bounded request fields without query-string data. |
+| `TestRequestResponseDebugEvents.test_request_completed_skips_static_asset_noise` | Verifies static asset-style requests do not emit the INFO-level completion event. |
 | `TestRequestResponseDebugEvents.test_request_logged_at_debug_level` | Checks that request logged at debug level. |
 | `TestRequestResponseDebugEvents.test_request_debug_extra_has_path` | Checks that request debug extra has path. |
 | `TestRequestResponseDebugEvents.test_request_debug_extra_has_method` | Checks that request debug extra has method. |
 | `TestRequestResponseDebugEvents.test_response_logged_at_debug_level` | Checks that response logged at debug level. |
 | `TestRequestResponseDebugEvents.test_response_debug_extra_has_status` | Checks that response debug extra has status. |
 | `TestRequestResponseDebugEvents.test_query_string_included_in_request_debug_when_present` | Checks that query string included in request debug when present. |
+| `TestWorkerEntrypointLoggingSetup.test_notification_worker_main_configures_logging` | Verifies the notification worker entrypoint configures structured logging before running. |
+| `TestWorkerEntrypointLoggingSetup.test_scheduler_worker_main_configures_logging` | Verifies the scheduler worker entrypoint configures structured logging before running. |
 | `TestDbPrunedEvent.test_db_pruned_emits_info_when_records_deleted` | Checks that database pruned emits info when records deleted. |
 | `TestDbPrunedEvent.test_db_pruned_extra_has_run_count` | Checks that database pruned extra has run count. |
 | `TestDbPrunedEvent.test_db_pruned_not_emitted_when_retention_disabled` | Checks that database pruned not emitted when retention disabled. |
@@ -2622,7 +2629,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `renders shell as a normal workspace folder in the prompt` | Verifies that a workspace folder named `shell` is displayed normally in the prompt instead of being treated as a mount prefix. |
 | `falls back to plain-text rendering when AnsiUp is unavailable` | Verifies that falls back to plain-text rendering when AnsiUp is unavailable. |
 | `wraps output content in a line-content container so prefix mode does not reshape the line flow` | Verifies that wraps output content in a line-content container so prefix mode does not reshape the line flow. |
-| `renders builtin help and FAQ rows as structured terminal content` | Verifies that help rows render command chips/descriptions and FAQ rows render stable question/answer markers with inline code. |
+| `renders builtin help and FAQ rows as structured terminal content` | Verifies that help rows render plain command/description columns and FAQ rows render stable question/answer markers with inline code. |
+| `keeps automatic command chips out of command list rows` | Verifies built-in help rows, command catalog rows, and table headers stay non-clickable while commands with arguments still split into aligned columns. |
 | `trims old lines and keeps rawLines in sync` | Verifies that trims old lines and keeps rawLines in sync. |
 | `coalesces consecutive progress rows in the live renderer while retaining raw lines` | Verifies that live progress updates replace the previous visible progress row while every emitted line stays in raw history. |
 | `coalesces batched status rows without dropping raw output history` | Verifies that batched status-line updates collapse to the newest visible row in each consecutive group while preserving raw output history. |

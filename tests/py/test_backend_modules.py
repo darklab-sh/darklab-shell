@@ -4671,6 +4671,81 @@ class TestNotificationsPhase0:
         with pytest.raises(ValueError, match="durable session token"):
             require_durable_session_token("sess-anonymous")
 
+    def test_notify_builtin_lists_mutes_tests_events_and_deletes_channel(self, monkeypatch, tmp_path):
+        from services.notifications.channels_store import create_notification_channel
+        from services.notifications.models import ChannelResult
+        import services.notifications.channels.webhook as webhook_channel
+
+        monkeypatch.setenv("SECRETS_MASTER_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+        secrets_vault.reset_master_key_cache_for_tests()
+        delivered = []
+
+        def fake_post_json(_url, payload, _config, *, label, **_kwargs):
+            delivered.append((label, payload["trigger"]))
+            return ChannelResult.success()
+
+        monkeypatch.setattr(webhook_channel, "post_json", fake_post_json)
+        conn = self._notification_db(monkeypatch, tmp_path)
+        conn.close()
+        channel = create_notification_channel(
+            "tok_notifications",
+            {
+                "kind": "webhook",
+                "label": "Ops Hook",
+                "triggers": ["run_complete"],
+                "secret_values": {"url": "https://hooks.example.test/darklab"},
+            },
+        )
+        channel_id = channel["id"]
+
+        lines, exit_code = builtin_commands.execute_builtin_command("notify list", "tok_notifications")
+        text = "\n".join(str(line.get("text", "")) for line in lines)
+
+        assert exit_code == 0
+        assert channel_id in text
+        assert "Ops Hook" in text
+
+        info_lines, _ = builtin_commands.execute_builtin_command(f"notify info {channel_id}", "tok_notifications")
+        info_text = "\n".join(str(line.get("text", "")) for line in info_lines)
+        assert "configured: url" in info_text
+
+        muted_lines, _ = builtin_commands.execute_builtin_command(f"notify mute {channel_id}", "tok_notifications")
+        assert "muted" in "\n".join(str(line.get("text", "")) for line in muted_lines)
+
+        test_lines, _ = builtin_commands.execute_builtin_command(f"notify test {channel_id}", "tok_notifications")
+        test_text = "\n".join(str(line.get("text", "")) for line in test_lines)
+        assert "queued 1 test event" in test_text
+        assert "sent" in test_text
+        assert delivered == [("webhook", "test")]
+
+        event_lines, _ = builtin_commands.execute_builtin_command(
+            f"notify events --channel {channel_id} --status sent",
+            "tok_notifications",
+        )
+        event_text = "\n".join(str(line.get("text", "")) for line in event_lines)
+        assert "Notification events" in event_text
+        assert channel_id in event_text
+
+        unmuted_lines, _ = builtin_commands.execute_builtin_command(f"notify unmute {channel_id}", "tok_notifications")
+        assert "unmuted" in "\n".join(str(line.get("text", "")) for line in unmuted_lines)
+
+        deleted_lines, _ = builtin_commands.execute_builtin_command(f"notify delete {channel_id}", "tok_notifications")
+        assert "deleted" in "\n".join(str(line.get("text", "")) for line in deleted_lines)
+
+    def test_notify_builtin_keeps_secret_channel_creation_in_options(self, monkeypatch, tmp_path):
+        conn = self._notification_db(monkeypatch, tmp_path)
+        conn.close()
+
+        lines, exit_code = builtin_commands.execute_builtin_command(
+            "notify create webhook --label Hook",
+            "tok_notifications",
+        )
+        text = "\n".join(str(line.get("text", "")) for line in lines)
+
+        assert exit_code == 0
+        assert "Webhook channels require secret values" in text
+        assert "Options > Notifications" in text
+
 
 class TestRunHistorySearchClauses:
     def test_sqlite_history_search_prefers_fts_for_output_scope(self):

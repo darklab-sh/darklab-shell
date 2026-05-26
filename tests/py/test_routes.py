@@ -8737,7 +8737,11 @@ class TestHistoryRoute:
                 with mock.patch.object(ai_assists.log, "info") as info_log:
                     queued = client.post(f"/runs/{run_id}/ai-summary", json={}, headers={"X-Session-ID": session})
                     suggested = client.post(f"/runs/{run_id}/ai-next-commands", json={}, headers={"X-Session-ID": session})
-                    enqueue_log_count = info_log.call_count
+                    enqueue_events = [
+                        (call.args[0], call.kwargs["extra"])
+                        for call in info_log.call_args_list
+                        if call.args and call.args[0] == "AI_ASSIST_ENQUEUE_RESULT"
+                    ]
                 missing_summary_session = client.post(f"/runs/{run_id}/ai-summary", json={})
                 missing_next_session = client.post(f"/runs/{run_id}/ai-next-commands", json={})
                 listed = client.get(f"/runs/{run_id}/ai-assists", headers={"X-Session-ID": session})
@@ -8878,10 +8882,12 @@ class TestHistoryRoute:
             assert forced.status_code == 202
             assert forced_payload["assist"]["id"] != queued_payload["assist"]["id"]
             assert forced_payload["assist"]["status"] == "queued"
-            assert enqueue_log_count == 2
+            assert [event for event, _extra in enqueue_events] == ["AI_ASSIST_ENQUEUE_RESULT"] * 2
+            assert {extra["variant"] for _event, extra in enqueue_events} == {"summary", "next_commands"}
             reuse_events = [
                 (call.args[0], call.kwargs["extra"])
                 for call in reuse_log.call_args_list
+                if call.args and call.args[0] == "AI_ASSIST_ENQUEUE_RESULT"
             ]
             assert [event for event, _extra in reuse_events] == ["AI_ASSIST_ENQUEUE_RESULT"] * 2
             assert reuse_events[0][1] == {

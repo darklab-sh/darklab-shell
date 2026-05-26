@@ -54,7 +54,7 @@ unknown `tok_...` values return `revoked_token`.
 
 ## Versioning
 
-`/api/v1` is additive within v1. Existing routes, required request fields, and documented response fields should not be removed or changed incompatibly. Breaking changes belong under a future `/api/v2`.
+`/api/v1` is additive within v1. Existing routes, required request fields, and documented response fields should not be removed or changed incompatibly.
 
 The OpenAPI contract is served at `/api/v1/openapi.json` and checked in at `docs/api-v1-openapi.json`. It includes route-level parameters plus request, response, error, and stream schemas for the public API. The Python spec in `app/services/api_v1/openapi.py` is the source of truth; regenerate the checked-in JSON with:
 
@@ -359,7 +359,7 @@ Test sends use the fixed trigger `test` with a canned payload shaped like:
 }
 ```
 
-Muted channels stay configured but do not queue test sends or other deliveries until unmuted. Delivery audit rows are paged with the normal API envelope and can be filtered by `channel_id`, `trigger`, or `status` (`pending`, `retry_wait`, `sent`, or `dead`).
+Muted channels stay configured and skip normal deliveries, but explicit test sends can still target the selected channel for troubleshooting. Delivery audit rows are paged with the normal API envelope and can be filtered by `channel_id`, `trigger`, or `status` (`pending`, `retry_wait`, `sent`, or `dead`).
 
 ---
 
@@ -462,7 +462,7 @@ The CLI talks only to `/api/v1` and has no Flask app imports.
 | `darklab watch info\|pause\|resume\|delete\|run <watcher_id> [--format text\|json]` | Inspect, pause, resume, delete, or immediately fire one watcher. |
 | `darklab watch accept <watcher_id> [--run-id RUN_ID]` | Promote the latest watcher fire, or the supplied run, to the new baseline. |
 | `darklab watch fires <watcher_id> [--limit N] [--offset N] [--format text\|json\|ndjson]` | List watcher fire audit rows. `--limit` defaults to 50 and caps at 100. |
-| `darklab notify list\|create\|update\|mute\|unmute\|delete\|test\|events ...` | Manage outbound notification channels and read delivery audit rows. Most read and mutation commands accept `--format text\|json`; `notify events` also accepts `ndjson`, and `--limit` defaults to 50 and caps at 100. Channel secrets come from prompts or `--secret-file`, never command-line secret flags. |
+| `darklab notify list\|create\|update\|mute\|unmute\|delete\|test\|events ...` | Manage outbound notification channels and read delivery audit rows. Channel mutation commands accept `--format text\|json`; `notify list` and `notify events` also accept `ndjson`, and event `--limit` defaults to 50 and caps at 100. Channel secrets come from prompts or `--secret-file`, never command-line secret flags. |
 | `darklab completion bash\|zsh\|fish` | Print static shell completion for subcommands, nested subcommands, option names, and fixed choices. This command reads only the local CLI parser and does not require `DARKLAB_API_URL` or `DARKLAB_TOKEN`. |
 | `darklab completion install [--shell auto\|bash\|zsh\|fish]` | Install static shell completion into the current user's shell-completion directory. `auto` reads `$SHELL`; pass a shell explicitly when detection is not enough. |
 | `darklab download <run_id> --artifact ARTIFACT_ID --out DIR` | Download one artifact. |

@@ -758,22 +758,22 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Behavior:**
 
-- Durable `tok_` sessions can manage outbound channels from the Options **Notifications** tab, `/api/v1/notification-channels`, or `darklab notify`.
+- Durable `tok_` sessions can manage outbound channels from the Options **Notifications** tab, the terminal `notify` built-in, `/api/v1/notification-channels`, or `darklab notify`. Secret-valued channel creation stays in Options, the API, or the CLI's prompt/secret-file flow instead of accepting secrets in terminal command text.
 - Supported destinations are generic JSON webhooks, Slack incoming webhooks, Discord incoming webhooks, Telegram Bot API chats, Pushover, and SMTP email.
 - Channel secrets are write-only. Webhook URLs, bot tokens, Pushover tokens, and related secret values are stored through the encrypted vault; list responses only say whether each required secret is configured.
 - SMTP email uses operator-owned transport settings from `notifications.smtp.*`, while each email channel chooses its recipients and optional reply-to address.
 - External non-PTY run finalization queues a `run_complete` notification with the configured `app_name`, run id, command root, exit code, token hint, and summary counts. Built-in commands and PTY sessions do not send `run_complete` by default.
 - The trigger list also includes `pty_session_ended`, `scheduled_run_failed`, `watcher_changed`, `watcher_error`, `watcher_recovered`, and `test`; a channel sends only when a matching app source queues that trigger.
-- Test sends use the same queue and delivery path as real notifications, so a successful test verifies both channel config and delivery plumbing. Muted channels stay configured but do not queue test sends or other deliveries until unmuted.
+- Test sends use the same queue and delivery path as real notifications, so a successful test verifies both channel config and delivery plumbing. Muted channels skip normal deliveries but can still receive an explicit test send for troubleshooting.
 - Delivery events are queued, claimed by the notification worker, retried with backoff when failures are retryable, and moved to dead-letter state when attempts or retry age are exhausted. Sent delivery audit rows are pruned after the configured retention window.
 - Webhook-style channels reject non-public destinations by default, with an operator allowlist for trusted internal receivers.
-- Delivery audit rows are available from each channel's **Deliveries** control in the Options **Notifications** tab, through `/api/v1/notification-events`, and through `darklab notify events`; the CLI can also update, mute, unmute, test, and delete channels.
+- Delivery audit rows are available from each channel's **Deliveries** control in the Options **Notifications** tab, through `/api/v1/notification-events`, the terminal `notify events` built-in, and `darklab notify events`; the terminal built-in and CLI can also update, mute, unmute, test, and delete channels.
 
 **Limits:** anonymous browser sessions cannot create outbound channels. Email channels require SMTP settings before they can be saved or tested. Channel payloads are intentionally compact and should still be sent only to destinations you trust.
 
 **Configuration:** `notifications.*` controls do-not-disturb, per-channel delivery rate, HTTP/test timeouts, private webhook destination allowlisting, SMTP transport, sent-event retention, and retry behavior. `app_name` controls outbound titles/messages. See [CONFIGURATION.md](CONFIGURATION.md) and [docs/notifications.md](docs/notifications.md).
 
-**Related files:** `app/services/notifications/` (channel registry, payload builders, queue dispatcher, worker, and secret helpers), `app/blueprints/notifications.py` (browser channel routes), `app/blueprints/api_v1.py` (API channel and audit routes), `app/static/js/features/preferences/notification_channels.js` (Options **Notifications** tab), `docs/notifications.md` (setup and payload guide).
+**Related files:** `app/services/notifications/` (channel registry, payload builders, queue dispatcher, worker, and secret helpers), `app/services/commands/builtins_notify.py` (terminal `notify` built-in), `app/blueprints/notifications.py` (browser channel routes), `app/blueprints/api_v1.py` (API channel and audit routes), `app/static/js/features/preferences/notification_channels.js` (Options **Notifications** tab), `docs/notifications.md` (setup and payload guide).
 
 ---
 
@@ -803,7 +803,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Behavior:**
 
-- The Options modal includes a **Secrets** section where users can add, replace, and delete secret values for the active session. The add flow suggests the API key names declared by the command and provider registries first, with a custom option for local overlays or future integrations.
+- The Options modal includes a **Secrets** section where users can add, replace, and delete secret values for the active session. The add flow suggests the API key names declared by the command and provider registries first, with a custom option for local overlays.
 - **Provider Status** in the Secrets section shows which intel providers are usable now, which ones still need an API key, the app-facing secret names, supported lookup types or CLI uses, and broad account/free-tier notes. Clicking a secret name opens the add-secret prompt with that key selected.
 - `secret set NAME` opens the same browser-owned value prompt from the terminal. The command line contains only the name; the value is entered in the modal and is not echoed.
 - `secret list` shows stored names and their consumer environment bindings. It never prints values.
@@ -1195,7 +1195,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Terminal option keys:** `line-numbers`, `timestamps`, `welcome`, `share-redaction`, `project-auto-link-runs`, `project-auto-link-run-entities`, `run-notifications`, `hud-clock`, `compare-view`, `compare-context`, `prompt-username`.
 
-**Related files:** `app/static/js/features/preferences/preferences.js` (Options modal state, notification preference, and session preference persistence), `app/static/js/features/preferences/notification_channels.js` (outbound channel list, editor, mute/delete, and test sends), `app/static/js/features/terminal/local_commands.js` (terminal `config` command), `app/static/js/features/preferences/secrets_panel.js` (encrypted secret rows and value prompt), `app/static/js/runner.js` (run-completion notification dispatch and browser-owned terminal command routing), `app/static/js/shell_chrome.js` (desktop options navigation), `app/static/js/mobile_chrome.js` (mobile menu wiring).
+**Related files:** `app/static/js/features/preferences/preferences.js` (Options modal state, notification preference, and session preference persistence), `app/static/js/features/preferences/notification_channels.js` (outbound channel list, editor, mute/delete, and test sends), `app/services/commands/builtins_notify.py` (server-owned terminal `notify` command), `app/static/js/features/terminal/local_commands.js` (terminal `config` command), `app/static/js/features/preferences/secrets_panel.js` (encrypted secret rows and value prompt), `app/static/js/runner.js` (run-completion notification dispatch and browser-owned terminal command routing), `app/static/js/shell_chrome.js` (desktop options navigation), `app/static/js/mobile_chrome.js` (mobile menu wiring).
 
 ---
 

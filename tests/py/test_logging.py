@@ -765,7 +765,7 @@ class TestRunFailureEvents:
 
 
 class TestRequestResponseDebugEvents:
-    """REQUEST and RESPONSE are only emitted when the logger is at DEBUG level."""
+    """REQUEST/RESPONSE stay DEBUG-only while REQUEST_COMPLETED is visible at INFO."""
 
     def test_request_not_logged_at_info_level(self):
         original_level = shell_app.log.level
@@ -786,6 +786,44 @@ class TestRequestResponseDebugEvents:
                 get_client().get("/health")
             response_calls = [c for c in mock_debug.call_args_list if c[0][0] == "RESPONSE"]
             assert len(response_calls) == 0
+        finally:
+            shell_app.log.setLevel(original_level)
+
+    def test_request_completed_logged_at_info_level(self):
+        original_level = shell_app.log.level
+        shell_app.log.setLevel(logging.INFO)
+        try:
+            with mock.patch.object(shell_app.log, "info") as mock_info:
+                get_client().get("/health")
+            completed_calls = [c for c in mock_info.call_args_list if c[0][0] == "REQUEST_COMPLETED"]
+            assert len(completed_calls) == 1
+        finally:
+            shell_app.log.setLevel(original_level)
+
+    def test_request_completed_extra_has_bounded_request_fields(self):
+        original_level = shell_app.log.level
+        shell_app.log.setLevel(logging.INFO)
+        try:
+            with mock.patch.object(shell_app.log, "info") as mock_info:
+                get_client().get("/health?debug=1")
+            call = next(c for c in mock_info.call_args_list if c[0][0] == "REQUEST_COMPLETED")
+            assert call.kwargs["extra"]["method"] == "GET"
+            assert call.kwargs["extra"]["path"] == "/health"
+            assert call.kwargs["extra"]["endpoint"] == "assets.health"
+            assert call.kwargs["extra"]["status"] == 200
+            assert "duration_ms" in call.kwargs["extra"]
+            assert "qs" not in call.kwargs["extra"]
+        finally:
+            shell_app.log.setLevel(original_level)
+
+    def test_request_completed_skips_static_asset_noise(self):
+        original_level = shell_app.log.level
+        shell_app.log.setLevel(logging.INFO)
+        try:
+            with mock.patch.object(shell_app.log, "info") as mock_info:
+                get_client().get("/favicon.ico")
+            completed_calls = [c for c in mock_info.call_args_list if c[0][0] == "REQUEST_COMPLETED"]
+            assert len(completed_calls) == 0
         finally:
             shell_app.log.setLevel(original_level)
 
@@ -857,6 +895,32 @@ class TestRequestResponseDebugEvents:
             assert "json" in call.kwargs["extra"]["qs"]
         finally:
             shell_app.log.setLevel(original_level)
+
+
+# ── worker entrypoint logging setup ──────────────────────────────────────────
+
+class TestWorkerEntrypointLoggingSetup:
+    """Dedicated worker processes configure structured logging before they run."""
+
+    def test_notification_worker_main_configures_logging(self):
+        from services.notifications import worker
+
+        with mock.patch.object(worker, "configure_logging") as configure, \
+             mock.patch.object(worker, "run_forever") as run_forever:
+            worker.main()
+
+        configure.assert_called_once_with(worker.CFG)
+        run_forever.assert_called_once_with()
+
+    def test_scheduler_worker_main_configures_logging(self):
+        from services.scheduler import worker
+
+        with mock.patch.object(worker, "configure_logging") as configure, \
+             mock.patch.object(worker, "run_forever") as run_forever:
+            worker.main()
+
+        configure.assert_called_once_with(worker.CFG)
+        run_forever.assert_called_once_with()
 
 
 # ── DB_PRUNED log event ───────────────────────────────────────────────────────

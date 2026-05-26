@@ -42,6 +42,7 @@ from services.commands.builtins_misc import (
     run_builtin_sudo as _run_builtin_sudo,
     run_builtin_xyzzy as _run_builtin_xyzzy,
 )
+from services.commands.builtins_notify import run_builtin_notify as _run_builtin_notify
 from services.commands.builtins_project import run_builtin_project as _run_builtin_project
 from services.commands.builtins_runtime import (
     run_builtin_history as _run_builtin_history,
@@ -316,6 +317,7 @@ _BUILTIN_COMMAND_DISPATCH = {
     "mkdir":     lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
     "mv":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
     "man":       lambda cmd, sid: _run_builtin_man(cmd),
+    "notify":    lambda cmd, sid: _run_builtin_notify(cmd, sid),
     "providers": lambda cmd, sid: _run_builtin_secret("secret show-consumers", sid),
     "ps":        lambda cmd, sid: _run_builtin_ps(sid, cmd),
     "pwd":       lambda cmd, sid: _run_builtin_pwd(),

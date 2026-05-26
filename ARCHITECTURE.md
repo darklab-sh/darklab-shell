@@ -386,7 +386,7 @@ stored `raw_line` / `title` text with fingerprint fallback, while artifact keys 
 | -------- | ---------- | ------------- |
 | `GET` | `/session/token/generate` | Generates and stores a new persistent `tok_...` session token. |
 | `GET` | `/session/token/info` | Returns the active named token and creation timestamp, or null fields for anonymous sessions. |
-| `POST` | `/session/token/revoke` | Revokes a named token so future requests with that token fall back to anonymous session handling. |
+| `POST` | `/session/token/revoke` | Revokes a named token so new requests with that token fall back to anonymous session handling. |
 | `POST` | `/session/token/verify` | Checks whether a supplied `tok_...` token was issued by this server. |
 | `GET` | `/session/recent-values` | Returns current-session recent target values for metadata-gated autocomplete suggestions. |
 | `POST` | `/session/recent-values` | Saves normalized recent values for the current session and prunes each value kind to the autocomplete cap. |
@@ -555,7 +555,7 @@ Modular frontend with no build step. `index.html` is the HTML shell — no inlin
 
 **CSS composition.** CSS is split across ordered static files under `static/css/`, with `styles.css` acting as the compatibility entrypoint that imports core tokens, shell foundations, reusable primitives, desktop/mobile chrome, and feature-owned stylesheets under `static/css/features/`.
 
-**Desktop shell chrome.** `shell-chrome.css` and its companion `static/js/shell_chrome.js` own the left rail (app title, recent commands, workflows, options, history, Atlas, theme, FAQ, diag, version footer), the tabbar row, and the bottom HUD bar (eleven live status pills — STATUS, LAST EXIT, TABS, TRANSPORT, LATENCY, MODE, SESSION, UPTIME, CLOCK, DB, REDIS — plus the `share snapshot / copy / save ▾ / clear` actions and the kill button). The visible desktop navigation lives in the rail and calls the shared desktop action helpers directly, so desktop and mobile are parallel trigger layers over the same behavior instead of one UI surface proxying through another.
+**Desktop shell chrome.** `shell-chrome.css` and its companion `static/js/shell_chrome.js` own the left rail (app title, recent commands, workflows, options, history, Atlas, theme, FAQ, diag, version footer, and the More menu for Projects, Schedules, and Watchers), the tabbar row, and the bottom HUD bar (eleven live status pills — STATUS, LAST EXIT, TABS, TRANSPORT, LATENCY, MODE, SESSION, UPTIME, CLOCK, DB, REDIS — plus the `share snapshot / copy / save ▾ / clear` actions and the kill button). The visible desktop navigation lives in the rail and calls the shared desktop action helpers directly, so desktop and mobile are parallel trigger layers over the same behavior instead of one UI surface proxying through another.
 
 **HUD runtime.** Polls `GET /status` on a visibility-aware cadence: every 3 seconds while the tab is visible and every 15 seconds while hidden, with an immediate refresh when the tab becomes visible again. Round-trip latency is measured client-side via `performance.now()`, server uptime is interpolated locally between polls, and the clock pill ticks once per second. The clock mode is user-selectable from the Options modal (`UTC` vs browser-local time); local mode prefers the browser's short timezone label (for example `CDT`) and falls back to a GMT offset label when the browser cannot provide a stable abbreviation. The `SESSION` pill reflects the active session identity and updates via a `storage` event listener so cross-tab token switches are picked up without a reload. `LAST EXIT` is updated from `runner.js` on every SSE `exit` event and on kill through the shared document-level UI event stream rather than a shell-chrome-specific global.
 
@@ -887,11 +887,11 @@ Outbound notifications use the same durable session-token ownership model as the
 
 The route layer only validates, masks, and queues. `app/blueprints/notifications.py` and the `/api/v1/notification-channels` routes both call `services.notifications.channels_store`, which owns channel CRUD, trigger/config validation, the channel-kind field contract, secret-field masking, and write-only secret replacement. Channel rows store metadata, trigger subscriptions, muted state, and references to vault entries; plaintext webhook URLs, bot tokens, and Pushover keys are not stored in channel payloads. Channel row writes and replacement vault secret writes use one database transaction so a failed channel update does not leave a half-applied secret replacement behind. SMTP email is intentionally split: recipients and reply-to live on each channel row, while relay host, user, password environment variable name, from address, and TLS mode come from operator config.
 
-Delivery is asynchronous. App event sources build stable payloads in `services.notifications.payloads` and enqueue one row per subscribed channel in `notification_events` through `services.notifications.dispatcher.enqueue()`. External non-PTY run finalization emits one `run_complete` payload with `app_name`, command root, exit code, token hint, and summary counts; built-in commands and PTY sessions do not participate in default `run_complete` fan-out. Test sends use the same queue with a fixed `test` payload and target only the requested channel, so the UI, API, and CLI exercise the real delivery path without surprising every configured destination. Chat and email summary formatters shorten long run ids to a readable suffix while generic webhooks receive the raw payload.
+Delivery is asynchronous. App event sources build stable payloads in `services.notifications.payloads` and enqueue one row per subscribed channel in `notification_events` through `services.notifications.dispatcher.enqueue()`. External non-PTY run finalization emits one `run_complete` payload with `app_name`, command root, exit code, token hint, and summary counts; built-in commands and PTY sessions do not participate in default `run_complete` fan-out. Test sends use the same queue with a fixed `test` payload and target only the requested channel, so the UI, terminal `notify` built-in, API, and CLI exercise the real delivery path without surprising every configured destination. Chat and email summary formatters shorten long run ids to a readable suffix while generic webhooks receive the raw payload.
 
 `services.notifications.base.Channel` is the registerable delivery contract. Built-in channel implementations cover generic JSON webhooks, Slack, Discord, Telegram, Pushover, and SMTP email. Formatting helpers keep chat/push/email titles aligned, while generic webhooks receive the raw JSON payload. Webhook-style HTTP senders reject non-public destinations by default and allow trusted internal receivers only through `notifications.http_private_host_allowlist`. Each channel returns a `ChannelResult` so the dispatcher can decide whether a failure is retryable or terminal without coupling the queue to provider-specific exceptions.
 
-The notification worker is a dedicated Gunicorn-sibling process started and supervised by `entrypoint.sh` when `NOTIFICATION_WORKER_ENABLED` is not disabled. It claims due event rows from the database, applies global do-not-disturb and per-channel delivery-rate settings, sends through the registered channel class, and then marks each event `sent`, `retry_wait`, or `dead`. Local gates such as do-not-disturb and per-channel rate limits defer events without consuming provider retry attempts. Retryable provider failures use exponential backoff capped by `notifications.retry.max_attempts` and `notifications.retry.max_age_hours`; terminal failures and expired retry windows become dead-letter audit rows. Browser users can inspect the most recent per-channel delivery rows from the Options **Notifications** tab, while API and CLI users can page the same audit table. The worker prunes sent delivery audit rows after `notifications.events.retention_days`; retry and dead-letter rows remain available for triage. Postgres deployments reserve separate advisory-lock namespaces for notification delivery and notification sweeps so future worker coordination cannot collide with migrations or the scheduler.
+The notification worker is a dedicated Gunicorn-sibling process started and supervised by `entrypoint.sh` when `NOTIFICATION_WORKER_ENABLED` is not disabled. It claims due event rows from the database, applies global do-not-disturb and per-channel delivery-rate settings, sends through the registered channel class, and then marks each event `sent`, `retry_wait`, or `dead`. Local gates such as do-not-disturb and per-channel rate limits defer events without consuming provider retry attempts. Retryable provider failures use exponential backoff capped by `notifications.retry.max_attempts` and `notifications.retry.max_age_hours`; terminal failures and expired retry windows become dead-letter audit rows. Browser users can inspect the most recent per-channel delivery rows from the Options **Notifications** tab, while API and CLI users can page the same audit table. The worker prunes sent delivery audit rows after `notifications.events.retention_days`; retry and dead-letter rows remain available for triage. Postgres deployments reserve separate advisory-lock namespaces for notification delivery and notification sweeps so they cannot collide with migrations or the scheduler.
 
 ### Scheduler Process
 
@@ -903,7 +903,7 @@ Due user-owned schedules launch through the same brokered run preparation path a
 
 The browser Schedules modal uses the same route contract as the terminal and CLI management paths. Its cadence preview calls `/schedules/preview`, which is token-authenticated, takes only query parameters, and performs no database write. The modal formats preview times in the selected schedule timezone from the timezone dropdown so the visible "next runs" match the cadence the worker will use. Fire audit rows can open their completed runs, and rows with an older completed fire on the current page can launch the shared run comparison modal against that previous fire. History and Run Details scheduled badges reopen the originating schedule, while Run Details can also prefill a new schedule from the completed command.
 
-Cron support is intentionally strict: five-field POSIX cron only, with `hourly`, `daily`, and `weekly` cadence presets normalized to canonical cron strings before storage. Custom cron expressions cannot run more often than every five minutes, so `*/5 * * * *` is valid but every-minute or two-minute schedules are rejected. Each schedule stores an IANA timezone, defaulting to `scheduler.default_timezone` (`UTC`). On startup, recovery coalesces recent missed fire windows into one catch-up fire within `scheduler.max_catchup_window_seconds`; older missed windows are skipped with an audit row in `schedule_fires`. The v1 overlap policy is always stored and enforced as `skip`, leaving the column in place for future policies without changing the current behavior.
+Cron support is intentionally strict: five-field POSIX cron only, with `hourly`, `daily`, and `weekly` cadence presets normalized to canonical cron strings before storage. Custom cron expressions cannot run more often than every five minutes, so `*/5 * * * *` is valid but every-minute or two-minute schedules are rejected. Each schedule stores an IANA timezone, defaulting to `scheduler.default_timezone` (`UTC`). On startup, recovery coalesces recent missed fire windows into one catch-up fire within `scheduler.max_catchup_window_seconds`; older missed windows are skipped with an audit row in `schedule_fires`. The overlap policy is stored and enforced as `skip`.
 
 ### Watchers
 
@@ -1230,7 +1230,7 @@ erDiagram
 
 `ENTITY_LABELS` and `ENTITY_NOTES` are polymorphic on `(entity_type, entity_id)` and attach to several record types — projects, runs, snapshots, workspace files, run file artifacts, Atlas entities, findings, and packages — without separate FKs per type, which is why they sit under `LOGICAL_SESSION` rather than chaining off one specific parent.
 
-`NOTIFICATION_CHANNELS` stores session-owned delivery destinations without plaintext secrets. Registered channel kinds cover generic JSON webhooks, Slack, Discord, Telegram, Pushover, and SMTP email, with channel-specific secret references resolved through the existing vault and operator SMTP credentials read from server config. Durable session-token users can manage those rows from the Options **Notifications** tab through `/session/notification-channels`, where secret fields are write-only, list payloads expose only configured/missing state, and `test` sends use the same queued dispatcher path as real app events. External run finalization enqueues one `run_complete` notification payload with artifact, finding, Atlas entity, project-target, output-kind, output-signal, and output-entity-type counts; built-in and PTY runs stay out of that default fan-out. `NOTIFICATION_EVENTS` is the queue and audit trail used by the dedicated notification worker, with the session token copied onto each event so delivery history does not depend on joining a still-existing channel row.
+`NOTIFICATION_CHANNELS` stores session-owned delivery destinations without plaintext secrets. Registered channel kinds cover generic JSON webhooks, Slack, Discord, Telegram, Pushover, and SMTP email, with channel-specific secret references resolved through the existing vault and operator SMTP credentials read from server config. Durable session-token users can manage those rows from the Options **Notifications** tab through `/session/notification-channels`, the terminal `notify` built-in, `/api/v1/notification-channels`, and `darklab notify`, where secret fields are write-only, list payloads expose only configured/missing state, and `test` sends use the same queued dispatcher path as real app events. Secret-valued terminal channel creation points back to Options so webhook URLs and tokens do not enter terminal history. External run finalization enqueues one `run_complete` notification payload with artifact, finding, Atlas entity, project-target, output-kind, output-signal, and output-entity-type counts; built-in and PTY runs stay out of that default fan-out. `NOTIFICATION_EVENTS` is the queue and audit trail used by the dedicated notification worker, with the session token copied onto each event so delivery history does not depend on joining a still-existing channel row.
 
 #### Atlas entity model
 
@@ -1644,6 +1644,11 @@ The current event inventory is:
 | INFO | `BUILTIN_SCHEDULE_RESUMED` | terminal schedule built-in | session, source, schedule_id, enabled, next_run_at |
 | INFO | `BUILTIN_SCHEDULE_DELETED` | terminal schedule built-in | session, source, schedule_id, removed |
 | INFO | `BUILTIN_SCHEDULE_RUN_NOW` | terminal schedule built-in | session, source, schedule_id, status, fired_at, run_id, last_error |
+| INFO | `BUILTIN_NOTIFY_CREATED` | terminal notify built-in | session, source, channel_id, kind, muted |
+| INFO | `BUILTIN_NOTIFY_UPDATED` | terminal notify built-in | session, source, channel_id, muted |
+| INFO | `BUILTIN_NOTIFY_MUTED` | terminal notify built-in | session, source, channel_id |
+| INFO | `BUILTIN_NOTIFY_UNMUTED` | terminal notify built-in | session, source, channel_id |
+| INFO | `BUILTIN_NOTIFY_DELETED` | terminal notify built-in | session, source, channel_id, removed |
 | INFO | `SCHEDULE_FIRED` | scheduler dispatch | schedule_id, owner_kind, session, run_id, fired_at, next_run_at, command_root |
 | INFO | `SCHEDULE_FIRE_SKIPPED_OVERLAP` | scheduler dispatch | schedule_id, session, run_id, fired_at, active_run_count, command_root |
 | INFO | `WATCHER_FIRED` | watcher scheduler hook | watcher_id, schedule_id, run_id, baseline_run_id, session, fired_at |
@@ -1693,6 +1698,7 @@ The current event inventory is:
 | WARN | `SCHEDULE_REQUEST_REJECTED` | browser schedule routes | ip, session, source, action, schedule_id, status, error |
 | WARN | `API_SCHEDULE_REJECTED` | API schedule routes | ip, session, code, status, route, method, error |
 | WARN | `BUILTIN_SCHEDULE_REJECTED` | terminal schedule built-in | session, source, subcommand, error |
+| WARN | `BUILTIN_NOTIFY_REJECTED` | terminal notify built-in | session, source, subcommand, error |
 | WARN | `SCHEDULE_DISABLED_REVOKED` | scheduler dispatch | schedule_id, owner_kind, session, fired_at, next_run_at, command_root |
 | WARN | `WATCHER_FIRE_SKIPPED_OVERLAP` | scheduler dispatch | schedule_id, owner_kind, session, run_id, fired_at, active_run_count, command_root |
 | WARN | `WATCHER_ERROR` | watcher finalization | watcher_id, schedule_id, session, state, run_id, error, notification_count |
@@ -1882,12 +1888,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 3,236
+- behavior tests: 3,244
 - docs/inventory meta-tests: 33
-- `pytest`: 1787 (1754 behavior + 33 meta)
-- `vitest`: 1246
+- `pytest`: 1794 (1761 behavior + 33 meta)
+- `vitest`: 1247
 - `playwright`: 253
-- total: 3,286
+- total: 3,294
 
 ### Testing Architecture
 

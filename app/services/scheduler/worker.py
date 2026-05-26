@@ -11,9 +11,10 @@ import signal
 import time
 from typing import Iterator
 
-from config import resolve_data_dir
+from config import CFG, resolve_data_dir
 from core import database
 from core.database_backend import DatabaseBackend, is_transient_postgres_error, postgres_advisory_lock_id
+from core.logging_setup import configure_logging
 from services.scheduler import scheduler_cfg
 from services.scheduler.dispatch import fire_schedule
 from services.scheduler.recovery import recover_missed_fires
@@ -169,6 +170,7 @@ def run_forever(*, tick_seconds: float | None = None, limit: int = 50) -> None:
 
 
 def main() -> None:
+    configure_logging(CFG)
     run_forever()
 
 

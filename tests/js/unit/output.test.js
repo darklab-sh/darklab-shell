@@ -274,16 +274,40 @@ describe('appendLine', () => {
     appendLine('A  Run `help` first.', 'builtin-faq-a', 'tab-1')
 
     const helpLine = document.querySelector('.line.builtin-help-row')
-    const chip = helpLine.querySelector('.faq-chip[data-faq-command="history"]')
-    expect(chip?.textContent).toBe('history')
+    expect(helpLine.querySelector('.faq-chip[data-faq-command="history"]')).toBeNull()
+    expect(helpLine.querySelector('.builtin-help-label')?.textContent).toBe('history')
     expect(helpLine.querySelector('.builtin-help-description')?.textContent).toBe('Show saved runs')
-    chip.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(activateFaqCommandChip).toHaveBeenCalledWith('history')
+    expect(activateFaqCommandChip).not.toHaveBeenCalled()
 
     expect(document.querySelector('.line.builtin-faq-q .builtin-row-marker')?.textContent).toBe('Q')
     expect(document.querySelector('.line.builtin-faq-q .builtin-faq-question-text')?.textContent).toBe('How do I export?')
     expect(document.querySelector('.line.builtin-faq-a .builtin-row-marker')?.textContent).toBe('A')
     expect(document.querySelector('.line.builtin-faq-a .builtin-inline-code')?.textContent).toBe('help')
+  })
+
+  it('keeps automatic command chips out of command list rows', () => {
+    const activateFaqCommandChip = vi.fn()
+    const { appendLine } = loadOutputFns({
+      appConfig: { max_output_lines: 20 },
+      extraGlobals: { activateFaqCommandChip },
+    })
+
+    appendLine('  banner  Print the configured banner art', 'builtin-help-row', 'tab-1')
+    appendLine('  cat <file>                    Show a session file.', 'builtin-help-row', 'tab-1')
+    appendLine('id                                   kind       muted  label', 'builtin-table-header', 'tab-1')
+    appendLine('  nmap  Fast network scanner', 'builtin-catalog-item', 'tab-1')
+
+    expect(document.querySelectorAll('.line.builtin-help-row .faq-chip, .line.builtin-catalog-item .faq-chip')).toHaveLength(0)
+    expect(document.querySelectorAll('.line.builtin-help-row .builtin-help-label')).toHaveLength(2)
+    expect(document.querySelectorAll('.line.builtin-help-row .builtin-help-label')[1].textContent).toBe('cat <file>')
+    expect(document.querySelectorAll('.line.builtin-help-row .builtin-help-description')[1].textContent).toBe('Show a session file.')
+
+    const tableHeader = document.querySelector('.line.builtin-table-header')
+    expect(tableHeader.querySelector('.builtin-help-label')).toBeNull()
+    expect(tableHeader.querySelector('.builtin-help-description')).toBeNull()
+    expect(tableHeader.textContent).toContain('id')
+    expect(tableHeader.textContent).toContain('kind')
+    expect(activateFaqCommandChip).not.toHaveBeenCalled()
   })
 
   it('trims old lines and keeps rawLines in sync', () => {

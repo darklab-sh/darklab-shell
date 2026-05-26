@@ -45,7 +45,7 @@ No Open TODOs are currently tracked.
 
 ## Known Issues
 
-- Synthetic post-filter `grep` treats quoted patterns that begin with `-` as unsupported flags, so commands such as `man nmap | grep '-script'` fall out of the safe pipe-helper path and hit the shell-operator denial. Add support for `grep -- -pattern` and `grep -e '-pattern'` while keeping the synthetic grep helper limited to safe app-native filtering.
+No known issues are currently tracked.
 
 ---
 

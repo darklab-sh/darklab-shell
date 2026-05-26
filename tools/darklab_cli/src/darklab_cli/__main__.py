@@ -335,6 +335,7 @@ def _parser() -> argparse.ArgumentParser:
     notify_create.add_argument("--trigger", action="append", default=[])
     notify_create.add_argument("--config", action="append", default=[], help="Channel config as KEY=VALUE.")
     notify_create.add_argument("--secret-file", help="JSON file containing write-only secret fields.")
+    notify_create.add_argument("--format", choices=("text", "json"), default="text")
 
     notify_update = notify_sub.add_parser("update", help="Update a notification channel.")
     notify_update.add_argument("channel_id")
@@ -1254,7 +1255,7 @@ def _notify(client: DarklabClient, args: argparse.Namespace) -> int:
                 "secret_values": _notification_secret_values(client, args.kind, args.secret_file),
             }
             payload = client.request("POST", "/notification-channels", body=body)
-            return _print_notification_channel(payload, "text")
+            return _print_notification_channel(payload, args.format)
         case "update":
             body: dict[str, Any] = {}
             if args.label is not None:
