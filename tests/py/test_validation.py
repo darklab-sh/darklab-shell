@@ -95,6 +95,16 @@ class TestShellOperators:
         ok, _ = _check("ping darklab.sh | grep ttl")
         assert ok
 
+    def test_synthetic_grep_dash_pattern_pipe_allowed(self):
+        ok, _ = _check("nmap darklab.sh | grep '-script'")
+        assert ok
+
+        ok, _ = _check("nmap darklab.sh | grep -- -script")
+        assert ok
+
+        ok, _ = _check("nmap darklab.sh | grep -e '-script'")
+        assert ok
+
     def test_synthetic_head_pipe_allowed(self):
         ok, _ = _check("ping darklab.sh | head -n 5")
         assert ok
@@ -229,6 +239,25 @@ class TestSyntheticGrepParsing:
         assert spec["stages"][0]["extended"] is True
         assert spec["stages"][0]["pattern"] == "ttl|time"
 
+    def test_parses_option_terminator_pattern_starting_with_dash(self):
+        quoted, quoted_err = parse_synthetic_postfilter("man nmap | grep '-script'")
+        assert quoted_err is None
+        assert quoted is not None
+        assert quoted["stages"][0]["pattern"] == "-script"
+
+        spec, err = parse_synthetic_postfilter("man nmap | grep -- -script")
+        assert err is None
+        assert spec is not None
+        assert spec["base_command"] == "man nmap"
+        assert spec["stages"][0]["pattern"] == "-script"
+
+    def test_parses_dash_e_pattern_starting_with_dash(self):
+        spec, err = parse_synthetic_postfilter("man nmap | grep -i -e '-script'")
+        assert err is None
+        assert spec is not None
+        assert spec["stages"][0]["ignore_case"] is True
+        assert spec["stages"][0]["pattern"] == "-script"
+
     def test_rejects_missing_pattern(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | grep -i")
         assert spec is None
@@ -236,6 +265,10 @@ class TestSyntheticGrepParsing:
 
     def test_rejects_unsupported_flags(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | grep -n ttl")
+        assert spec is None
+        assert err == "Synthetic grep supports only -i, -v, and -E."
+
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | grep -script")
         assert spec is None
         assert err == "Synthetic grep supports only -i, -v, and -E."
 

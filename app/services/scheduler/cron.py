@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from dateutil import tz as dateutil_tz
 from croniter import croniter
 
 from services.scheduler import scheduler_cfg
@@ -134,7 +135,20 @@ def _aware_after(after: datetime, tz_name: str) -> datetime:
     return base.astimezone(tz)
 
 
+def _resolve_local_wall_time(value: datetime, tz_name: str) -> datetime:
+    zone = dateutil_tz.gettz(validate_timezone(tz_name))
+    if zone is None:
+        raise ScheduleCronError("timezone must be an IANA timezone name")
+    local = value.replace(tzinfo=None).replace(tzinfo=zone)
+    if not dateutil_tz.datetime_exists(local):
+        local = dateutil_tz.resolve_imaginary(local)
+    elif dateutil_tz.datetime_ambiguous(local):
+        local = local.replace(fold=0)
+    return local.astimezone(timezone.utc)
+
+
 def next_fire(cron_expr: str, after: datetime, timezone_name: str = "UTC") -> datetime:
     normalized = validate_cron(cron_expr)
-    iterator = croniter(normalized, _aware_after(after, timezone_name))
-    return iterator.get_next(datetime).astimezone(timezone.utc)
+    local_after = _aware_after(after, timezone_name)
+    iterator = croniter(normalized, local_after.replace(tzinfo=None))
+    return _resolve_local_wall_time(iterator.get_next(datetime), timezone_name)

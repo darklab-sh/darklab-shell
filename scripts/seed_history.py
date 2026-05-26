@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Seed the history database with realistic runs for a UUID or tok_ session.
+"""Seed the configured history database with realistic runs for a UUID or tok_ session.
 
 Useful for exercising user-facing flows that only reveal themselves with a
 populated history: the history drawer, fuzzy history search, reverse-i-search,
 date/exit/star filters, and token-migration workflows.
 
-Run this *inside* the running container (so the same SQLite version that owns
-the DB does the writes). Running it on the host against the project's
-``data/history.db`` while the container is up — or even with the container
-stopped if the host's SQLite differs from the container's — can corrupt the
-FTS5 internal pages. The script refuses to do that by default; pass
-``--allow-host-write`` only if you understand the risk and the container is
-not running.
+Run this *inside* the running container so it uses the same configured database
+backend as the app. For SQLite, that also keeps writes on the same SQLite
+version that owns the DB. Running SQLite writes on the host against the
+project's ``data/history.db`` while the container is up — or even with the
+container stopped if the host's SQLite differs from the container's — can
+corrupt the FTS5 internal pages. The script refuses to do that by default; pass
+``--allow-host-write`` only if you understand the risk and the container is not
+running.
 
 Examples
 --------
@@ -52,8 +53,21 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
-ROOT = Path(__file__).resolve().parents[1]
+
+def _resolve_root() -> Path:
+    path = Path(__file__)
+    if path.name == "<stdin>":
+        cwd = Path.cwd().resolve()
+        if (cwd / "app").exists():
+            return cwd
+        if cwd.name == "app":
+            return cwd.parent
+    return path.resolve().parents[1]
+
+
+ROOT = _resolve_root()
 
 VISUAL_HISTORY_FIXTURES = {
     "visual-flows": {
@@ -88,9 +102,66 @@ def _resolve_db_path() -> str:
 DB_PATH = _resolve_db_path()
 
 
+def _app_dir() -> Path:
+    app_dir = ROOT / "app"
+    if app_dir.exists() and str(app_dir) not in sys.path:
+        sys.path.insert(0, str(app_dir))
+    return app_dir
+
+
+def _configured_backend() -> str:
+    _app_dir()
+    try:
+        from config import CFG  # noqa: PLC0415
+        from core.database_backend import configured_database_backend  # noqa: PLC0415
+
+        return configured_database_backend(CFG).value
+    except Exception:  # noqa: BLE001
+        return "sqlite"
+
+
+def _active_database_label() -> str:
+    if _configured_backend() == "postgres":
+        _app_dir()
+        try:
+            from config import CFG  # noqa: PLC0415
+
+            return _redact_database_url(str(CFG.get("database_url") or "postgres"))
+        except Exception:  # noqa: BLE001
+            return "postgres"
+    return DB_PATH
+
+
+def _redact_database_url(value: str) -> str:
+    if "://" not in value or "@" not in value:
+        return value
+    head, tail = value.rsplit("@", 1)
+    scheme, userinfo = head.split("://", 1)
+    if ":" not in userinfo:
+        return f"{scheme}://<redacted>@{tail}"
+    user, _password = userinfo.split(":", 1)
+    return f"{scheme}://{user}:<redacted>@{tail}"
+
+
+def _database_bool(value: bool) -> bool | int:
+    if _configured_backend() == "postgres":
+        return bool(value)
+    return 1 if value else 0
+
+
 @contextmanager
 def db_connect():
+    if _configured_backend() == "postgres":
+        _app_dir()
+        from config import CFG  # noqa: PLC0415
+        from core.database_backend import connect_postgres_sqlite_compat  # noqa: PLC0415
+
+        with connect_postgres_sqlite_compat(CFG) as conn:
+            yield conn
+        return
+
     conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.row_factory = sqlite3.Row
     try:
         yield conn
     finally:
@@ -99,7 +170,7 @@ def db_connect():
 
 def _load_autocomplete_example_commands() -> list[str]:
     """Return surfaced example commands from the command registry context."""
-    sys.path.insert(0, str(ROOT / "app"))
+    _app_dir()
     commands_mod = importlib.import_module("services.commands.registry")
     seen = set()
     commands = []
@@ -205,7 +276,8 @@ def resolve_session(args) -> tuple[str, str | None]:
         created = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         with db_connect() as conn:
             conn.execute(
-                "INSERT OR IGNORE INTO session_tokens (token, created) VALUES (?, ?)",
+                "INSERT INTO session_tokens (token, created) VALUES (?, ?) "
+                "ON CONFLICT(token) DO NOTHING",
                 (token, created),
             )
             conn.commit()
@@ -220,7 +292,8 @@ def resolve_session(args) -> tuple[str, str | None]:
         created = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         with db_connect() as conn:
             conn.execute(
-                "INSERT OR IGNORE INTO session_tokens (token, created) VALUES (?, ?)",
+                "INSERT INTO session_tokens (token, created) VALUES (?, ?) "
+                "ON CONFLICT(token) DO NOTHING",
                 (token, created),
             )
             conn.commit()
@@ -276,10 +349,10 @@ def _fake_run_row(
         exit_code,                               # exit_code
         None,                                    # output (legacy, always NULL)
         json.dumps(preview_lines),               # output_preview
-        0,                                       # preview_truncated
+        _database_bool(False),                   # preview_truncated
         len(preview_lines),                      # output_line_count
-        0,                                       # full_output_available
-        0,                                       # full_output_truncated
+        _database_bool(False),                   # full_output_available
+        _database_bool(False),                   # full_output_truncated
         search_text,                             # output_search_text
     )
 
@@ -334,7 +407,8 @@ def seed_stars(session_id: str, commands: list[str], star_count: int, rng: rando
     picks = rng.sample(unique_cmds, min(star_count, len(unique_cmds)))
     with db_connect() as conn:
         conn.executemany(
-            "INSERT OR IGNORE INTO starred_commands (session_id, command) VALUES (?, ?)",
+            "INSERT INTO starred_commands (session_id, command) VALUES (?, ?) "
+            "ON CONFLICT(session_id, command) DO NOTHING",
             [(session_id, cmd) for cmd in picks],
         )
         conn.commit()
@@ -371,6 +445,8 @@ def _guard_host_write_to_project_data(allow: bool) -> None:
       - we're not running inside the container, and
       - the resolved DB path is under <repo>/data/.
     """
+    if _configured_backend() != "sqlite":
+        return
     if _in_docker() or not _resolves_under_project_data(DB_PATH):
         return
     if allow:
@@ -396,6 +472,23 @@ def _guard_host_write_to_project_data(allow: bool) -> None:
     )
 
 
+def _table_names(conn: Any) -> set[str]:
+    if _configured_backend() == "postgres":
+        return {
+            row["table_name"]
+            for row in conn.execute(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = current_schema()"
+            )
+        }
+    return {
+        row["name"]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
+        )
+    }
+
+
 def _require_schema() -> None:
     """Fail fast if the DB is missing the schema this script depends on.
 
@@ -404,19 +497,14 @@ def _require_schema() -> None:
     """
     with db_connect() as conn:
         try:
-            tables = {
-                row[0]
-                for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
-                )
-            }
-        except sqlite3.DatabaseError as exc:
-            sys.exit(f"could not read schema from {DB_PATH}: {exc}")
+            tables = _table_names(conn)
+        except Exception as exc:  # noqa: BLE001
+            sys.exit(f"could not read schema from {_active_database_label()}: {exc}")
     required = {"runs", "session_tokens", "starred_commands"}
     missing = required - tables
     if missing:
         sys.exit(
-            f"DB at {DB_PATH} is missing required tables: {sorted(missing)}.\n"
+            f"DB at {_active_database_label()} is missing required tables: {sorted(missing)}.\n"
             "Start the app once so it can run db_init(), then re-run this script."
         )
 
@@ -490,7 +578,7 @@ def main() -> int:
     commands = seed_runs(session_id, count, days, rng)
     starred = seed_stars(session_id, commands, star, rng) if star else []
 
-    print(f"database:       {DB_PATH}")
+    print(f"database:       {_active_database_label()}")
     print(f"session_id:     {session_id}")
     if new_token:
         print("  (new token — save this in localStorage as session_token to use it)")

@@ -22,6 +22,13 @@ var DarklabRunnerCore = (function (global) {
     return value;
   }
 
+  function _isQuotedToken(token) {
+    const value = String(token || '');
+    if (value.length < 2) return false;
+    const first = value[0];
+    return (first === '"' || first === "'") && value[value.length - 1] === first;
+  }
+
   function _parseStage(stageTokens) {
     if (!stageTokens.length) return null;
     const normalizedStageTokens = stageTokens.map(_unquoteToken);
@@ -30,7 +37,28 @@ var DarklabRunnerCore = (function (global) {
     if (helper === 'grep') {
       let pattern = null;
       const options = { ignoreCase: false, invertMatch: false, extended: false };
-      for (const token of normalizedStageTokens.slice(1)) {
+      let index = 1;
+      while (index < normalizedStageTokens.length) {
+        const rawToken = stageTokens[index];
+        const token = normalizedStageTokens[index];
+        if (pattern !== null) return null;
+        if (_isQuotedToken(rawToken)) {
+          pattern = token;
+          index += 1;
+          continue;
+        }
+        if (token === '--') {
+          if (index + 1 >= normalizedStageTokens.length) return null;
+          pattern = normalizedStageTokens[index + 1];
+          index += 2;
+          continue;
+        }
+        if (token === '-e') {
+          if (index + 1 >= normalizedStageTokens.length) return null;
+          pattern = normalizedStageTokens[index + 1];
+          index += 2;
+          continue;
+        }
         if (pattern === null && /^-[^-]/.test(token)) {
           for (const flag of token.slice(1)) {
             if (!['i', 'v', 'E'].includes(flag)) return null;
@@ -38,10 +66,11 @@ var DarklabRunnerCore = (function (global) {
             if (flag === 'v') options.invertMatch = true;
             if (flag === 'E') options.extended = true;
           }
+          index += 1;
           continue;
         }
-        if (pattern !== null) return null;
         pattern = token;
+        index += 1;
       }
       return pattern !== null ? { kind: 'grep', pattern, ...options } : null;
     }

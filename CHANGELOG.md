@@ -6,7 +6,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
-## [2.0] - Unreleased
+## [2.0] — 2026-05-25
 
 ### Added
 
@@ -28,7 +28,7 @@ Entries favor clear outcomes first, then implementation and test details when th
     - Added context-hash, compact summary/next-command context, summary-tail priority, exact summary finding merge, open-port prose contradiction repair, redaction-accounting, redaction-secret failure logging, suggestion secret lookup failure logging, cache-reuse, and cache-hit metric emission coverage.
     - Added AI queue-health metric, AI storage DB timing, AI Redis key metric, database context-manager, Postgres-safe AI context suppression-filter, summary-worker completion, next-command worker validation, stale-assist recovery logging, redacted-context suggestion validation, suggestion-rejection metric emission, stale-context failure, and deterministic summary truncation fallback coverage.
     - Added browser summary/next-command route coverage for invalid-body, missing-session, disabled/feature-disabled, no-context, Redis-unavailable, busy, and rate-limit guard rejection, plus API summary/next-command routes with the same guard/error matrix.
-    - Added deterministic Run Details AI summary/suggestion rendering coverage that drives queued polling with fake timers, a Playwright Run Details AI workflow smoke, and static entrypoint/Compose assertions for the gated AI worker plus llama sidecar wiring. Current suite total: 1783 pytest + 1245 Vitest + 253 Playwright = **3,281 tests**.
+    - Added deterministic Run Details AI summary/suggestion rendering coverage that drives queued polling with fake timers, a Playwright Run Details AI workflow smoke, and static entrypoint/Compose assertions for the gated AI worker plus llama sidecar wiring. Current suite total: 1787 pytest + 1246 Vitest + 253 Playwright = **3,286 tests**.
 - **Structured output model** — run output now has a typed Python and browser contract, and producers, storage, live streams, and consumers all share the same line-event shape while legacy transcript output stays stable at the compatibility boundary.
   - **Why:** command transcripts currently overload `cls` with severity and visual-role hints, which makes comparison, redaction, search, exports, and future structured summaries harder to keep consistent.
   - **What:**
@@ -64,7 +64,6 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Why:** help output should not feed findings or Atlas entities, and secret-backed tools still need smoke coverage for their unauthenticated help commands.
   - **What:** added command-level `help.flags` metadata, added example-level `smoke.profile: unauthenticated` metadata for safe help invocations, switched output classification, `/runs` secret preflight, and the shared container smoke corpus to the registry metadata, and added smoke expectations for required-secret tool help commands such as Shodan, VirusTotal, GreyNoise, urlscan, and Chaos.
   - **Tests:** updated registry loader, smoke-corpus, and output-signal coverage to prove registry-declared help invocations suppress findings/entities while still allowing non-help uses of flags like `nikto -h target` and `whois -h server target`. Current suite total: 1744 pytest + 1243 Vitest + 252 Playwright = **3,239 tests**.
-
 - **Watchers browser modal** — durable session tokens can now manage change-detection watchers from the browser.
   - **Why:** operators need a visual path for creating a watcher from a completed baseline run, checking recent fire history, and accepting expected changes without dropping into terminal commands.
   - **What:** added a top-level Watchers modal beside Schedules, desktop rail and mobile menu entry points, Run Details and History drawer **Create watcher from this baseline** handoffs, a Baseline run helper card, watcher create/edit/pause/resume/run-now/delete controls, accept-baseline confirmation, selected-timezone cadence previews, comparison-style last-diff summaries, and fire-audit rows that keep empty-diff fires visible as `diff_kind='none'` while completed fires can jump straight into a baseline-vs-fire comparison.
@@ -77,7 +76,6 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Why:** watcher operations should leave clear operational breadcrumbs, and the feature needed one full lifecycle smoke before leaving the TODO list.
   - **What:** added `WATCHER_DIFF_FAILED` as a structured warning before watcher diff failures move through the normal watcher-error path, documented the event in the logging table, and removed the completed Watchers plan from `TODO.md`.
   - **Tests:** added a backend smoke covering create, scheduler fire with no change, scheduler fire with a detected change, watcher-changed notification enqueueing, and accept-baseline promotion. Current suite total: 1692 pytest + 1211 Vitest + 252 Playwright = **3,155 tests**.
-
 - **Command Constellation full-sky polish** — the Status Monitor's run constellation now keeps a continuous sky regardless of which hours an operator actually uses.
   - **Why:** the constellation maps run history onto a 24-hour clock-time X axis, so most operators saw a 22:00–09:00 dead zone reading as visual void instead of texture.
   - **What:**
@@ -87,7 +85,6 @@ Entries favor clear outcomes first, then implementation and test details when th
     - Centralised the X-axis mapping behind new `_constellationHourDensity`, `_constellationActiveWindow`, and `_constellationMinuteToX` helpers so stars, ambient, streak paths, time guides, and the backdrop share one source of truth. Major/minor time guides scale to 4/5/6 hour-aligned ticks for narrow/medium/wide windows, and the rightmost-edge label is suppressed only when it sits at the window boundary.
     - Auto-fit also crops INTERIOR dead bands so the canvas stays a continuous sky even when an operator's active hours stretch across both ends of the day with a sleep window in the middle. `_constellationDeadBands(stars)` finds contiguous runs of low-density hours (relative density ≤ 0.15, ≥ 2 h, ±30 min edge padding, minimum 30 plotted stars). `_constellationVisibleSegments(window, deadBands)` returns the visible spans. `_constellationMinuteToX(window, segments)` becomes piecewise — dead-band minutes clamp to the seam x. Time guides, ambient sampling, the gradient backdrop, and real-star rendering all honour the piecewise mapping; a dashed seam line plus a `//` glyph marks the cropped boundary. Full day reverts to the single 24 h span.
   - **Tests:** added unit coverage for hour-density normalisation, active-window detection (sparse/clustered/clamping), the auto-fit mapping math, the legend toggle round-trip through preferences and panel re-render, the contract that ambient stars carry no `data-star-id` and no focus surface, dead-band detection (minimum-star floor + interior band recovery), visible-segment cropping, the piecewise minute-to-x mapping with dead-band collapse, and seam-marker rendering when a dead band is detected. Added desktop UI-capture scenes `status-monitor-constellation-active-hours`, `status-monitor-constellation-full-day`, and `status-monitor-constellation-sparse`.
-
 - **Scheduled run foundation** — the app now has the durable schema, cron helpers, service layer, and supervised worker shell needed for scheduled and watcher-owned runs.
   - **Why:** recurring commands need a reliable process outside the browser and outside Gunicorn workers before routes, UI, and watcher orchestration can safely build on top.
   - **What:** added SQLite/Postgres `schedules` and `schedule_fires` tables, strict five-field cron parsing through `croniter`, a five-minute minimum custom-cron interval, hourly/daily/weekly cadence normalization, IANA timezone validation, durable-token schedule ownership checks, normal-vs-watcher ownership separation, missed-fire recovery, deployment-wide scheduler locks, a supervised scheduler worker entrypoint, scheduler config defaults, and scheduler architecture/config documentation.
@@ -686,6 +683,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Demo recorder workspace probe with Postgres** — the demo history seeder now writes to the configured app database instead of always registering generated `tok_` sessions in SQLite, and the desktop/mobile OBS wrappers now distinguish a missing active session from Files being disabled.
 - **AI operator docs accuracy** — AI privacy and configuration docs now describe the current compact prompt context, full-output source behavior, raw model payload storage, worker toggle, and Compose environment variables without implying unbounded transcript prompts or post-response raw-payload redaction.
 - **AI feature docs** — `FEATURES.md` now treats AI summaries and next-command drafts as a full user-facing feature, including completed-run behavior, cached/queued states, Copy/Run actions, blocked suggestion reasons, privacy guardrails, and operator setup links.
 - **AI API docs** — the headless API docs and OpenAPI contract now spell out AI assist request bodies, cached versus queued response statuses, payload shapes, progress fields, and the `503 ai_unavailable` path for Redis coordination or provider setup failures.
@@ -725,6 +723,9 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Options preferences survive rapid changes** — session preference saves now run in order, so quick Options changes such as line numbers plus HUD clock can't let an older snapshot overwrite the latest saved state before a reload.
 - **AI assist v1 TODO retired** — the completed AI-assisted summary and next-command suggestion plan has been removed from `TODO.md`; the remaining AI backlog now starts with CPU-only summary latency tuning.
 - **External-command contributor checklist** — the contributor guide and external-command integration notes now call out the command-specific registry, output-signal, entity, AI, autocomplete, policy, smoke, and documentation surfaces to review when adding a new external tool.
+- **Synthetic grep dash patterns** — app-native pipe filtering now accepts quoted dash-prefixed patterns, `grep -- -pattern`, and `grep -e '-pattern'`, so operators can search command output for dash-prefixed text without falling out of the safe synthetic pipe-helper path.
+- **Cron DST scheduling stays stable after croniter updates** — scheduled runs now resolve cron matches as local wall-clock times, moving nonexistent spring-forward times through the DST gap while avoiding duplicate fall-back fires for the repeated hour.
+- **Postgres migration schema init honors `PGOPTIONS`** — the Postgres pool now preserves caller-provided connection options such as `search_path` while adding the app's default `jit=off` option, so isolated-schema SQLite-to-Postgres migration prep initializes the same schema the copy helper validates.
 - **Nmap scan-report entities keep host/IP pairs** — Nmap lines such as `Nmap scan report for host (ip)` now tag the reported name as a host-scoped output entity and keep the adjacent private or public IP beside it, so multi-host subnet scans feed downstream entity materialization with both sides of the scan target instead of only the hostname.
 - **Workspace permission repair** — scanner-owned workspace entries are now repaired when their mode bits already look right but their group has drifted away from the shared app group.
   - **Why:** after rebuilds or command-created folders, paths such as `darklab/` could sit at `scanner:scanner` with `3770`; the app saw the expected mode and skipped repair, but `appuser` still could not traverse the folder, so the Files modal reported "session folder is not readable".

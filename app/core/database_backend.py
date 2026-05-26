@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 import json
 import logging
+import os
 import sqlite3
 import time
 from typing import Any, Iterable
@@ -226,7 +227,7 @@ SQLiteConnection = sqlite3.Connection
 PostgresConnection = Any
 
 _POSTGRES_POOL: Any | None = None
-_POSTGRES_POOL_CONFIG: tuple[str, int, int, bool] | None = None
+_POSTGRES_POOL_CONFIG: tuple[str, int, int, bool, str] | None = None
 _POSTGRES_TRANSIENT_SQLSTATES = frozenset({
     "08003",  # connection does not exist
     "08006",  # connection failure
@@ -294,7 +295,15 @@ def require_sqlite_backend(cfg: dict[str, Any], feature: str = "database") -> No
     )
 
 
-def postgres_pool_settings(cfg: dict[str, Any]) -> tuple[str, int, int, bool]:
+def _postgres_connection_options(*, jit_enabled: bool) -> str:
+    options = str(os.environ.get("PGOPTIONS") or "").strip()
+    option_parts = [options] if options else []
+    if not jit_enabled:
+        option_parts.append("-c jit=off")
+    return " ".join(option_parts)
+
+
+def postgres_pool_settings(cfg: dict[str, Any]) -> tuple[str, int, int, bool, str]:
     dsn = str(cfg.get("database_url") or "").strip()
     if not dsn:
         raise PostgresConnectionError("database_url is required when database_backend='postgres'")
@@ -309,13 +318,13 @@ def postgres_pool_settings(cfg: dict[str, Any]) -> tuple[str, int, int, bool]:
     if max_size < min_size:
         max_size = min_size or 1
     jit_enabled = bool(cfg.get("database_postgres_jit"))
-    return dsn, min_size, max_size, jit_enabled
+    return dsn, min_size, max_size, jit_enabled, _postgres_connection_options(jit_enabled=jit_enabled)
 
 
 def postgres_pool_metrics_snapshot(cfg: dict[str, Any]) -> dict[str, int]:
     """Return bounded, non-secret Postgres pool state for Prometheus scrapes."""
     pool_config = postgres_pool_settings(cfg)
-    _, min_size, max_size, jit_enabled = pool_config
+    _, min_size, max_size, jit_enabled, _ = pool_config
     snapshot = {
         "configured_min": min_size,
         "configured_max": max_size,
@@ -379,10 +388,10 @@ def get_postgres_pool(cfg: dict[str, Any]) -> Any:
         return _POSTGRES_POOL
     close_postgres_pool()
     connection_pool, dict_row = _load_postgres_pool_types()
-    dsn, min_size, max_size, jit_enabled = pool_config
+    dsn, min_size, max_size, jit_enabled, options = pool_config
     kwargs: dict[str, Any] = {"row_factory": dict_row}
-    if not jit_enabled:
-        kwargs["options"] = "-c jit=off"
+    if options:
+        kwargs["options"] = options
     try:
         _POSTGRES_POOL = connection_pool(
             conninfo=dsn,

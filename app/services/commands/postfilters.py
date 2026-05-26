@@ -8,7 +8,7 @@ import shlex
 def _split_shell_control_tokens(command: str) -> list[str]:
     """Split a shell-like command while keeping control operators as tokens."""
     try:
-        lexer = shlex.shlex(command, posix=True, punctuation_chars='|&;<>')
+        lexer = shlex.shlex(command, posix=False, punctuation_chars='|&;<>')
         lexer.whitespace_split = True
         lexer.commenters = ''
         return list(lexer)
@@ -16,16 +16,44 @@ def _split_shell_control_tokens(command: str) -> list[str]:
         return []
 
 
+def _is_quoted_token(token: str) -> bool:
+    return len(token) >= 2 and token[0] in {"'", '"'} and token[-1] == token[0]
+
+
+def _unquote_token(token: str) -> str:
+    return token[1:-1] if _is_quoted_token(token) else token
+
+
 def _parse_synthetic_grep_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
     """Parse the post-filter stage for the narrow app-native grep helper."""
-    if stage_tokens[0].lower() != 'grep':
+    if _unquote_token(stage_tokens[0]).lower() != 'grep':
         return None, None
 
     options = {"ignore_case": False, "invert_match": False, "extended": False}
     pattern = None
-    for token in stage_tokens[1:]:
+    index = 1
+    while index < len(stage_tokens):
+        raw_token = stage_tokens[index]
+        token = _unquote_token(raw_token)
+        quoted = _is_quoted_token(raw_token)
         if pattern is not None:
             return None, "Synthetic grep only supports a single pattern argument."
+        if quoted:
+            pattern = token
+            index += 1
+            continue
+        if token == "--":
+            if index + 1 >= len(stage_tokens):
+                return None, "Synthetic grep requires a pattern."
+            pattern = _unquote_token(stage_tokens[index + 1])
+            index += 2
+            continue
+        if token == "-e":
+            if index + 1 >= len(stage_tokens):
+                return None, "Synthetic grep requires a pattern."
+            pattern = _unquote_token(stage_tokens[index + 1])
+            index += 2
+            continue
         if token.startswith('-') and token != '-':
             if token.startswith('--'):
                 return None, "Synthetic grep supports only -i, -v, and -E."
@@ -38,8 +66,10 @@ def _parse_synthetic_grep_stage(stage_tokens: list[str]) -> tuple[dict | None, s
                     options["extended"] = True
                 else:
                     return None, "Synthetic grep supports only -i, -v, and -E."
+            index += 1
             continue
         pattern = token
+        index += 1
 
     if pattern is None:
         return None, "Synthetic grep requires a pattern."
@@ -53,6 +83,7 @@ def _parse_synthetic_grep_stage(stage_tokens: list[str]) -> tuple[dict | None, s
 
 def _parse_synthetic_head_tail_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
     """Parse narrow app-native head/tail helpers with default count, -n, or -<number>."""
+    stage_tokens = [_unquote_token(token) for token in stage_tokens]
     command_name = stage_tokens[0].lower()
     if command_name not in {"head", "tail"}:
         return None, None
@@ -74,6 +105,7 @@ def _parse_synthetic_head_tail_stage(stage_tokens: list[str]) -> tuple[dict | No
 
 def _parse_synthetic_wc_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
     """Parse the narrow app-native `wc -l` helper."""
+    stage_tokens = [_unquote_token(token) for token in stage_tokens]
     if stage_tokens[0].lower() != "wc":
         return None, None
     if stage_tokens[1:] == ["-l"]:
@@ -86,6 +118,7 @@ _SORT_VALID_FLAGS = frozenset("rnu")
 
 def _parse_synthetic_sort_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
     """Parse the narrow app-native sort helper. Supports -r, -n, -u in any combination."""
+    stage_tokens = [_unquote_token(token) for token in stage_tokens]
     if stage_tokens[0].lower() != "sort":
         return None, None
     if len(stage_tokens) == 1:
@@ -101,6 +134,7 @@ def _parse_synthetic_sort_stage(stage_tokens: list[str]) -> tuple[dict | None, s
 
 def _parse_synthetic_uniq_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
     """Parse the narrow app-native uniq helper. Supports uniq and uniq -c."""
+    stage_tokens = [_unquote_token(token) for token in stage_tokens]
     if stage_tokens[0].lower() != "uniq":
         return None, None
     if len(stage_tokens) == 1:
@@ -170,7 +204,7 @@ def parse_synthetic_postfilter(command: str) -> tuple[dict | None, str | None]:
         stage_start = pipe_index + 1
 
     return {
-        "base_command": shlex.join(base_tokens),
+        "base_command": shlex.join(_unquote_token(token) for token in base_tokens),
         "stages": stage_specs,
         "kind": stage_specs[0]["kind"],
     }, None

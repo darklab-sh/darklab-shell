@@ -342,6 +342,9 @@ describe('_isSyntheticGrepCommand', () => {
     expect(_isSyntheticGrepCommand('ping darklab.sh | grep ttl')).toBe(true)
     expect(_isSyntheticGrepCommand('ping darklab.sh | grep -iv ttl')).toBe(true)
     expect(_isSyntheticGrepCommand("ping darklab.sh | grep -E 'ttl|time'")).toBe(true)
+    expect(_isSyntheticGrepCommand("man nmap | grep '-script'")).toBe(true)
+    expect(_isSyntheticGrepCommand('man nmap | grep -- -script')).toBe(true)
+    expect(_isSyntheticGrepCommand("man nmap | grep -i -e '-script'")).toBe(true)
   })
 
   it('accepts no-space pipe variants', () => {
@@ -357,6 +360,7 @@ describe('_isSyntheticGrepCommand', () => {
   it('rejects unsupported shell operator forms', () => {
     expect(_isSyntheticGrepCommand('ping darklab.sh | cat')).toBe(false)
     expect(_isSyntheticGrepCommand('ping darklab.sh | grep -n ttl')).toBe(false)
+    expect(_isSyntheticGrepCommand('ping darklab.sh | grep -script')).toBe(false)
     expect(_isSyntheticGrepCommand('ping darklab.sh | grep ttl file.txt')).toBe(false)
     expect(_isSyntheticGrepCommand('ping darklab.sh || grep ttl')).toBe(false)
     expect(_isSyntheticPostFilterCommand('ping darklab.sh | grep ttl | cat')).toBe(false)
@@ -436,6 +440,23 @@ describe('client-side synthetic post-filters', () => {
     expect(parsed.baseCommand).toBe('theme list')
     expect(parsed.stages).toEqual([
       { kind: 'grep', pattern: 'blue', ignoreCase: true, invertMatch: false, extended: false },
+    ])
+  })
+
+  it('parses grep patterns that start with a dash', () => {
+    const quoted = _parseSyntheticPostFilterCommand("theme list | grep '-dark'")
+    expect(quoted.stages).toEqual([
+      { kind: 'grep', pattern: '-dark', ignoreCase: false, invertMatch: false, extended: false },
+    ])
+
+    const terminator = _parseSyntheticPostFilterCommand('theme list | grep -- -dark')
+    expect(terminator.stages).toEqual([
+      { kind: 'grep', pattern: '-dark', ignoreCase: false, invertMatch: false, extended: false },
+    ])
+
+    const dashE = _parseSyntheticPostFilterCommand("theme list | grep -i -e '-dark'")
+    expect(dashE.stages).toEqual([
+      { kind: 'grep', pattern: '-dark', ignoreCase: true, invertMatch: false, extended: false },
     ])
   })
 

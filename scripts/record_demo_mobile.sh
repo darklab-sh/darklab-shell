@@ -85,21 +85,28 @@ echo "Container is up."
 cd "$ROOT_DIR"
 
 require_workspace_enabled() {
-  local status
-  status="$(
-    curl -sS -o /dev/null -w '%{http_code}' \
+  local body response status
+  response="$(
+    curl -sS -w $'\n%{http_code}' \
       -H "X-Session-ID: ${DEMO_SESSION_TOKEN}" \
       "${BASE_URL}/workspace/files" || true
   )"
+  status="${response##*$'\n'}"
+  body="${response%$'\n'*}"
   if [ "$status" = "200" ]; then
     return
   fi
 
   echo "Error: mobile OBS demo recording requires Files/workspace API access so the Files panel can show response.html."
   echo "Workspace probe returned HTTP ${status:-000} for GET /workspace/files."
-  echo "Add this to app/conf/config.local.yaml and restart the container:"
-  echo "  workspace_enabled: true"
-  echo "  docker compose down && docker compose up -d"
+  if [ "$status" = "400" ] && [[ "$body" == *"Files require an active session"* ]]; then
+    echo "The generated demo session token was not accepted by the running app database."
+    echo "Make sure the history seed step uses the same DATABASE_BACKEND/DATABASE_URL as the container."
+  else
+    echo "Add this to app/conf/config.local.yaml and restart the container:"
+    echo "  workspace_enabled: true"
+    echo "  docker compose down && docker compose up -d"
+  fi
   exit 1
 }
 

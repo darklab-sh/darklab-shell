@@ -555,10 +555,10 @@
     {
       "name": "wpscan_writes_results",
       "command": "wpscan --url https://ip.darklab.sh --enumerate vp -o wpscan-results.txt",
-      "exit_code": null,
+      "exit_code": 4,
       "assert_files": {
         "wpscan-results.txt": [
-          "WPScan"
+          "WordPress Security Scanner"
         ]
       },
       "cleanup_files": [

@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 3,231
+- behavior tests: 3,236
 - docs/inventory meta-tests: 33
-- `pytest`: 1783 (1750 behavior + 33 meta)
-- `vitest`: 1245
+- `pytest`: 1787 (1754 behavior + 33 meta)
+- `vitest`: 1246
 - `playwright`: 253
-- total: 3,281
+- total: 3,286
 
 This document is organized in two parts:
 
@@ -184,7 +184,7 @@ scripts/record_demo.sh --base-url http://localhost:9000
 scripts/record_demo.sh --no-arm                     # start immediately when OBS is already lined up
 ```
 
-Wrappers health-check the container, seed/register the demo session token, probe `GET /workspace/files` with that token so the Files segment can create `response.html`, set `RUN_DEMO=1`, open a headed Chromium window, and use `scripts/obs_recording.mjs` to start/stop OBS over its WebSocket API. By default the wrapper pauses on a holding screen before recording starts, which gives you time to select the correct Chromium window in OBS without missing the welcome animation. Use `--no-arm` when OBS is already lined up. The desktop and mobile demos both open the Status Monitor during the long-running ffuf segment so the active run rows and pulse strip are visible in the final video. See [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
+Wrappers health-check the container, seed/register the demo session token through the configured app database, probe `GET /workspace/files` with that token so the Files segment can create `response.html`, set `RUN_DEMO=1`, open a headed Chromium window, and use `scripts/obs_recording.mjs` to start/stop OBS over its WebSocket API. By default the wrapper pauses on a holding screen before recording starts, which gives you time to select the correct Chromium window in OBS without missing the welcome animation. Use `--no-arm` when OBS is already lined up. The desktop and mobile demos both open the Status Monitor during the long-running ffuf segment so the active run rows and pulse strip are visible in the final video. See [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
 
 OBS must be installed and running before you start either wrapper. Enable the WebSocket server in `Tools -> WebSocket Server Settings`; set `OBS_WS_PASSWORD` if your OBS WebSocket requires one.
 
@@ -478,6 +478,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestLoadConfig.test_workspace_root_env_warning_only_logs_on_mismatch` | Verifies that the workspace-root drift helper warns when raw env/config paths diverge, without warning for matching paths. |
 | `TestDatabaseBackend.test_backend_defaults_to_sqlite_and_exposes_sqlite_dialect` | Verifies the database backend helper defaults to SQLite and exposes the current SQLite dialect shape. |
 | `TestDatabaseBackend.test_postgres_backend_exposes_dialect_and_pool_settings` | Verifies the Postgres backend exposes dialect helpers, pool settings, and the SQLite-route guard. |
+| `TestDatabaseBackend.test_postgres_pool_preserves_pgoptions_when_disabling_jit` | Verifies the Postgres pool preserves caller-provided connection options while adding the app's default JIT setting. |
 | `TestDatabaseBackend.test_postgres_pool_uses_psycopg_pool_lazily` | Verifies the Postgres pool is imported lazily, cached by pool settings, and closed cleanly. |
 | `TestDatabaseBackend.test_postgres_compat_connection_converts_app_placeholders` | Verifies the Postgres app-query compatibility wrapper converts SQLite-style placeholders for connection, cursor, and batch execution. |
 | `TestDatabaseBackend.test_postgres_compat_connection_preserves_transient_error_when_rollback_is_lost` | Verifies a lost connection during transient-error rollback does not hide the original retryable Postgres shutdown error. |
@@ -1945,6 +1946,7 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestShellOperators.test_redirect_append` | Checks redirect append handling. |
 | `TestShellOperators.test_redirect_in` | Checks redirect in handling. |
 | `TestShellOperators.test_synthetic_grep_pipe_allowed` | Checks that the narrow synthetic grep pipe is allowed while general pipes remain blocked. |
+| `TestShellOperators.test_synthetic_grep_dash_pattern_pipe_allowed` | Checks that synthetic grep pipes can filter for patterns that start with a dash without enabling arbitrary shell pipes. |
 | `TestShellOperators.test_synthetic_head_pipe_allowed` | Checks that the narrow synthetic head pipe is allowed while general pipes remain blocked. |
 | `TestShellOperators.test_synthetic_tail_pipe_allowed` | Checks that the narrow synthetic tail pipe is allowed while general pipes remain blocked. |
 | `TestShellOperators.test_synthetic_wc_pipe_allowed` | Checks that the narrow synthetic `wc -l` pipe is allowed while general pipes remain blocked. |
@@ -1970,6 +1972,8 @@ Backend smoke, route, and migration coverage. SQLite smoke coverage always runs.
 | `TestSyntheticGrepParsing.test_parses_basic_synthetic_grep` | Checks that the basic synthetic grep form is parsed into a base command plus grep options. |
 | `TestSyntheticGrepParsing.test_parses_combined_flags` | Checks that combined `-iv` synthetic grep flags are accepted. |
 | `TestSyntheticGrepParsing.test_parses_extended_regex_pattern` | Checks that `-E` synthetic grep patterns are parsed correctly. |
+| `TestSyntheticGrepParsing.test_parses_option_terminator_pattern_starting_with_dash` | Checks that synthetic grep accepts quoted and `--` patterns that start with a dash. |
+| `TestSyntheticGrepParsing.test_parses_dash_e_pattern_starting_with_dash` | Checks that synthetic grep accepts `-e` before a pattern that starts with a dash. |
 | `TestSyntheticGrepParsing.test_rejects_missing_pattern` | Checks that synthetic grep rejects a missing pattern. |
 | `TestSyntheticGrepParsing.test_rejects_unsupported_flags` | Checks that unsupported synthetic grep flags are rejected. |
 | `TestSyntheticGrepParsing.test_rejects_extra_operands` | Checks that synthetic grep rejects extra operands beyond one pattern. |
@@ -2771,6 +2775,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `accepts uniq -c` | Verifies that accepts uniq -c. |
 | `rejects unsupported uniq flags` | Verifies that rejects unsupported uniq flags. |
 | `parses the base command and grep stage for client-side built-ins` | Verifies that client-side built-ins can split a piped command into a runnable base command and synthetic helper stage. |
+| `parses grep patterns that start with a dash` | Verifies that client-side pipe parsing accepts quoted dash patterns, `grep -- -pattern`, and `grep -e '-pattern'`. |
 | `applies chained synthetic helpers to captured client-side output` | Verifies that captured client-side command output can pass through chained synthetic helpers before rendering. |
 | `filters terminal-native theme output through the same pipe helpers as older built-ins` | Verifies that terminal-native `theme` output supports the same pipe helpers as server-side built-ins. |
 | `filters terminal-native config output through chained pipe helpers` | Verifies that terminal-native `config` output supports chained pipe helpers before rendering. |

@@ -232,6 +232,42 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Browser surface: a "Report" tab inside the existing Projects modal; renderer reuses `export_html.js` and `export_pdf.js`.
   - Honors share-redaction defaults; the draft is always previewed before download so this stays additive to evidence packages, not a replacement.
 
+### Native ticketing integrations
+- From the Findings tab, Project views, or evidence package flows, create or update issues in Jira, Linear, GitHub Issues, GitLab, etc., with bidirectional sync of status, notes, and links back into the finding review state.
+- **Entry-level scope:**
+  - Generic webhook + templated payload connector plus first-class adapters for the most common trackers.
+  - Secret-backed auth stored in the existing encrypted secrets surface.
+  - One-click "Create ticket" and "Link existing" actions on individual findings and bulk on visible-page selections.
+  - Map finding review state to ticket status (and vice versa) where the tracker supports webhooks or polling.
+- **Architecture:**
+  - New `app/services/integrations/ticketing/` package (or a lighter `notifications` extension).
+  - Adds project-level and global configuration surfaces under Options or a new Integrations tab.
+  - Preserves the existing outbound notification model for fire-and-forget alerts while adding the stateful sync path.
+
+### Operator-extensible signal and parser rules
+- Allow operators to extend the built-in findings classifier, entity extractor, and structured metadata logic via a hot-reloadable `conf/signals.yaml` (or small sandboxed snippets) without code changes.
+- Custom rules feed the same findings strip, Atlas materialization, search scopes, run comparison diffs, project triage, and export surfaces as core signals.
+- **Entry-level scope:**
+  - Declarative regex + capture group + mapping rules for common cases (e.g., custom internal scanner output).
+  - Optional tiny expression or Lua/JS sandbox for complex parsing.
+  - Live reload on file change (consistent with `commands.yaml`, `workflows.yaml`, etc.).
+- **Architecture:**
+  - Extend or parallel `app/core/output_signals.py` with a user-rules loader.
+  - Surface validation and a `/diag` inspector mode for testing new rules against recent output samples.
+
+### Finding kanban / triage board view
+- Add a Kanban board presentation over a project's (or Atlas-scoped) findings as an alternative to the existing paged table/list views.
+- Columns are customizable (New, Investigating, Confirmed, False Positive, Remediated, etc.); swimlanes by target, severity, or tool.
+- Drag-and-drop transitions update the same review-state and label metadata already used by the list view and bulk actions.
+- **Entry-level scope:**
+  - Desktop-first board with mobile list fallback or sheet details.
+  - Persist column definitions and swimlane choice per project or as session preference.
+  - Quick card actions for notes, target attribution, source-run jump, suppress, and ticket linking (when the ticketing entry exists).
+- **Architecture:**
+  - New browser component under `app/static/js/features/findings/` (or reuse/extend existing finding list components).
+  - Reuses the existing project findings query endpoints and bulk update routes in `app/blueprints/projects.py`.
+  - Board state lives in the existing metadata tables; no new persistence required for core functionality.
+
 ---
 
 ## Architecture

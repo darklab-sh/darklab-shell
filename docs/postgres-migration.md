@@ -48,22 +48,30 @@ When using the bundled Compose stack, Postgres does not publish `5432` to the ho
 Start the profile-gated Postgres service, stop the app service so SQLite is quiet, then run the helper from a one-off container on the same Compose network:
 
 ```bash
+PG_DSN=postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell
+
 docker compose build shell
 docker compose --profile postgres up -d postgres
 docker compose stop shell
-DATABASE_BACKEND=postgres DATABASE_URL=postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell \
-  docker compose --profile postgres run --rm --no-deps --entrypoint python shell -c \
-  "from core.database import db_init; db_init()"
+docker compose --profile postgres run --rm --no-deps --entrypoint python \
+  -e DATABASE_BACKEND=postgres \
+  -e DATABASE_URL="$PG_DSN" \
+  shell -c "from config import CFG; print(f'database_backend={CFG[\"database_backend\"]}'); from core.database_backend import connect_postgres; from core.migrations import MIGRATIONS; from core.migrations.runner import run_migrations_with_advisory_lock; ctx = connect_postgres(CFG); conn = ctx.__enter__(); applied = run_migrations_with_advisory_lock(conn, MIGRATIONS); conn.commit(); ctx.__exit__(None, None, None); print(f'postgres migrations initialized; applied={len(applied)}')"
+
+docker compose --profile postgres run --rm --no-deps --entrypoint python \
+  -e DATABASE_BACKEND=postgres \
+  -e DATABASE_URL="$PG_DSN" \
+  shell -c "from config import CFG; from core.database_backend import connect_postgres; ctx = connect_postgres(CFG); conn = ctx.__enter__(); rows = conn.execute('SELECT version, name FROM schema_migrations ORDER BY version').fetchall(); print('\n'.join(f'{row[\"version\"]} {row[\"name\"]}' for row in rows)); ctx.__exit__(None, None, None)"
 
 docker compose --profile postgres run --rm --no-deps --entrypoint python shell - \
   --sqlite-db /data/history.db \
   --artifact-root /data \
-  --database-url postgresql://darklab:darklab_dev_password@postgres:5432/darklab_shell \
+  --database-url "$PG_DSN" \
   --confirm-secrets-key \
   --validate < scripts/migrate_sqlite_to_postgres.py
 ```
 
-The rebuild makes sure the `shell` image includes the current Python dependencies, including `psycopg[binary,pool]` for Postgres. The short `db_init()` command runs the app-owned Postgres migrations before data is copied. Both one-off commands override the normal container entrypoint so they run Python directly instead of starting Gunicorn. The migration command pipes the checked-in helper into the one-off `shell` container because the normal app container only mounts `./app` and `./data`, not `./scripts`. The one-off container still joins the Compose network, so `postgres:5432` resolves without exposing the database to the OS.
+The rebuild makes sure the `shell` image includes the current Python dependencies, including `psycopg[binary,pool]` for Postgres. The short migration-runner command applies the app-owned Postgres migrations before data is copied, and the follow-up check should print every migration version from `0001` through the current release. The one-off commands pass `DATABASE_BACKEND` and `DATABASE_URL` directly into the container instead of relying on Compose interpolation, which makes the migration path independent of any stale values in `.env`. These commands override the normal container entrypoint so they run Python directly instead of starting Gunicorn. The migration command pipes the checked-in helper into the one-off `shell` container because the normal app container only mounts `./app` and `./data`, not `./scripts`. The one-off container still joins the Compose network, so `postgres:5432` resolves without exposing the database to the OS.
 
 Adjust the username, password, and database name if your `.env` overrides `POSTGRES_USER`, `POSTGRES_PASSWORD`, or `POSTGRES_DB`.
 
@@ -100,6 +108,9 @@ PGOPTIONS="-c search_path=darklab_migration_test" \
   PYTHONPATH=app DATABASE_BACKEND=postgres DATABASE_URL="$DATABASE_URL" \
   python -c "from core.database import db_init; db_init()"
 
+PGOPTIONS="-c search_path=darklab_migration_test" \
+  psql "$DATABASE_URL" -c 'SELECT version, name FROM schema_migrations ORDER BY version'
+
 python scripts/migrate_sqlite_to_postgres.py \
   --sqlite-db /data/history.db \
   --artifact-root /data \
@@ -108,6 +119,8 @@ python scripts/migrate_sqlite_to_postgres.py \
   --confirm-secrets-key \
   --validate
 ```
+
+The `db_init()` command logs through the app logger, so it may not print anything in a bare local shell. The `psql` check is the confirmation step: it should list every migration version before you run the copy helper.
 
 If you want the helper to copy referenced artifact and body-store files into a new data root, add:
 

@@ -2294,7 +2294,8 @@ class TestDatabaseBackend:
             '"value" = excluded."value", "updated" = excluded."updated"'
         )
 
-    def test_postgres_backend_exposes_dialect_and_pool_settings(self):
+    def test_postgres_backend_exposes_dialect_and_pool_settings(self, monkeypatch):
+        monkeypatch.delenv("PGOPTIONS", raising=False)
         cfg = {
             "database_backend": "postgres",
             "database_url": "postgresql://darklab:secret@postgres:5432/darklab_shell",
@@ -2325,11 +2326,40 @@ class TestDatabaseBackend:
             2,
             7,
             False,
+            "-c jit=off",
         )
         with pytest.raises(database_backend.DatabaseBackendError, match="SQLite-specific SQL"):
             database_backend.require_sqlite_backend(cfg, "db_connect")
 
+    def test_postgres_pool_preserves_pgoptions_when_disabling_jit(self, monkeypatch):
+        monkeypatch.setenv("PGOPTIONS", "-c search_path=darklab_migration_test")
+
+        cfg = {
+            "database_backend": "postgres",
+            "database_url": "postgresql://darklab:secret@postgres:5432/darklab_shell",
+        }
+        jit_cfg = {
+            **cfg,
+            "database_postgres_jit": True,
+        }
+
+        assert database_backend.postgres_pool_settings(cfg) == (
+            "postgresql://darklab:secret@postgres:5432/darklab_shell",
+            1,
+            5,
+            False,
+            "-c search_path=darklab_migration_test -c jit=off",
+        )
+        assert database_backend.postgres_pool_settings(jit_cfg) == (
+            "postgresql://darklab:secret@postgres:5432/darklab_shell",
+            1,
+            5,
+            True,
+            "-c search_path=darklab_migration_test",
+        )
+
     def test_postgres_pool_uses_psycopg_pool_lazily(self, monkeypatch):
+        monkeypatch.delenv("PGOPTIONS", raising=False)
         created = []
         closed = []
 
@@ -3013,6 +3043,9 @@ class TestSchedulerFoundation:
         assert spring.isoformat() == "2026-03-08T08:30:00+00:00"
         assert fall.isoformat() == "2026-11-01T06:30:00+00:00"
         assert weekly_tokyo.isoformat() == "2026-05-25T00:00:00+00:00"
+
+        after_fall_first_fire = cron.next_fire("30 1 * * *", fall, "America/Chicago")
+        assert after_fall_first_fire.isoformat() == "2026-11-02T07:30:00+00:00"
 
     def test_scheduler_service_requires_tokens_and_hides_watcher_owned_rows(self, monkeypatch, tmp_path):
         from services.scheduler import service
